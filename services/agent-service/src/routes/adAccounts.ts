@@ -99,6 +99,13 @@ const UpdateAdAccountSchema = z.object({
   connection_status: z.enum(['pending', 'connected', 'error']).optional(),
   last_error: z.string().nullable().optional(),
 
+  // Autopilot settings
+  autopilot: z.boolean().optional(),
+  autopilot_tiktok: z.boolean().optional(),
+  optimization: z.boolean().optional(),
+  plan_daily_budget_cents: z.number().nullable().optional(),
+  default_cpl_target_cents: z.number().nullable().optional(),
+
   // Brain settings
   brain_mode: z.enum(['autopilot', 'report', 'semi_auto']).optional(),
   brain_schedule_hour: z.number().int().min(0).max(23).optional(),
@@ -129,6 +136,12 @@ function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unkn
     fb_business_id: dbRecord.business_id,
     // Аватар страницы
     page_picture_url: dbRecord.page_picture_url,
+    // Autopilot settings
+    autopilot: dbRecord.autopilot ?? false,
+    autopilot_tiktok: dbRecord.autopilot_tiktok ?? false,
+    optimization: dbRecord.optimization ?? false,
+    plan_daily_budget_cents: dbRecord.plan_daily_budget_cents ?? null,
+    default_cpl_target_cents: dbRecord.default_cpl_target_cents ?? null,
     // Brain settings
     brain_mode: dbRecord.brain_mode || 'report',
     brain_schedule_hour: dbRecord.brain_schedule_hour ?? 8,
@@ -599,8 +612,22 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       // TikTok
-      if (validated.tiktok_account_id !== undefined) dbData.tiktok_account_id = validated.tiktok_account_id;
-      if (validated.tiktok_business_id !== undefined) dbData.tiktok_business_id = validated.tiktok_business_id;
+      if (validated.tiktok_account_id !== undefined) {
+        dbData.tiktok_account_id = validated.tiktok_account_id;
+        log.info({
+          adAccountId,
+          tiktok_account_id: validated.tiktok_account_id ? '***set***' : null,
+          action: validated.tiktok_account_id ? 'connect' : 'disconnect'
+        }, 'Updating TikTok account ID');
+      }
+      if (validated.tiktok_business_id !== undefined) {
+        dbData.tiktok_business_id = validated.tiktok_business_id;
+        log.info({
+          adAccountId,
+          tiktok_business_id: validated.tiktok_business_id || null,
+          action: validated.tiktok_business_id ? 'connect' : 'disconnect'
+        }, 'Updating TikTok business ID');
+      }
 
       // Prompts
       if (validated.prompt1 !== undefined) dbData.prompt1 = validated.prompt1;
@@ -629,6 +656,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       // Status
       if (validated.connection_status !== undefined) dbData.connection_status = validated.connection_status;
       if (validated.last_error !== undefined) dbData.last_error = validated.last_error;
+
+      // Autopilot settings
+      if (validated.autopilot !== undefined) {
+        dbData.autopilot = validated.autopilot;
+        log.info({ adAccountId, autopilot: validated.autopilot }, 'Updating Facebook autopilot setting');
+      }
+      if (validated.autopilot_tiktok !== undefined) {
+        dbData.autopilot_tiktok = validated.autopilot_tiktok;
+        log.info({ adAccountId, autopilot_tiktok: validated.autopilot_tiktok }, 'Updating TikTok autopilot setting');
+      }
+      if (validated.optimization !== undefined) dbData.optimization = validated.optimization;
+      if (validated.plan_daily_budget_cents !== undefined) dbData.plan_daily_budget_cents = validated.plan_daily_budget_cents;
+      if (validated.default_cpl_target_cents !== undefined) dbData.default_cpl_target_cents = validated.default_cpl_target_cents;
 
       // Brain settings
       if (validated.brain_mode !== undefined) dbData.brain_mode = validated.brain_mode;

@@ -16,6 +16,7 @@ import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
 import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
+import { collectTikTokMetricsForDays } from './tiktokMetricsCollector.js';
 
 // Основной бот для отправки отчётов клиентам и в мониторинг
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -5038,6 +5039,45 @@ async function processUserTikTok(user) {
     }
 
     const result = await response.json();
+
+    // Собираем TikTok метрики за последние 7 дней
+    let metricsResult = null;
+    if (user.tiktok_business_id && user.tiktok_access_token) {
+      try {
+        fastify.log.info({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          action: 'collecting_metrics'
+        }, 'Starting TikTok metrics collection');
+
+        metricsResult = await collectTikTokMetricsForDays(
+          user.tiktok_business_id,  // advertiserId
+          user.tiktok_access_token, // accessToken
+          user.id,                   // userAccountId
+          accountId,                 // accountId (UUID or null)
+          7                          // days
+        );
+
+        fastify.log.info({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          metricsCollected: metricsResult.totalMetrics,
+          errorsCount: metricsResult.errors?.length || 0,
+          action: 'metrics_collected'
+        }, 'TikTok metrics collection completed');
+      } catch (metricsErr) {
+        fastify.log.warn({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          error: metricsErr.message,
+          action: 'metrics_collection_failed'
+        }, 'Failed to collect TikTok metrics, continuing...');
+      }
+    }
+
     const duration = Date.now() - startTime;
 
     fastify.log.info({
@@ -5049,7 +5089,8 @@ async function processUserTikTok(user) {
       duration,
       actionsCount: result.actions?.length || 0,
       dispatched: result.dispatched,
-      telegramSent: result.telegramSent || false
+      telegramSent: result.telegramSent || false,
+      metricsCollected: metricsResult?.totalMetrics || 0
     });
 
     return {
@@ -5059,6 +5100,7 @@ async function processUserTikTok(user) {
       success: true,
       actionsCount: result.actions?.length || 0,
       telegramSent: result.telegramSent || false,
+      metricsCollected: metricsResult?.totalMetrics || 0,
       duration
     };
   } catch (err) {
@@ -6345,6 +6387,42 @@ async function processAccountTikTok(account) {
     }
 
     const runResult = await runResponse.json();
+
+    // Собираем TikTok метрики за последние 7 дней
+    let metricsResult = null;
+    if (account.tiktok_business_id && account.tiktok_access_token) {
+      try {
+        fastify.log.info({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          action: 'collecting_metrics'
+        }, 'Starting TikTok metrics collection');
+
+        metricsResult = await collectTikTokMetricsForDays(
+          account.tiktok_business_id,  // advertiserId
+          account.tiktok_access_token, // accessToken
+          account.user_account_id,     // userAccountId
+          account.id,                  // accountId (UUID)
+          7                            // days
+        );
+
+        fastify.log.info({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          metricsCollected: metricsResult.totalMetrics,
+          errorsCount: metricsResult.errors?.length || 0,
+          action: 'metrics_collected'
+        }, 'TikTok metrics collection completed');
+      } catch (metricsErr) {
+        fastify.log.warn({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          error: metricsErr.message,
+          action: 'metrics_collection_failed'
+        }, 'Failed to collect TikTok metrics, continuing...');
+      }
+    }
+
     const duration = Date.now() - startTime;
 
     fastify.log.info({
@@ -6355,7 +6433,8 @@ async function processAccountTikTok(account) {
       duration,
       actionsCount: runResult.actions?.length || 0,
       dispatched: runResult.dispatched,
-      telegramSent: runResult.telegramSent || false
+      telegramSent: runResult.telegramSent || false,
+      metricsCollected: metricsResult?.totalMetrics || 0
     });
 
     return {
@@ -6364,7 +6443,8 @@ async function processAccountTikTok(account) {
       accountName: account.name,
       duration,
       actionsCount: runResult.actions?.length || 0,
-      telegramSent: runResult.telegramSent || false
+      telegramSent: runResult.telegramSent || false,
+      metricsCollected: metricsResult?.totalMetrics || 0
     };
   } catch (err) {
     const duration = Date.now() - startTime;

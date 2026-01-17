@@ -12,14 +12,51 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - TikTok creatives: video-only creation with `tiktok_video_id` or `media_url` upload fallback; KZT budgets for TikTok.
 - Brain/batch: `/api/brain/run-tiktok` with `autopilot_tiktok` gating, platform-tagged reports/executions, Telegram message per platform.
 - Dashboard/ROI tabs: platform separation; TikTok dashboard data loaded through proxy in `tiktokApi`.
-- DB migrations for TikTok: 112, 150, 152, 155.
+- **Multi-account TikTok UI**: TikTok tab in AdAccountsManager with OAuth flow, connection status display, and `autopilot_tiktok` toggle in Brain Settings.
+- **TikTok OAuth multi-account**: Backend supports saving TikTok credentials to `ad_accounts` table via `ad_account_id` in OAuth state.
+- **TikTok connection status**: Displayed in account cards (AdAccountsManager) showing Facebook and TikTok connection status.
+- **Backend autopilot settings API**: `autopilot_tiktok` field in UpdateAdAccountSchema with detailed logging for all autopilot and TikTok credential updates.
+- **Frontend error handling**: Try-catch error handling and console logging in TikTok OAuth flow (AdAccountsManager).
+- DB migrations for TikTok: 112, 150, 152, 155, 157, 158, 159.
 
 ### Pending / not implemented yet
-- UI controls for `autopilot_tiktok` and TikTok credentials in multi-account mode (Profile/AdAccountsManager).
 - Cross-platform creative sync via `creative_group_id` is not wired in UI/backend logic.
-- TikTok metrics ingestion into `creative_metrics_history` is not present in this repo; ROI relies on that table so TikTok ROI can be empty unless an external process writes metrics.
-- TikTok lead attribution / CRM qualification flows (CAPI/WhatsApp conversions, lead quality) are not implemented.
-- TikTok account status checks are not surfaced in the UI (Dashboard still uses Facebook account status only).
+
+### Phase 2 & 3: Metrics & CAPI (Completed)
+
+#### TikTok Metrics Collector
+**File**: `services/agent-brain/src/tiktokMetricsCollector.js`
+
+**Features**:
+- Fetches TikTok Report API at AUCTION_AD level
+- Maps TikTok metrics to `creative_metrics_history` schema
+- Supports multi-account mode via `account_id` parameter
+- Saves with `platform = 'tiktok'`
+
+**Integration**:
+- ✅ Called in `processUserTikTok()` (legacy batch)
+- ✅ Called in `processAccountTikTok()` (multi-account hourly batch)
+- ✅ Collects last 7 days of metrics after brain run
+- ✅ Graceful error handling (continues if metrics collection fails)
+- ✅ Logs metricsCollected count in batch results
+
+#### TikTok Events API Client
+**File**: `services/chatbot-service/src/lib/tiktokEventsClient.ts`
+
+**Features**:
+- Analogous to Meta CAPI client
+- Supports events: ViewContent, CompleteRegistration, PlaceAnOrder
+- SHA256 hashing for phone/email
+- ttclid support for attribution (TikTok Click ID)
+- Circuit breaker and retry with exponential backoff
+- Logs to `capi_events_log` with `platform = 'tiktok'`
+
+**Integration**:
+- ✅ Integrated into `capiTools.ts` via platform detection
+- ✅ Automatically selects TikTok or Meta client based on `account_directions.platform`
+- ✅ Uses same qualification flow and CAPI tools as Meta
+- ✅ Supports ttclid from `dialog_analysis` for lead attribution
+- ✅ Gets pixel_code and access_token from direction via `getDirectionTikTokPixelInfo()`
 
 ## Platform separation (UI vs DB)
 - UI uses `platform = instagram | tiktok` in `AppContext`.
@@ -51,11 +88,19 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 ### agent-brain
 - TikTok API wrapper for brain:
   - `services/agent-brain/src/chatAssistant/shared/tikTokGraph.js`
+- TikTok metrics collector:
+  - `services/agent-brain/src/tiktokMetricsCollector.js`
 - Brain endpoint:
   - `services/agent-brain/src/server.js` (`POST /api/brain/run-tiktok`)
 - MCP tool schemas and handlers:
   - `services/agent-brain/src/chatAssistant/agents/tiktok/toolDefs.js`
   - `services/agent-brain/src/chatAssistant/agents/tiktok/handlers.js`
+
+### chatbot-service
+- TikTok Events API client:
+  - `services/chatbot-service/src/lib/tiktokEventsClient.ts`
+- Meta CAPI client (Facebook):
+  - `services/chatbot-service/src/lib/metaCapiClient.ts`
 
 ### frontend
 - Platform selection (Instagram/TikTok tabs):
@@ -132,9 +177,24 @@ Relevant migration:
   - `autopilot_tiktok` flag
 
 ### brain_executions and campaign_reports
-Relevant migration:
+Relevant migrations:
 - `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql`:
   - `platform` column added to separate TikTok vs Facebook reports
+- `migrations/157_add_platform_to_brain_executions.sql`:
+  - `platform` column in `brain_executions` with index
+
+### creative_metrics_history
+Relevant migration:
+- `migrations/158_add_platform_to_creative_metrics_history.sql`:
+  - `platform` column (default 'facebook') for separating FB and TikTok metrics
+  - Updated unique constraints to include platform
+
+### capi_events_log, leads, dialog_analysis
+Relevant migration:
+- `migrations/159_add_platform_and_ttclid_to_capi.sql`:
+  - `platform` column in `capi_events_log`
+  - `ttclid` (TikTok Click ID) in `capi_events_log`, `leads`, `dialog_analysis`
+  - Indexes for ttclid lookups
 
 ## API endpoints (agent-service)
 
@@ -184,6 +244,17 @@ Supported TikTok actions via `POST /api/actions`:
 - `TikTok.UpdateAdGroupBudget`
 - `TikTok.PauseAd` / `TikTok.ResumeAd`
 - `TikTok.Direction.CreateAdGroupWithCreatives`
+
+### Ad Accounts (multi-account TikTok)
+```
+PATCH /api/ad-accounts/:adAccountId
+```
+Supported TikTok-related fields:
+- `tiktok_account_id`: TT_USER identity ID (nullable for disconnect)
+- `tiktok_business_id`: TikTok advertiser ID (nullable for disconnect)
+- `autopilot_tiktok`: Enable/disable TikTok autopilot
+
+Backend logs all TikTok credential updates with action type (connect/disconnect) and autopilot setting changes.
 
 ## Workflows
 

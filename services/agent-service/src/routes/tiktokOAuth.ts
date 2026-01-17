@@ -12,7 +12,12 @@ const TIKTOK_APP_SECRET = process.env.TIKTOK_APP_SECRET || '';
 /**
  * Parse base64url encoded state from TikTok OAuth
  */
-function parseState(state: string): { user_id?: string; uid?: string; ts?: number } | null {
+function parseState(state: string): {
+  user_id?: string;
+  uid?: string;
+  ad_account_id?: string | null;
+  ts?: number;
+} | null {
   if (!state || typeof state !== 'string') {
     return null;
   }
@@ -277,11 +282,16 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         }, 'Failed to get TikTok identities');
       }
 
+      // Extract ad_account_id from state for multi-account mode
+      const adAccountId = stateData?.ad_account_id;
+
       log.info({
         userId,
+        adAccountId,
         business_id,
         account_name,
-        identity_id
+        identity_id,
+        isMultiAccount: !!adAccountId
       }, 'TikTok OAuth successful');
 
       // Save to database
@@ -291,28 +301,57 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         { auth: { persistSession: false, autoRefreshToken: false } }
       );
 
-      const { error: updateError } = await freshSupabase
-        .from('user_accounts')
-        .update({
-          tiktok_access_token: access_token,
-          tiktok_business_id: business_id,
-          tiktok_account_id: identity_id, // TT_USER identity_id only
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId);
+      // Multi-account mode: save to ad_accounts
+      if (adAccountId) {
+        const { error: updateError } = await freshSupabase
+          .from('ad_accounts')
+          .update({
+            tiktok_access_token: access_token,
+            tiktok_business_id: business_id,
+            tiktok_account_id: identity_id, // TT_USER identity_id only
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', adAccountId)
+          .eq('user_account_id', userId); // Ensure ownership
 
-      if (updateError) {
-        log.error({ error: updateError, userId }, 'Failed to save TikTok tokens');
-        return res.status(500).send({
-          success: false,
-          error: 'Failed to save TikTok connection'
-        });
+        if (updateError) {
+          log.error({ error: updateError, adAccountId, userId }, 'Failed to save TikTok tokens to ad_accounts');
+          return res.status(500).send({
+            success: false,
+            error: 'Failed to save TikTok connection'
+          });
+        }
+
+        log.info({
+          userId,
+          adAccountId,
+          business_id
+        }, 'Successfully saved TikTok tokens to ad_accounts (multi-account)');
+      } else {
+        // Legacy mode: save to user_accounts
+        const { error: updateError } = await freshSupabase
+          .from('user_accounts')
+          .update({
+            tiktok_access_token: access_token,
+            tiktok_business_id: business_id,
+            tiktok_account_id: identity_id, // TT_USER identity_id only
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', userId);
+
+        if (updateError) {
+          log.error({ error: updateError, userId }, 'Failed to save TikTok tokens to user_accounts');
+          return res.status(500).send({
+            success: false,
+            error: 'Failed to save TikTok connection'
+          });
+        }
+
+        log.info({
+          userId,
+          business_id
+        }, 'Successfully saved TikTok tokens to user_accounts (legacy)');
       }
-
-      log.info({ 
-        userId, 
-        business_id 
-      }, 'Successfully saved TikTok tokens to database');
 
       return res.send({
         success: true,
@@ -320,6 +359,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         business_id,
         account_id: account_name,
         identity_id: identity_id,
+        ad_account_id: adAccountId || null, // For multi-account mode
         advertisers: advertisers.map((adv: any) => ({
           id: adv.advertiser_id,
           name: adv.advertiser_name

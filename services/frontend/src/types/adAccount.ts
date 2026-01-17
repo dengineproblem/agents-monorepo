@@ -63,6 +63,7 @@ export interface AdAccount {
 
   // Autopilot settings
   autopilot: boolean;
+  autopilot_tiktok: boolean;
   optimization: boolean;
   plan_daily_budget_cents: number | null;
   default_cpl_target_cents: number | null;
@@ -188,6 +189,7 @@ export interface UpdateAdAccountPayload {
 
   // Autopilot
   autopilot?: boolean;
+  autopilot_tiktok?: boolean;
   optimization?: boolean;
   plan_daily_budget_cents?: number | null;
   default_cpl_target_cents?: number | null;

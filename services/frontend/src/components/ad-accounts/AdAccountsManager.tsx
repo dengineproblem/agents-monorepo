@@ -43,8 +43,17 @@ import {
   Key,
   Building2,
   Brain,
+  ExternalLink,
+  Unlink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// TikTok icon SVG component
+const TikTokIcon = ({ className }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+  </svg>
+);
 
 interface AdAccountsManagerProps {
   className?: string;
@@ -61,11 +70,15 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState<AdAccount | null>(null);
 
-  // Form state (extended with brain fields)
+  // Form state (extended with brain fields and TikTok)
   const [formData, setFormData] = useState<Partial<CreateAdAccountPayload> & {
     brain_mode?: 'autopilot' | 'report' | 'semi_auto';
     brain_schedule_hour?: number;
     brain_timezone?: string;
+    autopilot_tiktok?: boolean;
+    tiktok_account_id?: string;
+    tiktok_business_id?: string;
+    tiktok_access_token?: string;
   }>({
     name: '',
     username: '',
@@ -87,6 +100,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
     brain_mode: 'report',
     brain_schedule_hour: 8,
     brain_timezone: 'Asia/Almaty',
+    autopilot_tiktok: false,
   });
 
   // Load accounts
@@ -216,6 +230,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       brain_mode: 'report',
       brain_schedule_hour: 8,
       brain_timezone: 'Asia/Almaty',
+      autopilot_tiktok: false,
     });
   };
 
@@ -242,6 +257,10 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       brain_mode: account.brain_mode || 'report',
       brain_schedule_hour: account.brain_schedule_hour ?? 8,
       brain_timezone: account.brain_timezone || 'Asia/Almaty',
+      autopilot_tiktok: account.autopilot_tiktok ?? false,
+      tiktok_account_id: account.tiktok_account_id || '',
+      tiktok_business_id: account.tiktok_business_id || '',
+      tiktok_access_token: account.tiktok_access_token || '',
     });
     setIsEditOpen(true);
   };
@@ -304,7 +323,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                   Заполните данные нового рекламного аккаунта
                 </DialogDescription>
               </DialogHeader>
-              <AccountForm formData={formData} setFormData={setFormData} />
+              <AccountForm formData={formData} setFormData={setFormData} selectedAccountId={undefined} />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
                   Отмена
@@ -331,6 +350,10 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                 account.fb_instagram_id &&
                 account.fb_access_token &&
                 account.fb_ad_account_id
+              );
+              const hasTikTokFields = !!(
+                account.tiktok_access_token &&
+                account.tiktok_business_id
               );
               const computedStatus = hasAllFbFields ? 'connected' : (account.connection_status || 'pending');
               const status = STATUS_CONFIG[computedStatus] || STATUS_CONFIG.pending;
@@ -362,8 +385,23 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {account.fb_ad_account_id ? `FB: ${account.fb_ad_account_id}` : 'FB не настроен'}
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Facebook className="h-3 w-3" />
+                          {hasAllFbFields ? (
+                            <span className="text-green-600">{account.fb_ad_account_id}</span>
+                          ) : (
+                            <span className="text-yellow-600">не настроен</span>
+                          )}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <TikTokIcon className="h-3 w-3" />
+                          {hasTikTokFields ? (
+                            <span className="text-green-600">подключён</span>
+                          ) : (
+                            <span className="text-muted-foreground">не настроен</span>
+                          )}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -409,7 +447,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               {selectedAccount?.name}
             </DialogDescription>
           </DialogHeader>
-          <AccountForm formData={formData} setFormData={setFormData} />
+          <AccountForm formData={formData} setFormData={setFormData} selectedAccountId={selectedAccount?.id} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditOpen(false)}>
               Отмена
@@ -448,24 +486,102 @@ interface AccountFormProps {
     brain_mode?: 'autopilot' | 'report' | 'semi_auto';
     brain_schedule_hour?: number;
     brain_timezone?: string;
+    autopilot_tiktok?: boolean;
+    tiktok_account_id?: string;
+    tiktok_business_id?: string;
+    tiktok_access_token?: string;
   };
   setFormData: React.Dispatch<React.SetStateAction<Partial<CreateAdAccountPayload> & {
     brain_mode?: 'autopilot' | 'report' | 'semi_auto';
     brain_schedule_hour?: number;
     brain_timezone?: string;
+    autopilot_tiktok?: boolean;
+    tiktok_account_id?: string;
+    tiktok_business_id?: string;
+    tiktok_access_token?: string;
   }>>;
+  selectedAccountId?: string;
 }
 
-function AccountForm({ formData, setFormData }: AccountFormProps) {
-  const updateField = (field: string, value: string | number) => {
+function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormProps) {
+  const updateField = (field: string, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const isTikTokConnected = Boolean(formData.tiktok_access_token && formData.tiktok_business_id);
+
+  const handleConnectTikTok = () => {
+    try {
+      // Собираем state для OAuth callback
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
+        console.error('[TikTok OAuth] User not found in localStorage');
+        toast.error('Пользователь не найден. Пожалуйста, войдите в систему заново.');
+        return;
+      }
+
+      let userData;
+      try {
+        userData = JSON.parse(storedUser);
+      } catch (parseError) {
+        console.error('[TikTok OAuth] Failed to parse user data:', parseError);
+        toast.error('Ошибка данных пользователя. Пожалуйста, войдите заново.');
+        return;
+      }
+
+      if (!userData?.id) {
+        console.error('[TikTok OAuth] User ID not found in user data');
+        toast.error('ID пользователя не найден');
+        return;
+      }
+
+      const statePayload = {
+        user_id: userData.id,
+        ad_account_id: selectedAccountId || null, // Для multi-account режима
+        ts: Date.now(),
+      };
+
+      console.log('[TikTok OAuth] Initiating OAuth flow', {
+        userId: userData.id,
+        adAccountId: selectedAccountId || 'legacy mode',
+        timestamp: statePayload.ts,
+      });
+
+      const state = btoa(JSON.stringify(statePayload));
+      const appId = import.meta.env.VITE_TIKTOK_APP_ID || '7457939636746919942';
+      const redirectUri = encodeURIComponent(`${window.location.origin}/oauth/tiktok/callback`);
+
+      const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=${appId}&state=${state}&redirect_uri=${redirectUri}`;
+
+      console.log('[TikTok OAuth] Redirecting to TikTok auth', { authUrl: authUrl.substring(0, 100) + '...' });
+      window.location.href = authUrl;
+    } catch (error) {
+      console.error('[TikTok OAuth] Unexpected error:', error);
+      toast.error('Произошла ошибка при подключении TikTok');
+    }
+  };
+
+  const handleDisconnectTikTok = () => {
+    console.log('[TikTok] Disconnecting TikTok account', {
+      adAccountId: selectedAccountId || 'legacy mode',
+      hadBusinessId: !!formData.tiktok_business_id,
+    });
+
+    setFormData(prev => ({
+      ...prev,
+      tiktok_access_token: '',
+      tiktok_business_id: '',
+      tiktok_account_id: '',
+    }));
+    toast.success('TikTok отключён. Сохраните изменения.');
   };
 
   return (
     <Tabs defaultValue="basic" className="w-full">
-      <TabsList className="grid w-full grid-cols-5">
+      <TabsList className="grid w-full grid-cols-6">
         <TabsTrigger value="basic">Основное</TabsTrigger>
         <TabsTrigger value="facebook">Facebook</TabsTrigger>
+        <TabsTrigger value="tiktok">TikTok</TabsTrigger>
         <TabsTrigger value="notifications">Уведомления</TabsTrigger>
         <TabsTrigger value="brain">Оптимизация</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
@@ -542,6 +658,73 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
         </div>
         <p className="text-xs text-muted-foreground mt-4">
           * Access Token заполняется администратором
+        </p>
+      </TabsContent>
+
+      <TabsContent value="tiktok" className="space-y-4 mt-4">
+        <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
+          <TikTokIcon className="h-4 w-4" />
+          <span>Подключение TikTok Business</span>
+        </div>
+
+        {isTikTokConnected ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <span className="text-green-700 dark:text-green-300 font-medium">TikTok подключён</span>
+            </div>
+
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label>Advertiser ID</Label>
+                <Input
+                  value={formData.tiktok_business_id || ''}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+              {formData.tiktok_account_id && (
+                <div className="grid gap-2">
+                  <Label>Account ID</Label>
+                  <Input
+                    value={formData.tiktok_account_id || ''}
+                    disabled
+                    className="bg-muted"
+                  />
+                </div>
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              className="text-red-500 border-red-200 hover:bg-red-50"
+              onClick={handleDisconnectTikTok}
+            >
+              <Unlink className="h-4 w-4 mr-2" />
+              Отключить TikTok
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-yellow-500" />
+              <span className="text-yellow-700 dark:text-yellow-300">TikTok не подключён</span>
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              Подключите TikTok Business аккаунт для запуска рекламы на TikTok.
+              После авторизации credentials будут автоматически сохранены.
+            </p>
+
+            <Button onClick={handleConnectTikTok}>
+              <ExternalLink className="h-4 w-4 mr-2" />
+              Подключить TikTok
+            </Button>
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground mt-4">
+          * После подключения будет получен Access Token через OAuth авторизацию
         </p>
       </TabsContent>
 
@@ -658,6 +841,25 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* TikTok Autopilot */}
+          <div className="border-t pt-4 mt-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <TikTokIcon className="h-4 w-4" />
+                  TikTok Autopilot
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Включить автоматическую оптимизацию для TikTok кампаний
+                </p>
+              </div>
+              <Switch
+                checked={formData.autopilot_tiktok ?? false}
+                onCheckedChange={(checked) => updateField('autopilot_tiktok', checked)}
+              />
+            </div>
           </div>
         </div>
       </TabsContent>

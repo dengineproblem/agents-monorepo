@@ -21,6 +21,12 @@ import {
   CAPI_EVENTS,
   type CapiEventLevel
 } from './metaCapiClient.js';
+import {
+  sendTikTokEvent,
+  getDirectionTikTokPixelInfo,
+  TIKTOK_EVENTS,
+  type TikTokEventLevel
+} from './tiktokEventsClient.js';
 
 const baseLog = createLogger({ module: 'capiTools' });
 
@@ -99,7 +105,8 @@ async function getLeadDataForCapi(leadId: string) {
       direction_id,
       capi_interest_sent,
       capi_qualified_sent,
-      capi_scheduled_sent
+      capi_scheduled_sent,
+      ttclid
     `)
     .eq('id', leadId)
     .single();
@@ -124,6 +131,24 @@ async function getLeadDataForCapi(leadId: string) {
     ...data,
     lead_id: leadRecordId,
   };
+}
+
+/**
+ * Получить платформу direction (facebook | tiktok)
+ */
+async function getDirectionPlatform(directionId: string): Promise<'facebook' | 'tiktok' | null> {
+  const { data, error } = await supabase
+    .from('account_directions')
+    .select('platform')
+    .eq('id', directionId)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  // platform может быть 'facebook', 'tiktok' или null (legacy = facebook)
+  return (data.platform as 'facebook' | 'tiktok') || 'facebook';
 }
 
 /**
@@ -225,58 +250,149 @@ async function handleSendCapiEvent(
     return 'Не удалось определить направление для отправки CAPI события.';
   }
 
-  const pixelStartTime = Date.now();
-  const { pixelId, accessToken } = await getDirectionPixelInfo(lead.direction_id);
-  const pixelLatencyMs = Date.now() - pixelStartTime;
+  // Определяем платформу direction
+  const platformStartTime = Date.now();
+  const platform = await getDirectionPlatform(lead.direction_id);
+  const platformLatencyMs = Date.now() - platformStartTime;
 
   log.debug({
     directionId: maskUuid(lead.direction_id),
-    hasPixel: !!pixelId,
-    hasToken: !!accessToken,
-    pixelLatencyMs
-  }, '[handleSendCapiEvent] Pixel info loaded', ['api', 'db']);
+    platform: platform || 'unknown',
+    platformLatencyMs
+  }, '[handleSendCapiEvent] Platform determined', ['api', 'db']);
 
-  if (!pixelId || !accessToken) {
+  if (!platform) {
     log.warn({
-      hasPixel: !!pixelId,
-      hasToken: !!accessToken,
       directionId: maskUuid(lead.direction_id),
       elapsedMs: Date.now() - startTime
-    }, '[handleSendCapiEvent] Missing pixel or access token - CAPI not configured', ['api']);
-    return 'CAPI не настроен для этого направления (отсутствует пиксель или токен).';
+    }, '[handleSendCapiEvent] Failed to determine platform', ['api']);
+    return 'Не удалось определить платформу для отправки события.';
   }
 
-  // Определяем имя события
-  const eventName = level === 1 ? CAPI_EVENTS.INTEREST :
-                    level === 2 ? CAPI_EVENTS.QUALIFIED :
-                    CAPI_EVENTS.SCHEDULED;
+  // Отправляем событие в зависимости от платформы
+  let result: any;
+  let eventName: string;
 
-  log.info({
-    level,
-    eventName,
-    leadId: maskUuid(leadId),
-    phone: maskPhone(lead.contact_phone)
-  }, '[handleSendCapiEvent] Sending CAPI event to Meta', ['api']);
+  if (platform === 'tiktok') {
+    // TikTok Events API
+    const pixelStartTime = Date.now();
+    const { pixelCode, accessToken } = await getDirectionTikTokPixelInfo(lead.direction_id);
+    const pixelLatencyMs = Date.now() - pixelStartTime;
 
-  // Отправляем событие
-  const capiStartTime = Date.now();
-  const result = await sendCapiEvent({
-    pixelId,
-    accessToken,
-    eventName,
-    eventLevel: level,
-    phone: lead.contact_phone,
-    dialogAnalysisId: lead.id,
-    leadId: lead.lead_id ? String(lead.lead_id) : undefined,
-    userAccountId: lead.user_account_id || '',
-    directionId: lead.direction_id,
-    customData: {
-      channel: CAPI_CHANNEL,
-      ...(level === 1 ? { stage: 'interest' } : level === 2 ? { stage: 'qualified' } : { stage: 'scheduled' }),
-      ...(args.reason ? { reason: args.reason } : {}),
+    log.debug({
+      directionId: maskUuid(lead.direction_id),
+      hasPixel: !!pixelCode,
+      hasToken: !!accessToken,
+      pixelLatencyMs
+    }, '[handleSendCapiEvent] TikTok pixel info loaded', ['api', 'db']);
+
+    if (!pixelCode || !accessToken) {
+      log.warn({
+        hasPixel: !!pixelCode,
+        hasToken: !!accessToken,
+        directionId: maskUuid(lead.direction_id),
+        elapsedMs: Date.now() - startTime
+      }, '[handleSendCapiEvent] Missing TikTok pixel or access token', ['api']);
+      return 'TikTok Events API не настроен для этого направления (отсутствует пиксель или токен).';
     }
-  });
-  const capiLatencyMs = Date.now() - capiStartTime;
+
+    eventName = level === 1 ? TIKTOK_EVENTS.INTEREST :
+                level === 2 ? TIKTOK_EVENTS.QUALIFIED :
+                TIKTOK_EVENTS.SCHEDULED;
+
+    log.info({
+      level,
+      eventName,
+      leadId: maskUuid(leadId),
+      phone: maskPhone(lead.contact_phone),
+      hasTtclid: !!lead.ttclid
+    }, '[handleSendCapiEvent] Sending event to TikTok Events API', ['api']);
+
+    const capiStartTime = Date.now();
+    result = await sendTikTokEvent({
+      pixelCode,
+      accessToken,
+      eventName,
+      eventLevel: level as TikTokEventLevel,
+      phone: lead.contact_phone,
+      ttclid: lead.ttclid || undefined,
+      dialogAnalysisId: lead.id,
+      leadId: lead.lead_id ? String(lead.lead_id) : undefined,
+      userAccountId: lead.user_account_id || '',
+      directionId: lead.direction_id,
+      customData: {
+        channel: CAPI_CHANNEL,
+        ...(level === 1 ? { stage: 'interest' } : level === 2 ? { stage: 'qualified' } : { stage: 'scheduled' }),
+        ...(args.reason ? { reason: args.reason } : {}),
+      }
+    });
+    const capiLatencyMs = Date.now() - capiStartTime;
+
+    log.debug({
+      capiLatencyMs,
+      success: result.success
+    }, '[handleSendCapiEvent] TikTok Events API response received', ['api']);
+  } else {
+    // Meta CAPI (Facebook)
+    const pixelStartTime = Date.now();
+    const { pixelId, accessToken } = await getDirectionPixelInfo(lead.direction_id);
+    const pixelLatencyMs = Date.now() - pixelStartTime;
+
+    log.debug({
+      directionId: maskUuid(lead.direction_id),
+      hasPixel: !!pixelId,
+      hasToken: !!accessToken,
+      pixelLatencyMs
+    }, '[handleSendCapiEvent] Meta pixel info loaded', ['api', 'db']);
+
+    if (!pixelId || !accessToken) {
+      log.warn({
+        hasPixel: !!pixelId,
+        hasToken: !!accessToken,
+        directionId: maskUuid(lead.direction_id),
+        elapsedMs: Date.now() - startTime
+      }, '[handleSendCapiEvent] Missing pixel or access token - CAPI not configured', ['api']);
+      return 'CAPI не настроен для этого направления (отсутствует пиксель или токен).';
+    }
+
+    eventName = level === 1 ? CAPI_EVENTS.INTEREST :
+                level === 2 ? CAPI_EVENTS.QUALIFIED :
+                CAPI_EVENTS.SCHEDULED;
+
+    log.info({
+      level,
+      eventName,
+      leadId: maskUuid(leadId),
+      phone: maskPhone(lead.contact_phone)
+    }, '[handleSendCapiEvent] Sending CAPI event to Meta', ['api']);
+
+    const capiStartTime = Date.now();
+    result = await sendCapiEvent({
+      pixelId,
+      accessToken,
+      eventName,
+      eventLevel: level,
+      phone: lead.contact_phone,
+      dialogAnalysisId: lead.id,
+      leadId: lead.lead_id ? String(lead.lead_id) : undefined,
+      userAccountId: lead.user_account_id || '',
+      directionId: lead.direction_id,
+      customData: {
+        channel: CAPI_CHANNEL,
+        ...(level === 1 ? { stage: 'interest' } : level === 2 ? { stage: 'qualified' } : { stage: 'scheduled' }),
+        ...(args.reason ? { reason: args.reason } : {}),
+      }
+    });
+    const capiLatencyMs = Date.now() - capiStartTime;
+
+    log.debug({
+      capiLatencyMs,
+      success: result.success
+    }, '[handleSendCapiEvent] Meta CAPI response received', ['api']);
+  }
+
+  // Проверяем результат отправки
+  const capiLatencyMs = Date.now() - startTime;
 
   if (!result.success) {
     log.error({
@@ -284,10 +400,11 @@ async function handleSendCapiEvent(
       levelName: LEVEL_NAMES[level],
       eventName,
       error: result.error,
+      platform,
       capiLatencyMs,
       elapsedMs: Date.now() - startTime
-    }, '[handleSendCapiEvent] Failed to send CAPI event to Meta', {}, ['api']);
-    return `Не удалось отправить CAPI событие: ${result.error}`;
+    }, `[handleSendCapiEvent] Failed to send event to ${platform} API`, {}, ['api']);
+    return `Не удалось отправить событие: ${result.error}`;
   }
 
   // Обновляем флаги в dialog_analysis
@@ -298,7 +415,7 @@ async function handleSendCapiEvent(
       eventId: result.eventId,
       level,
       flagUpdateMs: Date.now() - flagStartTime
-    }, '[handleSendCapiEvent] CAPI flags updated in database', ['api', 'db']);
+    }, '[handleSendCapiEvent] Event flags updated in database', ['api', 'db']);
   }
 
   log.info({
@@ -306,11 +423,13 @@ async function handleSendCapiEvent(
     levelName: LEVEL_NAMES[level],
     eventName,
     eventId: result.eventId,
+    platform,
     capiLatencyMs,
     totalElapsedMs: Date.now() - startTime
-  }, '[handleSendCapiEvent] <<< CAPI event sent successfully', ['api']);
+  }, '[handleSendCapiEvent] <<< Event sent successfully', ['api']);
 
-  return `Событие ${LEVEL_NAMES[level]} успешно отправлено в Meta CAPI.`;
+  const platformName = platform === 'tiktok' ? 'TikTok Events API' : 'Meta CAPI';
+  return `Событие ${LEVEL_NAMES[level]} успешно отправлено в ${platformName}.`;
 }
 
 /**
