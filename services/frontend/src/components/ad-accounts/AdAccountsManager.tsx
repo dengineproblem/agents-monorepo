@@ -711,15 +711,23 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
               <span className="text-yellow-700 dark:text-yellow-300">TikTok не подключён</span>
             </div>
 
-            <p className="text-sm text-muted-foreground">
-              Подключите TikTok Business аккаунт для запуска рекламы на TikTok.
-              После авторизации credentials будут автоматически сохранены.
-            </p>
+            {selectedAccountId ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Подключите TikTok Business аккаунт для запуска рекламы на TikTok.
+                  После авторизации credentials будут автоматически сохранены.
+                </p>
 
-            <Button onClick={handleConnectTikTok}>
-              <ExternalLink className="h-4 w-4 mr-2" />
-              Подключить TikTok
-            </Button>
+                <Button onClick={handleConnectTikTok}>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Подключить TikTok
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Сначала сохраните аккаунт, затем подключите TikTok в настройках.
+              </p>
+            )}
           </div>
         )}
 

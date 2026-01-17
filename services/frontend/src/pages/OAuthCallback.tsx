@@ -72,12 +72,14 @@ const OAuthCallback = () => {
       setMessage('Connecting TikTok...');
       console.log('Processing TikTok OAuth callback');
 
-      // Decode state to get user_id
+      // Decode state to get user_id and ad_account_id
       let userId = '';
+      let adAccountId: string | null = null;
       try {
         const decodedState = JSON.parse(atob(decodeURIComponent(state)));
         userId = decodedState.user_id || decodedState.uid;
-        console.log('Decoded state:', { userId });
+        adAccountId = decodedState.ad_account_id || null;
+        console.log('Decoded state:', { userId, adAccountId, isMultiAccount: !!adAccountId });
       } catch (e) {
         console.error('Failed to decode state:', e);
         throw new Error('Invalid state parameter');
@@ -89,51 +91,57 @@ const OAuthCallback = () => {
 
       // Call backend to exchange code for token
       const API_URL = 'https://performanteaiagency.com/api';
-      console.log('Calling TikTok OAuth exchange endpoint');
+      console.log('Calling TikTok OAuth exchange endpoint', { adAccountId });
 
       const response = await fetch(`${API_URL}/tiktok/oauth/exchange`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json' 
+        headers: {
+          'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           auth_code: authCode,
-          state 
+          state
         }),
       });
 
       const data = await response.json();
-      console.log('TikTok OAuth response:', { 
-        success: data.success, 
+      console.log('TikTok OAuth response:', {
+        success: data.success,
         hasToken: !!data.access_token,
-        hasBusinessId: !!data.business_id
+        hasBusinessId: !!data.business_id,
+        savedToAdAccount: data.ad_account_id || null
       });
 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to connect TikTok');
       }
 
-      // Update localStorage with TikTok data
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const userData = JSON.parse(storedUser);
-          userData.tiktok_access_token = data.access_token;
-          userData.tiktok_business_id = data.business_id;
-          userData.tiktok_account_id = data.account_id;
-          localStorage.setItem('user', JSON.stringify(userData));
-          console.log('Updated localStorage with TikTok credentials');
-        } catch (e) {
-          console.error('Failed to update localStorage:', e);
+      // Update localStorage with TikTok data only for legacy mode (no ad_account_id)
+      // In multi-account mode, credentials are saved to ad_accounts table by backend
+      if (!adAccountId) {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            userData.tiktok_access_token = data.access_token;
+            userData.tiktok_business_id = data.business_id;
+            userData.tiktok_account_id = data.account_id;
+            localStorage.setItem('user', JSON.stringify(userData));
+            console.log('Updated localStorage with TikTok credentials (legacy mode)');
+          } catch (e) {
+            console.error('Failed to update localStorage:', e);
+          }
         }
+      } else {
+        console.log('Multi-account mode: TikTok credentials saved to ad_accounts table', { adAccountId });
       }
 
       setStatus('success');
       setMessage('TikTok connected successfully!');
       toast.success('TikTok connected successfully!');
-      
+
       console.log('TikTok OAuth completed, redirecting to profile');
-      
+
       // Redirect to profile after 1 second
       setTimeout(() => navigate('/profile'), 1000);
 
