@@ -33,11 +33,25 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - Supports multi-account mode via `account_id` parameter
 - Saves with `platform = 'tiktok'`
 
+**Reliability & Error Handling**:
+- ✅ Retry logic с exponential backoff (3 attempts: 2s, 5s, 10s)
+- ✅ Timeout protection (60s per API call)
+- ✅ Input validation (advertiserId, accessToken, dates)
+- ✅ Graceful error handling (continues if metrics collection fails)
+- ✅ Detailed error logging with correlation ID for tracing
+
+**Logging & Observability**:
+- ✅ Correlation ID для сквозного трейсинга запросов
+- ✅ Structured logging с action tags (collection_started, report_fetched, etc.)
+- ✅ Performance metrics (reportDurationMs, adsDurationMs, totalDurationMs)
+- ✅ Подробная статистика (metricsCollected, skippedRows, errorsCount)
+- ✅ Debug logs для каждого этапа (validation, fetching, processing)
+
 **Integration**:
 - ✅ Called in `processUserTikTok()` (legacy batch)
 - ✅ Called in `processAccountTikTok()` (multi-account hourly batch)
 - ✅ Collects last 7 days of metrics after brain run
-- ✅ Graceful error handling (continues if metrics collection fails)
+- ✅ Returns correlationId for end-to-end tracing
 - ✅ Logs metricsCollected count in batch results
 
 #### TikTok Events API Client
@@ -45,11 +59,32 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 
 **Features**:
 - Analogous to Meta CAPI client
-- Supports events: ViewContent, CompleteRegistration, PlaceAnOrder
-- SHA256 hashing for phone/email
+- Supports events: ViewContent (Interest), CompleteRegistration (Qualified), PlaceAnOrder (Scheduled)
+- SHA256 hashing for phone/email (lowercase, trimmed)
 - ttclid support for attribution (TikTok Click ID)
-- Circuit breaker and retry with exponential backoff
-- Logs to `capi_events_log` with `platform = 'tiktok'`
+- Deterministic event ID generation для deduplication
+
+**Reliability & Error Handling**:
+- ✅ Circuit breaker (threshold: 5 failures, reset: 60s)
+- ✅ Retry logic с exponential backoff (3 attempts: 1s, 2s, 4s)
+- ✅ Timeout protection (30s per request)
+- ✅ Atomic deduplication via `sendTikTokEventAtomic()`
+- ✅ Database retry для логирования (2 retries with 500ms delay)
+
+**Logging & Observability**:
+- ✅ Correlation ID поддержка для трейсинга
+- ✅ Structured logging с action tags (tiktok_event_send_start, success, failed, etc.)
+- ✅ Circuit breaker state logging
+- ✅ Performance metrics (requestDurationMs, retryCount)
+- ✅ Request/response payload logging в `capi_events_log`
+- ✅ Detailed timing: request_started_at, request_duration_ms
+
+**Database Logging**:
+- ✅ Logs to `capi_events_log` with `platform = 'tiktok'`
+- ✅ Stores full request payload для debugging
+- ✅ Correlation tracking across services
+- ✅ Retry count tracking
+- ✅ Error details и TikTok API responses
 
 **Integration**:
 - ✅ Integrated into `capiTools.ts` via platform detection
@@ -57,6 +92,7 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - ✅ Uses same qualification flow and CAPI tools as Meta
 - ✅ Supports ttclid from `dialog_analysis` for lead attribution
 - ✅ Gets pixel_code and access_token from direction via `getDirectionTikTokPixelInfo()`
+- ✅ Unified error handling и logging across both platforms
 
 ## Platform separation (UI vs DB)
 - UI uses `platform = instagram | tiktok` in `AppContext`.

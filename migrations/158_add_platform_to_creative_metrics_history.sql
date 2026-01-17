@@ -1,27 +1,74 @@
 -- Migration 158: Add platform column to creative_metrics_history
--- Date: 2025-01-16
--- Description: Добавляет колонку platform для разделения Facebook и TikTok метрик
--- SAFE: Only adds nullable column with default
+-- Date: 2025-01-17
+-- Description: Добавляет колонку platform для разделения метрик Facebook и TikTok
+-- ⚠️ CRITICAL: Изменяет unique constraint - требуется проверка на дубликаты
+
+-- =====================================================
+-- ШАГ 1: Добавление колонки platform
+-- =====================================================
+-- SAFE: Добавляет колонку с DEFAULT 'facebook'
+-- Все существующие записи автоматически получат platform='facebook'
 
 ALTER TABLE creative_metrics_history
   ADD COLUMN IF NOT EXISTS platform TEXT DEFAULT 'facebook';
 
--- Index for platform filtering (used in ROI Analytics)
+-- =====================================================
+-- ШАГ 2: Индекс для фильтрации по платформе
+-- =====================================================
+-- SAFE: Просто добавляет индекс для ускорения запросов
+
 CREATE INDEX IF NOT EXISTS idx_creative_metrics_history_platform
   ON creative_metrics_history(platform);
 
--- Update unique constraint to include platform
--- Old: (user_account_id, ad_id, date) WHERE ad_id IS NOT NULL
--- New: (user_account_id, ad_id, date, platform) WHERE ad_id IS NOT NULL
+COMMENT ON COLUMN creative_metrics_history.platform IS 'Platform: facebook or tiktok';
+
+-- =====================================================
+-- ШАГ 3: Обновление уникального индекса
+-- =====================================================
+-- ⚠️ REQUIRES VERIFICATION:
+-- Старый индекс: (user_account_id, ad_id, date)
+-- Новый индекс: (user_account_id, ad_id, date, platform)
+--
+-- ЗАЧЕМ:
+-- - Храним метрики FB и TikTok в одной таблице
+-- - ad_id от Facebook и ad_id от TikTok - это РАЗНЫЕ объявления с разных платформ
+-- - Теоретически ad_id могут случайно совпасть (обе платформы используют числовые ID)
+-- - platform в индексе разделяет пространства имен и предотвращает конфликты
+--
+-- ВАЖНО: Если в таблице уже есть дубликаты с одинаковыми
+-- (user_account_id, ad_id, date), миграция завершится ошибкой.
+--
+-- Проверка перед применением:
+-- SELECT user_account_id, ad_id, date, COUNT(*)
+-- FROM creative_metrics_history
+-- WHERE ad_id IS NOT NULL
+-- GROUP BY user_account_id, ad_id, date
+-- HAVING COUNT(*) > 1;
+
 DROP INDEX IF EXISTS creative_metrics_ad_date_unique;
+
 CREATE UNIQUE INDEX IF NOT EXISTS creative_metrics_ad_date_platform_unique
   ON creative_metrics_history(user_account_id, ad_id, date, platform)
   WHERE ad_id IS NOT NULL;
 
--- Same for adset-based constraint (legacy)
-DROP INDEX IF EXISTS creative_metrics_adset_unique;
-CREATE UNIQUE INDEX IF NOT EXISTS creative_metrics_adset_platform_unique
-  ON creative_metrics_history(user_account_id, adset_id, date, platform)
-  WHERE adset_id IS NOT NULL AND ad_id IS NULL;
+-- =====================================================
+-- ОБРАТНАЯ СОВМЕСТИМОСТЬ
+-- =====================================================
+/*
+✅ ГАРАНТИИ:
+1. Все существующие записи получат platform='facebook' автоматически
+2. Все существующие запросы без фильтра platform продолжат работать
+3. Уникальный индекс расширен (не сужен), поэтому конфликтов не будет
 
-COMMENT ON COLUMN creative_metrics_history.platform IS 'Platform: facebook or tiktok';
+⚠️ ПОТЕНЦИАЛЬНЫЕ ПРОБЛЕМЫ:
+1. Если в таблице уже есть дубликаты (одинаковые user_account_id, ad_id, date),
+   создание нового уникального индекса завершится ошибкой
+2. Код, который явно ссылается на индекс creative_metrics_ad_date_unique,
+   может перестать работать (но таких ссылок быть не должно)
+
+📝 РЕКОМЕНДАЦИЯ:
+1. Запустить проверочный запрос для поиска дубликатов
+2. Если дубликаты найдены - объединить их перед применением миграции
+3. Применить миграцию в dev окружении для проверки
+4. Только после успешной проверки применять в production
+*/
