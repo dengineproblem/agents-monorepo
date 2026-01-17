@@ -27,7 +27,8 @@ const ProcessVideoSchema = z.object({
   client_question: z.string().optional(),
   site_url: z.string().url().optional(),
   utm: z.string().optional(),
-  direction_id: z.string().uuid().optional() // Направление бизнеса (опционально для legacy)
+  direction_id: z.string().uuid().optional(), // Направление бизнеса (опционально для legacy)
+  creative_group_id: z.string().uuid().optional() // Cross-platform creative group ID (опционально)
 });
 
 type ProcessVideoBody = z.infer<typeof ProcessVideoSchema>;
@@ -189,6 +190,16 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info('Creating creative record...');
 
+      // Generate creative_group_id if not provided (for cross-platform sync)
+      const creativeGroupId = body.creative_group_id || randomUUID();
+
+      app.log.info({
+        user_id: body.user_id,
+        account_id: body.account_id || null,
+        creative_group_id: creativeGroupId,
+        is_new_group: !body.creative_group_id
+      }, 'Creating creative with group ID');
+
       const { data: creative, error: creativeError } = await supabase
         .from('user_creatives')
         .insert({
@@ -196,7 +207,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           account_id: body.account_id || null, // UUID FK для мультиаккаунтности
           title: body.title || 'Untitled Creative',
           status: 'processing',
-          direction_id: body.direction_id || null // Сохраняем direction_id (null для legacy)
+          direction_id: body.direction_id || null, // Сохраняем direction_id (null для legacy)
+          creative_group_id: creativeGroupId, // Cross-platform sync
+          media_type: 'video' // Явно указываем тип медиа
         })
         .select()
         .single();

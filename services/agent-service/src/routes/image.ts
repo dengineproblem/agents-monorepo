@@ -24,7 +24,8 @@ const ProcessImageSchema = z.object({
   site_url: z.string().url().optional(),
   utm: z.string().optional(),
   direction_id: z.string().uuid().optional(), // Направление бизнеса (опционально для legacy)
-  page_access_token: z.string().optional() // Опционально: токен страницы как в n8n
+  page_access_token: z.string().optional(), // Опционально: токен страницы как в n8n
+  creative_group_id: z.string().uuid().optional() // Cross-platform creative group ID (опционально)
 });
 
 type ProcessImageBody = z.infer<typeof ProcessImageSchema>;
@@ -33,7 +34,8 @@ const CreateImageCreativeSchema = z.object({
   user_id: z.string().uuid(),
   account_id: z.string().uuid().optional(), // UUID FK из ad_accounts.id (для мультиаккаунтности)
   creative_id: z.string().uuid(), // ID из generated_creatives
-  direction_id: z.string().uuid()
+  direction_id: z.string().uuid(),
+  creative_group_id: z.string().uuid().optional() // Cross-platform creative group ID (опционально)
 });
 
 type CreateImageCreativeBody = z.infer<typeof CreateImageCreativeSchema>;
