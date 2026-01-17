@@ -1298,14 +1298,21 @@ const Profile: React.FC = () => {
                     handleDisconnectTikTok();
                   } else {
                     const uid = user?.id || '';
-                    const statePayload = { user_id: uid, ts: Date.now() };
+                    // Включаем ad_account_id для multi-account режима
+                    const statePayload: { user_id: string; ad_account_id?: string; ts: number } = {
+                      user_id: uid,
+                      ts: Date.now()
+                    };
+                    if (multiAccountEnabled && currentAdAccountId) {
+                      statePayload.ad_account_id = currentAdAccountId;
+                    }
                     let state = '';
                     try {
                       state = encodeURIComponent(btoa(JSON.stringify(statePayload)));
                     } catch {
                       state = encodeURIComponent(JSON.stringify(statePayload));
                     }
-                    const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
+                    const redirect = encodeURIComponent(`${window.location.origin}/oauth/tiktok/callback`);
                     const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`;
                     window.open(authUrl, '_blank', 'noopener,noreferrer');
                   }
