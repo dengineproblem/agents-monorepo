@@ -365,6 +365,7 @@ const AppRoutes = () => {
                       <Route path="/" element={<HomeRoute />} />
                       <Route path="/accounts" element={<MultiAccountDashboard />} />
                       <Route path="/oauth/callback" element={<OAuthCallback />} />
+                      <Route path="/oauth/tiktok/callback" element={<OAuthCallback />} />
                       <Route path="/campaign/:id" element={<CampaignDetail />} />
                       {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}
                       {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
@@ -394,6 +395,7 @@ const AppRoutes = () => {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/oauth/callback" element={<OAuthCallback />} />
+          <Route path="/oauth/tiktok/callback" element={<OAuthCallback />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       )}
