@@ -19,13 +19,15 @@ import {
   updateDialogCapiFlags,
   getDirectionPixelInfo,
   CAPI_EVENTS,
-  type CapiEventLevel
+  type CapiEventLevel,
+  type CapiEventName
 } from './metaCapiClient.js';
 import {
   sendTikTokEvent,
   getDirectionTikTokPixelInfo,
   TIKTOK_EVENTS,
-  type TikTokEventLevel
+  type TikTokEventLevel,
+  type TikTokEventName
 } from './tiktokEventsClient.js';
 
 const baseLog = createLogger({ module: 'capiTools' });
@@ -312,7 +314,7 @@ async function handleSendCapiEvent(
     result = await sendTikTokEvent({
       pixelCode,
       accessToken,
-      eventName,
+      eventName: eventName as TikTokEventName,
       eventLevel: level as TikTokEventLevel,
       phone: lead.contact_phone,
       ttclid: lead.ttclid || undefined,
@@ -370,7 +372,7 @@ async function handleSendCapiEvent(
     result = await sendCapiEvent({
       pixelId,
       accessToken,
-      eventName,
+      eventName: eventName as CapiEventName,
       eventLevel: level,
       phone: lead.contact_phone,
       dialogAnalysisId: lead.id,
