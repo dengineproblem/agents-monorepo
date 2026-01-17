@@ -89,9 +89,6 @@ const OAuthCallback = () => {
         throw new Error('No user_id in state');
       }
 
-      // Отладка: показываем что передаём
-      toast.info(`Режим: ${adAccountId ? 'multi-account' : 'legacy'}, ad_account_id: ${adAccountId || 'нет'}`);
-
       // Call backend to exchange code for token
       const API_URL = 'https://performanteaiagency.com/api';
       console.log('Calling TikTok OAuth exchange endpoint', { adAccountId });
@@ -114,9 +111,6 @@ const OAuthCallback = () => {
         hasBusinessId: !!data.business_id,
         savedToAdAccount: data.ad_account_id || null
       });
-
-      // Отладка: показываем ответ бэкенда
-      toast.info(`Backend ответ: success=${data.success}, ad_account_id=${data.ad_account_id || 'нет'}`);
 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to connect TikTok');
