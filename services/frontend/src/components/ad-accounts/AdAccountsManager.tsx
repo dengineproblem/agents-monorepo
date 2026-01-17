@@ -510,8 +510,15 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
 
   const isTikTokConnected = Boolean(formData.tiktok_access_token && formData.tiktok_business_id);
 
-  const handleConnectTikTok = () => {
+  const handleConnectTikTok = (accountId: string | undefined) => {
     try {
+      // Явная проверка accountId - это обязательный параметр для multi-account режима
+      if (!accountId) {
+        console.error('[TikTok OAuth] accountId is required but not provided');
+        toast.error('Ошибка: аккаунт не выбран. Сначала сохраните аккаунт.');
+        return;
+      }
+
       // Собираем state для OAuth callback
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
@@ -535,15 +542,16 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
         return;
       }
 
+      // accountId гарантированно строка здесь
       const statePayload = {
         user_id: userData.id,
-        ad_account_id: selectedAccountId || null, // Для multi-account режима
+        ad_account_id: accountId, // Явно передаём accountId для multi-account режима
         ts: Date.now(),
       };
 
       console.log('[TikTok OAuth] Initiating OAuth flow', {
         userId: userData.id,
-        adAccountId: selectedAccountId || 'legacy mode',
+        adAccountId: accountId,
         timestamp: statePayload.ts,
       });
 
@@ -715,10 +723,10 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
               <>
                 <p className="text-sm text-muted-foreground">
                   Подключите TikTok Business аккаунт для запуска рекламы на TikTok.
-                  После авторизации credentials будут автоматически сохранены.
+                  После авторизации credentials будут сохранены для этого аккаунта.
                 </p>
 
-                <Button onClick={handleConnectTikTok}>
+                <Button onClick={() => handleConnectTikTok(selectedAccountId)}>
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Подключить TikTok
                 </Button>
