@@ -20,7 +20,7 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - DB migrations for TikTok: 112, 150, 152, 155, 157, 158, 159.
 
 ### Pending / not implemented yet
-- Cross-platform creative sync via `creative_group_id` is not wired in UI/backend logic.
+- Cross-platform creative sync via `creative_group_id`: schema support added (video.ts, image.ts), full UI/API implementation postponed.
 
 ### Phase 2 & 3: Metrics & CAPI (Completed)
 
@@ -351,8 +351,10 @@ Batch scheduling:
 - Converts Facebook spend from USD to KZT using a fixed rate in code.
 - TikTok spend uses raw values (KZT).
 
-Important limitation:
-- TikTok metrics are only shown if `creative_metrics_history` contains TikTok rows. There is no TikTok metrics writer in this repo.
+Platform support:
+- TikTok metrics are populated by `tiktokMetricsCollector.js` in batch processes (legacy and multi-account).
+- Metrics are stored in `creative_metrics_history` with `platform = 'tiktok'`.
+- ROI analytics automatically includes both Facebook and TikTok data.
 
 ## Troubleshooting
 - ROI 400 on `user_creatives` filter:
