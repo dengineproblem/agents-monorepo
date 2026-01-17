@@ -101,6 +101,7 @@ const CreateDirectionSchema = z.object({
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
   tiktok_target_cpl: z.number().min(0).optional(),
   tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
+  tiktok_instant_page_id: z.string().optional(),
   // Опциональные дефолтные настройки рекламы
   default_settings: DefaultSettingsSchema.optional(),
   facebook_default_settings: DefaultSettingsSchema.optional(),
@@ -182,6 +183,7 @@ const UpdateDirectionSchema = z.object({
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
   tiktok_target_cpl: z.number().min(0).optional(),
   tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
+  tiktok_instant_page_id: z.string().nullable().optional(),
   // CAPI settings (direction-level)
   capi_enabled: z.boolean().optional(),
   capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
@@ -596,7 +598,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      const maxDirections = userAccountCheck.multi_account_enabled ? 10 : 5;
+      const maxDirections = userAccountCheck.multi_account_enabled ? 10 : 10;
       if ((activeCount || 0) + directionsNeeded > maxDirections) {
         return reply.code(400).send({
           success: false,
@@ -1011,6 +1013,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               tiktok_target_cpl: input.tiktok_target_cpl ?? null,
               tiktok_adgroup_mode: input.tiktok_adgroup_mode ?? null,
               tiktok_identity_id: tiktokCreds?.identityId || null,
+              tiktok_instant_page_id: input.tiktok_instant_page_id ?? null,
               campaign_status: tiktokCampaign.status,
               is_active: true,
               // CAPI settings are Facebook-only for now
