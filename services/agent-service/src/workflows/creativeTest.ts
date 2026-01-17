@@ -486,7 +486,7 @@ export async function fetchCreativeTestInsights(
 
     const result = await graph('GET', url, accessToken, {
       fields,
-      date_preset: 'today'
+      date_preset: 'maximum'  // All time data for tests running across multiple days
     });
 
     baseLog.debug({ ad_id, insights: result?.data }, 'Insights response for creative test');
