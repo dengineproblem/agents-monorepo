@@ -13,7 +13,8 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - Brain/batch: `/api/brain/run-tiktok` with `autopilot_tiktok` gating, platform-tagged reports/executions, Telegram message per platform.
 - Dashboard/ROI tabs: platform separation; TikTok dashboard data loaded through proxy in `tiktokApi`.
 - **Multi-account TikTok UI**: TikTok tab in AdAccountsManager with OAuth flow, connection status display, and `autopilot_tiktok` toggle in Brain Settings.
-- **TikTok OAuth multi-account**: Backend supports saving TikTok credentials to `ad_accounts` table via `ad_account_id` in OAuth state.
+- **TikTok OAuth multi-account**: Backend supports saving TikTok credentials to `ad_accounts` table via `ad_account_id` in OAuth state. OAuth can be initiated from both Profile.tsx (with multi-account support) and AdAccountsManager.tsx.
+- **Fixed OAuth redirect URI**: All TikTok OAuth flows use `https://performanteaiagency.com/oauth/callback` (configured in TikTok Developer Portal).
 - **TikTok connection status**: Displayed in account cards (AdAccountsManager) showing Facebook and TikTok connection status.
 - **Backend autopilot settings API**: `autopilot_tiktok` field in UpdateAdAccountSchema with detailed logging for all autopilot and TikTok credential updates.
 - **Frontend error handling**: Try-catch error handling and console logging in TikTok OAuth flow (AdAccountsManager).
@@ -158,20 +159,43 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
   - `services/frontend/src/components/AllAccountsExecutionsSection.tsx`
 
 ## Authentication and credentials
+
+### OAuth Flow
+- **Redirect URI**: `https://performanteaiagency.com/oauth/callback` (fixed, configured in TikTok Developer Portal)
+- **Callback handler**: `services/frontend/src/pages/OAuthCallback.tsx`
+  - Handles both `/oauth/callback` and `/oauth/tiktok/callback` routes
+  - Decodes state to get `user_id` and `ad_account_id`
+  - Calls backend exchange endpoint
+
+### OAuth Entry Points
+1. **Profile.tsx** (`services/frontend/src/pages/Profile.tsx`)
+   - TikTok button in integrations section
+   - Multi-account mode: includes `ad_account_id` in state when `multiAccountEnabled && currentAdAccountId`
+   - Legacy mode: only `user_id` in state
+
+2. **AdAccountsManager.tsx** (`services/frontend/src/components/ad-accounts/AdAccountsManager.tsx`)
+   - TikTok tab in account settings
+   - Always includes `ad_account_id` in state (requires saved account)
+
+### Backend Exchange
 - OAuth exchange endpoint: `POST /tiktok/oauth/exchange`
-  - Exchanges `auth_code` for `access_token`.
-  - Fetches advertiser accounts and TT_USER identity.
-  - Persists credentials to `user_accounts` or `ad_accounts`.
-- Backend credential resolution:
-  - Multi-account mode uses `ad_accounts` for TikTok credentials.
-  - Legacy mode uses `user_accounts`.
-- Frontend `tiktokApi` reads credentials from localStorage user object.
-- Environment variables:
-  - `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`
-  - `TIKTOK_API_VERSION` (default `v1.3`)
-  - `VITE_TIKTOK_PROXY_URL` (frontend proxy for dashboard)
-- Feature flag:
-  - `FEATURES.SHOW_TIKTOK` hides TikTok UI in app review mode.
+  - Exchanges `auth_code` for `access_token`
+  - Fetches advertiser accounts and TT_USER identity
+  - If `ad_account_id` in state: saves to `ad_accounts` table
+  - Otherwise: saves to `user_accounts` table (legacy mode)
+
+### Credential Resolution
+- Multi-account mode: uses `ad_accounts` for TikTok credentials
+- Legacy mode: uses `user_accounts`
+- Frontend `tiktokApi` reads credentials from localStorage user object
+
+### Environment Variables
+- `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`
+- `TIKTOK_API_VERSION` (default `v1.3`)
+- `VITE_TIKTOK_PROXY_URL` (frontend proxy for dashboard)
+
+### Feature Flags
+- `FEATURES.SHOW_TIKTOK` hides TikTok UI in app review mode
 
 ## Data model and migrations
 
