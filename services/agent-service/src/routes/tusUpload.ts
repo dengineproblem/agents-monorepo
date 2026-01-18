@@ -12,6 +12,7 @@ import { Server } from '@tus/server';
 import { FileStore } from '@tus/file-store';
 import path from 'path';
 import fs from 'fs/promises';
+import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { processVideoTranscription, extractVideoThumbnail } from '../lib/transcription.js';
 import {
@@ -22,11 +23,76 @@ import {
   createWebsiteLeadsCreative,
   createLeadFormVideoCreative
 } from '../adapters/facebook.js';
+import { uploadVideo as uploadTikTokVideo } from '../adapters/tiktok.js';
+import { getTikTokCredentials } from '../lib/tiktokSettings.js';
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger({ module: 'tusUpload' });
+
+// Константы
+const MAX_TITLE_LENGTH = 500;
+const TRANSCRIPTION_TIMEOUT_MS = 120000; // 2 минуты
+const TIKTOK_UPLOAD_RETRY_DELAYS = [2000, 5000, 10000]; // Exponential backoff
+
+// Валидация uploadId для защиты от path traversal
+const VALID_UPLOAD_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+
+function isValidUploadId(uploadId: string): boolean {
+  return VALID_UPLOAD_ID_REGEX.test(uploadId) && uploadId.length <= 100;
+}
+
+/**
+ * Retry wrapper с exponential backoff
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  delays: number[],
+  operation: string,
+  correlationId: string
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      if (attempt < delays.length) {
+        const delay = delays[attempt];
+        log.warn({
+          correlationId,
+          operation,
+          attempt: attempt + 1,
+          maxAttempts: delays.length + 1,
+          delayMs: delay,
+          error: error.message
+        }, `[TUS] Retry attempt for ${operation}`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Timeout wrapper для операций
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string
+): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`${operation} timeout after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]);
+}
 
 // Директория для хранения TUS uploads
 const TUS_UPLOAD_DIR = '/var/tmp/tus-uploads';
@@ -44,6 +110,258 @@ function normalizeAdAccountId(adAccountId: string): string {
   if (!adAccountId) return '';
   const id = String(adAccountId).trim();
   return id.startsWith('act_') ? id : `act_${id}`;
+}
+
+/**
+ * Обработка TikTok upload - загрузка видео в TikTok Ads
+ *
+ * Улучшения безопасности и надёжности:
+ * - Валидация uploadId (защита от path traversal)
+ * - Retry с exponential backoff для TikTok upload
+ * - Timeout для транскрипции
+ * - Optimistic locking при обновлении статуса
+ * - Проверка idempotency (не обрабатывать дважды)
+ */
+async function processTikTokUpload(
+  uploadId: string,
+  metadata: Record<string, string>,
+  videoPath: string,
+  language: string
+) {
+  const correlationId = randomUUID();
+  const startTime = Date.now();
+  let creativeId: string | null = null;
+
+  // Валидация uploadId для защиты от path traversal
+  if (!isValidUploadId(uploadId)) {
+    log.error({ uploadId, correlationId }, '[TUS-TikTok] Invalid uploadId format (possible path traversal)');
+    throw new Error('Invalid uploadId format');
+  }
+
+  log.info({
+    correlationId,
+    uploadId,
+    userId: metadata.user_id,
+    accountId: metadata.account_id,
+    directionId: metadata.direction_id
+  }, '[TUS-TikTok] Starting TikTok upload processing');
+
+  try {
+    const userId = metadata.user_id;
+    const accountId = metadata.account_id;
+    const directionId = metadata.direction_id;
+    // Ограничиваем длину title для защиты от DoS
+    const title = (metadata.title || metadata.filename || 'Untitled').substring(0, MAX_TITLE_LENGTH).trim();
+
+    // Проверка idempotency - не обрабатывать один upload дважды
+    const { data: existingCreative } = await supabase
+      .from('user_creatives')
+      .select('id, status')
+      .eq('tus_upload_id', uploadId)
+      .maybeSingle();
+
+    if (existingCreative) {
+      log.info({
+        correlationId,
+        uploadId,
+        existingCreativeId: existingCreative.id,
+        status: existingCreative.status
+      }, '[TUS-TikTok] Upload already processed, skipping');
+      return;
+    }
+
+    // 1. Получить TikTok credentials
+    const creds = await getTikTokCredentials(userId, accountId || undefined);
+    if (!creds || !creds.accessToken || !creds.advertiserId) {
+      throw new Error('TikTok account not connected or credentials incomplete. Please reconnect TikTok in settings.');
+    }
+
+    log.info({
+      correlationId,
+      uploadId,
+      advertiserId: creds.advertiserId,
+      hasIdentity: !!creds.identityId
+    }, '[TUS-TikTok] Got TikTok credentials');
+
+    // 2. Транскрипция видео с timeout
+    log.info({ correlationId, uploadId }, '[TUS-TikTok] Starting video transcription');
+    let transcriptionText = 'Транскрипция недоступна';
+    let transcriptionDuration = 0;
+    try {
+      const result = await withTimeout(
+        processVideoTranscription(videoPath, language),
+        TRANSCRIPTION_TIMEOUT_MS,
+        'Transcription'
+      );
+      transcriptionText = result.text;
+      transcriptionDuration = result.duration || 0;
+      log.info({
+        correlationId,
+        uploadId,
+        textLength: transcriptionText.length,
+        duration: transcriptionDuration
+      }, '[TUS-TikTok] Transcription completed');
+    } catch (transcriptionError: any) {
+      log.warn({
+        correlationId,
+        err: transcriptionError,
+        uploadId,
+        isTimeout: transcriptionError.message?.includes('timeout')
+      }, '[TUS-TikTok] Transcription failed, using fallback');
+    }
+
+    // 3. Создать запись креатива в БД
+    const { data: creative, error: insertError } = await supabase
+      .from('user_creatives')
+      .insert({
+        user_id: userId,
+        account_id: accountId || null,
+        title,
+        status: 'processing',
+        media_type: 'video',
+        direction_id: directionId || null,
+        tus_upload_id: uploadId
+      })
+      .select()
+      .single();
+
+    if (insertError || !creative) {
+      throw new Error(`Failed to create creative record: ${insertError?.message}`);
+    }
+    creativeId = creative.id;
+
+    log.info({ correlationId, uploadId, creativeId }, '[TUS-TikTok] Creative record created');
+
+    // 4. Загрузить видео в TikTok с retry
+    log.info({
+      correlationId,
+      uploadId,
+      advertiserId: creds.advertiserId
+    }, '[TUS-TikTok] Uploading video to TikTok Ads');
+
+    const videoBuffer = await fs.readFile(videoPath);
+    const fileSizeMB = Math.round(videoBuffer.length / 1024 / 1024);
+    log.info({ correlationId, uploadId, fileSizeMB }, '[TUS-TikTok] Read video file, starting upload');
+
+    const uploadResult = await withRetry(
+      () => uploadTikTokVideo(creds.advertiserId, creds.accessToken, videoBuffer),
+      TIKTOK_UPLOAD_RETRY_DELAYS,
+      'TikTok video upload',
+      correlationId
+    );
+
+    const tiktokVideoId = uploadResult.video_id;
+    log.info({
+      correlationId,
+      uploadId,
+      tiktokVideoId
+    }, '[TUS-TikTok] Video uploaded to TikTok successfully');
+
+    // 5. Сохранить транскрипцию (graceful fallback)
+    try {
+      await supabase
+        .from('creative_transcripts')
+        .insert({
+          creative_id: creativeId,
+          lang: language,
+          source: 'whisper',
+          text: transcriptionText,
+          duration_sec: Math.round(transcriptionDuration),
+          status: 'ready'
+        });
+      log.info({ correlationId, uploadId, creativeId }, '[TUS-TikTok] Transcription saved');
+    } catch (transcriptSaveError: any) {
+      // Не прерываем основной процесс из-за ошибки сохранения транскрипции
+      log.warn({
+        correlationId,
+        err: transcriptSaveError,
+        creativeId
+      }, '[TUS-TikTok] Failed to save transcription, continuing...');
+    }
+
+    // 6. Обновить креатив с tiktok_video_id (optimistic locking)
+    const { error: updateError } = await supabase
+      .from('user_creatives')
+      .update({
+        tiktok_video_id: tiktokVideoId,
+        status: 'ready',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', creativeId)
+      .eq('status', 'processing');  // Optimistic locking
+
+    if (updateError) {
+      log.error({
+        correlationId,
+        err: updateError,
+        creativeId
+      }, '[TUS-TikTok] Failed to update creative status');
+    }
+
+    const duration = Date.now() - startTime;
+    log.info({
+      correlationId,
+      uploadId,
+      creativeId,
+      tiktokVideoId,
+      durationMs: duration,
+      durationSec: Math.round(duration / 1000)
+    }, '[TUS-TikTok] ✅ Processing complete');
+
+    // Обновляем онбординг
+    onCreativeCreated(userId).catch(err => {
+      log.warn({ correlationId, err, userId }, '[TUS-TikTok] Failed to update onboarding');
+    });
+
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    log.error({
+      correlationId,
+      err: error,
+      uploadId,
+      creativeId,
+      errorMessage: error.message,
+      durationMs: duration
+    }, '[TUS-TikTok] ❌ Processing failed');
+
+    // Обновляем статус креатива на error
+    if (creativeId) {
+      try {
+        await supabase
+          .from('user_creatives')
+          .update({
+            status: 'error',
+            error_text: (error.message || 'Unknown error during TikTok upload').substring(0, 500)
+          })
+          .eq('id', creativeId);
+      } catch (updateErr) {
+        log.error({ correlationId, err: updateErr, creativeId }, '[TUS-TikTok] Failed to update error status');
+      }
+    }
+
+    // Логируем ошибку админу
+    logErrorToAdmin({
+      user_account_id: metadata.user_id,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'tus_tiktok_upload',
+      endpoint: '/tus',
+      request_data: { uploadId, correlationId, creativeId },
+      severity: 'warning'
+    }).catch(() => {});
+
+    throw error;
+  } finally {
+    // Удаляем временные файлы
+    try {
+      await fs.unlink(videoPath);
+      await fs.unlink(`${videoPath}.json`).catch(() => {});
+      log.info({ correlationId, videoPath }, '[TUS-TikTok] Temporary files deleted');
+    } catch (err) {
+      log.warn({ correlationId, err, videoPath }, '[TUS-TikTok] Failed to delete temporary files');
+    }
+  }
 }
 
 /**
@@ -75,8 +393,9 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         .eq('id', directionId)
         .maybeSingle();
 
+      // Для TikTok направлений используем отдельный обработчик
       if (direction?.platform === 'tiktok') {
-        throw new Error('TikTok directions are not supported for Facebook creatives');
+        return await processTikTokUpload(uploadId, metadata, videoPath, language);
       }
     }
 

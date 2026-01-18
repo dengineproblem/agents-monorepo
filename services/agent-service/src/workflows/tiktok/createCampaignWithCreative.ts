@@ -36,6 +36,7 @@ export interface CreateTikTokCampaignParams {
   auto_activate?: boolean;  // Если true - сразу активирует (по умолчанию true)
   schedule_start_time?: string;  // ISO datetime
   schedule_end_time?: string;  // ISO datetime
+  page_id?: string;  // TikTok Instant Page ID for Lead Generation
 }
 
 export interface CreateTikTokCampaignContext {
@@ -133,7 +134,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
     use_default_settings = true,
     auto_activate = true,
     schedule_start_time,
-    schedule_end_time
+    schedule_end_time,
+    page_id
   } = params;
 
   const { user_account_id, ad_account_id } = context;
@@ -172,6 +174,36 @@ export async function workflowCreateTikTokCampaignWithCreative(
     hasIdentity: !!identityId,
     step: 'credentials_loaded'
   }, '[TikTok:Workflow:CreateCampaign] ✅ Credentials загружены');
+
+  // ===================================================
+  // STEP 0.5: Валидация page_id для Lead Generation
+  // ===================================================
+  if (objective === 'lead_generation') {
+    if (!page_id) {
+      throw new Error('page_id (Instant Page ID) is required for lead_generation objective');
+    }
+
+    // Проверяем, что page_id принадлежит этому advertiser
+    log.info({
+      page_id,
+      advertiserId,
+      step: 'validating_page_id'
+    }, '[TikTok:Workflow:CreateCampaign] 🔍 Проверка доступа к Instant Page');
+
+    const pageInfo = await tt.getInstantPage(advertiserId!, page_id, accessToken!);
+
+    if (!pageInfo) {
+      throw new Error(`Instant Page ${page_id} not found or not accessible for this advertiser`);
+    }
+
+    log.info({
+      page_id,
+      page_name: pageInfo.page_name,
+      page_type: pageInfo.page_type,
+      status: pageInfo.status,
+      step: 'page_id_validated'
+    }, '[TikTok:Workflow:CreateCampaign] ✅ Instant Page подтверждена');
+  }
 
   // ===================================================
   // STEP 1: Получаем ВСЕ креативы из Supabase
@@ -430,10 +462,12 @@ export async function workflowCreateTikTokCampaignWithCreative(
       ad_format: 'SINGLE_VIDEO' as const,
       video_id: creative.tiktok_video_id,
       ad_text: creative.description || creative.title,
-      call_to_action: 'LEARN_MORE',
+      call_to_action: objective === 'lead_generation' ? 'SIGN_UP' : 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       // Identity
-      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
+      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const }),
+      // Lead Generation: Instant Page
+      ...(objective === 'lead_generation' && page_id && { page_id })
     };
 
     log.info({

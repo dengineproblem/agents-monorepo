@@ -27,6 +27,7 @@ import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/d
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
+// tiktokApi убран - Instant Page ID вводится вручную
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { API_BASE_URL } from '@/config/api';
@@ -263,6 +264,7 @@ interface CreateDirectionDialogProps {
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: CreateDirectionFormData) => Promise<void>;
   userAccountId: string;
+  accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
   defaultPlatform?: DirectionPlatform;
 }
 
@@ -277,6 +279,7 @@ export interface CreateDirectionFormData {
   tiktok_objective?: TikTokObjective;
   tiktok_daily_budget?: number;
   tiktok_target_cpl_kzt?: number;
+  tiktok_instant_page_id?: string;
   whatsapp_phone_number?: string;
   adSettings?: CreateDefaultSettingsInput;
   facebookAdSettings?: CreateDefaultSettingsInput;
@@ -289,6 +292,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   onOpenChange,
   onSubmit,
   userAccountId,
+  accountId,
   defaultPlatform = 'facebook',
 }) => {
   // Ref для порталинга Popover внутрь Dialog
@@ -335,10 +339,13 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
   const [utmTag, setUtmTag] = useState(DEFAULT_UTM);
 
-  // Lead Forms специфичные
+  // Lead Forms специфичные (Facebook)
   const [leadFormId, setLeadFormId] = useState('');
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
+
+  // TikTok Instant Page ID (Lead Forms) - ручной ввод
+  const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
 
   // CAPI Configuration (direction-level)
   const [capiEnabled, setCapiEnabled] = useState(false);
@@ -457,6 +464,13 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     };
     loadLeadForms();
   }, [objective, open, needsFacebook]);
+
+  // Сброс Instant Page ID при смене цели
+  useEffect(() => {
+    if (!open || !needsTikTok || tiktokObjective !== 'lead_generation') {
+      setTikTokInstantPageId('');
+    }
+  }, [tiktokObjective, open, needsTikTok]);
 
   // Load connected CRMs on mount
   useEffect(() => {
@@ -652,6 +666,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         }
         tiktokTargetCplValue = Math.round(parsedTarget);
       }
+
+      // Валидация Instant Page ID для Lead Generation
+      if (tiktokObjective === 'lead_generation' && !tiktokInstantPageId) {
+        setError('Введите Instant Page ID для лидогенерации TikTok');
+        return;
+      }
     }
 
     // Валидация настроек рекламы
@@ -787,6 +807,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           tiktok_objective: tiktokObjective,
           tiktok_daily_budget: Math.round(tiktokBudgetValue),
           ...(tiktokTargetCplValue !== null && { tiktok_target_cpl_kzt: tiktokTargetCplValue }),
+          ...(tiktokObjective === 'lead_generation' && tiktokInstantPageId && {
+            tiktok_instant_page_id: tiktokInstantPageId,
+          }),
         }),
         ...(separateTikTokSettings && needsFacebook && needsTikTok
           ? {
@@ -1153,6 +1176,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     </Label>
                   </div>
                 </RadioGroup>
+              </div>
+            )}
+
+            {/* TikTok Instant Page ID (Lead Generation) */}
+            {needsTikTok && tiktokObjective === 'lead_generation' && (
+              <div className="space-y-2">
+                <Label htmlFor="tiktok-instant-page-id">
+                  Instant Page ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="tiktok-instant-page-id"
+                  value={tiktokInstantPageId}
+                  onChange={(e) => setTikTokInstantPageId(e.target.value.trim())}
+                  placeholder="Например: 7123456789012345678"
+                  disabled={isSubmitting}
+                  className="bg-white dark:bg-gray-900"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Скопируйте ID из TikTok Ads Manager → Tools → Instant Page
+                </p>
               </div>
             )}
 

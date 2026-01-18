@@ -25,9 +25,9 @@ interface DirectionsCardProps {
 
 const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId }) => {
   const { platform } = useAppContext();
-  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
+  // В профиле показываем ВСЕ направления (без фильтра по платформе)
   const { directions, loading, createDirection, updateDirection, deleteDirection } =
-    useDirections(userAccountId, accountId, directionsPlatform);
+    useDirections(userAccountId, accountId);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -88,6 +88,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(data.tiktok_objective && { tiktok_objective: data.tiktok_objective }),
       ...(data.tiktok_daily_budget !== undefined && { tiktok_daily_budget: data.tiktok_daily_budget }),
       ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
+      ...(data.tiktok_instant_page_id && { tiktok_instant_page_id: data.tiktok_instant_page_id }),
       ...(facebookSettings && { facebook_default_settings: facebookSettings }),
       ...(tiktokSettings && { tiktok_default_settings: tiktokSettings }),
       ...(sharedSettings && !facebookSettings && !tiktokSettings && { default_settings: sharedSettings }),
@@ -256,6 +257,13 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
                             direction.is_active ? 'bg-green-500' : 'bg-gray-400'
                           }`}
                         />
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+                          direction.platform === 'tiktok'
+                            ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                        }`}>
+                          {direction.platform === 'tiktok' ? 'TikTok' : 'Facebook'}
+                        </span>
                         <h3 className="font-semibold truncate">
                           {direction.name}
                         </h3>
@@ -363,7 +371,8 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         onOpenChange={setCreateDialogOpen}
         onSubmit={handleCreate}
         userAccountId={userAccountId || ''}
-        defaultPlatform={directionsPlatform}
+        accountId={accountId}
+        defaultPlatform={platform === 'tiktok' ? 'tiktok' : 'facebook'}
       />
 
       <EditDirectionDialog

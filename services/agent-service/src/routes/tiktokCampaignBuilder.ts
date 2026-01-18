@@ -236,7 +236,9 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                   objective: (direction.tiktok_objective || 'traffic') as TikTokObjectiveType,
                   campaign_name: direction.name,
                   daily_budget: direction.tiktok_daily_budget || 2500,
-                  auto_activate: true
+                  auto_activate: true,
+                  // Lead Generation: передаём Instant Page ID
+                  ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id })
                 },
                 {
                   user_account_id,
@@ -444,7 +446,9 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               objective: finalObjective as TikTokObjectiveType,
               campaign_name: `${direction.name} - Manual ${new Date().toISOString().split('T')[0]}`,
               daily_budget: finalBudget,
-              auto_activate: true
+              auto_activate: true,
+              // Lead Generation: передаём Instant Page ID
+              ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id })
             },
             {
               user_account_id,
@@ -527,7 +531,8 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             campaign_name: { type: 'string', minLength: 1 },
             objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] },
             daily_budget: { type: 'number', minimum: 2500 },
-            auto_activate: { type: 'boolean' }
+            auto_activate: { type: 'boolean' },
+            page_id: { type: 'string' }  // TikTok Instant Page ID for Lead Generation
           }
         }
       }
@@ -542,6 +547,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         objective?: TikTokObjectiveType;
         daily_budget?: number;
         auto_activate?: boolean;
+        page_id?: string;  // TikTok Instant Page ID for Lead Generation
       };
 
       log.info({
@@ -565,7 +571,9 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             objective: body.objective || 'traffic',
             campaign_name: body.campaign_name,
             daily_budget: body.daily_budget || 2500,
-            auto_activate: body.auto_activate ?? true
+            auto_activate: body.auto_activate ?? true,
+            // Lead Generation: передаём Instant Page ID
+            ...(body.page_id && { page_id: body.page_id })
           },
           {
             user_account_id: body.user_account_id,

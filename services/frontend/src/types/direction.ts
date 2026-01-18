@@ -33,6 +33,7 @@ export interface Direction {
   tiktok_target_cpl?: number | null;
   tiktok_adgroup_mode?: 'use_existing' | 'create_new' | null;
   tiktok_identity_id?: string | null;
+  tiktok_instant_page_id?: string | null;
   campaign_status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | null;
   daily_budget_cents: number;
   target_cpl_cents: number;
@@ -74,6 +75,7 @@ export interface CreateDirectionPayload {
   tiktok_target_cpl_kzt?: number;
   tiktok_target_cpl?: number;
   tiktok_adgroup_mode?: 'use_existing' | 'create_new';
+  tiktok_instant_page_id?: string;
   default_settings?: DirectionDefaultSettingsInput;
   facebook_default_settings?: DirectionDefaultSettingsInput;
   tiktok_default_settings?: DirectionDefaultSettingsInput;

@@ -18,7 +18,70 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - **TikTok connection status**: Displayed in account cards (AdAccountsManager) showing Facebook and TikTok connection status.
 - **Backend autopilot settings API**: `autopilot_tiktok` field in UpdateAdAccountSchema with detailed logging for all autopilot and TikTok credential updates.
 - **Frontend error handling**: Try-catch error handling and console logging in TikTok OAuth flow (AdAccountsManager).
-- DB migrations for TikTok: 112, 150, 152, 155, 157, 158, 159.
+- DB migrations for TikTok: 112, 150, 152, 155, 157, 158, 159, 160.
+- **TikTok Video Upload via TUS**: Direct video upload to TikTok Ads when direction platform is TikTok.
+- **TikTok Instant Pages (Lead Forms)**: API endpoint to fetch Instant Pages for Lead Generation campaigns.
+- **TikTok Lead Webhooks**: Webhook handler for receiving leads from TikTok Instant Forms.
+
+### Phase 4: TikTok Video Upload & Lead Generation (Latest)
+
+#### TikTok Video Upload
+**File**: `services/agent-service/src/routes/tusUpload.ts`
+
+**Features**:
+- Direct upload to TikTok Ads API when direction.platform === 'tiktok'
+- Video transcription with Whisper (same as Facebook)
+- Creates `user_creatives` record with `tiktok_video_id`
+
+**Reliability & Error Handling**:
+- ✅ Retry logic с exponential backoff (3 attempts: 2s, 5s, 10s)
+- ✅ Timeout protection for transcription (2 minutes)
+- ✅ Path traversal protection (uploadId validation)
+- ✅ Idempotency check (prevents duplicate processing)
+- ✅ Optimistic locking при обновлении статуса
+- ✅ Graceful fallback для транскрипции
+
+**Logging & Observability**:
+- ✅ Correlation ID для сквозного трейсинга
+- ✅ Structured logging с step-by-step progress
+- ✅ Performance metrics (durationMs for each step)
+
+#### TikTok Instant Pages API
+**File**: `services/agent-service/src/routes/tiktokRoutes.ts`
+
+**Endpoint**: `GET /tiktok/instant-pages`
+
+**Features**:
+- Fetch Instant Pages (Lead Forms) для TikTok аккаунта
+- Multi-account mode support (via adAccountId)
+- Legacy mode support (via userAccountId)
+
+**Security**:
+- ✅ Ownership validation (user can only access their own ad_accounts)
+- ✅ UUID format validation
+- ✅ Access control logging
+
+#### TikTok Lead Webhooks
+**File**: `services/agent-service/src/routes/tiktokWebhooks.ts`
+
+**Endpoints**:
+- `GET /tiktok/webhook` - Challenge verification
+- `POST /tiktok/webhook` - Lead event processing
+
+**Features**:
+- Receives leads from TikTok Instant Forms
+- Maps leads to directions by campaign_id, page_id, or advertiser_id
+- Creates lead records in `leads` table with platform='tiktok'
+
+**Security & Reliability**:
+- ✅ HMAC-SHA256 signature verification (x-tiktok-signature)
+- ✅ Explicit duplicate check before processing
+- ✅ DB constraint fallback for duplicates
+- ✅ PII masking in logs (phone, email)
+- ✅ Correlation ID for tracing
+
+**Environment Variables**:
+- `TIKTOK_WEBHOOK_SECRET` - Webhook secret from TikTok Developer Portal
 
 ### Pending / not implemented yet
 - Cross-platform creative sync via `creative_group_id`: schema support added (video.ts, image.ts), full UI/API implementation postponed.

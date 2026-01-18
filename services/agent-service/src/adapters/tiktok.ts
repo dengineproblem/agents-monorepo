@@ -617,6 +617,7 @@ export async function createAd(
     identity_id?: string;
     identity_type?: 'AUTH_CODE' | 'TT_USER';
     operation_status?: 'ENABLE' | 'DISABLE';
+    page_id?: string;  // TikTok Instant Page ID for Lead Generation
   }
 ): Promise<{ ad_id: string }> {
   log.info({
@@ -628,6 +629,9 @@ export async function createAd(
     video_id: params.video_id,
     has_image_ids: !!params.image_ids,
     call_to_action: params.call_to_action,
+    landing_page_url: params.landing_page_url,
+    page_id: params.page_id,  // Lead Generation Instant Page
+    identity_id: params.identity_id,
     operation_status: params.operation_status || 'ENABLE'
   }, '[TikTok:createAd] Создание Ad');
 
@@ -654,13 +658,18 @@ export async function createAd(
   if (params.identity_id) body.identity_id = params.identity_id;
   if (params.identity_type) body.identity_type = params.identity_type;
 
+  // Lead Generation: Instant Page
+  if (params.page_id) body.page_id = params.page_id;
+
   const result = await tikTokGraph('POST', 'ad/create/', accessToken, body);
 
   log.info({
     advertiserId,
     ad_id: result.data.ad_id,
     ad_name: params.ad_name,
-    adgroup_id: params.adgroup_id
+    adgroup_id: params.adgroup_id,
+    page_id: params.page_id || null,
+    has_lead_form: !!params.page_id
   }, '[TikTok:createAd] ✅ Ad создан');
 
   return { ad_id: result.data.ad_id };
@@ -1045,6 +1054,118 @@ export async function getIdentities(
 }
 
 // ============================================================
+// INSTANT PAGES (LEAD FORMS)
+// ============================================================
+
+export interface TikTokInstantPage {
+  page_id: string;
+  page_name: string;
+  page_type: string;
+  status: string;
+  create_time?: string;
+  modify_time?: string;
+}
+
+/**
+ * Получить список Instant Pages (Lead Forms) для аккаунта
+ *
+ * Endpoint: page/list/
+ * Документация: https://business-api.tiktok.com/portal/docs
+ */
+export async function getInstantPages(
+  advertiserId: string,
+  accessToken: string
+): Promise<TikTokInstantPage[]> {
+  log.info({ advertiserId }, '[TikTok:getInstantPages] Запрос списка Instant Pages');
+
+  try {
+    // Пробуем несколько возможных endpoints для Instant Pages
+    // TikTok API может использовать разные пути в зависимости от версии
+    let result;
+    try {
+      result = await tikTokGraph('GET', 'creative/instant_page/list/', accessToken, {
+        advertiser_id: advertiserId,
+        page_size: 100
+      });
+    } catch (e: any) {
+      log.warn({ error: e.message }, '[TikTok:getInstantPages] creative/instant_page/list/ failed, trying page/list/');
+      result = await tikTokGraph('GET', 'page/list/', accessToken, {
+        advertiser_id: advertiserId,
+        page_size: 100
+      });
+    }
+
+    const pages = result.data?.page_info_list || [];
+
+    log.info({
+      advertiserId,
+      pages_count: pages.length
+    }, '[TikTok:getInstantPages] ✅ Instant Pages получены');
+
+    return pages.map((p: any) => ({
+      page_id: p.page_id,
+      page_name: p.page_name || `Page ${p.page_id}`,
+      page_type: p.page_type || 'UNKNOWN',
+      status: p.status || 'ACTIVE',
+      create_time: p.create_time,
+      modify_time: p.modify_time
+    }));
+  } catch (error: any) {
+    log.error({
+      advertiserId,
+      error: error.message
+    }, '[TikTok:getInstantPages] Ошибка получения Instant Pages');
+
+    // Возвращаем пустой массив вместо ошибки для graceful degradation
+    return [];
+  }
+}
+
+/**
+ * Получить конкретную Instant Page по ID
+ */
+export async function getInstantPage(
+  advertiserId: string,
+  pageId: string,
+  accessToken: string
+): Promise<TikTokInstantPage | null> {
+  log.info({ advertiserId, pageId }, '[TikTok:getInstantPage] Запрос Instant Page');
+
+  try {
+    const result = await tikTokGraph('GET', 'page/get/', accessToken, {
+      advertiser_id: advertiserId,
+      page_ids: [pageId]
+    });
+
+    const pages = result.data?.page_info_list || [];
+
+    if (pages.length === 0) {
+      log.warn({ advertiserId, pageId }, '[TikTok:getInstantPage] Instant Page не найдена');
+      return null;
+    }
+
+    const p = pages[0];
+    log.info({ advertiserId, pageId }, '[TikTok:getInstantPage] ✅ Instant Page получена');
+
+    return {
+      page_id: p.page_id,
+      page_name: p.page_name || `Page ${p.page_id}`,
+      page_type: p.page_type || 'UNKNOWN',
+      status: p.status || 'ACTIVE',
+      create_time: p.create_time,
+      modify_time: p.modify_time
+    };
+  } catch (error: any) {
+    log.error({
+      advertiserId,
+      pageId,
+      error: error.message
+    }, '[TikTok:getInstantPage] Ошибка получения Instant Page');
+    return null;
+  }
+}
+
+// ============================================================
 // CONVENIENCE OBJECT (like fb object in facebook.ts)
 // ============================================================
 
@@ -1085,7 +1206,11 @@ export const tt = {
   // Account
   getAdvertiserInfo,
   getPixels,
-  getIdentities
+  getIdentities,
+
+  // Instant Pages (Lead Forms)
+  getInstantPages,
+  getInstantPage
 };
 
 export default tt;

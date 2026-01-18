@@ -1565,13 +1565,13 @@ const Creatives: React.FC = () => {
   });
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
-  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
-  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId, directionsPlatform);
+  // Показываем ВСЕ направления (и Facebook, и TikTok)
+  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
   const launchDirection = useMemo(
     () => directions.find(d => d.id === launchDirectionId),
     [directions, launchDirectionId]
   );
-  
+
   // Сбрасываем выбранное направление при смене аккаунта
   useEffect(() => {
     setSelectedDirectionId('');
@@ -1593,6 +1593,7 @@ const Creatives: React.FC = () => {
 
   const handleFilesSelected = useCallback((files: FileList | null) => {
     if (!files || files.length === 0) return;
+
     const maxSizeBytes = 10 * 1024 * 1024; // 10MB для изображений
     const fileArray = Array.from(files);
     const allowed = fileArray.filter((f) => {
@@ -1802,7 +1803,16 @@ const Creatives: React.FC = () => {
                     <SelectContent>
                       {directions.map((direction) => (
                         <SelectItem key={direction.id} value={direction.id}>
-                          {direction.name} ({getDirectionObjectiveLabel(direction)})
+                          <span className="flex items-center gap-2">
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                              direction.platform === 'tiktok'
+                                ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
+                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                            }`}>
+                              {direction.platform === 'tiktok' ? 'TT' : 'FB'}
+                            </span>
+                            {direction.name} ({getDirectionObjectiveLabel(direction)})
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>

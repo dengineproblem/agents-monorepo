@@ -5,6 +5,7 @@
 import { format, subDays, addDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
 
 // Types
 export interface TikTokCampaign {
@@ -32,6 +33,15 @@ export interface TikTokCampaignStat {
 export interface DateRange {
   since: string;
   until: string;
+}
+
+export interface TikTokInstantPage {
+  page_id: string;
+  page_name: string;
+  page_type: string;
+  status: string;
+  create_time?: string;
+  modify_time?: string;
 }
 
 // Функция для получения данных текущего пользователя TikTok
@@ -572,7 +582,7 @@ export const tiktokApi = {
     if (!await hasValidTikTokConfig()) {
       return [];
     }
-    
+
     try {
       const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
       const endpoint = `report/integrated/get/`;
@@ -593,13 +603,13 @@ export const tiktokApi = {
         page: '1',
         page_size: '1000'
       };
-      
+
       const response = await fetchFromTikTokAPI(endpoint, params);
-      
+
       if (response.code !== 0 || !response.data?.list) {
         return [];
       }
-      
+
       return (response.data.list || []).map((stat: any) => {
         const leads = parseInt(stat.metrics?.conversion || "0", 10);
         const spend = parseFloat(stat.metrics?.spend || "0");
@@ -607,7 +617,7 @@ export const tiktokApi = {
         const clicks = parseInt(stat.metrics?.clicks || "0", 10);
         const ctr = parseFloat(stat.metrics?.ctr || "0");
         const cpl = leads > 0 ? spend / leads : 0;
-        
+
         return {
           campaign_id: stat.dimensions?.campaign_id,
           campaign_name: stat.dimensions?.campaign_name || 'Unknown Campaign',
@@ -623,6 +633,45 @@ export const tiktokApi = {
       });
     } catch (error) {
       toast.error('Не удалось получить статистику TikTok кампании по дням.');
+      return [];
+    }
+  },
+
+  /**
+   * Получить список Instant Pages (Lead Forms) для TikTok аккаунта
+   * Вызывает backend endpoint /tiktok/instant-pages
+   *
+   * @param userAccountId - UUID пользователя из user_accounts (legacy mode)
+   * @param adAccountId - UUID рекламного аккаунта из ad_accounts (multi-account mode)
+   */
+  getInstantPages: async (
+    userAccountId?: string,
+    adAccountId?: string
+  ): Promise<TikTokInstantPage[]> => {
+    console.log('[tiktokApi] getInstantPages', { userAccountId, adAccountId });
+
+    try {
+      const params = new URLSearchParams();
+      if (userAccountId) params.append('userAccountId', userAccountId);
+      if (adAccountId) params.append('adAccountId', adAccountId);
+
+      const url = `${API_BASE_URL}/tiktok/instant-pages?${params.toString()}`;
+      console.log('[tiktokApi] Fetching instant pages from:', url);
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error('[tiktokApi] Error fetching instant pages:', data.error);
+        toast.error(data.error || 'Не удалось получить список Instant Forms');
+        return [];
+      }
+
+      console.log('[tiktokApi] Got instant pages:', data.data?.length || 0);
+      return data.data || [];
+    } catch (error) {
+      console.error('[tiktokApi] Exception fetching instant pages:', error);
+      toast.error('Ошибка при получении списка Instant Forms');
       return [];
     }
   }
