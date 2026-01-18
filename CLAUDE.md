@@ -55,3 +55,9 @@ docker-compose up -d
 - Main branch: `main`
 - Коммить без лишних вопросов, если я попросил
 - Пуш на remote только по явной просьбе
+
+## Ads Agent
+При работе с рекламой Facebook/Instagram через MCP используй:
+- Главная инструкция: [.claude/ads-agent/AGENT.md](.claude/ads-agent/AGENT.md)
+- Конфигурация аккаунтов: [.claude/ads-agent/config/ad_accounts.md](.claude/ads-agent/config/ad_accounts.md)
+- Skills: `/ads-optimizer`, `/campaign-manager`, `/ads-reporter`, `/creative-analyzer`, `/targeting-expert`
