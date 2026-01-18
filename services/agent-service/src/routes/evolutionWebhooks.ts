@@ -522,7 +522,8 @@ async function processAdLead(params: {
     contactPhone: clientPhone,
     contactName,  // ✅ НОВОЕ: имя из WhatsApp (pushName)
     messageText,
-    ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: передаём ctwa_clid для CAPI
+    ctwaClid: ctwaClid || null,  // ✅ передаём ctwa_clid для CAPI
+    directionId: directionId || null,  // ✅ НОВОЕ: передаём direction_id для CAPI
     timestamp
   }, app);
 
@@ -639,12 +640,13 @@ async function upsertDialogAnalysis(params: {
   contactName?: string;  // имя контакта из WhatsApp (pushName)
   messageText: string;
   ctwaClid?: string | null;  // Click-to-WhatsApp Click ID для CAPI
+  directionId?: string | null;  // ✅ НОВОЕ: direction_id для CAPI
   timestamp: Date;
   isIncoming?: boolean;  // true если входящее сообщение от клиента (default: true)
 }, app: FastifyInstance) {
   const {
     userAccountId, accountId, instanceName, contactPhone,
-    contactName, messageText, ctwaClid, timestamp,
+    contactName, messageText, ctwaClid, directionId, timestamp,
     isIncoming = true
   } = params;
 
@@ -653,13 +655,14 @@ async function upsertDialogAnalysis(params: {
     contactPhone,
     instanceName,
     ctwaClid: ctwaClid || null,
+    directionId: directionId || null,
     isIncoming
   }, 'upsertDialogAnalysis: incoming params');
 
   // Проверить существование записи
   const { data: existing } = await supabase
     .from('dialog_analysis')
-    .select('id, ctwa_clid, contact_name, capi_msg_count, capi_interest_sent, direction_id')
+    .select('id, ctwa_clid, contact_name, capi_msg_count, capi_interest_sent, direction_id, incoming_count')
     .eq('contact_phone', contactPhone)
     .eq('instance_name', instanceName)
     .maybeSingle();
@@ -670,16 +673,25 @@ async function upsertDialogAnalysis(params: {
   if (existing) {
     // Обновить существующую запись
     const finalCtwaClid = ctwaClid || existing.ctwa_clid;
+    // ✅ НОВОЕ: используем переданный direction_id или сохраняем существующий
+    const finalDirectionId = directionId || existing.direction_id;
 
     // CAPI: Инкрементируем счётчик только для входящих сообщений от рекламных лидов
     const newCapiMsgCount = (isIncoming && isFromAd)
       ? (existing.capi_msg_count || 0) + 1
       : (existing.capi_msg_count || 0);
 
+    // ✅ НОВОЕ: также инкрементируем incoming_count для processDialogForCapi
+    const newIncomingCount = isIncoming
+      ? (existing.incoming_count || 0) + 1
+      : (existing.incoming_count || 0);
+
     const updateData: Record<string, any> = {
       last_message: timestamp.toISOString(),
       ctwa_clid: finalCtwaClid,
+      direction_id: finalDirectionId,  // ✅ НОВОЕ: обновляем direction_id
       capi_msg_count: newCapiMsgCount,
+      incoming_count: newIncomingCount,  // ✅ НОВОЕ: обновляем incoming_count
       analyzed_at: timestamp.toISOString()
     };
 
@@ -700,17 +712,19 @@ async function upsertDialogAnalysis(params: {
     // CAPI: Проверить порог для ViewContent (Interest)
     const INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 
+    // ✅ ИСПРАВЛЕНО: используем finalDirectionId (может быть передан явно)
     if (
       isFromAd &&                              // Рекламный лид
       newCapiMsgCount >= INTEREST_THRESHOLD && // Достиг порога
       !existing.capi_interest_sent &&          // Ещё не отправляли
-      existing.direction_id                    // Есть direction для CAPI
+      finalDirectionId                         // Есть direction для CAPI
     ) {
       app.log.info({
         contactPhone,
         capiMsgCount: newCapiMsgCount,
+        incomingCount: newIncomingCount,
         threshold: INTEREST_THRESHOLD,
-        directionId: existing.direction_id
+        directionId: finalDirectionId
       }, 'CAPI threshold reached, sending ViewContent');
 
       await sendCapiInterestEvent(app, instanceName, contactPhone);
@@ -720,12 +734,16 @@ async function upsertDialogAnalysis(params: {
     // Создать новую запись
     // CAPI: Начинаем счёт с 1 только если это входящее сообщение от рекламного лида
     const initialCapiMsgCount = (isIncoming && isFromAd) ? 1 : 0;
+    // ✅ НОВОЕ: incoming_count для processDialogForCapi
+    const initialIncomingCount = isIncoming ? 1 : 0;
 
     app.log.debug({
       contactPhone,
       ctwaClid: ctwaClid || null,
+      directionId: directionId || null,
       isFromAd,
-      initialCapiMsgCount
+      initialCapiMsgCount,
+      initialIncomingCount
     }, 'upsertDialogAnalysis: creating new record');
 
     const { error: insertError } = await supabase
@@ -739,7 +757,9 @@ async function upsertDialogAnalysis(params: {
         first_message: timestamp.toISOString(),
         last_message: timestamp.toISOString(),
         ctwa_clid: ctwaClid || null,
+        direction_id: directionId || null,  // ✅ НОВОЕ: direction_id для CAPI
         capi_msg_count: initialCapiMsgCount,
+        incoming_count: initialIncomingCount,  // ✅ НОВОЕ: incoming_count
         funnel_stage: 'new_lead',
         analyzed_at: timestamp.toISOString()
       });
@@ -1077,6 +1097,7 @@ async function createLeadWithoutCreative(params: {
       contactPhone: clientPhone,
       contactName,  // ✅ НОВОЕ: имя из WhatsApp
       messageText,
+      directionId: directionId || null,  // ✅ НОВОЕ: direction_id для CAPI
       timestamp
     }, app);
 
@@ -1117,6 +1138,7 @@ async function createLeadWithoutCreative(params: {
     contactPhone: clientPhone,
     contactName,  // ✅ НОВОЕ: имя из WhatsApp
     messageText,
+    directionId: directionId || null,  // ✅ НОВОЕ: direction_id для CAPI
     timestamp
   }, app);
 
