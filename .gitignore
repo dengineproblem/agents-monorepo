@@ -59,3 +59,12 @@ nginx-*.log
 # Test files
 test-results/
 coverage/
+
+# Ads Agent sensitive data (accounts, briefs, history)
+.claude/ads-agent/config/ad_accounts.md
+.claude/ads-agent/config/briefs/*.md
+!.claude/ads-agent/config/briefs/_template.md
+.claude/ads-agent/history/
+
+# MCP config with tokens
+.mcp.json
