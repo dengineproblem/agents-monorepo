@@ -74,43 +74,43 @@ def calculate_risk_score(creative, target_cpl, median_cpm):
 
 ## Группировка по Creative Tags
 
+### Зачем это нужно
+
+Одно видео/изображение может использоваться в нескольких объявлениях:
+- Разные аудитории (возраст, гео, lookalike)
+- Разные adsets
+- Разные кампании
+
+**Цель:** видеть статистику не по отдельному объявлению, а по креативу (видео).
+
 ### Naming Convention
 
-Объявления именуются по формату: `{creative_tag}_{variant}_{audience}`
+Объявления именуются по формату: `{creative_tag}_{описание}`
 
 ```
-kitchen_v1_30-45_msk
-kitchen_v2_lookalike
-bathroom_promo_retarget
+kitchen_30-45_msk
+kitchen_lookalike
+kitchen_retarget_7d
+bathroom_cold_audience
 ```
+
+- Первая часть до `_` = **creative_tag** = идентификатор видео/изображения
+- Остальное = любая информация (аудитория, гео, заметки)
 
 **Подробности:** `.claude/ads-agent/config/naming_convention.md`
 
 ### Парсинг имени
 
 ```python
-def parse_creative_tag(ad_name):
-    """Извлекает creative_tag из имени объявления"""
-    parts = ad_name.split("_")
-    if not parts:
-        return ad_name  # Fallback
+def get_creative_tag(ad_name):
+    """Первая часть имени до _ = тег креатива"""
+    return ad_name.split("_")[0]
+```
 
-    # creative_tag = первая часть (или первые 2 если не версия)
-    creative_tag = parts[0]
-
-    # Если вторая часть НЕ версия (v1, v2...), добавляем её к тегу
-    if len(parts) > 1 and not parts[1].startswith("v"):
-        creative_tag = f"{parts[0]}_{parts[1]}"
-
-    return creative_tag
-
-def parse_variant(ad_name):
-    """Извлекает variant из имени (v1, v2, ...)"""
-    parts = ad_name.split("_")
-    for part in parts:
-        if part.startswith("v") and part[1:].isdigit():
-            return part
-    return None
+Пример:
+```
+Ad Name: "kitchen_lookalike_3pct"
+Creative Tag: "kitchen"
 ```
 
 ### Агрегация метрик по тегу
@@ -121,7 +121,7 @@ def aggregate_by_tag(ads_with_insights):
     groups = {}
 
     for ad in ads_with_insights:
-        tag = parse_creative_tag(ad.name)
+        tag = get_creative_tag(ad.name)
 
         if tag not in groups:
             groups[tag] = {
@@ -156,22 +156,24 @@ def aggregate_by_tag(ads_with_insights):
 |--------------|----:|------:|------:|----:|----:|-----:|-------|--------------|
 | kitchen | 5 | $450 | 120 | $3.75 | 1.8% | 22 | ↑ | 🟢 Scale |
 | bathroom | 3 | $280 | 45 | $6.22 | 1.2% | 48 | → | 🟡 Monitor |
-| promo_winter | 2 | $150 | 12 | $12.50 | 0.6% | 78 | ↓↓ | ⛔ Pause |
+| promo | 2 | $150 | 12 | $12.50 | 0.6% | 78 | ↓↓ | ⛔ Pause |
 
 ### Детали: kitchen (5 ads)
 
 | Ad Name | Spend | Leads | CPL | Risk |
 |---------|------:|------:|----:|-----:|
-| kitchen_v1_30-45 | $180 | 55 | $3.27 | 18 |
-| kitchen_v1_lookalike | $120 | 35 | $3.43 | 21 |
-| kitchen_v2_30-45 | $85 | 18 | $4.72 | 35 |
-| kitchen_v2_lookalike | $40 | 8 | $5.00 | 42 |
-| kitchen_v1_retarget | $25 | 4 | $6.25 | 52 |
+| kitchen_30-45_msk | $180 | 55 | $3.27 | 18 |
+| kitchen_lookalike | $120 | 35 | $3.43 | 21 |
+| kitchen_cold_spb | $85 | 18 | $4.72 | 35 |
+| kitchen_retarget_7d | $40 | 8 | $5.00 | 42 |
+| kitchen_broad | $25 | 4 | $6.25 | 52 |
 
 **Инсайты:**
-- v1 работает лучше v2 (CPL $3.35 vs $4.86)
-- Lookalike аудитории эффективны
+- Lookalike аудитория лучше всех (CPL $3.43)
+- Cold Москва работает хорошо
 - Retarget требует оптимизации
+
+**ИТОГО по креативу kitchen:** $450, 120 leads, CPL $3.75
 ```
 
 ### Реестр креативов
@@ -509,8 +511,8 @@ if abs(cpl_a - cpl_b) / min(cpl_a, cpl_b) > 0.2:
 ### "Какой креатив лучше: kitchen или bathroom?"
 → Сравнение двух тегов по CPL, CTR, Risk Score
 
-### "Сравни версии kitchen_v1 vs kitchen_v2"
-→ A/B анализ вариантов одного креатива
+### "Детали по креативу kitchen"
+→ Все ads с тегом kitchen, их метрики и итог
 
 ### "Добавь новый креатив в реестр"
 → Обновить config/creatives.md с новым тегом
