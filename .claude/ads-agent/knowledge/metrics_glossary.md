@@ -115,35 +115,222 @@ Frequency = Impressions / Reach
 
 ---
 
-## Health Score (HS)
-
-Агрегированная оценка здоровья adset/ad.
+## Health Score (HS) — 5-компонентный расчёт
 
 ### Формула
 
 ```
-HS = ((target_CPL - actual_CPL) / target_CPL) * 100
+HS_raw = CPL_Gap + Trends + Diagnostics + Today_Adj
+HS = round(HS_raw * Volume_Factor)
+HS = max(-100, min(100, HS))
 ```
 
-### Шкала
+**Диапазон: [-100; +100]**
 
-| Диапазон | Класс | Интерпретация |
-|----------|-------|---------------|
-| ≥ +25 | VERY_GOOD | Масштабировать |
-| +5 до +24 | GOOD | Работает хорошо |
-| -5 до +4 | NEUTRAL | Норма, мониторинг |
-| -6 до -24 | BAD | Нужна оптимизация |
-| ≤ -25 | VERY_BAD | Критично, пауза или снижение |
+---
 
-### Примеры
+### Компоненты и веса
+
+| Компонент | Вес | Описание |
+|-----------|-----|----------|
+| CPL Gap | ±45 | Отклонение от target CPL |
+| Trends | ±15 | Динамика 3d vs 7d, 7d vs 30d |
+| CTR Penalty | -8 | Штраф за CTR < 1% |
+| CPM Penalty | -12 | Штраф за CPM > median*1.3 |
+| Freq Penalty | -10 | Штраф за Frequency > 2 |
+| Today Adj | +0..+30 | Компенсация хорошего today |
+| Volume Factor | x0.6..1.0 | Коэффициент доверия |
+
+---
+
+### Компонент 1: CPL Gap (вес 45)
 
 ```
-Target CPL: $5
+ratio = actual_CPL / target_CPL
 
-Actual CPL: $3 → HS = (5-3)/5 * 100 = +40 (VERY_GOOD)
-Actual CPL: $5 → HS = (5-5)/5 * 100 = 0 (NEUTRAL)
-Actual CPL: $8 → HS = (5-8)/5 * 100 = -60 (VERY_BAD)
+ratio <= 0.7  → +45  (30%+ дешевле)
+ratio <= 0.9  → +30  (10-30% дешевле)
+ratio <= 1.1  → +10  (±10% от плана)
+ratio <= 1.3  → -30  (10-30% дороже)
+ratio > 1.3   → -45  (30%+ дороже)
+
+# 0 лидов при spend >= 2x target → -45
 ```
+
+---
+
+### Компонент 2: Тренды (вес до 15)
+
+```
+eCPL_3d = spend_3d / leads_3d
+eCPL_7d = spend_7d / leads_7d
+eCPL_30d = spend_30d / leads_30d
+
+# Тренд 3d vs 7d
+eCPL_3d < eCPL_7d         → +7.5  (улучшение)
+eCPL_3d > eCPL_7d * 1.1   → -7.5  (ухудшение)
+
+# Тренд 7d vs 30d
+eCPL_7d < eCPL_30d        → +7.5  (улучшение)
+eCPL_7d > eCPL_30d * 1.1  → -7.5  (ухудшение)
+
+Trends = Trend_3d_7d + Trend_7d_30d  # от -15 до +15
+```
+
+---
+
+### Компонент 3: Диагностика (до -30)
+
+```
+# CTR Penalty
+CTR < 1%  → -8
+
+# CPM Penalty
+CPM > median_cpm * 1.3  → -12
+
+# Frequency Penalty
+Frequency > 2  → -10
+
+Diagnostics = CTR_penalty + CPM_penalty + Freq_penalty  # от -30 до 0
+```
+
+---
+
+### Компонент 4: Today-компенсация
+
+**ВАЖНО: Хорошие результаты СЕГОДНЯ перевешивают плохие ВЧЕРА!**
+
+Условие: today.impressions >= 300
+
+```
+eCPL_today vs eCPL_yesterday:
+
+<= 0.5x (в 2+ раза лучше)   → ПОЛНАЯ компенсация + бонус +15
+<= 0.7x (на 30% лучше)      → 60% компенсация + бонус +10
+<= 0.9x (легкое улучшение)  → бонус +5
+```
+
+Особый случай: вчера 0 лидов, сегодня есть
+```
+eCPL_today vs target_CPL:
+<= 0.7x  → полная компенсация + 15
+<= 1.0x  → 70% компенсация + 10
+<= 1.3x  → 30% компенсация
+```
+
+---
+
+### Компонент 5: Volume Factor
+
+Коэффициент доверия на основе объёма данных.
+
+```
+impressions = yesterday.impressions
+
+>= 1000  → 1.0  (полное доверие)
+<= 100   → 0.6  (минимальное доверие)
+иначе    → 0.6 + 0.4 * (impr - 100) / 900
+```
+
+**При малом объёме данных HS сдвигается к нейтральному!**
+
+---
+
+### Классификация HS
+
+| Класс | Диапазон | Интерпретация | Действие |
+|-------|----------|---------------|----------|
+| **very_good** | ≥ +25 | Отличный | Масштабировать +20..+30% |
+| **good** | +5..+24 | Хороший | Держать или +10% |
+| **neutral** | -5..+4 | Нейтральный | Мониторинг |
+| **slightly_bad** | -25..-6 | Немного плохой | Снижать -20..-50% |
+| **bad** | ≤ -25 | Плохой | Пауза или -50% |
+
+---
+
+### Примеры расчёта HS
+
+**Пример 1: Хороший adset**
+```
+Target CPL: $4
+Yesterday CPL: $2.50 (ratio = 0.625)
+CTR: 1.5%
+CPM: $10 (median $12)
+Frequency: 1.5
+Trend 3d vs 7d: улучшение
+Impressions: 2000
+
+CPL_Gap = +45 (ratio <= 0.7)
+Trends = +7.5 (3d лучше 7d)
+Diagnostics = 0 (всё в норме)
+Today_Adj = 0 (не нужно)
+Volume_Factor = 1.0
+
+HS = (45 + 7.5 + 0 + 0) * 1.0 = +52 → capped to +100? No, +52
+Класс: very_good → Scale +30%
+```
+
+**Пример 2: Проблемный adset с хорошим today**
+```
+Target CPL: $4
+Yesterday CPL: $12 (ratio = 3.0)
+Today CPL: $4 (ratio to yesterday = 0.33)
+CTR: 0.5%
+Impressions yesterday: 1500
+Impressions today: 500
+
+CPL_Gap = -45 (ratio > 1.3)
+Trends = -7.5 (ухудшение)
+CTR_Penalty = -8 (CTR < 1%)
+Today_Adj = abs(-45) + 15 = 60 (полная компенсация!)
+Volume_Factor = 1.0
+
+HS_raw = -45 - 7.5 - 8 + 60 = -0.5
+HS = round(-0.5 * 1.0) = 0
+Класс: neutral → Мониторинг (today спас!)
+```
+
+---
+
+## Risk Score для креативов (0-100)
+
+Оценка риска креатива. Чем выше — тем хуже.
+
+### Формула
+
+```
+Base = 50 (нейтральный)
+
+# Facebook метрики (60%)
+CPL vs target:
+  > 2x target  → +25
+  > 1.3x       → +15
+  < 0.7x       → -20
+
+CTR:
+  < 0.5%  → +15
+  > 2%    → -10
+
+CPM:
+  > median * 1.5  → +15
+
+# ROI данные (40%) — если доступны
+ROI > 100%   → -25 (отличная окупаемость)
+ROI 50-100%  → -10 (хорошая)
+ROI 0-50%    → 0
+ROI < 0%     → +30 (убыточный)
+
+Risk = max(0, min(100, Base + adjustments))
+```
+
+### Классификация Risk Score
+
+| Risk | Уровень | Действие |
+|------|---------|----------|
+| 0-25 | Low | Приоритет для масштабирования |
+| 26-50 | Medium | Использовать с мониторингом |
+| 51-75 | High | Требует оптимизации |
+| 76-100 | Critical | Рекомендуется пауза |
 
 ---
 
@@ -226,22 +413,29 @@ CR = (Conversions / Link Clicks) * 100%
 
 | Период | Использование |
 |--------|---------------|
-| Today | Мониторинг в реальном времени |
-| Yesterday | Анализ прошлого дня |
-| Last 7 days | Недельный анализ |
-| Last 14 days | Сравнение недель |
-| Last 30 days | Месячный анализ |
-| This month | Отчет за месяц |
-| Last month | Сравнение месяцев |
+| today | Мониторинг в реальном времени, today-компенсация |
+| yesterday | Основной период для HS (CPL Gap) |
+| last_3d | Тренд 3d vs 7d |
+| last_7d | Тренд 7d vs 30d, недельный анализ |
+| last_30d | Долгосрочные тренды |
+| this_month | Отчет за месяц |
+| last_month | Сравнение месяцев |
 
 ---
 
 ## MCP параметры для get_insights
 
 ```
-time_range: "today" | "yesterday" | "last_7d" | "last_14d" | "last_30d" | "this_month" | "last_month"
+time_range: "today" | "yesterday" | "last_3d" | "last_7d" | "last_14d" | "last_30d" | "this_month" | "last_month"
 
 breakdown: "age" | "gender" | "country" | "device_platform" | "publisher_platform"
 
 level: "account" | "campaign" | "adset" | "ad"
 ```
+
+**ВАЖНО: Для полного анализа нужны данные за 5 периодов!**
+- today — для today-компенсации
+- yesterday — для CPL Gap
+- last_3d — для тренда 3d vs 7d
+- last_7d — для тренда 7d vs 30d
+- last_30d — для долгосрочного тренда
