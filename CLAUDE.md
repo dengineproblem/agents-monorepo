@@ -56,11 +56,7 @@ docker-compose up -d
 - Коммить без лишних вопросов, если я попросил
 - Пуш на remote только по явной просьбе
 
-## Ads Agent
-При работе с рекламой Facebook/Instagram через MCP используй:
-- Главная инструкция: [.claude/ads-agent/AGENT.md](.claude/ads-agent/AGENT.md)
-- Конфигурация аккаунтов: [.claude/ads-agent/config/ad_accounts.md](.claude/ads-agent/config/ad_accounts.md)
-- **MCP Tools документация**: [~/meta-ads-mcp/CUSTOM_EXTENSIONS.md](../meta-ads-mcp/CUSTOM_EXTENSIONS.md) — 16 tools + Skills + Health Score + Creative Tags + Action History
-- Skills: `/ads-optimizer`, `/campaign-manager`, `/ads-reporter`, `/creative-analyzer`, `/targeting-expert`
-- Креативы: `config/creatives.md` (реестр тегов), `config/naming_convention.md` (правила именования)
-- История действий: `.claude/ads-agent/history/YYYY-MM/YYYY-MM-DD.md` (читай перед оптимизацией!)
+## Доступные агенты (по требованию)
+
+Агенты вызываются явно через skills:
+- `/ads-agent` — управление Facebook рекламой (MCP meta-ads)
