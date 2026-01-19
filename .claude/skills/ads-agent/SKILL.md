@@ -31,6 +31,7 @@ description: AI-агент для управления Facebook рекламой
    - `/ads-reporter` - отчеты и метрики
    - `/creative-analyzer` - анализ креативов
    - `/creative-copywriter` - написание текстов для креативов
+   - `/creative-image-generator` - генерация изображений через Gemini
    - `/targeting-expert` - таргетинг и аудитории
 
 ### Путь к конфигурации:
