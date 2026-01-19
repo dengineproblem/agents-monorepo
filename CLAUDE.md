@@ -61,6 +61,6 @@ docker-compose up -d
 - Главная инструкция: [.claude/ads-agent/AGENT.md](.claude/ads-agent/AGENT.md)
 - Конфигурация аккаунтов: [.claude/ads-agent/config/ad_accounts.md](.claude/ads-agent/config/ad_accounts.md)
 - **MCP Tools документация**: [~/meta-ads-mcp/CUSTOM_EXTENSIONS.md](../meta-ads-mcp/CUSTOM_EXTENSIONS.md) — 18 tools + Skills + Health Score + Creative Tags + Action History
-- Skills: `/ads-optimizer`, `/campaign-manager`, `/ads-reporter`, `/creative-analyzer`, `/targeting-expert`, `/creative-copywriter`, `/creative-image-generator`
+- Skills: `/ads-optimizer`, `/campaign-manager`, `/ads-reporter`, `/creative-analyzer`, `/targeting-expert`, `/creative-copywriter`, `/creative-image-generator`, `/account-onboarding`
 - Креативы: `config/creatives.md` (реестр тегов), `config/naming_convention.md` (правила именования)
 - История действий: `.claude/ads-agent/history/YYYY-MM/YYYY-MM-DD.md` (читай перед оптимизацией!)
