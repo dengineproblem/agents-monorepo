@@ -32,7 +32,9 @@
 .claude/ads-agent/
 ├── config/
 │   ├── ad_accounts.md      ← список аккаунтов
-│   └── briefs/             ← брифы по аккаунтам
+│   ├── briefs/             ← брифы по аккаунтам
+│   ├── creatives.md        ← реестр креативов (теги)
+│   └── naming_convention.md ← правила именования ads
 ├── knowledge/              ← база знаний
 └── history/                ← история действий
 ```
