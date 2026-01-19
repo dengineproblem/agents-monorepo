@@ -60,4 +60,6 @@ docker-compose up -d
 При работе с рекламой Facebook/Instagram через MCP используй:
 - Главная инструкция: [.claude/ads-agent/AGENT.md](.claude/ads-agent/AGENT.md)
 - Конфигурация аккаунтов: [.claude/ads-agent/config/ad_accounts.md](.claude/ads-agent/config/ad_accounts.md)
+- **MCP Tools документация**: [~/meta-ads-mcp/CUSTOM_EXTENSIONS.md](../meta-ads-mcp/CUSTOM_EXTENSIONS.md) — 16 кастомных tools + Skills + Health Score + Action History
 - Skills: `/ads-optimizer`, `/campaign-manager`, `/ads-reporter`, `/creative-analyzer`, `/targeting-expert`
+- История действий: `.claude/ads-agent/history/YYYY-MM/YYYY-MM-DD.md` (читай перед оптимизацией!)
