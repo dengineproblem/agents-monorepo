@@ -73,6 +73,8 @@ description: AI-агент для управления Facebook рекламой
 
 ## Доступные инструменты
 
+**Полная документация:** [~/meta-ads-mcp/CUSTOM_EXTENSIONS.md](../../../meta-ads-mcp/CUSTOM_EXTENSIONS.md) — 16 custom tools + Skills + Health Score + Creative Tags + Action History
+
 ### MCP сервер `meta-ads` (46 tools):
 
 **Чтение данных:**
