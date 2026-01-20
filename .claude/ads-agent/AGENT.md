@@ -21,6 +21,7 @@
 1. **Определи аккаунт** - прочитай `config/ad_accounts.md` чтобы понять какие аккаунты доступны
 2. **Изучи бриф** - прочитай бриф аккаунта из `config/briefs/{account_name}.md` для понимания целей и ограничений
 3. **Используй skill** - вызови соответствующий skill для задачи:
+   - `/dashboard` - мультиаккаунтный дашборд со статистикой
    - `/ads-optimizer` - анализ и оптимизация
    - `/campaign-manager` - создание и управление кампаниями
    - `/ads-reporter` - отчеты и метрики
@@ -33,6 +34,10 @@
 ├── config/
 │   ├── ad_accounts.md      ← список аккаунтов
 │   ├── briefs/             ← брифы по аккаунтам
+│   ├── creatives/          ← реестр креативов по аккаунтам
+│   │   ├── README.md       ← формат реестра
+│   │   └── {account}/      ← папка аккаунта
+│   │       └── index.md    ← video_id, creative_id, настройки
 │   ├── creatives.md        ← реестр креативов (теги)
 │   └── naming_convention.md ← правила именования ads
 ├── knowledge/              ← база знаний
@@ -96,8 +101,71 @@
 **Креативы:**
 - `upload_ad_image` - загрузка изображений
 - `upload_video` - загрузка видео
-- `create_ad_creative` - создание креатива
+- `create_ad_creative` - создание image креатива
+- `create_video_creative` - создание video креатива (WhatsApp, LeadForm, Website)
 - `create_*_carousel` - карусельные креативы
+- `get_video_status` - статус обработки видео
+
+---
+
+## Работа с креативами
+
+### ВСЕГДА проверяй реестр перед загрузкой!
+
+**Алгоритм:**
+```
+1. Прочитай config/creatives/{account}/index.md
+
+2. ИЩИ video_id в таблице "Facebook Video ID"
+   ├─ НАЙДЕН → используй его (НЕ загружай файл!)
+   └─ НЕ НАЙДЕН → upload_video() → сохрани video_id
+
+3. ИЩИ creative_id в таблице "Facebook Creative ID"
+   с нужными настройками (campaign_type, message, settings)
+   ├─ НАЙДЕН → используй его (НЕ создавай креатив!)
+   └─ НЕ НАЙДЕН → create_video_creative() → сохрани creative_id
+```
+
+**Важно:** video_id универсальный! Один video_id используется для ВСЕХ типов кампаний (WhatsApp, LeadForm, Website). Загружаем файл ОДИН раз.
+
+### Таблицы в реестре
+
+**Facebook Video ID** - хранит video_id загруженных файлов:
+```markdown
+| creative_name | video_id | file_size_mb | upload_date |
+|---------------|----------|--------------|-------------|
+| восстановим 7000 | 635947262936533 | 41.86 | 2026-01-20 |
+```
+
+**Facebook Creative ID** - хранит creative_id по типам кампаний:
+```markdown
+| creative_name | campaign_type | creative_id | message | cta | settings | created |
+|---------------|---------------|-------------|---------|-----|----------|---------|
+| восстановим 7000 | WhatsApp | 1222074622687120 | Текст... | WHATSAPP_MESSAGE | phone:XXX | 2026-01-20 |
+```
+
+### Типы кампаний (campaign_type)
+
+| Тип | Описание | Settings |
+|-----|----------|----------|
+| **WhatsApp** | Click-to-WhatsApp | phone, question |
+| **LeadForm** | Lead generation | form_id |
+| **Website** | Трафик на сайт | link_url |
+| **Instagram** | IG engagement | instagram_actor_id |
+
+### Когда нужен НОВЫЙ creative_id
+
+- Другой `message` текст
+- Другой `cta` (call-to-action)
+- Другие настройки (phone, form_id, link_url)
+- Креатив для другого типа кампании
+
+### После создания креатива
+
+**ОБЯЗАТЕЛЬНО обнови реестр:**
+1. Добавь video_id в таблицу "Facebook Video ID"
+2. Добавь creative_id в таблицу "Facebook Creative ID"
+3. Укажи все настройки (message, cta, settings)
 
 ---
 
