@@ -65,6 +65,7 @@ coverage/
 .claude/ads-agent/config/briefs/*.md
 !.claude/ads-agent/config/briefs/_template.md
 .claude/ads-agent/history/
+.claude/ads-agent/config/tokens.md
 
 # MCP config with tokens
 .mcp.json

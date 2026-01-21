@@ -89,6 +89,18 @@ Bot: ⚠️ Оптимизация всех аккаунтов может зан
      Продолжить? (да/нет)
 ```
 
+**Пример 5: Оптимизация одного направления/кампании**
+```
+User: /ads-optimizer Bas Dent Имплантация
+Bot: ✅ Аккаунт: Bas Dent, направление: Имплантация
+     Target CPL: $4 (из брифа направления)
+     Анализирую только кампанию [Имплантация]...
+```
+
+> **Примечание:** Кампания = направление. При оптимизации одного направления
+> используется target CPL из брифа этого направления, а не общий по аккаунту.
+> Это полезно когда нужно быстро проверить конкретное направление.
+
 ---
 
 ### Шаг 0.5: Загрузка истории действий
@@ -146,7 +158,11 @@ last_3d = get_insights(object_id="act_XXX", time_range="last_3d", level="adset")
 last_7d = get_insights(object_id="act_XXX", time_range="last_7d", level="adset")
 last_30d = get_insights(object_id="act_XXX", time_range="last_30d", level="adset")
 
-# 3. Для детализации по ads (ad-eater detection + анализ креативов)
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. КРИТИЧНО: Данные по ADS обязательны для ad-eater detection!
+#    Ad-eaters = ОБЪЯВЛЕНИЯ (Ads), НЕ AdSets!
+#    Без этих данных невозможно найти пожиратели бюджета на уровне объявлений.
+# ═══════════════════════════════════════════════════════════════════════════════
 ads_yesterday = get_insights(object_id="act_XXX", time_range="yesterday", level="ad")
 ads_last_7d = get_insights(object_id="act_XXX", time_range="last_7d", level="ad")
 ```
@@ -773,6 +789,137 @@ scalable_creatives = креативы с:
 **Рекомендации по креативам:**
 - `video_implant` — лучший CPL, рассмотреть масштабирование
 - `static_gnatology` — CPL 3x от target, рассмотреть паузу/замену
+```
+
+---
+
+### Шаг 3.3: Ad-Eater Detection (КРИТИЧНО!)
+
+**ВАЖНО: Ad-eaters — это ОБЪЯВЛЕНИЯ (Ads), НЕ AdSets!**
+
+Ad-eater — объявление, которое тратит бюджет без адекватного результата.
+Это ключевое отличие от анализа AdSets: мы ищем конкретные объявления внутри групп.
+
+#### Алгоритм анализа
+
+```python
+# 1. Собрать данные по всем активным ads за last_7d
+ads_data = get_insights(account_id, time_range="last_7d", level="ad")
+
+# 2. Для каждого ad рассчитать spend_share внутри его adset
+adset_spends = {}  # adset_id → total_spend
+for ad in ads_data:
+    if ad.adset_id not in adset_spends:
+        adset_spends[ad.adset_id] = 0
+    adset_spends[ad.adset_id] += ad.spend
+
+for ad in ads_data:
+    ad.spend_share = ad.spend / adset_spends[ad.adset_id] if adset_spends[ad.adset_id] > 0 else 0
+
+# 3. Применить is_ad_eater() к каждому ad
+ad_eaters = []
+for ad in ads_data:
+    # Определяем направление и его target_cpl
+    direction = match_ad_to_direction(ad, directions)
+    target_cpl = direction["target_cpl_cents"] if direction else brief_target_cpl
+
+    priority = is_ad_eater(
+        cpl=ad.cpl,
+        target_cpl=target_cpl,
+        spend=ad.spend,
+        adset_total_spend=adset_spends[ad.adset_id],
+        leads=ad.leads
+    )
+
+    if priority:
+        ad_eaters.append({
+            "ad_id": ad.id,
+            "ad_name": ad.name,
+            "adset_id": ad.adset_id,
+            "adset_name": ad.adset_name,
+            "direction_name": direction["name"] if direction else "N/A",
+            "priority": priority,
+            "spend": ad.spend,
+            "leads": ad.leads,
+            "cpl": ad.cpl if ad.leads > 0 else None,
+            "spend_share": ad.spend_share,
+            "target_cpl": target_cpl
+        })
+
+# 4. Проверить will_adset_be_empty для каждого ad-eater
+for eater in ad_eaters:
+    adset_id = eater["adset_id"]
+    total_active_ads = len([a for a in ads_data if a.adset_id == adset_id and a.status == "ACTIVE"])
+    eaters_in_adset = len([e for e in ad_eaters if e["adset_id"] == adset_id])
+    eater["total_ads_in_adset"] = total_active_ads
+    eater["eaters_in_adset"] = eaters_in_adset
+    eater["remaining_after_pause"] = total_active_ads - eaters_in_adset
+    eater["will_adset_be_empty"] = (total_active_ads - eaters_in_adset) == 0
+```
+
+#### Функция is_ad_eater (Brain Mini)
+
+```python
+def is_ad_eater(cpl, target_cpl, spend, adset_total_spend, leads):
+    """
+    Определяет, является ли объявление ad-eater.
+
+    Возвращает: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | None
+    """
+    spend_share = spend / adset_total_spend if adset_total_spend > 0 else 0
+
+    # CRITICAL — CPL > 3x target (независимо от spend_share)
+    if leads > 0 and cpl > target_cpl * 3:
+        return "CRITICAL"
+
+    # HIGH — Zero leads при достаточном spend
+    if leads == 0 and spend >= target_cpl * 2:
+        return "HIGH"
+
+    # HIGH — CPL > 2x И тратит > 50% бюджета adset
+    if leads > 0 and cpl > target_cpl * 2 and spend_share >= 0.5:
+        return "HIGH"
+
+    # MEDIUM — CPL > 1.5x target при высокой доле spend
+    if leads > 0 and cpl > target_cpl * 1.5 and spend_share >= 0.5:
+        return "MEDIUM"
+
+    # LOW — spend_share >= 50% но CPL приемлемый
+    if leads > 0 and spend_share >= 0.5 and cpl <= target_cpl * 1.5:
+        return "LOW"
+
+    return None
+```
+
+#### Вывод Ad-Eaters
+
+```markdown
+### 🚨 Ad-Eaters Detection (Объявления-пожиратели)
+
+| # | Ad ID | Ad Name | AdSet | Direction | Spend | Leads | CPL | vs Target | Priority | Action |
+|---|-------|---------|-------|-----------|------:|------:|----:|-----------|----------|--------|
+| 1 | 123456 | Implant_v1_old | Set 1 | Имплантация | $15 | 1 | $15 | 3.75× | CRITICAL | **PAUSE** |
+| 2 | 234567 | Braces_test | Set 2 | Брекеты | $12 | 0 | ∞ | N/A | HIGH | **PAUSE** |
+| 3 | 345678 | Veneers_v2 | Set 3 | Виниры | $18 | 2 | $9 | 1.8× | MEDIUM | Мониторинг |
+
+**Примечания:**
+- ⚠️ Ad 234567: После паузы AdSet "Set 2" останется без активных ads!
+  → Рекомендация: Запаузить весь AdSet или добавить новый креатив
+- Ad 123456: В AdSet "Set 1" останется 2 других активных объявления
+```
+
+#### Обработка will_adset_be_empty
+
+```python
+# ВАЖНО: Если после паузы ad-eater'а adset станет пустым
+if eater["will_adset_be_empty"]:
+    # Вариант 1: Запаузить весь adset (если все ads плохие)
+    # Вариант 2: НЕ паузить ad, а снизить бюджет adset
+    # Вариант 3: Добавить новый креатив в adset
+
+    # В рекомендациях указать:
+    print(f"⚠️ Ad {eater['ad_name']}: единственный активный в AdSet!")
+    print(f"   → Рекомендация: pauseAdSet вместо pauseAd")
 ```
 
 ---
@@ -1638,6 +1785,22 @@ def handle_freed_budget(direction, freed_budget, proposals):
 
 ---
 
+### 🚨 Ad-Eaters (Объявления-пожиратели)
+
+**ВАЖНО: Ad-eaters = Ads (объявления), НЕ AdSets!**
+
+| # | Ad ID | Ad Name | AdSet | Direction | Spend | Leads | CPL | vs Target | Priority | Action |
+|---|-------|---------|-------|-----------|------:|------:|----:|-----------|----------|--------|
+| 1 | 123456 | Implant_old | Set 1 | Имплантация | $18 | 1 | $18 | 6× | **CRITICAL** | PAUSE |
+| 2 | 234567 | Braces_v2 | Set 2 | Брекеты | $10 | 0 | ∞ | N/A | **HIGH** | PAUSE |
+
+**Примечания:**
+- Ad 234567: После паузы AdSet "Set 2" останется пустым → рекомендуется pauseAdSet
+- CRITICAL и HIGH требуют немедленной паузы
+- MEDIUM — мониторинг, LOW — только информация
+
+---
+
 ### Направление: Имплантация ✅
 
 **Параметры:**
@@ -1912,16 +2075,20 @@ def get_direction_status_emoji(direction):
 
 **Типы действий:**
 
-| Тип | Описание |
-|-----|----------|
-| `budget_increase` | Повышение бюджета |
-| `budget_decrease` | Снижение бюджета |
-| `pause_ad` | Пауза объявления |
-| `pause_adset` | Пауза adset |
-| `resume_ad` | Возобновление ad |
-| `resume_adset` | Возобновление adset |
+| Тип | Описание | Уровень | Контекст |
+|-----|----------|---------|----------|
+| `budget_increase` | Повышение бюджета | AdSet | HS very_good/good, масштабирование |
+| `budget_decrease` | Снижение бюджета | AdSet | HS slightly_bad/bad, оптимизация |
+| `pause_ad` | Пауза объявления (ad-eater) | **Ad** | CPL > 3× или zero leads с spend ≥ 2× |
+| `pause_adset` | Пауза adset | AdSet | HS bad, CPL > 3× на уровне adset |
+| `resume_ad` | Возобновление ad | Ad | Тестирование креатива |
+| `resume_adset` | Возобновление adset | AdSet | Возврат после паузы |
+| `create_adset` | Создание нового adset | AdSet | Freed budget, масштабирование |
 
-**ВАЖНО:** Логируй ТОЛЬКО выполненные действия (status=success), не proposals!
+**ВАЖНО:**
+- `pause_ad` — для **ad-eaters** (объявлений-пожирателей)!
+- `pause_adset` — для групп с плохим HS в целом
+- Логируй ТОЛЬКО выполненные действия (status=success), не proposals!
 
 ---
 
