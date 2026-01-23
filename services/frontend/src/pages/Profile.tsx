@@ -711,29 +711,49 @@ const Profile: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ 
+      if (multiAccountEnabled && currentAdAccountId) {
+        // Мультиаккаунт режим: обновляем ad_accounts через API
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/ad-accounts/${currentAdAccountId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tiktok_access_token: null,
+            tiktok_business_id: null,
+            tiktok_account_id: null
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          toast.error(appReviewText(`Failed to disconnect TikTok: ${errorData.message}`, 'Ошибка при отключении TikTok: ' + errorData.message));
+          return;
+        }
+      } else {
+        // Legacy режим: обновляем user_accounts напрямую
+        const { error } = await supabase
+          .from('user_accounts')
+          .update({
+            tiktok_access_token: null,
+            tiktok_business_id: null,
+            tiktok_account_id: null
+          })
+          .eq('id', user?.id);
+
+        if (error) {
+          toast.error(appReviewText(`Failed to disconnect TikTok: ${error.message}`, 'Ошибка при отключении TikTok: ' + error.message));
+          return;
+        }
+
+        // Обновляем localStorage только в legacy режиме
+        const updatedUser = {
+          ...user,
           tiktok_access_token: null,
           tiktok_business_id: null,
           tiktok_account_id: null
-        })
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to disconnect TikTok: ${error.message}`, 'Ошибка при отключении TikTok: ' + error.message));
-        return;
+        };
+        localStorage.setItem('user', JSON.stringify(updatedUser));
       }
 
-      // Обновляем localStorage
-      const updatedUser = { 
-        ...user, 
-        tiktok_access_token: null,
-        tiktok_business_id: null,
-        tiktok_account_id: null
-      };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
       toast.success(appReviewText('TikTok disconnected successfully', 'TikTok успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
@@ -1047,8 +1067,10 @@ const Profile: React.FC = () => {
     ? currentAdAccount?.connection_status === 'connected'
     : Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '');
 
-  // TikTok: пока только из user_accounts (TODO: добавить в ad_accounts)
-  const isTikTokConnected = Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
+  // TikTok: в мульти-режиме из ad_accounts, иначе из user_accounts
+  const isTikTokConnected = multiAccountEnabled
+    ? Boolean(currentAdAccount?.tiktok_access_token && currentAdAccount?.tiktok_business_id)
+    : Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
 
   // Tilda: проверяем наличие tilda_utm_field (всегда есть дефолт, считаем подключённым)
   const isTildaConnected = multiAccountEnabled

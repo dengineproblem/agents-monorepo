@@ -67,6 +67,7 @@ const UpdateAdAccountSchema = z.object({
   // TikTok
   tiktok_account_id: z.string().nullable().optional(),
   tiktok_business_id: z.string().nullable().optional(),
+  tiktok_access_token: z.string().nullable().optional(),
 
   // Prompts
   prompt1: z.string().nullable().optional(),
@@ -627,6 +628,14 @@ export async function adAccountsRoutes(app: FastifyInstance) {
           tiktok_business_id: validated.tiktok_business_id || null,
           action: validated.tiktok_business_id ? 'connect' : 'disconnect'
         }, 'Updating TikTok business ID');
+      }
+      if (validated.tiktok_access_token !== undefined) {
+        dbData.tiktok_access_token = validated.tiktok_access_token;
+        log.info({
+          adAccountId,
+          tiktok_access_token: validated.tiktok_access_token ? '***set***' : null,
+          action: validated.tiktok_access_token ? 'connect' : 'disconnect'
+        }, 'Updating TikTok access token');
       }
 
       // Prompts
