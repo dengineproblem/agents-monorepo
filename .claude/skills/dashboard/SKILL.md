@@ -28,9 +28,11 @@ description: Мультиаккаунтный дашборд. Статистик
 
 | Параметр | Варианты | Дефолт |
 |----------|----------|--------|
-| **Период** | today, yesterday, 7d, 30d, custom | today |
+| **Период** | today, yesterday, 7d, 30d, custom | **yesterday** |
 | **Аккаунты** | все / конкретный по имени | все |
-| **Уровень** | account, campaign, adset, ad | account |
+| **Уровень** | account, campaign, adset, ad | campaign |
+
+**ВАЖНО: Если период не указан явно — используй `yesterday` (вчера).**
 
 **Ключевые слова для периода:**
 - "сегодня", "today" → `today`
@@ -40,10 +42,10 @@ description: Мультиаккаунтный дашборд. Статистик
 - "YYYY-MM-DD — YYYY-MM-DD" → custom `{"since": "...", "until": "..."}`
 
 **Ключевые слова для уровня:**
-- "с кампаниями", "campaign" → уровень `campaign`
+- "только аккаунты", "account" → уровень `account`
 - "с адсетами", "adset" → уровень `adset`
 - "полный", "детальный", "все уровни", "ads" → уровень `ad`
-- без указания → уровень `account`
+- без указания → уровень `campaign` (по умолчанию)
 
 **Ключевые слова для аккаунта:**
 - Имя аккаунта (например "Profimed", "Бас дент") → только этот аккаунт
@@ -60,6 +62,11 @@ description: Мультиаккаунтный дашборд. Статистик
    - name (Название)
    - account_id (Account ID)
    - page_id (Page ID)
+   - brief_path (путь к брифу)
+
+4. Прочитай бриф каждого аккаунта (briefs/{name}.md)
+5. Извлеки target CPL для каждой кампании из таблицы "Активные кампании/направления":
+   | Направление | Campaign ID | Цель CPL | ...
 ```
 
 **Парсинг секций:**
@@ -177,6 +184,10 @@ def count_leads(actions):
 cpl = spend / leads if leads > 0 else None
 ctr = (clicks / impressions) * 100 if impressions > 0 else 0
 cpm = (spend / impressions) * 1000 if impressions > 0 else 0
+
+# План-факт (ОБЯЗАТЕЛЬНО для кампаний)
+target_cpl = brief.campaigns[campaign_id].target_cpl  # из брифа
+cpl_diff = ((cpl - target_cpl) / target_cpl) * 100 if target_cpl and cpl else None  # % отклонения
 ```
 
 **WhatsApp метрики (показывать если messagingLeads > 0):**
@@ -261,12 +272,17 @@ account.leads = sum(campaign.leads for campaign in account.campaigns)
 ```markdown
 ## {Account Name} — Кампании
 
-| Кампания | Spend | Leads | CPL | CTR | Budget | Статус |
-|----------|------:|------:|----:|----:|-------:|--------|
-| Импланты | $250.00 | 65 | $3.85 | 1.3% | $40 | ACTIVE |
-| Виниры | $200.00 | 55 | $3.64 | 1.1% | $30 | ACTIVE |
-| **ИТОГО** | **$450.00** | **120** | **$3.75** | **1.2%** | **$70** | — |
+| Кампания | Spend | Leads | CPL | Target | Δ% | Budget | Статус |
+|----------|------:|------:|----:|-------:|---:|-------:|--------|
+| Импланты | $250.00 | 65 | $3.85 | $4.00 | -4% | $40 | ACTIVE |
+| Виниры | $200.00 | 55 | $3.64 | $5.00 | -27% | $30 | ACTIVE |
+| **ИТОГО** | **$450.00** | **120** | **$3.75** | — | — | **$70** | — |
 ```
+
+**Форматирование Δ% (план-факт):**
+- Отрицательное значение (CPL < Target) = хорошо, показывать как есть: `-4%`
+- Положительное значение (CPL > Target) = плохо, показывать: `+15%`
+- Если нет target или нет лидов — показывать `—`
 
 ---
 
@@ -328,6 +344,23 @@ account.leads = sum(campaign.leads for campaign in account.campaigns)
 
 ## Примеры запросов
 
+### Дашборд без указания периода
+
+**Запрос:** "Покажи дашборд" или `/dashboard`
+
+**Парсинг:**
+- Период: yesterday (по умолчанию)
+- Аккаунты: все
+- Уровень: campaign (по умолчанию)
+
+**Действия:**
+1. Читаю ad_accounts.md → активные аккаунты
+2. Читаю брифы каждого аккаунта → target CPL для кампаний
+3. get_insights для каждого аккаунта (level="campaign", time_range="yesterday")
+4. Формирую таблицы с колонками Target и Δ%
+
+---
+
 ### Базовый дашборд
 
 **Запрос:** "Покажи дашборд за вчера"
@@ -335,13 +368,13 @@ account.leads = sum(campaign.leads for campaign in account.campaigns)
 **Парсинг:**
 - Период: yesterday
 - Аккаунты: все
-- Уровень: account
+- Уровень: campaign (по умолчанию)
 
 **Действия:**
 1. Читаю ad_accounts.md → 2 активных аккаунта
-2. get_insights(act_805414428109857, "yesterday", "account")
-3. get_insights(act_1106872004544227, "yesterday", "account")
-4. Формирую сводную таблицу
+2. get_insights(act_805414428109857, "yesterday", "campaign")
+3. get_insights(act_1106872004544227, "yesterday", "campaign")
+4. Формирую сводную таблицу + таблицы кампаний для каждого аккаунта
 
 ---
 
@@ -390,7 +423,7 @@ account.leads = sum(campaign.leads for campaign in account.campaigns)
 **Парсинг:**
 - Период: {"since": "2026-01-10", "until": "2026-01-20"}
 - Аккаунты: все
-- Уровень: account
+- Уровень: campaign (по умолчанию)
 
 ---
 
