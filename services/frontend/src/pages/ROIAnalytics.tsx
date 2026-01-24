@@ -343,9 +343,9 @@ const ROIAnalytics: React.FC = () => {
   */
 
   // Загрузка направлений
-  const loadDirections = async (userAccountId: string) => {
+  const loadDirections = async (userAccountId: string, accountId?: string) => {
     try {
-      const { data, error } = await salesApi.getDirections(userAccountId, directionsPlatform);
+      const { data, error } = await salesApi.getDirections(userAccountId, directionsPlatform, accountId);
       if (error) {
         console.error('Ошибка загрузки направлений:', error);
         return;
@@ -451,19 +451,19 @@ const ROIAnalytics: React.FC = () => {
   };
 
   useEffect(() => {
-    // Инициализация при монтировании / смене платформы
+    // Инициализация при монтировании / смене платформы / смене аккаунта
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       const userData = JSON.parse(storedUser);
       const userId = userData?.id || '';
       setUserAccountId(userId);
       if (userId) {
-        loadDirections(userId);
+        loadDirections(userId, currentAdAccountId || undefined);
       }
     }
     setSelectedDirectionId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [platform]);
+  }, [platform, currentAdAccountId]);
 
   // Перезагрузка при смене направления, типа медиа, аккаунта или платформы
   useEffect(() => {

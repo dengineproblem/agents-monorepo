@@ -132,12 +132,16 @@ class SalesApiService {
   // Получение списка направлений пользователя
   async getDirections(
     userAccountId: string,
-    platform?: 'facebook' | 'tiktok'
+    platform?: 'facebook' | 'tiktok',
+    accountId?: string // UUID из ad_accounts.id для мультиаккаунтности
   ): Promise<{ data: Direction[]; error: any }> {
     try {
       const params = new URLSearchParams({ userAccountId });
       if (platform) {
         params.append('platform', platform);
+      }
+      if (accountId) {
+        params.append('accountId', accountId);
       }
       const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);
       const result = await response.json();

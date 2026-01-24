@@ -1,0 +1,99 @@
+# Health Score Rules Configuration
+# Формулы и пороги для расчёта Health Score
+
+version: "1.0"
+
+# Итоговая формула
+# HS = round((CPL_Gap + Trends + Diagnostics + Today_Adj) × Volume_Factor)
+
+components:
+  # Компонент 1: CPL Gap (±45)
+  # Отклонение CPL от таргета
+  cpl_gap:
+    min: -45
+    max: 45
+    thresholds:
+      - ratio: 0.5   # CPL ≤ target × 0.5
+        score: 45
+      - ratio: 0.7   # CPL = target × 0.7
+        score: 30
+      - ratio: 1.0   # CPL = target
+        score: 0
+      - ratio: 1.5   # CPL = target × 1.5
+        score: -30
+      - ratio: 2.0   # CPL ≥ target × 2
+        score: -45
+
+  # Компонент 2: Trends (±15)
+  # Сравнение CPL за 3 дня vs 7 дней
+  trends:
+    min: -15
+    max: 15
+    description: |
+      trend_pct = (CPL_3d - CPL_7d) / CPL_7d × 100
+      - trend ≤ -20% → +15 (улучшение)
+      - trend = 0% → 0
+      - trend ≥ +20% → -15 (ухудшение)
+
+  # Компонент 3: Diagnostics (до -30)
+  # Штрафы за плохие показатели
+  diagnostics:
+    min: -30
+    max: 0
+    penalties:
+      - metric: ctr
+        condition: "< 1%"
+        penalty: -8
+      - metric: cpm
+        condition: "> median × 1.3"
+        penalty: -12
+      - metric: frequency
+        condition: "> 2"
+        penalty: -10
+
+  # Компонент 4: Today Adjustment (+0..+30)
+  # Компенсация за хороший сегодняшний CPL
+  today_adjustment:
+    min: 0
+    max: 30
+    min_impressions: 500
+    description: |
+      improvement = (CPL_yesterday - CPL_today) / CPL_yesterday × 100
+      - improvement ≥ 30% → +30
+      - improvement = 0% → 0
+
+  # Компонент 5: Volume Factor (0.6..1.0)
+  # Множитель по объёму impressions
+  volume_factor:
+    thresholds:
+      - impressions: 500
+        factor: 0.6
+      - impressions: 1000
+        factor: 0.7
+      - impressions: 2000
+        factor: 0.8
+      - impressions: 5000
+        factor: 0.9
+      - impressions: 10000
+        factor: 1.0
+
+# Классификация HS
+classification:
+  very_good:
+    min: 25
+    description: "Отличный перформер"
+  good:
+    min: 5
+    max: 24
+    description: "Хороший результат"
+  neutral:
+    min: -5
+    max: 4
+    description: "Стабильный"
+  slightly_bad:
+    min: -25
+    max: -6
+    description: "Требует внимания"
+  bad:
+    max: -26
+    description: "Критический"

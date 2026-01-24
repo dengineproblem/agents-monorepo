@@ -11,6 +11,7 @@ const ITEMS_PER_PAGE = 20;
 interface Lead {
   id: string;
   chat_id: string;
+  phone?: string;
   creative_id: string | null;
   creative_name?: string;
   direction_id: string | null;
@@ -157,7 +158,7 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
               <tbody>
                 {paginatedLeads.map((lead) => (
                   <tr key={lead.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="py-2 px-3 whitespace-nowrap font-medium">{formatPhone(lead.chat_id)}</td>
+                    <td className="py-2 px-3 whitespace-nowrap font-medium">{formatPhone(lead.phone || lead.chat_id)}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {lead.creative_name ? (
                         <span className="text-xs">{lead.creative_name}</span>

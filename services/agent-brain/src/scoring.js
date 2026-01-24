@@ -2079,6 +2079,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
             creative_id: mapping.fb_creative_id,
             adset_id: mapping.adset_id,
             campaign_id: mapping.campaign_id,
+            platform: 'facebook',  // Для уникального индекса
 
             // Абсолютные метрики
             impressions: impressions,
@@ -2140,8 +2141,8 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
     try {
       const { error } = await supabase
         .from('creative_metrics_history')
-        .upsert(records, { 
-          onConflict: 'user_account_id,ad_id,date',
+        .upsert(records, {
+          onConflict: 'user_account_id,ad_id,date,platform',
           ignoreDuplicates: false  // Обновляем если уже есть (на случай повторного запуска)
         });
 

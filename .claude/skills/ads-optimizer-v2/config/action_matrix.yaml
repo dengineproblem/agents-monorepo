@@ -1,0 +1,199 @@
+# Action Matrix Configuration
+# Матрица действий для Decision Maker (LLM)
+
+version: "1.0"
+
+# Действия по Health Score
+hs_actions:
+  very_good:
+    hs_range: "≥ +25"
+    budget_change: "+10% to +30%"
+    priority: 1
+    rules:
+      - condition: "is_new"
+        action: "no_change"
+        reason: "Новый adset, ждём 48h"
+      - condition: "was_increased_yesterday"
+        action: "+10%"
+        reason: "Уже увеличивали вчера"
+      - condition: "default"
+        action: "+20%"
+        reason: "Отличный перформер"
+
+  good:
+    hs_range: "+5 to +24"
+    budget_change: "+0% to +10%"
+    priority: 2
+    rules:
+      - condition: "is_new"
+        action: "no_change"
+      - condition: "default"
+        action: "+5%"
+
+  neutral:
+    hs_range: "-5 to +4"
+    budget_change: "no_change"
+    priority: 3
+    rules:
+      - condition: "default"
+        action: "monitor"
+
+  slightly_bad:
+    hs_range: "-25 to -6"
+    budget_change: "-20% to -40%"
+    priority: 4
+    rules:
+      - condition: "was_decreased_yesterday"
+        action: "no_change"
+        reason: "Уже снижали вчера"
+      - condition: "consecutive_decreases >= 3"
+        action: "pause"
+        reason: "3+ дня снижений подряд"
+      - condition: "default"
+        action: "-30%"
+
+  bad:
+    hs_range: "≤ -26"
+    budget_change: "-50% or pause"
+    priority: 5
+    rules:
+      - condition: "is_new AND cpl < 3× target"
+        action: "no_change"
+        reason: "Новый, даём шанс"
+      - condition: "consecutive_decreases >= 2"
+        action: "pause"
+      - condition: "default"
+        action: "-50%"
+
+# Действия по CPL отклонению (дополнительные правила)
+cpl_deviation_actions:
+  - deviation: "CPL < target × 0.5"
+    action: "+30%"
+    note: "Суперзвезда"
+
+  - deviation: "CPL 0.5-0.8× target"
+    action: "+15%"
+
+  - deviation: "CPL 0.8-1.2× target"
+    action: "no_change"
+    note: "В пределах нормы"
+
+  - deviation: "CPL 1.2-1.5× target"
+    action: "-20%"
+
+  - deviation: "CPL 1.5-2× target"
+    action: "-40%"
+
+  - deviation: "CPL > 2× target"
+    action: "-50% or pause"
+
+  - deviation: "CPL > 3× target"
+    action: "pause"
+    note: "Критический CPL"
+
+# Правила истории
+history_rules:
+  is_new:
+    condition: "created < 48h ago"
+    action: "no_change"
+    exception: "CPL > 3× target → pause"
+    reason: "Недостаточно данных для решения"
+
+  was_decreased_yesterday:
+    condition: "budget was decreased yesterday"
+    action: "no_decrease_today"
+    reason: "Не снижаем два дня подряд"
+
+  was_increased_yesterday:
+    condition: "budget was increased yesterday"
+    action: "no_decrease_today"
+    reason: "Даём время на раскрутку"
+
+  consecutive_decreases:
+    condition: "≥ 3 days of decreases"
+    action: "pause"
+    reason: "Системная проблема"
+
+# Ad-Eaters Actions
+ad_eaters_actions:
+  critical:
+    will_adset_be_empty: false
+    action: "pause_ad"
+    reason: "CPL > 3× target"
+
+  critical_last_ad:
+    will_adset_be_empty: true
+    hs_condition: "≤ -25"
+    action: "pause_adset"
+    reason: "Единственный ad + плохой HS"
+
+  critical_last_ad_ok_hs:
+    will_adset_be_empty: true
+    hs_condition: "> -25"
+    action: "keep_with_warning"
+    reason: "Единственный ad, но HS терпимый"
+
+  high:
+    action: "pause_ad"
+    reason: "0 leads + high spend"
+
+  medium:
+    action: "reduce_budget_or_pause"
+    reason: "Высокий CPL + большая доля бюджета"
+
+# Бюджетный баланс
+budget_balance:
+  target_corridor: "95-105%"
+  description: |
+    Сумма бюджетов должна быть в коридоре 95-105% от план_бюджета направления
+
+  underspend_actions:
+    - condition: "< 95%"
+      priority: 1
+      action: "find_best_performer_to_increase"
+
+    - condition: "no good performers"
+      priority: 2
+      action: "create_new_adset_with_unused_creative"
+      min_freed_budget: 10  # $10 минимум
+
+  overspend_actions:
+    - condition: "> 105%"
+      action: "reduce_worst_performers_first"
+
+# Новые adsets
+new_adset_rules:
+  trigger: "unused_creatives available AND freed_budget >= $10"
+
+  creative_selection:
+    priority: 1
+    rule: "Low Risk Score creatives first"
+
+  initial_budget:
+    method: "10-15% of direction daily budget"
+    min: 10
+    max: 50
+
+  naming_convention: "{Direction}_{Tag}_{Date}"
+
+# Logging Actions
+logging:
+  required_fields:
+    - adset_id
+    - adset_name
+    - direction
+    - action
+    - old_budget
+    - new_budget
+    - reason
+    - hs
+    - cpl_yesterday
+
+  format: |
+    ### Adset: {adset_name} ({adset_id})
+    - Direction: {direction}
+    - Action: {action}
+    - Budget: ${old_budget} → ${new_budget}
+    - HS: {hs} ({hs_class})
+    - CPL: ${cpl_yesterday} (target: ${target_cpl})
+    - Reason: {reason}

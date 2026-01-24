@@ -1,0 +1,120 @@
+# Risk Score Rules Configuration
+# Формулы для оценки риска креативов
+
+version: "1.0"
+
+# Итоговая формула
+# Risk Score = CPL_Component + Trend_Component + Volume_Component + Consistency_Bonus
+# Диапазон: 0-100
+
+components:
+  # Компонент 1: Base CPL Deviation (0-40)
+  cpl_deviation:
+    min: 0
+    max: 40
+    thresholds:
+      - ratio: 1.0    # CPL ≤ target
+        score: 0
+      - ratio: 1.5    # CPL = target × 1.5
+        score: 20
+      - ratio: 2.0    # CPL = target × 2
+        score: 35
+      - ratio: 3.0    # CPL ≥ target × 3
+        score: 40
+    no_leads_score: 25  # Если нет лидов
+
+  # Компонент 2: Trend (0-20)
+  trend:
+    min: 0
+    max: 20
+    thresholds:
+      - change_pct: -10   # Улучшение ≥10%
+        score: 0
+      - change_pct: 0     # Без изменений
+        score: 5
+      - change_pct: 20    # Ухудшение ≤20%
+        score: 15
+      - change_pct: 50    # Ухудшение >20%
+        score: 20
+    no_data_score: 10
+
+  # Компонент 3: Volume Confidence (0-20)
+  volume_confidence:
+    min: 0
+    max: 20
+    min_spend_for_confidence: 50  # $50 минимум для уверенности
+    thresholds:
+      - spend_ratio: 2.0   # spend ≥ 2× min
+        score: 0
+      - spend_ratio: 1.0   # spend ≥ min
+        score: 10
+      - spend_ratio: 0.5   # spend ≥ 0.5× min
+        score: 15
+      - spend_ratio: 0.0   # spend < 0.5× min
+        score: 20
+
+  # Компонент 4: Consistency Bonus (-20 to 0)
+  consistency:
+    min: -20
+    max: 0
+    thresholds:
+      - variance_pct: 10   # Разница 3d vs 7d ≤10%
+        bonus: -20
+      - variance_pct: 20
+        bonus: -10
+      - variance_pct: 30
+        bonus: -5
+      - variance_pct: 50
+        bonus: 0
+
+# Risk Levels
+levels:
+  low:
+    min: 0
+    max: 25
+    recommendation: "scale"
+    description: "Низкий риск - можно масштабировать"
+
+  medium:
+    min: 26
+    max: 50
+    recommendation: "monitor"
+    description: "Средний риск - мониторинг"
+
+  high:
+    min: 51
+    max: 75
+    recommendation: "reduce"
+    description: "Высокий риск - снижать бюджет"
+
+  critical:
+    min: 76
+    max: 100
+    recommendation: "pause"
+    description: "Критический - пауза или замена"
+
+# Ad-Eaters Detection
+ad_eaters:
+  critical:
+    condition: "CPL > 3× target"
+    action: "immediate_pause"
+    description: "Немедленная пауза"
+
+  high:
+    condition: "0 leads AND spend ≥ 2× avg"
+    action: "pause_today"
+    description: "Пауза сегодня"
+
+  medium:
+    condition: "CPL > 1.5× target AND spend_share > 50%"
+    action: "reduce_or_pause"
+    description: "Снизить или пауза"
+
+# Fatigue Detection
+fatigue:
+  frequency_threshold: 3.0
+  ctr_decline_threshold: -20  # процентов
+  recommendation:
+    mild: "monitor"
+    moderate: "replace_soon"
+    severe: "urgent_replace"

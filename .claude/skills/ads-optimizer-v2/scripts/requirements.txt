@@ -1,0 +1,7 @@
+# Ads Optimizer v2 Dependencies
+
+# YAML output
+pyyaml>=6.0
+
+# Date utilities
+python-dateutil>=2.8.0

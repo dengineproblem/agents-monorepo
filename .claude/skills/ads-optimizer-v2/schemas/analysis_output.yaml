@@ -1,0 +1,314 @@
+# Analysis Output Schema
+# Формат вывода optimizer.py
+
+version: "1.0"
+description: |
+  Схема YAML-вывода скрипта optimizer.py.
+  Этот файл используется LLM Decision Maker для принятия решений.
+  Ожидаемый размер: ~100 строк (вместо 800-1500 строк сырых JSON).
+
+schema:
+  account:
+    type: object
+    properties:
+      id:
+        type: string
+        example: "act_805414428109857"
+      name:
+        type: string
+        example: "Бас дент"
+
+  summary:
+    type: object
+    properties:
+      total_adsets:
+        type: integer
+        description: "Количество активных adsets"
+      total_spend_yesterday:
+        type: number
+        description: "Общий расход за вчера ($)"
+      total_leads_yesterday:
+        type: integer
+        description: "Общее количество лидов за вчера"
+      avg_cpl:
+        type: number
+        nullable: true
+        description: "Средний CPL за вчера ($)"
+
+  directions:
+    type: array
+    description: "Метрики по каждому направлению"
+    items:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Имплантация"
+        campaign_id:
+          type: string
+        target_cpl:
+          type: number
+          description: "Целевой CPL ($)"
+        budget_plan:
+          type: number
+          description: "Плановый дневной бюджет ($)"
+        budget_fact:
+          type: number
+          description: "Фактическая сумма бюджетов ($)"
+        spend_yesterday:
+          type: number
+        leads_yesterday:
+          type: integer
+        actual_cpl:
+          type: number
+          nullable: true
+        adsets_count:
+          type: integer
+        hs_distribution:
+          type: object
+          properties:
+            very_good:
+              type: integer
+            good:
+              type: integer
+            neutral:
+              type: integer
+            slightly_bad:
+              type: integer
+            bad:
+              type: integer
+
+  adsets:
+    type: array
+    description: "Детальные данные по каждому adset с Health Score"
+    items:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        direction:
+          type: string
+        hs:
+          type: integer
+          description: "Health Score (-100 to +100)"
+        hs_class:
+          type: string
+          enum: ["very_good", "good", "neutral", "slightly_bad", "bad"]
+        components:
+          type: object
+          properties:
+            cpl_gap:
+              type: number
+            trends:
+              type: number
+            diagnostics:
+              type: number
+            today_adj:
+              type: number
+            volume_factor:
+              type: number
+        budget:
+          type: number
+        cpl_yesterday:
+          type: number
+          nullable: true
+        cpl_today:
+          type: number
+          nullable: true
+        target_cpl:
+          type: number
+        cpl_diff_pct:
+          type: number
+          nullable: true
+        impressions_today:
+          type: integer
+        is_new:
+          type: boolean
+        history_flags:
+          type: object
+          properties:
+            was_decreased_yesterday:
+              type: boolean
+            was_increased_yesterday:
+              type: boolean
+            consecutive_decreases:
+              type: integer
+
+  creative_tags:
+    type: array
+    description: "Агрегированные метрики по creative_tag с Risk Score"
+    items:
+      type: object
+      properties:
+        tag:
+          type: string
+          example: "kitchen"
+        direction:
+          type: string
+        ads_count:
+          type: integer
+        total_spend:
+          type: number
+        total_leads:
+          type: integer
+        agg_cpl:
+          type: number
+          nullable: true
+        risk_score:
+          type: integer
+          description: "0-100, где 0 = низкий риск"
+        risk_level:
+          type: string
+          enum: ["low", "medium", "high", "critical"]
+        trend:
+          type: string
+          enum: ["improving", "stable", "declining"]
+        recommendation:
+          type: string
+          enum: ["scale", "monitor", "reduce", "pause"]
+
+  ad_eaters:
+    type: array
+    description: "Объявления, съедающие бюджет без результата"
+    items:
+      type: object
+      properties:
+        ad_id:
+          type: string
+        ad_name:
+          type: string
+        adset_id:
+          type: string
+        adset_name:
+          type: string
+        direction:
+          type: string
+        spend:
+          type: number
+        leads:
+          type: integer
+        cpl:
+          type: number
+          nullable: true
+        priority:
+          type: string
+          enum: ["CRITICAL", "HIGH", "MEDIUM"]
+        spend_share_pct:
+          type: number
+        will_adset_be_empty:
+          type: boolean
+        reason:
+          type: string
+
+  fatigue_alerts:
+    type: array
+    description: "Предупреждения об усталости креативов"
+    items:
+      type: object
+      properties:
+        tag:
+          type: string
+        frequency:
+          type: number
+        ctr_current:
+          type: number
+        ctr_baseline:
+          type: number
+        ctr_decline_pct:
+          type: number
+        recommendation:
+          type: string
+
+  unused_creatives:
+    type: array
+    description: "Неиспользуемые креативы из creatives.md"
+    items:
+      type: object
+      properties:
+        direction:
+          type: string
+        tag:
+          type: string
+        status:
+          type: string
+
+example:
+  account:
+    id: "act_805414428109857"
+    name: "Бас дент"
+
+  summary:
+    total_adsets: 13
+    total_spend_yesterday: 205.47
+    total_leads_yesterday: 52
+    avg_cpl: 3.95
+
+  directions:
+    - name: "Имплантация"
+      campaign_id: "120213249329150185"
+      target_cpl: 4.00
+      budget_plan: 100
+      budget_fact: 98.50
+      actual_cpl: 3.42
+      adsets_count: 5
+      hs_distribution:
+        very_good: 1
+        good: 2
+        neutral: 1
+        slightly_bad: 1
+        bad: 0
+
+  adsets:
+    - id: "120240711708530134"
+      name: "Set 1 - Creative Test 1"
+      direction: "Имплантация"
+      hs: 40
+      hs_class: "very_good"
+      components:
+        cpl_gap: 45
+        trends: 7.5
+        diagnostics: 0
+        today_adj: 0
+        volume_factor: 1.0
+      budget: 37.50
+      cpl_yesterday: 2.51
+      target_cpl: 4.00
+      is_new: false
+
+  creative_tags:
+    - tag: "kitchen"
+      direction: "Имплантация"
+      ads_count: 5
+      total_spend: 450.00
+      total_leads: 120
+      agg_cpl: 3.75
+      risk_score: 22
+      risk_level: "low"
+      trend: "improving"
+      recommendation: "scale"
+
+  ad_eaters:
+    - ad_id: "987654321"
+      ad_name: "promo_cold"
+      adset_id: "120241149018580134"
+      adset_name: "Brain bm35"
+      direction: "Гнатология"
+      spend: 25.00
+      leads: 0
+      priority: "CRITICAL"
+      spend_share_pct: 85
+      will_adset_be_empty: false
+      reason: "CPL $25.00 > 3× target $4.00"
+
+  fatigue_alerts:
+    - tag: "old_video"
+      frequency: 5.2
+      ctr_decline_pct: -25
+      recommendation: "replace"
+
+  unused_creatives:
+    - direction: "Виниры"
+      tag: "bathroom"
+      status: "active"
