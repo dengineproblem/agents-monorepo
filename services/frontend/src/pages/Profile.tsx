@@ -1068,6 +1068,15 @@ const Profile: React.FC = () => {
     : Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '');
 
   // TikTok: в мульти-режиме из ad_accounts, иначе из user_accounts
+  console.log('[Profile] TikTok check:', {
+    multiAccountEnabled,
+    currentAdAccount: currentAdAccount ? {
+      id: currentAdAccount.id,
+      tiktok_access_token: currentAdAccount.tiktok_access_token ? '***set***' : null,
+      tiktok_business_id: currentAdAccount.tiktok_business_id,
+    } : null,
+    user_tiktok: user?.tiktok_access_token ? '***set***' : null,
+  });
   const isTikTokConnected = multiAccountEnabled
     ? Boolean(currentAdAccount?.tiktok_access_token && currentAdAccount?.tiktok_business_id)
     : Boolean(user?.tiktok_access_token && user?.tiktok_business_id);

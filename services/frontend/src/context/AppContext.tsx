@@ -873,6 +873,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
           page_id: acc.fb_page_id,              // Бэкенд возвращает fb_page_id (для Lead Forms)
           fb_page_id: acc.fb_page_id,           // Для аватара (используется в компонентах)
+          // TikTok
+          tiktok_access_token: acc.tiktok_access_token,
+          tiktok_business_id: acc.tiktok_business_id,
+          tiktok_account_id: acc.tiktok_account_id,
         };
       });
 

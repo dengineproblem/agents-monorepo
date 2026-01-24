@@ -113,6 +113,7 @@ export interface CreateAdAccountPayload {
   // TikTok (filled by OAuth)
   tiktok_account_id?: string;
   tiktok_business_id?: string;
+  tiktok_access_token?: string;
 
   // Prompts
   prompt1?: string;
