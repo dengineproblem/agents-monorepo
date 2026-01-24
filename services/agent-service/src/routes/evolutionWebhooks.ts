@@ -291,7 +291,13 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       return;
     }
 
-    await tryBotResponse(clientPhone, instance, messageText, messageType, app);
+    // Проверяем наличие бота перед вызовом - не делаем лишний запрос если бота нет
+    const hasBot = await hasBotForInstance(instance);
+    if (hasBot) {
+      await tryBotResponse(clientPhone, instance, messageText, messageType, app);
+    } else {
+      app.log.debug({ instance, clientPhone }, 'No bot configured, skipping tryBotResponse');
+    }
 
     return;
   }
@@ -534,7 +540,13 @@ async function processAdLead(params: {
     return;
   }
 
-  await tryBotResponse(clientPhone, instanceName, messageText, 'text', app);
+  // Проверяем наличие бота перед вызовом - не делаем лишний запрос если бота нет
+  const hasBot = await hasBotForInstance(instanceName);
+  if (hasBot) {
+    await tryBotResponse(clientPhone, instanceName, messageText, 'text', app);
+  } else {
+    app.log.debug({ instanceName, clientPhone }, 'No bot configured for ad lead, skipping tryBotResponse');
+  }
 }
 
 /**
@@ -768,6 +780,45 @@ async function upsertDialogAnalysis(params: {
       app.log.error({ error: insertError, contactPhone }, 'Failed to create dialog_analysis');
     }
   }
+}
+
+/**
+ * Проверить, есть ли активный бот для инстанса
+ * Возвращает true только если бот существует и активен
+ */
+async function hasBotForInstance(instanceName: string): Promise<boolean> {
+  // Получаем инстанс
+  const { data: instanceData, error: instanceError } = await supabase
+    .from('whatsapp_instances')
+    .select('user_account_id')
+    .eq('instance_name', instanceName)
+    .single();
+
+  if (instanceError || !instanceData) {
+    return false;
+  }
+
+  // Проверяем привязку бота к инстансу через bot_instances
+  const { data: botInstance } = await supabase
+    .from('bot_instances')
+    .select('id')
+    .eq('instance_name', instanceName)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (botInstance) {
+    return true;
+  }
+
+  // Fallback: проверяем есть ли активный бот у пользователя
+  const { data: fallbackBot } = await supabase
+    .from('ai_bots')
+    .select('id')
+    .eq('user_account_id', instanceData.user_account_id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  return !!fallbackBot;
 }
 
 /**
