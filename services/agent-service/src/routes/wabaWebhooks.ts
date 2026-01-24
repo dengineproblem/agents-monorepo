@@ -19,7 +19,7 @@ import {
 
 const WABA_VERIFY_TOKEN = process.env.WABA_VERIFY_TOKEN || 'waba_verify_token';
 const WABA_APP_SECRET = process.env.WABA_APP_SECRET || '';
-const WABA_ENABLED = process.env.WABA_WEBHOOK_ENABLED !== 'false';
+const WABA_ENABLED = process.env.WABA_WEBHOOK_ENABLED === 'true';
 const CAPI_INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
