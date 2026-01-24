@@ -140,8 +140,8 @@ docker-compose up -d frontend
 
 **Локально (.env.agent)**: ✅ УЖЕ НАСТРОЕНО!
 ```bash
-EVOLUTION_API_KEY=52ea52572205cd16e2fbbb49edffb7fa0228aafdd1f6ae1df3da5d5b35577ac1
-EVOLUTION_DB_PASSWORD=evolution_secure_password_2024
+EVOLUTION_API_KEY=<YOUR_EVOLUTION_API_KEY>
+EVOLUTION_DB_PASSWORD=<YOUR_EVOLUTION_DB_PASSWORD>
 EVOLUTION_API_URL=http://evolution-api:8080
 EVOLUTION_DB_HOST=evolution-postgres
 EVOLUTION_DB_PORT=5432
@@ -256,7 +256,7 @@ curl http://localhost:8080
 open http://localhost:8080/manager
 
 # Ввести API Key (из .env.agent):
-# 52ea52572205cd16e2fbbb49edffb7fa0228aafdd1f6ae1df3da5d5b35577ac1
+# <YOUR_EVOLUTION_API_KEY from .env.agent>
 
 # Создать instance → Получить QR код → Отсканировать в WhatsApp
 ```
@@ -533,7 +533,7 @@ curl http://localhost:8080
 open http://localhost:8080/manager
 
 # 8. Ввести API Key:
-# 52ea52572205cd16e2fbbb49edffb7fa0228aafdd1f6ae1df3da5d5b35577ac1
+# <YOUR_EVOLUTION_API_KEY from .env.agent>
 
 # 9. Создать тестовый instance и подключить WhatsApp
 ```
