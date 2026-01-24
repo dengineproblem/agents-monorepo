@@ -22,6 +22,12 @@ const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const TELEGRAM_BOT_TOKEN = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
 const TELEGRAM_TECH_CHAT_ID = '-5079020326';
 
+// Custom lead notifications per account (hardcoded for specific clients)
+const LEAD_NOTIFICATIONS: Record<string, string> = {
+  // Bas Dent - отправка лидов в TG группу
+  '91454447-2906-4d89-892b-12c817584b0f': '-4862556272'
+};
+
 async function sendTelegramNotification(text: string): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN) {
     log.warn('TELEGRAM_BOT_TOKEN not set, skipping notification');
@@ -47,6 +53,46 @@ async function sendTelegramNotification(text: string): Promise<void> {
     }
   } catch (err) {
     log.error({ err }, 'Error sending Telegram notification');
+  }
+}
+
+/**
+ * Send lead notification to custom Telegram group (per-account)
+ */
+async function sendLeadNotificationToTelegram(
+  accountId: string,
+  leadData: { name: string | null; phone: string | null; directionName: string | null }
+): Promise<void> {
+  const chatId = LEAD_NOTIFICATIONS[accountId];
+  if (!chatId || !TELEGRAM_BOT_TOKEN) return;
+
+  const text = `🔔 <b>Новый лид с Facebook</b>
+
+👤 Имя: ${leadData.name || '—'}
+📞 Телефон: ${leadData.phone || '—'}
+📁 Направление: ${leadData.directionName || '—'}
+
+⏰ ${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}`;
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML'
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      log.error({ status: res.status, body, accountId }, 'Failed to send lead notification to Telegram');
+    } else {
+      log.info({ accountId, chatId }, 'Lead notification sent to Telegram');
+    }
+  } catch (err) {
+    log.error({ err, accountId }, 'Error sending lead notification to Telegram');
   }
 }
 
@@ -342,6 +388,22 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             creativeId,
             directionId
           }, 'Lead form lead created successfully');
+
+          // Send lead notification to Telegram (per-account)
+          if (accountId && LEAD_NOTIFICATIONS[accountId]) {
+            let directionName: string | null = null;
+            if (directionId) {
+              const { data: dir } = await supabase
+                .from('account_directions')
+                .select('name')
+                .eq('id', directionId)
+                .maybeSingle();
+              directionName = dir?.name || null;
+            }
+            sendLeadNotificationToTelegram(accountId, { name, phone, directionName }).catch(err => {
+              log.error({ err, accountId }, 'Failed to send lead TG notification');
+            });
+          }
 
           // Log business event
           await eventLogger.logBusinessEvent(

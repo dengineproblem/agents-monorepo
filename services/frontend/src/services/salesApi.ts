@@ -1193,6 +1193,7 @@ class SalesApiService {
         .select(`
           id,
           chat_id,
+          phone,
           creative_id,
           direction_id,
           needs_manual_match,
@@ -1275,6 +1276,7 @@ class SalesApiService {
       const transformedData = leads.map((lead: any) => ({
         id: lead.id,
         chat_id: lead.chat_id,
+        phone: lead.phone,
         creative_id: lead.creative_id,
         creative_name: lead.creative_id ? creativesMap[lead.creative_id] || null : null,
         direction_id: lead.direction_id,

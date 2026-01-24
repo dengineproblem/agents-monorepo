@@ -84,6 +84,12 @@ export default async function telegramWebhook(app: FastifyInstance) {
         return res.send({ ok: true });
       }
 
+      // Игнорируем сообщения из групп (только личные чаты)
+      if (update.message.chat.type !== 'private') {
+        log.debug({ chatType: update.message.chat.type, chatId: update.message.chat.id }, 'Ignoring group message');
+        return res.send({ ok: true });
+      }
+
       const message = update.message;
       const telegramId = String(message.from!.id);
       const telegramMessageId = message.message_id;
