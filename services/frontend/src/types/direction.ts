@@ -70,6 +70,8 @@ export interface CreateDirectionPayload {
   daily_budget_cents?: number;
   target_cpl_cents?: number;
   whatsapp_phone_number?: string;
+  whatsapp_connection_type?: 'evolution' | 'waba';
+  whatsapp_waba_phone_id?: string;
   tiktok_objective?: TikTokObjective;
   tiktok_daily_budget?: number;
   tiktok_target_cpl_kzt?: number;

@@ -96,6 +96,8 @@ const CreateDirectionSchema = z.object({
   daily_budget_cents: z.number().int().min(500).optional(), // минимум $5
   target_cpl_cents: z.number().int().min(10).optional(), // минимум $0.10 для instagram_traffic, проверяется в refine
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
+  whatsapp_connection_type: z.enum(['evolution', 'waba']).optional(),
+  whatsapp_waba_phone_id: z.string().optional(),
   tiktok_objective: TikTokObjectiveSchema.optional(),
   tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
@@ -178,6 +180,8 @@ const UpdateDirectionSchema = z.object({
   target_cpl_cents: z.number().int().min(10).optional(), // минимум проверяется в handler по objective
   is_active: z.boolean().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
+  whatsapp_connection_type: z.enum(['evolution', 'waba']).optional(),
+  whatsapp_waba_phone_id: z.string().nullable().optional(),
   tiktok_objective: TikTokObjectiveSchema.optional(),
   tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
@@ -701,11 +705,31 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
 
         if (existingNumber) {
-          // Номер уже существует, используем его
+          // Номер уже существует — обновляем connection_type и waba_phone_id если указаны
           whatsapp_phone_number_id = existingNumber.id;
-          log.info({ phoneNumber, id: whatsapp_phone_number_id }, 'Using existing WhatsApp number');
+
+          const connectionType = input.whatsapp_connection_type || 'evolution';
+          const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
+
+          // Обновляем тип подключения существующего номера
+          const { error: updateNumberError } = await supabase
+            .from('whatsapp_phone_numbers')
+            .update({
+              connection_type: connectionType,
+              waba_phone_id: wabaPhoneId,
+            })
+            .eq('id', existingNumber.id);
+
+          if (updateNumberError) {
+            log.error({ err: updateNumberError }, 'Error updating WhatsApp number connection type');
+          } else {
+            log.info({ phoneNumber, connectionType, wabaPhoneId, id: whatsapp_phone_number_id }, 'Updated existing WhatsApp number');
+          }
         } else {
-          // Создаем новый номер
+          // Создаем новый номер с типом подключения
+          const connectionType = input.whatsapp_connection_type || 'evolution';
+          const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
+
           const { data: newNumber, error: insertNumberError } = await supabase
             .from('whatsapp_phone_numbers')
             .insert([
@@ -715,6 +739,8 @@ export async function directionsRoutes(app: FastifyInstance) {
                 phone_number: phoneNumber,
                 is_active: true,
                 is_default: false,
+                connection_type: connectionType,
+                waba_phone_id: wabaPhoneId,
               },
             ])
             .select('id')
@@ -729,7 +755,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           }
 
           whatsapp_phone_number_id = newNumber.id;
-          log.info({ phoneNumber, id: whatsapp_phone_number_id }, 'Created new WhatsApp number');
+          log.info({ phoneNumber, connectionType, wabaPhoneId, id: whatsapp_phone_number_id }, 'Created new WhatsApp number');
         }
       }
 
@@ -1194,6 +1220,8 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Обрабатываем WhatsApp номер если он передан
       let updateData: any = { ...input };
       delete updateData.whatsapp_phone_number; // Удаляем из объекта обновления, т.к. это не колонка БД
+      delete updateData.whatsapp_connection_type; // Это поле для whatsapp_phone_numbers, не для directions
+      delete updateData.whatsapp_waba_phone_id; // Это поле для whatsapp_phone_numbers, не для directions
       
       if (input.whatsapp_phone_number !== undefined) {
         if (input.whatsapp_phone_number === null || input.whatsapp_phone_number === '') {
@@ -1214,8 +1242,29 @@ export async function directionsRoutes(app: FastifyInstance) {
 
           if (existingNumber) {
             updateData.whatsapp_phone_number_id = existingNumber.id;
-            log.info({ phoneNumber, id: existingNumber.id }, 'Using existing WhatsApp number for direction');
+
+            // Обновляем connection_type и waba_phone_id если указаны
+            const connectionType = input.whatsapp_connection_type || 'evolution';
+            const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
+
+            const { error: updateNumberError } = await supabase
+              .from('whatsapp_phone_numbers')
+              .update({
+                connection_type: connectionType,
+                waba_phone_id: wabaPhoneId,
+              })
+              .eq('id', existingNumber.id);
+
+            if (updateNumberError) {
+              log.error({ err: updateNumberError }, 'Error updating WhatsApp number connection type');
+            } else {
+              log.info({ phoneNumber, connectionType, wabaPhoneId, id: existingNumber.id }, 'Updated existing WhatsApp number for direction');
+            }
           } else {
+            // Создаем новый номер с типом подключения
+            const connectionType = input.whatsapp_connection_type || 'evolution';
+            const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
+
             const { data: newNumber, error: insertNumberError } = await supabase
               .from('whatsapp_phone_numbers')
               .insert([
@@ -1225,6 +1274,8 @@ export async function directionsRoutes(app: FastifyInstance) {
                   phone_number: phoneNumber,
                   is_active: true,
                   is_default: false,
+                  connection_type: connectionType,
+                  waba_phone_id: wabaPhoneId,
                 },
               ])
               .select('id')
@@ -1239,7 +1290,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             }
 
             updateData.whatsapp_phone_number_id = newNumber.id;
-            log.info({ phoneNumber, id: newNumber.id }, 'Created new WhatsApp number for direction');
+            log.info({ phoneNumber, connectionType, wabaPhoneId, id: newNumber.id }, 'Created new WhatsApp number for direction');
           }
         }
       }

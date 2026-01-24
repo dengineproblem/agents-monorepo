@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, AlertCircle, CheckCircle2, QrCode, Cloud } from 'lucide-react';
 import type {
   DirectionObjective,
   CreateDefaultSettingsInput,
@@ -68,6 +68,7 @@ interface ExistingCapiDirection {
 
 export type CrmType = 'amocrm' | 'bitrix24';
 export type CapiSource = 'whatsapp' | 'crm';
+export type ConnectionType = 'evolution' | 'waba';
 
 const MAX_CAPI_FIELDS = 3;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
@@ -281,6 +282,8 @@ export interface CreateDirectionFormData {
   tiktok_target_cpl_kzt?: number;
   tiktok_instant_page_id?: string;
   whatsapp_phone_number?: string;
+  whatsapp_connection_type?: ConnectionType;
+  whatsapp_waba_phone_id?: string;
   adSettings?: CreateDefaultSettingsInput;
   facebookAdSettings?: CreateDefaultSettingsInput;
   tiktokAdSettings?: CreateDefaultSettingsInput;
@@ -313,7 +316,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   
   // WhatsApp номер (вводится напрямую)
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState<string>('');
-  
+  const [whatsappConnectionType, setWhatsappConnectionType] = useState<ConnectionType>('evolution');
+  const [whatsappWabaPhoneId, setWhatsappWabaPhoneId] = useState<string>('');
+
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [cityPopoverOpen, setCityPopoverOpen] = useState(false);
@@ -723,6 +728,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
           return;
         }
+
+        // Валидация WABA Phone ID (обязательно для WABA типа подключения)
+        if (whatsappPhoneNumber.trim() && whatsappConnectionType === 'waba' && !whatsappWabaPhoneId.trim()) {
+          setError('Введите WABA Phone Number ID для подключения через Meta Cloud API');
+          return;
+        }
       }
 
       if (objective === 'instagram_traffic' && !instagramUrl.trim()) {
@@ -802,6 +813,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           daily_budget_cents: Math.round(budgetValue * 100),
           target_cpl_cents: Math.round(cplValue * 100),
           whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
+          ...(whatsappPhoneNumber.trim() && {
+            whatsapp_connection_type: whatsappConnectionType,
+            ...(whatsappConnectionType === 'waba' && { whatsapp_waba_phone_id: whatsappWabaPhoneId.trim() }),
+          }),
         }),
         ...(needsTikTok && {
           tiktok_objective: tiktokObjective,
@@ -844,6 +859,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setTikTokTargetCpl('');
     setSeparateTikTokSettings(false);
     setWhatsappPhoneNumber('');
+    setWhatsappConnectionType('evolution');
+    setWhatsappWabaPhoneId('');
     setSelectedCities([]);
     setAgeMin(18);
     setAgeMax(65);
@@ -1852,7 +1869,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           {needsFacebook && (objective === 'whatsapp' || objective === 'whatsapp_conversions') && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
-              
+
               {/* Ввод WhatsApp номера */}
               <div className="space-y-2">
                 <Label htmlFor="whatsapp-number">
@@ -1870,7 +1887,73 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
                 </p>
               </div>
-              
+
+              {/* Тип подключения WhatsApp (показываем только если номер указан) */}
+              {whatsappPhoneNumber.trim() && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Тип подключения</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWhatsappConnectionType('evolution');
+                          setWhatsappWabaPhoneId('');
+                        }}
+                        disabled={isSubmitting}
+                        className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                          whatsappConnectionType === 'evolution'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-muted hover:border-muted-foreground/50'
+                        }`}
+                      >
+                        <QrCode className="w-5 h-5" />
+                        <div className="text-left">
+                          <div className="font-medium text-sm">QR-код</div>
+                          <div className="text-xs text-muted-foreground">Evolution API</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWhatsappConnectionType('waba')}
+                        disabled={isSubmitting}
+                        className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                          whatsappConnectionType === 'waba'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-muted hover:border-muted-foreground/50'
+                        }`}
+                      >
+                        <Cloud className="w-5 h-5" />
+                        <div className="text-left">
+                          <div className="font-medium text-sm">WABA</div>
+                          <div className="text-xs text-muted-foreground">Meta Cloud API</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* WABA Phone ID - только для WABA */}
+                  {whatsappConnectionType === 'waba' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="waba-phone-id">
+                        WABA Phone Number ID <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        id="waba-phone-id"
+                        value={whatsappWabaPhoneId}
+                        onChange={(e) => setWhatsappWabaPhoneId(e.target.value)}
+                        placeholder="123456789012345"
+                        disabled={isSubmitting}
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="client-question">
                   Вопрос клиента <span className="text-red-500">*</span>
