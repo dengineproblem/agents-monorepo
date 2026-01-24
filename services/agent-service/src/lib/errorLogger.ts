@@ -24,6 +24,7 @@ export type ErrorType =
   | 'amocrm'
   | 'bitrix24'
   | 'evolution'
+  | 'waba'
   | 'chatbot_service'
   | 'creative_generation'
   | 'scoring'

@@ -1,6 +1,8 @@
 import { API_BASE_URL } from '@/config/api';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
+export type ConnectionType = 'evolution' | 'waba';
+
 export interface WhatsAppNumber {
   id: string;
   phone_number: string;
@@ -9,6 +11,8 @@ export interface WhatsAppNumber {
   is_active: boolean;
   instance_name: string | null;
   connection_status: 'connecting' | 'connected' | 'disconnected' | null;
+  connection_type: ConnectionType;
+  waba_phone_id: string | null;
 }
 
 export interface WhatsAppInstanceResponse {

@@ -4,9 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Phone, Plus, Star, Trash2, Edit2, Check } from 'lucide-react';
+import { Phone, Plus, Star, Trash2, Edit2, Check, QrCode, Cloud } from 'lucide-react';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
+
+type ConnectionType = 'evolution' | 'waba';
 
 interface WhatsAppNumber {
   id: string;
@@ -15,6 +17,8 @@ interface WhatsAppNumber {
   is_default: boolean;
   is_active: boolean;
   created_at: string;
+  connection_type: ConnectionType;
+  waba_phone_id: string | null;
 }
 
 interface WhatsAppNumbersCardProps {
@@ -32,6 +36,8 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
     phone_number: '',
     label: '',
     is_default: false,
+    connection_type: 'evolution' as ConnectionType,
+    waba_phone_id: '',
   });
 
   // Загрузка номеров
@@ -64,13 +70,23 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
       return;
     }
 
+    // Валидация WABA Phone ID
+    if (formData.connection_type === 'waba' && !formData.waba_phone_id.trim()) {
+      toast.error('Введите WABA Phone Number ID для подключения через Meta Cloud API');
+      return;
+    }
+
     try {
       const response = await fetch(`${API_BASE_URL}/whatsapp-numbers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userAccountId,
-          ...formData,
+          phone_number: formData.phone_number,
+          label: formData.label,
+          is_default: formData.is_default,
+          connection_type: formData.connection_type,
+          waba_phone_id: formData.connection_type === 'waba' ? formData.waba_phone_id : undefined,
         }),
       });
 
@@ -81,7 +97,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
 
       toast.success('Номер добавлен');
       setAddDialogOpen(false);
-      setFormData({ phone_number: '', label: '', is_default: false });
+      setFormData({ phone_number: '', label: '', is_default: false, connection_type: 'evolution', waba_phone_id: '' });
       loadNumbers();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось добавить номер');
@@ -201,6 +217,17 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
                       {number.is_default && (
                         <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" title="Дефолтный" />
                       )}
+                      {number.connection_type === 'waba' ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" title="Meta Cloud API">
+                          <Cloud className="w-3 h-3" />
+                          WABA
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" title="Evolution API (QR)">
+                          <QrCode className="w-3 h-3" />
+                          QR
+                        </span>
+                      )}
                     </div>
                     
                     {editingId === number.id ? (
@@ -280,8 +307,45 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
           <DialogHeader>
             <DialogTitle>Добавить WhatsApp номер</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4 py-4">
+            {/* Тип подключения */}
+            <div className="space-y-2">
+              <Label>Тип подключения</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, connection_type: 'evolution', waba_phone_id: '' })}
+                  className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                    formData.connection_type === 'evolution'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-muted hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <QrCode className="w-5 h-5" />
+                  <div className="text-left">
+                    <div className="font-medium text-sm">QR-код</div>
+                    <div className="text-xs text-muted-foreground">Evolution API</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, connection_type: 'waba' })}
+                  className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                    formData.connection_type === 'waba'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-muted hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <Cloud className="w-5 h-5" />
+                  <div className="text-left">
+                    <div className="font-medium text-sm">WABA</div>
+                    <div className="text-xs text-muted-foreground">Meta Cloud API</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="phone">Номер телефона*</Label>
               <Input
@@ -295,7 +359,24 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
                 Международный формат: +[код страны][номер]
               </p>
             </div>
-            
+
+            {/* WABA Phone ID - только для WABA */}
+            {formData.connection_type === 'waba' && (
+              <div className="space-y-2">
+                <Label htmlFor="waba_phone_id">WABA Phone Number ID*</Label>
+                <Input
+                  id="waba_phone_id"
+                  value={formData.waba_phone_id}
+                  onChange={(e) => setFormData({ ...formData, waba_phone_id: e.target.value })}
+                  placeholder="123456789012345"
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="label">Название (опционально)</Label>
               <Input
@@ -305,7 +386,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
                 placeholder="Например: Основной"
               />
             </div>
-            
+
             <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -319,7 +400,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
               </Label>
             </div>
           </div>
-          
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
               Отмена

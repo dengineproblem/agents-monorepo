@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff } from 'lucide-react';
+import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff, Cloud, QrCode, CheckCircle2 } from 'lucide-react';
 import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
 import { whatsappApi } from '@/services/whatsappApi';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
@@ -124,58 +124,86 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {numbers.map((number) => (
-                <div
-                  key={number.id}
-                  className="flex items-center justify-between p-4 border border-muted rounded-lg hover:bg-muted/50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    {number.connection_status === 'connected' ? (
-                      <Smartphone className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <PhoneOff className="h-5 w-5 text-muted-foreground" />
-                    )}
-                    <div>
-                      <p className="font-medium">{number.phone_number}</p>
-                      {number.label && (
-                        <p className="text-sm text-muted-foreground">{number.label}</p>
-                      )}
-                    </div>
-                  </div>
+              {numbers.map((number) => {
+                // WABA номера всегда "подключены" через webhook
+                const isWaba = number.connection_type === 'waba';
+                const isConnected = isWaba || number.connection_status === 'connected';
+                const isConnecting = !isWaba && number.connection_status === 'connecting';
 
-                  <Button
-                    variant={number.connection_status === 'connected' || number.connection_status === 'connecting' ? 'outline' : 'default'}
-                    size="sm"
-                    onClick={() => {
-                      if (number.connection_status === 'connected') {
-                        handleDisconnect(number.instance_name!);
-                      } else if (number.connection_status === 'connecting') {
-                        handleResetConnection(number.id);
-                      } else {
-                        handleConnect(number.id, number.phone_number);
-                      }
-                    }}
-                    className="px-2 sm:px-4"
+                return (
+                  <div
+                    key={number.id}
+                    className="flex items-center justify-between p-4 border border-muted rounded-lg hover:bg-muted/50 transition-colors"
                   >
-                    {number.connection_status === 'connected' ? (
-                      <>
-                        <X className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Отключить</span>
-                      </>
-                    ) : number.connection_status === 'connecting' ? (
-                      <>
-                        <X className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Отменить</span>
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Подключить</span>
-                      </>
+                    <div className="flex items-center space-x-3">
+                      {isConnected ? (
+                        isWaba ? (
+                          <Cloud className="h-5 w-5 text-blue-500" />
+                        ) : (
+                          <Smartphone className="h-5 w-5 text-green-500" />
+                        )
+                      ) : (
+                        <PhoneOff className="h-5 w-5 text-muted-foreground" />
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium">{number.phone_number}</p>
+                          {isWaba && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                              <Cloud className="w-3 h-3" />
+                              WABA
+                            </span>
+                          )}
+                        </div>
+                        {number.label && (
+                          <p className="text-sm text-muted-foreground">{number.label}</p>
+                        )}
+                        {isWaba && (
+                          <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 mt-0.5">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Подключен через Meta Cloud API
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Для WABA не показываем кнопки подключения - они работают через webhook */}
+                    {!isWaba && (
+                      <Button
+                        variant={isConnected || isConnecting ? 'outline' : 'default'}
+                        size="sm"
+                        onClick={() => {
+                          if (isConnected) {
+                            handleDisconnect(number.instance_name!);
+                          } else if (isConnecting) {
+                            handleResetConnection(number.id);
+                          } else {
+                            handleConnect(number.id, number.phone_number);
+                          }
+                        }}
+                        className="px-2 sm:px-4"
+                      >
+                        {isConnected ? (
+                          <>
+                            <X className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Отключить</span>
+                          </>
+                        ) : isConnecting ? (
+                          <>
+                            <X className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Отменить</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Подключить</span>
+                          </>
+                        )}
+                      </Button>
                     )}
-                  </Button>
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

@@ -9,18 +9,33 @@ const PhoneNumberSchema = z.string().regex(/^\+[1-9][0-9]{7,14}$/, {
   message: 'Номер должен быть в международном формате, например: +12345678901'
 });
 
+const ConnectionTypeSchema = z.enum(['evolution', 'waba']).default('evolution');
+
 const CreateWhatsAppNumberSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   phone_number: PhoneNumberSchema,
   label: z.string().max(100).optional(),
   is_default: z.boolean().default(false),
-});
+  connection_type: ConnectionTypeSchema,
+  waba_phone_id: z.string().max(50).optional(),  // Meta Cloud API Phone Number ID
+}).refine(
+  (data) => {
+    // Если тип WABA, то waba_phone_id обязателен
+    if (data.connection_type === 'waba' && !data.waba_phone_id) {
+      return false;
+    }
+    return true;
+  },
+  { message: 'waba_phone_id обязателен для типа подключения WABA' }
+);
 
 const UpdateWhatsAppNumberSchema = z.object({
   label: z.string().max(100).optional(),
   is_default: z.boolean().optional(),
   is_active: z.boolean().optional(),
+  connection_type: z.enum(['evolution', 'waba']).optional(),
+  waba_phone_id: z.string().max(50).nullable().optional(),  // null для очистки
 });
 
 export default async function whatsappNumbersRoutes(app: FastifyInstance) {
@@ -96,6 +111,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
           label: body.label || null,
           is_default: body.is_default,
           is_active: true,
+          connection_type: body.connection_type || 'evolution',
+          waba_phone_id: body.waba_phone_id || null,
         })
         .select()
         .single();
