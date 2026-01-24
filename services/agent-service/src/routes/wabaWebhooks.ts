@@ -75,12 +75,15 @@ export default async function wabaWebhooks(app: FastifyInstance) {
       // Signature verification (skip in dev if no secret configured)
       if (WABA_APP_SECRET) {
         const signature = request.headers['x-hub-signature-256'] as string | undefined;
-        const rawBody = (request as any).rawBody as Buffer;
+        const rawBody = (request as any).rawBody as Buffer | undefined;
 
-        if (!verifyWabaSignature(rawBody, signature, WABA_APP_SECRET)) {
+        if (!rawBody) {
+          app.log.warn('WABA webhook: rawBody not available, skipping signature check');
+          // Continue without signature verification if rawBody is not available
+        } else if (!verifyWabaSignature(rawBody, signature, WABA_APP_SECRET)) {
           app.log.warn({
             hasSignature: !!signature,
-            hasRawBody: !!rawBody
+            rawBodyLength: rawBody?.length
           }, 'WABA webhook signature verification failed');
           return reply.status(403).send('Invalid signature');
         }

@@ -71,7 +71,9 @@ const environment = process.env.NODE_ENV || 'development';
 
 const app = fastify({
   logger: baseLogger.child({ environment, service: 'agent-service' }),
-  genReqId: () => randomUUID()
+  genReqId: () => randomUUID(),
+  // Enable raw body for WABA webhook signature verification
+  rawBody: true
 });
 
 app.addHook('onRequest', (request, _reply, done) => {

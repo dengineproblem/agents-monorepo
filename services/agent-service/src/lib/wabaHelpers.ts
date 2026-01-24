@@ -91,11 +91,11 @@ export interface WabaStatus {
  * @returns true if signature is valid
  */
 export function verifyWabaSignature(
-  rawBody: Buffer | string,
+  rawBody: Buffer | string | undefined,
   signature: string | undefined,
   appSecret: string
 ): boolean {
-  if (!signature || !appSecret) {
+  if (!signature || !appSecret || !rawBody) {
     return false;
   }
 
