@@ -14,8 +14,8 @@ import OpenAI from 'openai';
 const log = createLogger({ module: 'errorLogger' });
 
 // Telegram для отправки ошибок в группу
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
-const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID || '-5079020326';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
 
 // Типы ошибок
 export type ErrorType =

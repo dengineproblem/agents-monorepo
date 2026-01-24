@@ -250,7 +250,7 @@ async function sendBotResponse(chatId: number | string, response: BotResponse): 
  * Отправить "печатает..." в чат
  */
 async function sendTypingAction(chatId: number | string): Promise<void> {
-  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
+  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
   const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
   try {
