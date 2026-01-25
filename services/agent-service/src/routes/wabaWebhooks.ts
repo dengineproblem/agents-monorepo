@@ -23,6 +23,9 @@ const WABA_ENABLED = process.env.WABA_WEBHOOK_ENABLED === 'true';
 const CAPI_INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
+// Forwarding to ad-analytics
+const AD_ANALYTICS_WEBHOOK_URL = process.env.AD_ANALYTICS_WEBHOOK_URL || '';
+
 // ============================================
 // Main Export
 // ============================================
@@ -90,6 +93,11 @@ export default async function wabaWebhooks(app: FastifyInstance) {
       }
 
       const body = request.body as WabaWebhookPayload;
+
+      // Forward to ad-analytics (fire and forget)
+      if (AD_ANALYTICS_WEBHOOK_URL) {
+        forwardToAdAnalytics(body, request.headers, app).catch(() => {});
+      }
 
       // Validate payload structure
       if (body.object !== 'whatsapp_business_account') {
@@ -529,5 +537,37 @@ async function sendCapiInterestEvent(
       instanceName,
       contactPhone
     }, 'WABA: CAPI Interest event error');
+  }
+}
+
+// ============================================
+// Helper: Forward to Ad Analytics
+// ============================================
+
+async function forwardToAdAnalytics(
+  body: WabaWebhookPayload,
+  headers: Record<string, unknown>,
+  app: FastifyInstance
+): Promise<void> {
+  if (!AD_ANALYTICS_WEBHOOK_URL) return;
+
+  try {
+    const response = await fetch(AD_ANALYTICS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hub-Signature-256': headers['x-hub-signature-256'] as string || '',
+        'X-Forwarded-From': 'agents-monorepo'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (response.ok) {
+      app.log.debug('WABA: Forwarded to ad-analytics');
+    } else {
+      app.log.warn({ status: response.status }, 'WABA: Forward to ad-analytics failed');
+    }
+  } catch (error: any) {
+    app.log.warn({ error: error.message }, 'WABA: Forward to ad-analytics error');
   }
 }
