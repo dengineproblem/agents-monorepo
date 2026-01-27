@@ -182,15 +182,17 @@ export function getBitrix24ConnectUrl(userAccountId: string): string {
  * Sync pipelines and stages from Bitrix24
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Sync result with count
  */
 export async function syncBitrix24Pipelines(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string
 ): Promise<{ success: boolean; count: number; entityType: string }> {
   const response = await fetch(`${API_BASE_URL}/bitrix24/sync-pipelines`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userAccountId }),
+    body: JSON.stringify({ userAccountId, accountId }),
   });
 
   if (!response.ok) {
@@ -383,16 +385,18 @@ export async function setBitrix24QualificationFields(
  *
  * @param userAccountId - User account UUID
  * @param entityType - Optional entity type override
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Sync result
  */
 export async function syncBitrix24Leads(
   userAccountId: string,
-  entityType?: 'lead' | 'deal' | 'both'
+  entityType?: 'lead' | 'deal' | 'both',
+  accountId?: string
 ): Promise<SyncResult> {
   const response = await fetch(`${API_BASE_URL}/bitrix24/sync-leads`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userAccountId, entityType }),
+    body: JSON.stringify({ userAccountId, entityType, accountId }),
   });
 
   if (!response.ok) {

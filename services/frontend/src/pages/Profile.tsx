@@ -1036,7 +1036,9 @@ const Profile: React.FC = () => {
     setIsSyncingBitrix24(true);
     try {
       toast.info('Синхронизация запущена...');
-      const result = await syncBitrix24Leads(user.id, bitrix24EntityType === 'both' ? undefined : bitrix24EntityType);
+      // Pass currentAdAccountId for multi-account mode
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      const result = await syncBitrix24Leads(user.id, bitrix24EntityType === 'both' ? undefined : bitrix24EntityType, accountId);
 
       if (result.success) {
         toast.success(`Синхронизировано: обновлено ${result.updated} записей`);

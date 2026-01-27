@@ -32,15 +32,18 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 // ============================================================================
 
 const UserAccountIdSchema = z.object({
-  userAccountId: z.string().uuid()
+  userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional()  // For multi-account mode
 });
 
 const SyncPipelinesBodySchema = z.object({
-  userAccountId: z.string().uuid()
+  userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional()  // For multi-account mode
 });
 
 const UpdateStageBodySchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // For multi-account mode
   stageId: z.string().uuid(),
   isQualifiedStage: z.boolean().optional(),
   isSuccessStage: z.boolean().optional(),
@@ -49,6 +52,7 @@ const UpdateStageBodySchema = z.object({
 
 const QualificationFieldsBodySchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // For multi-account mode
   fields: z.array(z.object({
     field_id: z.string(),
     field_name: z.string(),
@@ -61,6 +65,7 @@ const QualificationFieldsBodySchema = z.object({
 
 const KeyStagesBodySchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // For multi-account mode
   directionId: z.string().uuid(),
   entityType: z.enum(['lead', 'deal']),
   keyStages: z.array(z.object({
@@ -71,6 +76,7 @@ const KeyStagesBodySchema = z.object({
 
 const SyncLeadsBodySchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // For multi-account mode
   entityType: z.enum(['lead', 'deal', 'both']).optional()
 });
 
@@ -96,10 +102,10 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
+      const { userAccountId, accountId } = parsed.data;
 
-      // Get valid token
-      const { accessToken, domain, entityType } = await getValidBitrix24Token(userAccountId);
+      // Get valid token (pass accountId for multi-account mode)
+      const { accessToken, domain, entityType } = await getValidBitrix24Token(userAccountId, accountId || null);
 
       const stagesToInsert: any[] = [];
 
@@ -350,8 +356,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
-      const { accessToken, domain } = await getValidBitrix24Token(userAccountId);
+      const { userAccountId, accountId } = parsed.data;
+      const { accessToken, domain } = await getValidBitrix24Token(userAccountId, accountId || null);
 
       const fields = await getLeadUserFields(domain, accessToken);
 
@@ -399,8 +405,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
-      const { accessToken, domain } = await getValidBitrix24Token(userAccountId);
+      const { userAccountId, accountId } = parsed.data;
+      const { accessToken, domain } = await getValidBitrix24Token(userAccountId, accountId || null);
 
       const fields = await getDealUserFields(domain, accessToken);
 
@@ -448,8 +454,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
-      const { accessToken, domain } = await getValidBitrix24Token(userAccountId);
+      const { userAccountId, accountId } = parsed.data;
+      const { accessToken, domain } = await getValidBitrix24Token(userAccountId, accountId || null);
 
       const fields = await getContactUserFields(domain, accessToken);
 
@@ -580,8 +586,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId, entityType: requestedEntityType } = parsed.data;
-      const { accessToken, domain, entityType: configuredEntityType } = await getValidBitrix24Token(userAccountId);
+      const { userAccountId, accountId, entityType: requestedEntityType } = parsed.data;
+      const { accessToken, domain, entityType: configuredEntityType } = await getValidBitrix24Token(userAccountId, accountId || null);
 
       const effectiveEntityType = requestedEntityType || configuredEntityType;
 

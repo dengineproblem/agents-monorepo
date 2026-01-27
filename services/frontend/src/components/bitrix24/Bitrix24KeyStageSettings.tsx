@@ -11,12 +11,14 @@ import { salesApi, type Direction } from '@/services/salesApi';
 interface Bitrix24KeyStageSettingsProps {
   userAccountId: string;
   entityType: 'lead' | 'deal' | 'both';
+  accountId?: string;  // For multi-account mode
   onClose?: () => void;
 }
 
 export const Bitrix24KeyStageSettings: React.FC<Bitrix24KeyStageSettingsProps> = ({
   userAccountId,
   entityType,
+  accountId,
   onClose,
 }) => {
   const [directions, setDirections] = useState<Direction[]>([]);
@@ -59,7 +61,7 @@ export const Bitrix24KeyStageSettings: React.FC<Bitrix24KeyStageSettingsProps> =
       setError(null);
       setSuccessMessage(null);
 
-      const result = await syncBitrix24Leads(userAccountId, entityType === 'both' ? undefined : entityType);
+      const result = await syncBitrix24Leads(userAccountId, entityType === 'both' ? undefined : entityType, accountId);
 
       setSuccessMessage(
         `Синхронизация завершена! Обновлено: ${result.updated}, ошибок: ${result.errors}`
