@@ -785,34 +785,39 @@ async function upsertDialogAnalysis(params: {
 /**
  * Проверить, есть ли активный бот для инстанса
  * Возвращает true только если бот существует и активен
+ *
+ * ВАЖНО: Логика должна совпадать с getBotConfigForInstance в chatbot-service!
+ * Проверяем ai_bot_configurations, а не устаревшие bot_instances/ai_bots
  */
 async function hasBotForInstance(instanceName: string): Promise<boolean> {
-  // Получаем инстанс
+  // Получаем инстанс с привязанным ai_bot_id
   const { data: instanceData, error: instanceError } = await supabase
     .from('whatsapp_instances')
-    .select('user_account_id')
+    .select('user_account_id, ai_bot_id')
     .eq('instance_name', instanceName)
-    .single();
+    .maybeSingle();
 
   if (instanceError || !instanceData) {
     return false;
   }
 
-  // Проверяем привязку бота к инстансу через bot_instances
-  const { data: botInstance } = await supabase
-    .from('bot_instances')
-    .select('id')
-    .eq('instance_name', instanceName)
-    .eq('is_active', true)
-    .maybeSingle();
+  // Если есть привязанный бот - проверяем его активность
+  if (instanceData.ai_bot_id) {
+    const { data: linkedBot } = await supabase
+      .from('ai_bot_configurations')
+      .select('id')
+      .eq('id', instanceData.ai_bot_id)
+      .eq('is_active', true)
+      .maybeSingle();
 
-  if (botInstance) {
-    return true;
+    if (linkedBot) {
+      return true;
+    }
   }
 
-  // Fallback: проверяем есть ли активный бот у пользователя
+  // Fallback: проверяем есть ли активный бот у пользователя в ai_bot_configurations
   const { data: fallbackBot } = await supabase
-    .from('ai_bots')
+    .from('ai_bot_configurations')
     .select('id')
     .eq('user_account_id', instanceData.user_account_id)
     .eq('is_active', true)
