@@ -136,6 +136,7 @@ const ROIAnalytics: React.FC = () => {
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
   const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
+  const [allCreativesFunnelOpen, setAllCreativesFunnelOpen] = useState(false);
 
   // Creative metrics state
   const [expandedCreativeId, setExpandedCreativeId] = useState<string | null>(null);
@@ -414,12 +415,12 @@ const ROIAnalytics: React.FC = () => {
     }
   };
 
-  // Обновление таблицы + фоновая синхронизация AmoCRM для всех креативов
+  // Обновление таблицы + фоновая синхронизация CRM для всех креативов
   const handleRefresh = async () => {
     // 1. Сначала обновляем таблицу
     await loadROIData();
 
-    // 2. Запускаем синхронизацию AmoCRM фоном (если есть подключение)
+    // 2. Запускаем синхронизацию CRM фоном (если есть подключение)
     if (!userAccountId || !roiData?.campaigns?.length) return;
 
     setIsSyncing(true);
@@ -428,9 +429,17 @@ const ROIAnalytics: React.FC = () => {
       const creativeIds = roiData.campaigns.map(c => c.id);
 
       // Синхронизируем каждый креатив фоном (параллельно, но с ограничением)
+      // Используем универсальный CRM endpoint который автоматически определяет подключённую CRM
       const syncPromises = creativeIds.map(async (creativeId) => {
         try {
-          await fetch(`${API_BASE_URL}/amocrm/sync-creative-leads?userAccountId=${userAccountId}&creativeId=${creativeId}`, {
+          const params = new URLSearchParams({
+            userAccountId,
+            creativeId
+          });
+          if (currentAdAccountId) {
+            params.append('accountId', currentAdAccountId);
+          }
+          await fetch(`${API_BASE_URL}/crm/sync-creative-leads?${params.toString()}`, {
             method: 'POST'
           });
         } catch (e) {
@@ -444,7 +453,7 @@ const ROIAnalytics: React.FC = () => {
       // 3. После синхронизации обновляем таблицу ещё раз чтобы показать новые данные
       await loadROIData();
     } catch (err) {
-      console.error('Ошибка синхронизации AmoCRM:', err);
+      console.error('Ошибка синхронизации CRM:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -1000,7 +1009,7 @@ const ROIAnalytics: React.FC = () => {
               </DropdownMenu>
             </div>
 
-            {/* Кнопки обновления и экспорта - справа */}
+            {/* Кнопки обновления, воронки и экспорта - справа */}
             <div className="flex items-center gap-2 ml-auto">
               <Button
                 variant="outline"
@@ -1011,6 +1020,16 @@ const ROIAnalytics: React.FC = () => {
               >
                 <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isSyncing && "animate-spin")} />
                 {isSyncing ? 'Синхронизация...' : 'Обновить'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs flex-shrink-0"
+                onClick={() => setAllCreativesFunnelOpen(true)}
+                title="Общее распределение по воронке"
+              >
+                <Filter className="h-3.5 w-3.5 mr-1.5" />
+                Воронка
               </Button>
               {sortedCampaigns.length > 0 && (
                 <Button
@@ -1937,7 +1956,7 @@ const ROIAnalytics: React.FC = () => {
           </TabsContent>
         </Tabs>
 
-        {/* Funnel Modal */}
+        {/* Funnel Modal - для конкретного креатива */}
         {selectedCreative && (
           <CreativeFunnelModal
             isOpen={funnelModalOpen}
@@ -1949,6 +1968,15 @@ const ROIAnalytics: React.FC = () => {
             accountId={currentAdAccountId}
           />
         )}
+
+        {/* Funnel Modal - общая воронка для всех креативов */}
+        <CreativeFunnelModal
+          isOpen={allCreativesFunnelOpen}
+          onClose={() => setAllCreativesFunnelOpen(false)}
+          userAccountId={userAccountId}
+          directionId={selectedDirectionId || undefined}
+          accountId={currentAdAccountId}
+        />
       </div>
     </div>
   );

@@ -258,6 +258,34 @@ bitrix24_key_stage_3_status_id    TEXT
 |----------|-------|-------|----------|
 | `/webhooks/bitrix24` | POST | `user_id, account_id?` | Входящий webhook от Bitrix24 |
 
+### Unified CRM API (работает с AmoCRM и Bitrix24)
+
+| Endpoint | Метод | Query | Описание |
+|----------|-------|-------|----------|
+| `/crm/status` | GET | `userAccountId, accountId?` | Определить подключённую CRM |
+| `/crm/creative-funnel-stats` | GET | `userAccountId, creativeId?, directionId?, dateFrom?, dateTo?, accountId?` | Статистика воронки для креатива или всех креативов |
+| `/crm/sync-creative-leads` | POST | `userAccountId, creativeId, accountId?` | Синхронизация лидов для креатива |
+
+**Примечание:** Если `creativeId` не указан в `/crm/creative-funnel-stats`, возвращается статистика по всем креативам.
+
+**Response `/crm/creative-funnel-stats`:**
+```json
+{
+  "crmType": "bitrix24",
+  "total_leads": 117,
+  "stages": [
+    {
+      "stage_name": "Новая",
+      "pipeline_name": "Общая воронка",
+      "count": 45,
+      "percentage": 38.5,
+      "color": "#00bfa5",
+      "sort_order": 10
+    }
+  ]
+}
+```
+
 ---
 
 ## Bitrix24 API Adapter

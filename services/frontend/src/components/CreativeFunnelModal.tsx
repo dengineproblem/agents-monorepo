@@ -1,12 +1,23 @@
 /**
- * Модалка распределения лидов по воронке для конкретного креатива
- * 
+ * Модалка распределения лидов по воронке для конкретного креатива или всех креативов
+ *
  * Показывает таблицу с этапами воронки, количеством лидов и процентами
+ * Автоматически работает с подключённой CRM (AmoCRM или Bitrix24)
+ *
+ * Режимы работы:
+ * - С creativeId: показывает статистику для конкретного креатива
+ * - Без creativeId: показывает общую статистику по всем креативам
  */
 
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Loader2, Filter } from 'lucide-react';
-import { getCreativeFunnelStats, triggerCreativeLeadsSync, FunnelStats } from '../services/amocrmApi';
+import {
+  getCreativeFunnelStats,
+  syncCreativeLeads,
+  getCRMDisplayName,
+  FunnelStats,
+  CRMType
+} from '../services/crmApi';
 import {
   Dialog,
   DialogContent,
@@ -22,8 +33,8 @@ import { Badge } from '@/components/ui/badge';
 interface CreativeFunnelModalProps {
   isOpen: boolean;
   onClose: () => void;
-  creativeId: string;
-  creativeName: string;
+  creativeId?: string; // Optional - if not provided, shows stats for all creatives
+  creativeName?: string; // Optional - title for the modal
   userAccountId: string;
   directionId?: string;
   dateFrom?: string;
@@ -47,13 +58,17 @@ export function CreativeFunnelModal({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Режим "все креативы" - если creativeId не указан
+  const isAllCreativesMode = !creativeId;
+  const modalTitle = creativeName || (isAllCreativesMode ? 'Все креативы' : 'Креатив');
+
   const loadStats = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getCreativeFunnelStats({
         userAccountId,
-        creativeId,
+        creativeId, // undefined в режиме "все креативы"
         directionId,
         dateFrom,
         dateTo,
@@ -68,10 +83,12 @@ export function CreativeFunnelModal({
   };
 
   const handleSync = async () => {
+    // Синхронизация доступна только для конкретного креатива
+    if (!creativeId) return;
+
     setSyncing(true);
     try {
-      // Используем быструю синхронизацию только для лидов этого креатива
-      await triggerCreativeLeadsSync(userAccountId, creativeId, accountId);
+      await syncCreativeLeads(userAccountId, creativeId, accountId);
       // Перезагружаем статистику после синхронизации
       await loadStats();
     } catch (err: any) {
@@ -87,6 +104,10 @@ export function CreativeFunnelModal({
     }
   }, [isOpen, creativeId, userAccountId, directionId, dateFrom, dateTo, accountId]);
 
+  // Получаем название CRM для отображения
+  const crmName = stats ? getCRMDisplayName(stats.crmType) : 'CRM';
+  const isNoCRM = stats?.crmType === 'none';
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -94,9 +115,14 @@ export function CreativeFunnelModal({
           <DialogTitle className="flex items-center gap-2">
             <Filter className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             Распределение по воронке
+            {isAllCreativesMode && (
+              <Badge variant="secondary" className="ml-2 text-xs">
+                Все креативы
+              </Badge>
+            )}
           </DialogTitle>
           <DialogDescription className="text-sm">
-            {creativeName}
+            {modalTitle}
           </DialogDescription>
         </DialogHeader>
 
@@ -111,14 +137,31 @@ export function CreativeFunnelModal({
                 <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
               </CardContent>
             </Card>
+          ) : isNoCRM ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Filter className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <p className="text-muted-foreground mb-2">
+                  CRM не подключена
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Подключите AmoCRM или Bitrix24 для отслеживания лидов по воронке
+                </p>
+              </CardContent>
+            </Card>
           ) : stats && stats.total_leads > 0 ? (
             <div className="space-y-4">
               {/* Статистика */}
               <Card className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
                 <CardContent className="p-4">
-                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-                    Всего лидов: {stats.total_leads}
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                      Всего лидов: {stats.total_leads}
+                    </p>
+                    <Badge variant="outline" className="text-xs">
+                      {crmName}
+                    </Badge>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -195,10 +238,13 @@ export function CreativeFunnelModal({
               <CardContent className="py-12 text-center">
                 <Filter className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground mb-2">
-                  Лидов не найдено в AmoCRM для этого креатива
+                  {isAllCreativesMode
+                    ? `Лидов не найдено в ${crmName}`
+                    : `Лидов не найдено в ${crmName} для этого креатива`}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Убедитесь, что лиды синхронизированы с AmoCRM и имеют правильный creative_id
+                  Убедитесь, что лиды синхронизированы с {crmName}
+                  {!isAllCreativesMode && ' и имеют правильный creative_id'}
                 </p>
               </CardContent>
             </Card>
@@ -206,24 +252,27 @@ export function CreativeFunnelModal({
         </div>
 
         <DialogFooter className="flex items-center justify-between">
-          <Button
-            onClick={handleSync}
-            disabled={syncing}
-            variant="outline"
-            size="sm"
-          >
-            {syncing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Синхронизация...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Обновить из AmoCRM
-              </>
-            )}
-          </Button>
+          {/* Кнопка синхронизации - только для конкретного креатива, не для режима "все креативы" */}
+          {!isNoCRM && !isAllCreativesMode && (
+            <Button
+              onClick={handleSync}
+              disabled={syncing}
+              variant="outline"
+              size="sm"
+            >
+              {syncing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Синхронизация...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Обновить из {crmName}
+                </>
+              )}
+            </Button>
+          )}
           <Button onClick={onClose} variant="secondary" size="sm">
             Закрыть
           </Button>
