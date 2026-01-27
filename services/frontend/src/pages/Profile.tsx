@@ -1166,12 +1166,30 @@ const Profile: React.FC = () => {
     }
   };
 
-  // Handle deal pipeline (category) change - just update local state, don't save until stage is selected
-  const handleDealCategoryChange = (categoryId: string) => {
+  // Handle deal pipeline (category) change - save to API immediately
+  const handleDealCategoryChange = async (categoryId: string) => {
+    if (!user?.id) return;
+
     const newCategoryId = categoryId ? parseInt(categoryId) : null;
     setDefaultDealCategory(newCategoryId);
-    // Reset stage when category changes
+    // Reset stage when category changes (stages are different per pipeline)
     setDefaultDealStage(null);
+
+    // Save category to API (stage will be null until user selects it)
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      await setBitrix24DefaultStage(
+        user.id,
+        {
+          dealCategory: newCategoryId,
+          dealStage: null  // Reset stage when category changes
+        },
+        accountId || undefined
+      );
+    } catch (error) {
+      console.error('Error saving deal category:', error);
+      // Don't show error toast - this is a background save
+    }
   };
 
   const handleSyncPipelines = async () => {
