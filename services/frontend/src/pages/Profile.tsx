@@ -1147,8 +1147,9 @@ const Profile: React.FC = () => {
         toast.success('Настройка сохранена');
       } else {
         // For deals, use passed categoryId (avoids stale closure)
+        // Note: categoryId can be 0 (default pipeline), so check for null/undefined explicitly
         const dealCategoryId = categoryId ?? defaultDealCategory;
-        if (!dealCategoryId) {
+        if (dealCategoryId === null || dealCategoryId === undefined) {
           toast.error('Сначала выберите воронку');
           return;
         }
