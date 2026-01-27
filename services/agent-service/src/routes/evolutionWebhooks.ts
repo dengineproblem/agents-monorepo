@@ -293,11 +293,10 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
     // Проверяем наличие бота перед вызовом - не делаем лишний запрос если бота нет
     const hasBot = await hasBotForInstance(instance);
-    app.log.info({ instance, clientPhone, hasBot }, 'hasBotForInstance check result');
     if (hasBot) {
       await tryBotResponse(clientPhone, instance, messageText, messageType, app);
     } else {
-      app.log.info({ instance, clientPhone }, 'No bot configured, skipping tryBotResponse');
+      app.log.debug({ instance, clientPhone }, 'No bot configured, skipping tryBotResponse');
     }
 
     return;
@@ -798,23 +797,18 @@ async function hasBotForInstance(instanceName: string): Promise<boolean> {
     .eq('instance_name', instanceName)
     .maybeSingle();
 
-  console.log('[hasBotForInstance]', { instanceName, instanceData, instanceError: instanceError?.message });
-
   if (instanceError || !instanceData) {
-    console.log('[hasBotForInstance] No instance found, returning false');
     return false;
   }
 
   // Если есть привязанный бот - проверяем его активность
   if (instanceData.ai_bot_id) {
-    const { data: linkedBot, error: linkedBotError } = await supabase
+    const { data: linkedBot } = await supabase
       .from('ai_bot_configurations')
       .select('id')
       .eq('id', instanceData.ai_bot_id)
       .eq('is_active', true)
       .maybeSingle();
-
-    console.log('[hasBotForInstance] Linked bot check:', { ai_bot_id: instanceData.ai_bot_id, linkedBot, linkedBotError: linkedBotError?.message });
 
     if (linkedBot) {
       return true;
@@ -822,14 +816,12 @@ async function hasBotForInstance(instanceName: string): Promise<boolean> {
   }
 
   // Fallback: проверяем есть ли активный бот у пользователя в ai_bot_configurations
-  const { data: fallbackBot, error: fallbackError } = await supabase
+  const { data: fallbackBot } = await supabase
     .from('ai_bot_configurations')
     .select('id')
     .eq('user_account_id', instanceData.user_account_id)
     .eq('is_active', true)
     .maybeSingle();
-
-  console.log('[hasBotForInstance] Fallback bot check:', { user_account_id: instanceData.user_account_id, fallbackBot, fallbackError: fallbackError?.message });
 
   return !!fallbackBot;
 }
