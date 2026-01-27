@@ -148,17 +148,17 @@ async function getDefaultStageSettings(
       }
 
       return {
-        leadStatus: adAccount.bitrix24_default_lead_status || null,
-        dealCategory: adAccount.bitrix24_default_deal_category || null,
-        dealStage: adAccount.bitrix24_default_deal_stage || null
+        leadStatus: adAccount.bitrix24_default_lead_status ?? null,
+        dealCategory: adAccount.bitrix24_default_deal_category ?? null,
+        dealStage: adAccount.bitrix24_default_deal_stage ?? null
       };
     }
 
     // Legacy mode: get from user_accounts
     return {
-      leadStatus: userAccount.bitrix24_default_lead_status || null,
-      dealCategory: userAccount.bitrix24_default_deal_category || null,
-      dealStage: userAccount.bitrix24_default_deal_stage || null
+      leadStatus: userAccount.bitrix24_default_lead_status ?? null,
+      dealCategory: userAccount.bitrix24_default_deal_category ?? null,
+      dealStage: userAccount.bitrix24_default_deal_stage ?? null
     };
 
   } catch (error) {
