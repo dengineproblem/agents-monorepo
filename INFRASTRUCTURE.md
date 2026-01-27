@@ -619,6 +619,24 @@ WhatsApp CRM - это отдельная подсистема для управ�
    - Управление конфигурацией бота
    - **Порт:** 8083
 
+**⚠️ ВАЖНО: Связка agent-service → chatbot-service**
+
+Поток сообщений AI бота:
+```
+WhatsApp → Evolution API → agent-service (webhook) → chatbot-service (POST /process-message)
+```
+
+В **agent-service** функция `hasBotForInstance()` проверяет, есть ли бот для инстанса:
+- Таблица: `ai_bot_configurations` (НЕ `bot_instances`, НЕ `ai_bots`!)
+- Связка: `whatsapp_instances.ai_bot_id` → `ai_bot_configurations.id`
+- Файл: `services/agent-service/src/routes/evolutionWebhooks.ts`
+
+В **chatbot-service** функция `getBotConfigForInstance()` получает конфигурацию бота:
+- Таблица: `ai_bot_configurations`
+- Файл: `services/chatbot-service/src/lib/aiBotEngine.ts`
+
+**Логика этих двух функций ДОЛЖНА совпадать!** Иначе agent-service не отправит сообщение в chatbot-service.
+
 4. **chatbot-worker**
    - Background worker для cron jobs
    - Reactivation campaigns (массовая рассылка)
@@ -1553,6 +1571,17 @@ docker-compose restart grafana
 ---
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
+
+**27 января 2026:**
+- ✅ **КРИТИЧЕСКИЙ ФИКС:** Восстановлена работа AI чатбота (chatbot-service)
+- ✅ Проблема: AI бот перестал отвечать на сообщения WhatsApp
+- ✅ Причина: Функция `hasBotForInstance` в agent-service проверяла неправильные таблицы БД
+- ✅ Было: Проверялись несуществующие таблицы `bot_instances` и `ai_bots` ❌
+- ✅ Стало: Проверяется правильная таблица `ai_bot_configurations` ✅
+- ✅ **ВАЖНО:** Логика `hasBotForInstance` должна совпадать с `getBotConfigForInstance` в chatbot-service!
+- ✅ Связка: `whatsapp_instances.ai_bot_id` → `ai_bot_configurations.id`
+- ✅ Файл: `services/agent-service/src/routes/evolutionWebhooks.ts` (функция `hasBotForInstance`)
+- ✅ Коммит: `7a29cd2` - "fix: hasBotForInstance checking wrong tables"
 
 **8 декабря 2025:**
 - ✅ **НОВАЯ СИСТЕМА:** User Analytics System для отслеживания активности пользователей
