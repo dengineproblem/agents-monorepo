@@ -667,6 +667,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
                       .eq('id', localLead.id);
 
                     if (linkError) {
+                      app.log.warn({ error: linkError, leadId: localLead.id, bitrix24LeadId: bitrixLead.ID }, 'Error linking lead to Bitrix24');
                       errorCount++;
                     } else {
                       linkedCount++;
@@ -717,6 +718,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
                         .eq('id', localLead.id);
 
                       if (linkError) {
+                        app.log.warn({ error: linkError, leadId: localLead.id, bitrix24DealId: bitrixDeal.ID }, 'Error linking lead to Bitrix24 deal');
                         errorCount++;
                       } else {
                         linkedCount++;
@@ -776,6 +778,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
                   .eq('id', localLead.id);
 
                 if (updateError) {
+                  app.log.warn({ error: updateError, leadId: localLead.id }, 'Error updating lead status from Bitrix24');
                   errorCount++;
                 } else {
                   updatedCount++;
@@ -825,6 +828,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
                   .eq('id', localDeal.id);
 
                 if (updateError) {
+                  app.log.warn({ error: updateError, leadId: localDeal.id }, 'Error updating deal status from Bitrix24');
                   errorCount++;
                 } else {
                   updatedCount++;
