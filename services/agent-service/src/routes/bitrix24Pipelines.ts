@@ -120,6 +120,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         for (const status of leadStatuses) {
           stagesToInsert.push({
             user_account_id: userAccountId,
+            account_id: accountId || null,  // For multi-account mode
             category_id: 0, // Leads don't have categories
             category_name: 'Лиды',
             status_id: status.STATUS_ID,
@@ -153,6 +154,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
           for (const stage of stages) {
             stagesToInsert.push({
               user_account_id: userAccountId,
+              account_id: accountId || null,  // For multi-account mode
               category_id: categoryId,
               category_name: category.NAME,
               status_id: stage.STATUS_ID,
@@ -169,11 +171,19 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         }
       }
 
-      // Delete existing stages for this user
-      await supabase
+      // Delete existing stages for this user/account
+      let deleteQuery = supabase
         .from('bitrix24_pipeline_stages')
         .delete()
         .eq('user_account_id', userAccountId);
+
+      if (accountId) {
+        deleteQuery = deleteQuery.eq('account_id', accountId);
+      } else {
+        deleteQuery = deleteQuery.is('account_id', null);
+      }
+
+      await deleteQuery;
 
       // Insert new stages
       if (stagesToInsert.length > 0) {
@@ -234,12 +244,21 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
+      const { userAccountId, accountId } = parsed.data;
 
-      const { data: stages, error } = await supabase
+      let query = supabase
         .from('bitrix24_pipeline_stages')
         .select('*')
-        .eq('user_account_id', userAccountId)
+        .eq('user_account_id', userAccountId);
+
+      // In multi-account mode, filter by accountId
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      } else {
+        query = query.is('account_id', null);
+      }
+
+      const { data: stages, error } = await query
         .order('entity_type', { ascending: true })
         .order('category_id', { ascending: true })
         .order('status_sort', { ascending: true });

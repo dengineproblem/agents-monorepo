@@ -212,14 +212,19 @@ export async function syncBitrix24Pipelines(
  * Get all pipelines and stages for user
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad account UUID for multi-account mode
  * @returns Pipelines grouped by entity type
  */
 export async function getBitrix24Pipelines(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string
 ): Promise<Bitrix24Pipelines> {
-  const response = await fetch(
-    `${API_BASE_URL}/bitrix24/pipelines?userAccountId=${userAccountId}`
-  );
+  let url = `${API_BASE_URL}/bitrix24/pipelines?userAccountId=${userAccountId}`;
+  if (accountId) {
+    url += `&accountId=${accountId}`;
+  }
+
+  const response = await fetch(url);
 
   if (!response.ok) {
     const error = await response.json();

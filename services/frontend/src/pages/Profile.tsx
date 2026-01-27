@@ -1093,8 +1093,8 @@ const Profile: React.FC = () => {
       const loadPipelinesAndDefaults = async () => {
         setLoadingPipelines(true);
         try {
-          // Load pipelines
-          const pipelines = await getBitrix24Pipelines(user.id);
+          // Load pipelines (pass accountId for multi-account mode)
+          const pipelines = await getBitrix24Pipelines(user.id, accountId || undefined);
           setBitrix24Pipelines(pipelines);
 
           // Load default stage settings
@@ -1170,7 +1170,7 @@ const Profile: React.FC = () => {
     try {
       const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
       await syncBitrix24Pipelines(user.id, accountId);
-      const pipelines = await getBitrix24Pipelines(user.id);
+      const pipelines = await getBitrix24Pipelines(user.id, accountId);
       setBitrix24Pipelines(pipelines);
       toast.success('Воронки синхронизированы');
     } catch (error) {
