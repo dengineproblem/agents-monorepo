@@ -262,7 +262,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
                             ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
                             : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                         }`}>
-                          {direction.platform === 'tiktok' ? 'TikTok' : 'Facebook'}
+                          {direction.platform === 'tiktok' ? 'TikTok' : 'Meta'}
                         </span>
                         <h3 className="font-semibold truncate">
                           {direction.name}
