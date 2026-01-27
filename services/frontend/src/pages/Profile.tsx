@@ -1133,7 +1133,7 @@ const Profile: React.FC = () => {
     }
   };
 
-  const handleDefaultStageChange = async (type: 'lead' | 'deal', value: string) => {
+  const handleDefaultStageChange = async (type: 'lead' | 'deal', value: string, categoryId?: number | null) => {
     if (!user?.id) return;
 
     try {
@@ -1144,15 +1144,16 @@ const Profile: React.FC = () => {
         setDefaultLeadStatus(value || null);
         toast.success('Настройка сохранена');
       } else {
-        // For deals, value is just stageId - categoryId is already set
-        if (!defaultDealCategory) {
+        // For deals, use passed categoryId (avoids stale closure)
+        const dealCategoryId = categoryId ?? defaultDealCategory;
+        if (!dealCategoryId) {
           toast.error('Сначала выберите воронку');
           return;
         }
         await setBitrix24DefaultStage(
           user.id,
           {
-            dealCategory: defaultDealCategory,
+            dealCategory: dealCategoryId,
             dealStage: value || null
           },
           accountId || undefined
@@ -2276,7 +2277,7 @@ const Profile: React.FC = () => {
                           <Label className="text-xs text-muted-foreground">Этап сделки</Label>
                           <Select
                             value={defaultDealStage || ''}
-                            onValueChange={(value) => handleDefaultStageChange('deal', value)}
+                            onValueChange={(value) => handleDefaultStageChange('deal', value, defaultDealCategory)}
                             disabled={loadingPipelines}
                           >
                             <SelectTrigger className="w-full">
