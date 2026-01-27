@@ -1142,25 +1142,36 @@ const Profile: React.FC = () => {
       if (type === 'lead') {
         await setBitrix24DefaultStage(user.id, { leadStatus: value || null }, accountId || undefined);
         setDefaultLeadStatus(value || null);
+        toast.success('Настройка сохранена');
       } else {
-        // For deals, value is "categoryId:stageId"
-        const [categoryId, stageId] = value.split(':');
+        // For deals, value is just stageId - categoryId is already set
+        if (!defaultDealCategory) {
+          toast.error('Сначала выберите воронку');
+          return;
+        }
         await setBitrix24DefaultStage(
           user.id,
           {
-            dealCategory: categoryId ? parseInt(categoryId) : null,
-            dealStage: stageId || null
+            dealCategory: defaultDealCategory,
+            dealStage: value || null
           },
           accountId || undefined
         );
-        setDefaultDealCategory(categoryId ? parseInt(categoryId) : null);
-        setDefaultDealStage(stageId || null);
+        setDefaultDealStage(value || null);
+        toast.success('Настройка сохранена');
       }
-      toast.success('Настройка сохранена');
     } catch (error) {
       console.error('Error updating default stage:', error);
       toast.error('Ошибка при сохранении настройки');
     }
+  };
+
+  // Handle deal pipeline (category) change - just update local state, don't save until stage is selected
+  const handleDealCategoryChange = (categoryId: string) => {
+    const newCategoryId = categoryId ? parseInt(categoryId) : null;
+    setDefaultDealCategory(newCategoryId);
+    // Reset stage when category changes
+    setDefaultDealStage(null);
   };
 
   const handleSyncPipelines = async () => {
@@ -2221,32 +2232,51 @@ const Profile: React.FC = () => {
                   )}
 
                   {(bitrix24EntityType === 'deal' || bitrix24EntityType === 'both') && (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Воронка и этап сделки</Label>
-                      <Select
-                        value={defaultDealCategory && defaultDealStage ? `${defaultDealCategory}:${defaultDealStage}` : ''}
-                        onValueChange={(value) => handleDefaultStageChange('deal', value)}
-                        disabled={loadingPipelines}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Выберите воронку и этап" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {bitrix24Pipelines?.deals?.map((pipeline) => (
-                            <SelectGroup key={pipeline.categoryId}>
-                              <SelectLabel className="font-semibold text-xs text-muted-foreground">
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Воронка сделки</Label>
+                        <Select
+                          value={defaultDealCategory?.toString() || ''}
+                          onValueChange={handleDealCategoryChange}
+                          disabled={loadingPipelines}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Выберите воронку" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {bitrix24Pipelines?.deals?.map((pipeline) => (
+                              <SelectItem key={pipeline.categoryId} value={pipeline.categoryId.toString()}>
                                 {pipeline.categoryName}
-                              </SelectLabel>
-                              {pipeline.stages.map((stage) => (
-                                <SelectItem key={`${pipeline.categoryId}:${stage.statusId}`} value={`${pipeline.categoryId}:${stage.statusId}`}>
-                                  {stage.statusName}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {defaultDealCategory !== null && (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Этап сделки</Label>
+                          <Select
+                            value={defaultDealStage || ''}
+                            onValueChange={(value) => handleDefaultStageChange('deal', value)}
+                            disabled={loadingPipelines}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Выберите этап" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {bitrix24Pipelines?.deals
+                                ?.find((p) => p.categoryId === defaultDealCategory)
+                                ?.stages.map((stage) => (
+                                  <SelectItem key={stage.statusId} value={stage.statusId}>
+                                    {stage.statusName}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {!bitrix24Pipelines && !loadingPipelines && (
