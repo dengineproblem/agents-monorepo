@@ -1104,6 +1104,7 @@ const Profile: React.FC = () => {
           setDefaultLeadStatus(defaults.leadStatus);
           setDefaultDealCategory(defaults.dealCategory);
           setDefaultDealStage(defaults.dealStage);
+          setDefaultStagesDirty(false); // Reset dirty flag after loading
         } catch (error) {
           console.error('Error loading pipelines:', error);
         } finally {
@@ -1135,64 +1136,59 @@ const Profile: React.FC = () => {
     }
   };
 
-  const handleDefaultStageChange = async (type: 'lead' | 'deal', value: string, categoryId?: number | null) => {
-    if (!user?.id) return;
+  // Track if default stage settings have unsaved changes
+  const [defaultStagesDirty, setDefaultStagesDirty] = useState(false);
+  const [savingDefaultStages, setSavingDefaultStages] = useState(false);
 
-    try {
-      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
-
-      if (type === 'lead') {
-        await setBitrix24DefaultStage(user.id, { leadStatus: value || null }, accountId || undefined);
-        setDefaultLeadStatus(value || null);
-        toast.success('Настройка сохранена');
-      } else {
-        // For deals, use passed categoryId (avoids stale closure)
-        // Note: categoryId can be 0 (default pipeline), so check for null/undefined explicitly
-        const dealCategoryId = categoryId ?? defaultDealCategory;
-        if (dealCategoryId === null || dealCategoryId === undefined) {
-          toast.error('Сначала выберите воронку');
-          return;
-        }
-        await setBitrix24DefaultStage(
-          user.id,
-          {
-            dealCategory: dealCategoryId,
-            dealStage: value || null
-          },
-          accountId || undefined
-        );
-        setDefaultDealStage(value || null);
-        toast.success('Настройка сохранена');
-      }
-    } catch (error) {
-      console.error('Error updating default stage:', error);
-      toast.error('Ошибка при сохранении настройки');
-    }
+  // Handle lead status change - only update local state
+  const handleLeadStatusChange = (value: string) => {
+    setDefaultLeadStatus(value || null);
+    setDefaultStagesDirty(true);
   };
 
-  // Handle deal pipeline (category) change - save to API immediately
-  const handleDealCategoryChange = async (categoryId: string) => {
-    if (!user?.id) return;
+  // Handle deal stage change - only update local state
+  const handleDealStageChange = (value: string) => {
+    setDefaultDealStage(value || null);
+    setDefaultStagesDirty(true);
+  };
 
+  // Handle deal pipeline (category) change - only update local state
+  const handleDealCategoryChange = (categoryId: string) => {
     const newCategoryId = categoryId ? parseInt(categoryId) : null;
     setDefaultDealCategory(newCategoryId);
     // Reset stage when category changes (stages are different per pipeline)
     setDefaultDealStage(null);
+    setDefaultStagesDirty(true);
+  };
 
-    // Save category to API (stage will be null until user selects it)
+  // Save all default stage settings to API
+  const handleSaveDefaultStages = async () => {
+    if (!user?.id) return;
+
+    setSavingDefaultStages(true);
     try {
       const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
-      await setBitrix24DefaultStage(
-        user.id,
-        {
-          dealCategory: newCategoryId,
-          dealStage: null  // Reset stage when category changes
-        },
-        accountId || undefined
-      );
+
+      // Build update object based on entity type
+      const updateData: { leadStatus?: string | null; dealCategory?: number | null; dealStage?: string | null } = {};
+
+      if (bitrix24EntityType === 'lead' || bitrix24EntityType === 'both') {
+        updateData.leadStatus = defaultLeadStatus;
+      }
+
+      if (bitrix24EntityType === 'deal' || bitrix24EntityType === 'both') {
+        updateData.dealCategory = defaultDealCategory;
+        updateData.dealStage = defaultDealStage;
+      }
+
+      await setBitrix24DefaultStage(user.id, updateData, accountId || undefined);
+      setDefaultStagesDirty(false);
+      toast.success('Настройки сохранены');
     } catch (error) {
-      console.error('Error saving deal category:', error);
-      // Don't show error toast - this is a background save
+      console.error('Error saving default stages:', error);
+      toast.error('Ошибка при сохранении настроек');
+    } finally {
+      setSavingDefaultStages(false);
     }
   };
 
@@ -2234,7 +2230,7 @@ const Profile: React.FC = () => {
                       <Label className="text-xs text-muted-foreground">Этап лида</Label>
                       <Select
                         value={defaultLeadStatus || ''}
-                        onValueChange={(value) => handleDefaultStageChange('lead', value)}
+                        onValueChange={handleLeadStatusChange}
                         disabled={loadingPipelines}
                       >
                         <SelectTrigger className="w-full">
@@ -2280,7 +2276,7 @@ const Profile: React.FC = () => {
                           <Label className="text-xs text-muted-foreground">Этап сделки</Label>
                           <Select
                             value={defaultDealStage || ''}
-                            onValueChange={(value) => handleDefaultStageChange('deal', value, defaultDealCategory)}
+                            onValueChange={handleDealStageChange}
                             disabled={loadingPipelines}
                           >
                             <SelectTrigger className="w-full">
@@ -2305,6 +2301,16 @@ const Profile: React.FC = () => {
                     <p className="text-xs text-muted-foreground">
                       Нажмите "Обновить" для загрузки воронок из Bitrix24
                     </p>
+                  )}
+
+                  {bitrix24Pipelines && (
+                    <Button
+                      onClick={handleSaveDefaultStages}
+                      disabled={!defaultStagesDirty || savingDefaultStages}
+                      className="w-full"
+                    >
+                      {savingDefaultStages ? 'Сохранение...' : 'Сохранить настройки этапов'}
+                    </Button>
                   )}
                 </div>
               )}
