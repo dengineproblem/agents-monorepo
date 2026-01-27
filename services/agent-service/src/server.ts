@@ -55,6 +55,7 @@ import adminSettingsRoutes from './routes/adminSettings.js';
 import adInsightsRoutes from './routes/adInsights.js';
 import budgetForecastRoutes from './routes/budgetForecast.js';
 import tusUploadRoutes from './routes/tusUpload.js';
+import creativeAnalysisRoutes from './routes/creativeAnalysis.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
@@ -190,6 +191,7 @@ app.register(brainProposalsRoutes);
 app.register(impersonationRoutes);
 app.register(telegramWebhook);
 app.register(budgetForecastRoutes);
+app.register(creativeAnalysisRoutes);
 
 // SECURITY: Admin routes с обязательной проверкой is_tech_admin
 app.register(async (adminApp) => {

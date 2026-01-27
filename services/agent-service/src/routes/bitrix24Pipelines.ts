@@ -22,6 +22,10 @@ import {
   getDeals,
   getLead,
   getDeal,
+  getContact,
+  findByPhone,
+  extractPhone,
+  normalizePhone,
   Bitrix24Status,
   Bitrix24DealCategory
 } from '../adapters/bitrix24.js';
@@ -573,7 +577,9 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
   /**
    * POST /bitrix24/sync-leads
    *
-   * Sync leads/deals from Bitrix24 to update their status
+   * Sync leads/deals from Bitrix24:
+   * 1. For leads WITHOUT bitrix24_lead_id/deal_id - search by phone and link
+   * 2. For leads WITH bitrix24_lead_id/deal_id - update status
    */
   app.post('/bitrix24/sync-leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -600,8 +606,139 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
 
       const qualificationFields = userAccount?.bitrix24_qualification_fields || [];
 
-      let updatedCount = 0;
+      let linkedCount = 0;  // New links created
+      let updatedCount = 0; // Existing links updated
       let errorCount = 0;
+
+      // ========================================================================
+      // STEP 1: Link unlinked leads by phone number
+      // ========================================================================
+
+      // Get all leads with phone but without Bitrix24 link
+      const { data: unlinkedLeads } = await supabase
+        .from('leads')
+        .select('id, phone')
+        .eq('user_account_id', userAccountId)
+        .not('phone', 'is', null)
+        .is('bitrix24_lead_id', null)
+        .is('bitrix24_deal_id', null)
+        .limit(200);
+
+      if (unlinkedLeads && unlinkedLeads.length > 0) {
+        app.log.info({ count: unlinkedLeads.length }, 'Found unlinked leads with phone numbers');
+
+        // Process in batches of 20 (Bitrix24 limit for findbycomm)
+        for (let i = 0; i < unlinkedLeads.length; i += 20) {
+          const batch = unlinkedLeads.slice(i, i + 20) as Array<{ id: string; phone: string }>;
+          const phones = batch.map(l => l.phone).filter(Boolean);
+
+          if (phones.length === 0) continue;
+
+          try {
+            if (effectiveEntityType === 'lead' || effectiveEntityType === 'both') {
+              // Search for Bitrix24 leads by phone
+              const foundLeads = await findByPhone(domain, accessToken, phones, 'LEAD');
+
+              if (foundLeads.LEAD && foundLeads.LEAD.length > 0) {
+                // Get full lead data
+                const bitrixLeads = await getLeads(domain, accessToken, {
+                  ID: foundLeads.LEAD
+                }, ['ID', 'STATUS_ID', 'STATUS_SEMANTIC_ID', 'PHONE', ...qualificationFields.map((f: any) => f.field_name)]);
+
+                for (const bitrixLead of bitrixLeads) {
+                  // Find matching local lead by phone
+                  const bitrixPhone = extractPhone(bitrixLead);
+                  if (!bitrixPhone) continue;
+
+                  const normalizedBitrixPhone = normalizePhone(bitrixPhone);
+                  const localLead = batch.find(l => normalizePhone(l.phone) === normalizedBitrixPhone);
+
+                  if (localLead) {
+                    const isQualified = checkQualification(bitrixLead, qualificationFields);
+
+                    const { error: linkError } = await supabase
+                      .from('leads')
+                      .update({
+                        bitrix24_lead_id: parseInt(bitrixLead.ID || '0', 10),
+                        bitrix24_entity_type: 'lead',
+                        current_status_id: bitrixLead.STATUS_ID,
+                        is_qualified: isQualified
+                      })
+                      .eq('id', localLead.id);
+
+                    if (linkError) {
+                      errorCount++;
+                    } else {
+                      linkedCount++;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (effectiveEntityType === 'deal' || effectiveEntityType === 'both') {
+              // Search for Bitrix24 contacts by phone, then get their deals
+              const foundContacts = await findByPhone(domain, accessToken, phones, 'CONTACT');
+
+              if (foundContacts.CONTACT && foundContacts.CONTACT.length > 0) {
+                // Get contacts with phone data
+                for (const contactId of foundContacts.CONTACT) {
+                  try {
+                    const contact = await getContact(domain, accessToken, contactId);
+                    if (!contact) continue;
+
+                    const contactPhone = extractPhone(contact);
+                    if (!contactPhone) continue;
+
+                    const normalizedContactPhone = normalizePhone(contactPhone);
+                    const localLead = batch.find(l => normalizePhone(l.phone) === normalizedContactPhone);
+
+                    if (!localLead) continue;
+
+                    // Get deals for this contact
+                    const contactDeals = await getDeals(domain, accessToken, {
+                      CONTACT_ID: contactId
+                    }, ['ID', 'STAGE_ID', 'STAGE_SEMANTIC_ID', 'CATEGORY_ID', ...qualificationFields.map((f: any) => f.field_name)]);
+
+                    if (contactDeals.length > 0) {
+                      // Link to the most recent deal (first one)
+                      const bitrixDeal = contactDeals[0];
+                      const isQualified = checkQualification(bitrixDeal, qualificationFields);
+
+                      const { error: linkError } = await supabase
+                        .from('leads')
+                        .update({
+                          bitrix24_deal_id: parseInt(bitrixDeal.ID || '0', 10),
+                          bitrix24_entity_type: 'deal',
+                          current_status_id: bitrixDeal.STAGE_ID,
+                          current_pipeline_id: parseInt(bitrixDeal.CATEGORY_ID || '0', 10),
+                          is_qualified: isQualified
+                        })
+                        .eq('id', localLead.id);
+
+                      if (linkError) {
+                        errorCount++;
+                      } else {
+                        linkedCount++;
+                      }
+                    }
+                  } catch (contactError: any) {
+                    app.log.error({ error: contactError, contactId }, 'Error processing contact for deal linking');
+                    errorCount++;
+                  }
+                }
+              }
+            }
+          } catch (batchError: any) {
+            app.log.error({ error: batchError, phones }, 'Error searching Bitrix24 by phone');
+            errorCount += batch.length;
+          }
+        }
+      }
+
+      // ========================================================================
+      // STEP 2: Update status for already linked leads
+      // ========================================================================
 
       // Sync leads if needed
       if (effectiveEntityType === 'lead' || effectiveEntityType === 'both') {
@@ -704,12 +841,14 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       app.log.info({
         userAccountId,
         effectiveEntityType,
+        linkedCount,
         updatedCount,
         errorCount
       }, 'Bitrix24 leads sync completed');
 
       return reply.send({
         success: true,
+        linked: linkedCount,
         updated: updatedCount,
         errors: errorCount
       });

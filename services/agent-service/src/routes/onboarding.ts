@@ -20,6 +20,7 @@ import {
 } from '../services/adInsightsSync.js';
 import { normalizeAllResults } from '../services/resultNormalizer.js';
 import { processAdAccount as detectAnomalies } from '../services/anomalyDetector.js';
+import { analyzeTopCreatives } from './creativeAnalysis.js';
 
 const logger = createLogger({ module: 'onboardingRoutes' });
 
@@ -656,6 +657,11 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       // Запускаем фоновую синхронизацию (не ждём завершения)
       triggerBackgroundSync(userId).catch(err => {
         logger.error({ error: String(err), userId }, 'Background sync trigger failed');
+      });
+
+      // Анализируем топ креативы и импортируем лучшие (в фоне)
+      analyzeTopCreatives(userId).catch(err => {
+        logger.error({ error: String(err), userId }, 'Top creatives analysis failed');
       });
 
       return reply.send({

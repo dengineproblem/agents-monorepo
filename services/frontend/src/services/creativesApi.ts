@@ -37,6 +37,14 @@ export type UserCreative = {
   thumbnail_url?: string | null;
   // Данные карусели (carousel креативы)
   carousel_data?: CarouselCard[] | null;
+  // Источник креатива: uploaded (загружен пользователем) или imported_analysis (импортирован из анализа FB)
+  source?: 'uploaded' | 'imported_analysis' | null;
+  // Для импортированных креативов: оригинальный Facebook Ad ID
+  fb_ad_id?: string | null;
+  // CPL в центах на момент импорта (для imported_analysis)
+  imported_cpl_cents?: number | null;
+  // Количество лидов на момент импорта (для imported_analysis)
+  imported_leads?: number | null;
 };
 
 export type CreativeTestStatus = {
@@ -594,5 +602,95 @@ export const creativesApi = {
         upload.start();
       });
     });
+  },
+
+  /**
+   * Запускает анализ топ креативов из Facebook и импортирует лучшие
+   */
+  async analyzeTopCreatives(accountId?: string | null, force: boolean = false): Promise<{
+    success: boolean;
+    imported?: number;
+    error?: string;
+  }> {
+    const userId = getUserId();
+    if (!userId) {
+      return { success: false, error: 'User not authenticated' };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/analyze-top-creatives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          account_id: accountId || undefined,
+          force
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to analyze creatives'
+        };
+      }
+
+      return {
+        success: true,
+        imported: data.imported
+      };
+    } catch (error) {
+      console.error('creativesApi.analyzeTopCreatives error:', error);
+      return {
+        success: false,
+        error: 'Network error during analysis'
+      };
+    }
+  },
+
+  /**
+   * Проверяет статус импортированных креативов
+   */
+  async getImportedCreativesStatus(accountId?: string | null): Promise<{
+    hasImported: boolean;
+    count: number;
+    creatives: Array<{
+      id: string;
+      title: string;
+      imported_cpl_cents: number | null;
+      imported_leads: number | null;
+      created_at: string;
+    }>;
+  }> {
+    const userId = getUserId();
+    if (!userId) {
+      return { hasImported: false, count: 0, creatives: [] };
+    }
+
+    try {
+      const params = new URLSearchParams({ user_id: userId });
+      if (accountId) {
+        params.set('account_id', accountId);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/analyze-top-creatives/status?${params.toString()}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('getImportedCreativesStatus error:', data.error);
+        return { hasImported: false, count: 0, creatives: [] };
+      }
+
+      return {
+        hasImported: data.hasImported,
+        count: data.count,
+        creatives: data.creatives || []
+      };
+    } catch (error) {
+      console.error('creativesApi.getImportedCreativesStatus error:', error);
+      return { hasImported: false, count: 0, creatives: [] };
+    }
   },
 };

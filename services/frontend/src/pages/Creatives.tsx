@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket, Download, Zap } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { manualLaunchAds, ManualLaunchResponse } from "@/services/manualLaunchApi";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -1370,6 +1370,7 @@ const Creatives: React.FC = () => {
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
   const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
   const [isLaunching, setIsLaunching] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Состояния для Manual Launch модалки
   const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
@@ -1455,6 +1456,30 @@ const Creatives: React.FC = () => {
     } catch (error) {
       console.error('Ошибка при удалении креативов:', error);
       toast.error('Не удалось удалить креативы');
+    }
+  };
+
+  // Импортировать топ креативы из Facebook
+  const handleImportTopCreatives = async () => {
+    if (!currentAdAccountId) {
+      toast.error('Выберите рекламный аккаунт');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const result = await creativesApi.analyzeTopCreatives(currentAdAccountId, true);
+      if (result.success) {
+        toast.success(`Импортировано ${result.imported || 0} креативов`);
+        await reload();
+      } else {
+        toast.error(result.error || 'Ошибка импорта креативов');
+      }
+    } catch (error: any) {
+      console.error('Ошибка импорта:', error);
+      toast.error(error.message || 'Не удалось импортировать креативы');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -2011,6 +2036,24 @@ const Creatives: React.FC = () => {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
+                  {/* Кнопка импорта лучших креативов (только для Facebook) */}
+                  {platform !== 'tiktok' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleImportTopCreatives}
+                      disabled={isImporting || !currentAdAccountId}
+                      className="h-7 px-2 text-xs gap-1"
+                      title="Импортировать топ-5 креативов по CPL из Facebook"
+                    >
+                      {isImporting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Zap className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">Импорт лучших</span>
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={reload} disabled={loading} className="h-7 w-7 p-0">
                     <RefreshCw className="h-3.5 w-3.5" />
                   </Button>
@@ -2096,6 +2139,24 @@ const Creatives: React.FC = () => {
                           <div className="flex-shrink-0 hidden sm:block">
                             <MediaTypeBadge mediaType={it.media_type} showLabel={false} />
                           </div>
+
+                          {/* Badge "Импортирован" для креативов из анализа */}
+                          {it.source === 'imported_analysis' && (
+                            <div className="flex-shrink-0 hidden sm:flex items-center gap-1">
+                              <Badge
+                                className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                                title={it.imported_cpl_cents ? `CPL: $${(it.imported_cpl_cents / 100).toFixed(2)}, ${it.imported_leads || 0} лидов` : 'Импортирован из Facebook'}
+                              >
+                                <Zap className="h-3 w-3 mr-1" />
+                                Топ
+                                {it.imported_cpl_cents && (
+                                  <span className="ml-1 opacity-80">
+                                    ${(it.imported_cpl_cents / 100).toFixed(2)}
+                                  </span>
+                                )}
+                              </Badge>
+                            </div>
+                          )}
 
                           {/* Индикатор статуса теста */}
                           <div className="flex-shrink-0">
