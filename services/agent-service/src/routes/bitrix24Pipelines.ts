@@ -1410,6 +1410,405 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
     }
   });
 
+  // ============================================================================
+  // Auto-Create Leads Setting Endpoints
+  // ============================================================================
+
+  /**
+   * GET /bitrix24/auto-create-leads
+   *
+   * Get current auto-create leads setting
+   * Returns whether leads are automatically created in Bitrix24 when received from Facebook Lead Forms
+   */
+  app.get('/bitrix24/auto-create-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId } = parsed.data;
+
+      // Check if multi-account mode is enabled
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, bitrix24_auto_create_leads, bitrix24_domain')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({
+          error: 'not_found',
+          message: 'User account not found'
+        });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        // Multi-account mode: get from ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('bitrix24_auto_create_leads, bitrix24_domain')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (!adAccount) {
+          return reply.code(404).send({
+            error: 'not_found',
+            message: 'Ad account not found'
+          });
+        }
+
+        return reply.send({
+          enabled: adAccount.bitrix24_auto_create_leads === true,
+          bitrix24Connected: !!adAccount.bitrix24_domain
+        });
+      }
+
+      // Legacy mode: get from user_accounts
+      return reply.send({
+        enabled: userAccount.bitrix24_auto_create_leads === true,
+        bitrix24Connected: !!userAccount.bitrix24_domain
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching Bitrix24 auto-create setting');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /bitrix24/auto-create-leads
+   *
+   * Update auto-create leads setting
+   * Enables/disables automatic lead creation in Bitrix24 when leads are received from Facebook Lead Forms
+   */
+  app.patch('/bitrix24/auto-create-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const AutoCreateBodySchema = z.object({
+        userAccountId: z.string().uuid(),
+        accountId: z.string().uuid().optional(),
+        enabled: z.boolean()
+      });
+
+      const parsed = AutoCreateBodySchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId, enabled } = parsed.data;
+
+      // Check if multi-account mode is enabled
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, bitrix24_domain')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({
+          error: 'not_found',
+          message: 'User account not found'
+        });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        // Multi-account mode: update ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('bitrix24_domain')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (!adAccount) {
+          return reply.code(404).send({
+            error: 'not_found',
+            message: 'Ad account not found'
+          });
+        }
+
+        if (!adAccount.bitrix24_domain) {
+          return reply.code(400).send({
+            error: 'bitrix24_not_connected',
+            message: 'Bitrix24 is not connected for this ad account'
+          });
+        }
+
+        const { error: updateError } = await supabase
+          .from('ad_accounts')
+          .update({ bitrix24_auto_create_leads: enabled })
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId);
+
+        if (updateError) {
+          throw new Error(`Failed to update setting: ${updateError.message}`);
+        }
+
+        app.log.info({ userAccountId, accountId, enabled }, 'Bitrix24 auto-create setting updated (multi-account)');
+
+        return reply.send({ success: true, enabled });
+      }
+
+      // Legacy mode: update user_accounts
+      if (!userAccount.bitrix24_domain) {
+        return reply.code(400).send({
+          error: 'bitrix24_not_connected',
+          message: 'Bitrix24 is not connected for this account'
+        });
+      }
+
+      const { error: updateError } = await supabase
+        .from('user_accounts')
+        .update({ bitrix24_auto_create_leads: enabled })
+        .eq('id', userAccountId);
+
+      if (updateError) {
+        throw new Error(`Failed to update setting: ${updateError.message}`);
+      }
+
+      app.log.info({ userAccountId, enabled }, 'Bitrix24 auto-create setting updated');
+
+      return reply.send({ success: true, enabled });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating Bitrix24 auto-create setting');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  // ============================================================================
+  // Default Stage Setting Endpoints
+  // ============================================================================
+
+  /**
+   * GET /bitrix24/default-stage
+   *
+   * Get current default stage settings for auto-created leads/deals
+   * Returns the configured pipeline and stage where new entities will be created
+   */
+  app.get('/bitrix24/default-stage', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId } = parsed.data;
+
+      // Check if multi-account mode is enabled
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({
+          error: 'not_found',
+          message: 'User account not found'
+        });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        // Multi-account mode: get from ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (!adAccount) {
+          return reply.code(404).send({
+            error: 'not_found',
+            message: 'Ad account not found'
+          });
+        }
+
+        return reply.send({
+          entityType: adAccount.bitrix24_entity_type || 'lead',
+          leadStatus: adAccount.bitrix24_default_lead_status || null,
+          dealCategory: adAccount.bitrix24_default_deal_category || null,
+          dealStage: adAccount.bitrix24_default_deal_stage || null
+        });
+      }
+
+      // Legacy mode: get from user_accounts
+      return reply.send({
+        entityType: userAccount.bitrix24_entity_type || 'lead',
+        leadStatus: userAccount.bitrix24_default_lead_status || null,
+        dealCategory: userAccount.bitrix24_default_deal_category || null,
+        dealStage: userAccount.bitrix24_default_deal_stage || null
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching Bitrix24 default stage');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /bitrix24/default-stage
+   *
+   * Update default stage settings for auto-created leads/deals
+   * Sets the pipeline and stage where new entities will be created
+   */
+  app.patch('/bitrix24/default-stage', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const DefaultStageBodySchema = z.object({
+        userAccountId: z.string().uuid(),
+        accountId: z.string().uuid().optional(),
+        leadStatus: z.string().nullable().optional(),
+        dealCategory: z.number().nullable().optional(),
+        dealStage: z.string().nullable().optional()
+      });
+
+      const parsed = DefaultStageBodySchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId, leadStatus, dealCategory, dealStage } = parsed.data;
+
+      // Check if multi-account mode is enabled
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, bitrix24_domain')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({
+          error: 'not_found',
+          message: 'User account not found'
+        });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      // Build update object
+      const updateData: Record<string, any> = {};
+      if (leadStatus !== undefined) {
+        updateData.bitrix24_default_lead_status = leadStatus;
+      }
+      if (dealCategory !== undefined) {
+        updateData.bitrix24_default_deal_category = dealCategory;
+      }
+      if (dealStage !== undefined) {
+        updateData.bitrix24_default_deal_stage = dealStage;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'No fields to update'
+        });
+      }
+
+      if (isMultiAccountMode) {
+        // Multi-account mode: update ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('bitrix24_domain')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (!adAccount) {
+          return reply.code(404).send({
+            error: 'not_found',
+            message: 'Ad account not found'
+          });
+        }
+
+        if (!adAccount.bitrix24_domain) {
+          return reply.code(400).send({
+            error: 'bitrix24_not_connected',
+            message: 'Bitrix24 is not connected for this ad account'
+          });
+        }
+
+        const { error: updateError } = await supabase
+          .from('ad_accounts')
+          .update(updateData)
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId);
+
+        if (updateError) {
+          throw new Error(`Failed to update setting: ${updateError.message}`);
+        }
+
+        app.log.info({ userAccountId, accountId, ...updateData }, 'Bitrix24 default stage updated (multi-account)');
+
+        return reply.send({ success: true, ...updateData });
+      }
+
+      // Legacy mode: update user_accounts
+      if (!userAccount.bitrix24_domain) {
+        return reply.code(400).send({
+          error: 'bitrix24_not_connected',
+          message: 'Bitrix24 is not connected for this account'
+        });
+      }
+
+      const { error: updateError } = await supabase
+        .from('user_accounts')
+        .update(updateData)
+        .eq('id', userAccountId);
+
+      if (updateError) {
+        throw new Error(`Failed to update setting: ${updateError.message}`);
+      }
+
+      app.log.info({ userAccountId, ...updateData }, 'Bitrix24 default stage updated');
+
+      return reply.send({ success: true, ...updateData });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating Bitrix24 default stage');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
   /**
    * POST /bitrix24/recalculate-key-stage-stats
    * Manually trigger recalculation of Bitrix24 key stage statistics

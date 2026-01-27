@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users, Edit } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,7 +30,14 @@ import {
   openBitrix24ConnectWindow,
   onBitrix24Connected,
   syncBitrix24Leads,
+  syncBitrix24Pipelines,
+  getBitrix24Pipelines,
+  getBitrix24AutoCreateSetting,
+  setBitrix24AutoCreateSetting,
+  getBitrix24DefaultStage,
+  setBitrix24DefaultStage,
   type Bitrix24Status,
+  type Bitrix24Pipelines,
 } from '@/services/bitrix24Api';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -185,6 +194,13 @@ const Profile: React.FC = () => {
   // REMOVED: Qualification now configured at direction level via CAPI settings
   // const [bitrix24QualificationModal, setBitrix24QualificationModal] = useState(false);
   const [isSyncingBitrix24, setIsSyncingBitrix24] = useState(false);
+  const [bitrix24AutoCreate, setBitrix24AutoCreate] = useState(false);
+  const [loadingAutoCreate, setLoadingAutoCreate] = useState(false);
+  const [bitrix24Pipelines, setBitrix24Pipelines] = useState<Bitrix24Pipelines | null>(null);
+  const [loadingPipelines, setLoadingPipelines] = useState(false);
+  const [defaultLeadStatus, setDefaultLeadStatus] = useState<string | null>(null);
+  const [defaultDealCategory, setDefaultDealCategory] = useState<number | null>(null);
+  const [defaultDealStage, setDefaultDealStage] = useState<string | null>(null);
 
   // Facebook Manual Connect Modal
   const [facebookManualModal, setFacebookManualModal] = useState(false);
@@ -1050,6 +1066,116 @@ const Profile: React.FC = () => {
       toast.error('Ошибка синхронизации');
     } finally {
       setIsSyncingBitrix24(false);
+    }
+  };
+
+  // Load settings when modal opens
+  useEffect(() => {
+    if (bitrix24Modal && bitrix24Connected && user?.id) {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+
+      // Load auto-create setting
+      const loadAutoCreateSetting = async () => {
+        setLoadingAutoCreate(true);
+        try {
+          const result = await getBitrix24AutoCreateSetting(user.id, accountId || undefined);
+          setBitrix24AutoCreate(result.enabled);
+        } catch (error) {
+          console.error('Error loading auto-create setting:', error);
+        } finally {
+          setLoadingAutoCreate(false);
+        }
+      };
+
+      // Load pipelines and default stage
+      const loadPipelinesAndDefaults = async () => {
+        setLoadingPipelines(true);
+        try {
+          // Load pipelines
+          const pipelines = await getBitrix24Pipelines(user.id);
+          setBitrix24Pipelines(pipelines);
+
+          // Load default stage settings
+          const defaults = await getBitrix24DefaultStage(user.id, accountId || undefined);
+          setDefaultLeadStatus(defaults.leadStatus);
+          setDefaultDealCategory(defaults.dealCategory);
+          setDefaultDealStage(defaults.dealStage);
+        } catch (error) {
+          console.error('Error loading pipelines:', error);
+        } finally {
+          setLoadingPipelines(false);
+        }
+      };
+
+      loadAutoCreateSetting();
+      loadPipelinesAndDefaults();
+    }
+  }, [bitrix24Modal, bitrix24Connected, user?.id, multiAccountEnabled, currentAdAccountId]);
+
+  const handleAutoCreateChange = async (enabled: boolean) => {
+    if (!user?.id) return;
+
+    setLoadingAutoCreate(true);
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      const result = await setBitrix24AutoCreateSetting(user.id, enabled, accountId || undefined);
+      if (result.success) {
+        setBitrix24AutoCreate(result.enabled);
+        toast.success(enabled ? 'Авто-создание лидов включено' : 'Авто-создание лидов отключено');
+      }
+    } catch (error) {
+      console.error('Error updating auto-create setting:', error);
+      toast.error('Ошибка при изменении настройки');
+    } finally {
+      setLoadingAutoCreate(false);
+    }
+  };
+
+  const handleDefaultStageChange = async (type: 'lead' | 'deal', value: string) => {
+    if (!user?.id) return;
+
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+
+      if (type === 'lead') {
+        await setBitrix24DefaultStage(user.id, { leadStatus: value || null }, accountId || undefined);
+        setDefaultLeadStatus(value || null);
+      } else {
+        // For deals, value is "categoryId:stageId"
+        const [categoryId, stageId] = value.split(':');
+        await setBitrix24DefaultStage(
+          user.id,
+          {
+            dealCategory: categoryId ? parseInt(categoryId) : null,
+            dealStage: stageId || null
+          },
+          accountId || undefined
+        );
+        setDefaultDealCategory(categoryId ? parseInt(categoryId) : null);
+        setDefaultDealStage(stageId || null);
+      }
+      toast.success('Настройка сохранена');
+    } catch (error) {
+      console.error('Error updating default stage:', error);
+      toast.error('Ошибка при сохранении настройки');
+    }
+  };
+
+  const handleSyncPipelines = async () => {
+    if (!user?.id) return;
+
+    setLoadingPipelines(true);
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      await syncBitrix24Pipelines(user.id, accountId);
+      const pipelines = await getBitrix24Pipelines(user.id);
+      setBitrix24Pipelines(pipelines);
+      toast.success('Воронки синхронизированы');
+    } catch (error) {
+      console.error('Error syncing pipelines:', error);
+      toast.error('Ошибка синхронизации воронок');
+    } finally {
+      setLoadingPipelines(false);
     }
   };
 
@@ -2039,7 +2165,95 @@ const Profile: React.FC = () => {
                 </div>
               </div>
 
-              {/* REMOVED: Qualification now configured at direction level via CAPI settings */}
+              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">Авто-создание лидов</span>
+                  <span className="text-xs text-muted-foreground">
+                    Создавать лиды в CRM при получении из Facebook Lead Forms
+                  </span>
+                </div>
+                <Switch
+                  checked={bitrix24AutoCreate}
+                  onCheckedChange={handleAutoCreateChange}
+                  disabled={loadingAutoCreate}
+                />
+              </div>
+
+              {/* Default stage selector - показываем только если авто-создание включено */}
+              {bitrix24AutoCreate && (
+                <div className="p-3 bg-muted rounded-lg space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Этап для новых лидов</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleSyncPipelines}
+                      disabled={loadingPipelines}
+                    >
+                      {loadingPipelines ? 'Загрузка...' : 'Обновить'}
+                    </Button>
+                  </div>
+
+                  {(bitrix24EntityType === 'lead' || bitrix24EntityType === 'both') && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Этап лида</Label>
+                      <Select
+                        value={defaultLeadStatus || ''}
+                        onValueChange={(value) => handleDefaultStageChange('lead', value)}
+                        disabled={loadingPipelines}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Выберите этап" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bitrix24Pipelines?.leads?.map((pipeline) =>
+                            pipeline.stages.map((stage) => (
+                              <SelectItem key={stage.statusId} value={stage.statusId}>
+                                {stage.statusName}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {(bitrix24EntityType === 'deal' || bitrix24EntityType === 'both') && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Воронка и этап сделки</Label>
+                      <Select
+                        value={defaultDealCategory && defaultDealStage ? `${defaultDealCategory}:${defaultDealStage}` : ''}
+                        onValueChange={(value) => handleDefaultStageChange('deal', value)}
+                        disabled={loadingPipelines}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Выберите воронку и этап" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bitrix24Pipelines?.deals?.map((pipeline) => (
+                            <React.Fragment key={pipeline.categoryId}>
+                              <SelectItem value="" disabled className="font-semibold text-xs text-muted-foreground">
+                                {pipeline.categoryName}
+                              </SelectItem>
+                              {pipeline.stages.map((stage) => (
+                                <SelectItem key={`${pipeline.categoryId}:${stage.statusId}`} value={`${pipeline.categoryId}:${stage.statusId}`}>
+                                  {stage.statusName}
+                                </SelectItem>
+                              ))}
+                            </React.Fragment>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {!bitrix24Pipelines && !loadingPipelines && (
+                    <p className="text-xs text-muted-foreground">
+                      Нажмите "Обновить" для загрузки воронок из Bitrix24
+                    </p>
+                  )}
+                </div>
+              )}
 
               <Button
                 onClick={handleBitrix24Sync}

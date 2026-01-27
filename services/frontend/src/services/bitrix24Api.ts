@@ -590,6 +590,138 @@ export async function recalculateBitrix24KeyStageStats(
 }
 
 // ============================================================================
+// Auto-Create Leads API
+// ============================================================================
+
+export interface AutoCreateLeadsSetting {
+  enabled: boolean;
+  bitrix24Connected: boolean;
+}
+
+export interface DefaultStageSetting {
+  entityType: 'lead' | 'deal' | 'both';
+  leadStatus: string | null;
+  dealCategory: number | null;
+  dealStage: string | null;
+}
+
+/**
+ * Get current auto-create leads setting
+ *
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Current setting state
+ */
+export async function getBitrix24AutoCreateSetting(
+  userAccountId: string,
+  accountId?: string
+): Promise<AutoCreateLeadsSetting> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/bitrix24/auto-create-leads?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch auto-create setting');
+  }
+
+  return response.json();
+}
+
+/**
+ * Set auto-create leads setting
+ *
+ * @param userAccountId - User account UUID
+ * @param enabled - Whether to enable auto-creation
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Success status
+ */
+export async function setBitrix24AutoCreateSetting(
+  userAccountId: string,
+  enabled: boolean,
+  accountId?: string
+): Promise<{ success: boolean; enabled: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/bitrix24/auto-create-leads`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userAccountId, accountId, enabled }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to update auto-create setting');
+  }
+
+  return response.json();
+}
+
+/**
+ * Get current default stage settings
+ *
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Current default stage settings
+ */
+export async function getBitrix24DefaultStage(
+  userAccountId: string,
+  accountId?: string
+): Promise<DefaultStageSetting> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/bitrix24/default-stage?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch default stage setting');
+  }
+
+  return response.json();
+}
+
+/**
+ * Set default stage settings
+ *
+ * @param userAccountId - User account UUID
+ * @param settings - Default stage settings
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Success status
+ */
+export async function setBitrix24DefaultStage(
+  userAccountId: string,
+  settings: {
+    leadStatus?: string | null;
+    dealCategory?: number | null;
+    dealStage?: string | null;
+  },
+  accountId?: string
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/bitrix24/default-stage`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userAccountId, accountId, ...settings }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to update default stage setting');
+  }
+
+  return response.json();
+}
+
+// ============================================================================
 // Helper functions
 // ============================================================================
 

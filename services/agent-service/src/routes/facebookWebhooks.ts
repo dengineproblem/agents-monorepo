@@ -417,6 +417,55 @@ export default async function facebookWebhooks(app: FastifyInstance) {
               leadgen_id
             }
           );
+
+          // Sync to Bitrix24 if auto-create is enabled
+          try {
+            const { syncLeadToBitrix24, checkBitrix24AutoCreate } = await import('../workflows/bitrix24Sync.js');
+
+            log.debug({
+              leadId: lead?.id,
+              userAccountId,
+              accountId
+            }, '[Bitrix24] Checking auto-create settings');
+
+            const bitrix24Settings = await checkBitrix24AutoCreate(userAccountId, accountId);
+
+            log.debug({
+              enabled: bitrix24Settings.enabled,
+              leadId: lead?.id
+            }, '[Bitrix24] Auto-create check completed');
+
+            if (bitrix24Settings.enabled && lead?.id) {
+              log.info({
+                leadId: lead.id,
+                userAccountId,
+                accountId
+              }, '[Bitrix24] Starting async sync to Bitrix24');
+
+              // Async, don't block webhook response
+              syncLeadToBitrix24(lead.id, userAccountId, accountId, app)
+                .then(() => {
+                  log.info({ leadId: lead.id }, '[Bitrix24] Sync completed successfully');
+                })
+                .catch(err => {
+                  log.error({
+                    err: err.message,
+                    errStack: err.stack?.split('\n').slice(0, 3).join('\n'),
+                    leadId: lead.id,
+                    userAccountId,
+                    accountId
+                  }, '[Bitrix24] Failed to sync lead');
+                });
+            } else if (!bitrix24Settings.enabled) {
+              log.debug({ leadId: lead?.id }, '[Bitrix24] Auto-create disabled - skipping sync');
+            }
+          } catch (bitrix24Err: any) {
+            log.warn({
+              err: bitrix24Err.message,
+              errStack: bitrix24Err.stack?.split('\n').slice(0, 3).join('\n'),
+              leadId: lead?.id
+            }, '[Bitrix24] Sync check failed - skipping');
+          }
         }
       }
 
