@@ -244,8 +244,9 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
       // Register webhooks for real-time updates
       try {
         const webhookUrl = `${APP_URL}/api/webhooks/bitrix24`;
-        await registerCRMWebhooks(domain, tokens.access_token, webhookUrl, userAccountId, entityType);
-        app.log.info({ userAccountId, domain, entityType }, 'Bitrix24 webhooks registered successfully');
+        // Pass accountId for multi-account mode (will be included in webhook URL)
+        await registerCRMWebhooks(domain, tokens.access_token, webhookUrl, userAccountId, entityType, accountId);
+        app.log.info({ userAccountId, domain, entityType, accountId }, 'Bitrix24 webhooks registered successfully');
       } catch (error: any) {
         app.log.error({
           error: error.message,

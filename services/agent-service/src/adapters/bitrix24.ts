@@ -1040,15 +1040,21 @@ export async function getRegisteredEvents(
  * @param webhookUrl - Base webhook URL (user_id will be appended as query param)
  * @param userId - User account ID for webhook routing
  * @param entityTypes - Which entities to track: 'lead', 'deal', or 'both'
+ * @param accountId - Optional ad_account UUID for multi-account mode
  */
 export async function registerCRMWebhooks(
   domain: string,
   accessToken: string,
   webhookUrl: string,
   userId: string,
-  entityTypes: 'lead' | 'deal' | 'both' = 'both'
+  entityTypes: 'lead' | 'deal' | 'both' = 'both',
+  accountId?: string
 ): Promise<void> {
-  const handlerUrl = `${webhookUrl}?user_id=${userId}`;
+  // Include account_id in URL for multi-account mode
+  let handlerUrl = `${webhookUrl}?user_id=${userId}`;
+  if (accountId) {
+    handlerUrl += `&account_id=${accountId}`;
+  }
 
   const events: string[] = [];
 

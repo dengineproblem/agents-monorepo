@@ -56,7 +56,10 @@ export default async function bitrix24WebhooksRoutes(app: FastifyInstance) {
    */
   app.post('/webhooks/bitrix24', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { user_id: userAccountId } = request.query as { user_id?: string };
+      const { user_id: userAccountId, account_id: accountId } = request.query as {
+        user_id?: string;
+        account_id?: string;  // For multi-account mode
+      };
 
       if (!userAccountId) {
         app.log.warn('Bitrix24 webhook received without user_id');
@@ -75,6 +78,7 @@ export default async function bitrix24WebhooksRoutes(app: FastifyInstance) {
 
       app.log.info({
         userAccountId,
+        accountId,
         event,
         entityId,
         domain: auth?.domain,
@@ -84,7 +88,7 @@ export default async function bitrix24WebhooksRoutes(app: FastifyInstance) {
       // Process webhook asynchronously to respond quickly
       setImmediate(async () => {
         try {
-          await processWebhook(app, userAccountId, event, entityId, payload);
+          await processWebhook(app, userAccountId, event, entityId, payload, accountId);
         } catch (error: any) {
           app.log.error({ error, event, entityId }, 'Error processing Bitrix24 webhook');
 
@@ -123,18 +127,20 @@ async function processWebhook(
   userAccountId: string,
   event: string,
   entityId: string,
-  payload: Bitrix24WebhookPayload
+  payload: Bitrix24WebhookPayload,
+  accountId?: string  // For multi-account mode
 ): Promise<void> {
   // Get valid token for API calls
   let accessToken: string;
   let domain: string;
 
   try {
-    const tokenData = await getValidBitrix24Token(userAccountId);
+    // Pass accountId for multi-account mode token lookup
+    const tokenData = await getValidBitrix24Token(userAccountId, accountId || null);
     accessToken = tokenData.accessToken;
     domain = tokenData.domain;
   } catch (error: any) {
-    app.log.error({ error, userAccountId }, 'Failed to get Bitrix24 token for webhook processing');
+    app.log.error({ error, userAccountId, accountId }, 'Failed to get Bitrix24 token for webhook processing');
     return;
   }
 

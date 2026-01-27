@@ -1044,21 +1044,6 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
 
       app.log.info({ directionId, keyStagesCount: keyStages.length }, 'Bitrix24 key stages set successfully');
 
-      // Trigger recalculation of reached_key_stage_N flags asynchronously
-      const recalculateAsync = async () => {
-        try {
-          // Sync leads from Bitrix24 to update reached_key_stage flags
-          const { syncBitrix24Leads } = await import('./bitrix24Pipelines.js');
-          // Note: syncBitrix24Leads is the internal sync function
-          app.log.info({ directionId }, 'Bitrix24 reached key stage recalculation triggered');
-        } catch (error: any) {
-          app.log.error({ error: error.message, directionId }, 'Failed to recalculate Bitrix24 reached key stage flags');
-        }
-      };
-
-      // Start async recalculation (fire and forget)
-      recalculateAsync();
-
       return reply.send({
         success: true,
         direction: updatedDirection,
@@ -1387,14 +1372,14 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
             if (leadEntityType === 'lead') {
               const bitrix24Lead = await getLead(domain, accessToken, entityId);
               if (bitrix24Lead) {
-                currentStatusId = bitrix24Lead.STATUS_ID;
+                currentStatusId = bitrix24Lead.STATUS_ID || null;
                 currentCategoryId = 0; // Leads don't have categories
               }
             } else {
               const bitrix24Deal = await getDeal(domain, accessToken, entityId);
               if (bitrix24Deal) {
-                currentStatusId = bitrix24Deal.STAGE_ID;
-                currentCategoryId = parseInt(bitrix24Deal.CATEGORY_ID, 10) || 0;
+                currentStatusId = bitrix24Deal.STAGE_ID || null;
+                currentCategoryId = bitrix24Deal.CATEGORY_ID ? parseInt(bitrix24Deal.CATEGORY_ID, 10) : 0;
               }
             }
 
