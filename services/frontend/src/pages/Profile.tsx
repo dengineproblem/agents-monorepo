@@ -400,7 +400,9 @@ const Profile: React.FC = () => {
       if (!user?.id) return;
 
       try {
-        const status = await getBitrix24Status(user.id);
+        // In multi-account mode, pass accountId to check correct table
+        const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+        const status = await getBitrix24Status(user.id, accountId);
         console.log('Bitrix24 status loaded:', status);
         setBitrix24Connected(status.connected);
         setBitrix24Domain(status.domain || '');
@@ -411,7 +413,7 @@ const Profile: React.FC = () => {
     };
 
     loadBitrix24Status();
-  }, [user?.id]);
+  }, [user?.id, multiAccountEnabled, currentAdAccountId]);
 
   // Listen for Bitrix24 connection success
   useEffect(() => {

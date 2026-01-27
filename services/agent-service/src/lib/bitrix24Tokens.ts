@@ -317,9 +317,10 @@ export async function isBitrix24Connected(userAccountId: string): Promise<boolea
  * Get Bitrix24 connection status for user
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Connection status object
  */
-export async function getBitrix24Status(userAccountId: string): Promise<{
+export async function getBitrix24Status(userAccountId: string, accountId?: string | null): Promise<{
   connected: boolean;
   domain?: string;
   memberId?: string;
@@ -327,9 +328,10 @@ export async function getBitrix24Status(userAccountId: string): Promise<{
   tokenExpiresAt?: string;
   connectedAt?: string;
 }> {
+  // First check if multi-account mode is enabled
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_user_id, bitrix24_entity_type, bitrix24_qualification_fields, bitrix24_connected_at')
+    .select('id, multi_account_enabled, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_user_id, bitrix24_entity_type, bitrix24_qualification_fields, bitrix24_connected_at')
     .eq('id', userAccountId)
     .single();
 
@@ -337,6 +339,38 @@ export async function getBitrix24Status(userAccountId: string): Promise<{
     return { connected: false };
   }
 
+  const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+  if (isMultiAccountMode) {
+    // Multi-account mode: check ad_accounts
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_entity_type, bitrix24_connected_at')
+      .eq('id', accountId)
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (!adAccount) {
+      return { connected: false };
+    }
+
+    const connected = !!(
+      adAccount.bitrix24_domain &&
+      adAccount.bitrix24_access_token &&
+      adAccount.bitrix24_refresh_token
+    );
+
+    return {
+      connected,
+      domain: adAccount.bitrix24_domain || undefined,
+      memberId: adAccount.bitrix24_member_id || undefined,
+      entityType: adAccount.bitrix24_entity_type || undefined,
+      tokenExpiresAt: adAccount.bitrix24_token_expires_at || undefined,
+      connectedAt: adAccount.bitrix24_connected_at || undefined
+    };
+  }
+
+  // Legacy mode: check user_accounts
   const account = userAccount as UserAccountWithBitrix24;
 
   const connected = !!(

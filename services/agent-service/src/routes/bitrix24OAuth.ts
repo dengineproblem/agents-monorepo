@@ -50,7 +50,8 @@ const CallbackQuerySchema = z.object({
  * Query parameters for /status endpoint
  */
 const StatusQuerySchema = z.object({
-  userAccountId: z.string().uuid()
+  userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional()
 });
 
 /**
@@ -485,9 +486,9 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId } = parsed.data;
+      const { userAccountId, accountId } = parsed.data;
 
-      const status = await getBitrix24Status(userAccountId);
+      const status = await getBitrix24Status(userAccountId, accountId);
 
       return reply.send(status);
 

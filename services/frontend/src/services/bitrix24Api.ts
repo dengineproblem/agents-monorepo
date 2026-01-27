@@ -100,13 +100,20 @@ export interface SyncResult {
  * Get Bitrix24 connection status for user
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Connection status
  */
 export async function getBitrix24Status(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string | null
 ): Promise<Bitrix24Status> {
+  const params = new URLSearchParams({ userAccountId });
+  if (accountId) {
+    params.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/bitrix24/status?userAccountId=${userAccountId}`
+    `${API_BASE_URL}/bitrix24/status?${params.toString()}`
   );
 
   if (!response.ok) {
