@@ -610,17 +610,21 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
    *
    * Query params:
    *   - userAccountId: UUID of user account
+   *   - accountId: Optional ad_account UUID for multi-account mode
    *
    * Returns: HTML page with connection form
    */
   app.get('/bitrix24/connect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.code(400).send({
         error: 'Missing userAccountId parameter'
       });
     }
+
+    // Prepare accountId param for OAuth URL
+    const accountIdParam = accountId ? `&accountId=${accountId}` : '';
 
     return reply.type('text/html').send(`
       <!DOCTYPE html>
@@ -792,7 +796,8 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
             // Redirect to OAuth
             const authUrl = '/api/bitrix24/auth?userAccountId=${userAccountId}&domain=' +
               encodeURIComponent(cleanDomain) +
-              '&entityType=' + entityType;
+              '&entityType=' + entityType +
+              '${accountIdParam}';
 
             window.location.href = authUrl;
           });

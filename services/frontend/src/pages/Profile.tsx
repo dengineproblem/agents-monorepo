@@ -1026,7 +1026,9 @@ const Profile: React.FC = () => {
     } else {
       console.log('[Profile] Opening Bitrix24 connect window');
       if (user?.id) {
-        openBitrix24ConnectWindow(user.id);
+        // Pass accountId for multi-account mode
+        const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+        openBitrix24ConnectWindow(user.id, accountId || undefined);
       }
     }
   };

@@ -168,10 +168,15 @@ export async function setBitrix24EntityType(
  * Get Bitrix24 connect page URL
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Connect page URL
  */
-export function getBitrix24ConnectUrl(userAccountId: string): string {
-  return `${API_BASE_URL}/bitrix24/connect?userAccountId=${userAccountId}`;
+export function getBitrix24ConnectUrl(userAccountId: string, accountId?: string): string {
+  let url = `${API_BASE_URL}/bitrix24/connect?userAccountId=${userAccountId}`;
+  if (accountId) {
+    url += `&accountId=${accountId}`;
+  }
+  return url;
 }
 
 // ============================================================================
@@ -729,9 +734,10 @@ export async function setBitrix24DefaultStage(
  * Open Bitrix24 connect page in new window
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  */
-export function openBitrix24ConnectWindow(userAccountId: string): void {
-  const url = getBitrix24ConnectUrl(userAccountId);
+export function openBitrix24ConnectWindow(userAccountId: string, accountId?: string): void {
+  const url = getBitrix24ConnectUrl(userAccountId, accountId);
   const width = 600;
   const height = 700;
   const left = (window.innerWidth - width) / 2;
