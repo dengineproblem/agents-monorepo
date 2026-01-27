@@ -12,6 +12,7 @@ import { Check, X, Target, Plus, Trash2 } from 'lucide-react';
 import {
   getBitrix24Pipelines,
   updateBitrix24Stage,
+  saveBitrix24DirectionKeyStages,
   type Bitrix24Pipeline,
   type Bitrix24Stage,
 } from '@/services/bitrix24Api';
@@ -156,13 +157,23 @@ export const Bitrix24KeyStageSelector: React.FC<Bitrix24KeyStageSelectorProps> =
       setError(null);
       setSuccessMessage(null);
 
-      // Mark selected stages as qualified stages in Bitrix24
-      const validStages = keyStages.filter(stage => stage.categoryId !== undefined && stage.statusId);
+      // Filter out incomplete stages and format for API
+      const validStages = keyStages
+        .filter(stage => stage.categoryId !== undefined && stage.statusId)
+        .map(stage => ({
+          categoryId: stage.categoryId!,
+          statusId: stage.statusId!,
+        }));
 
-      // For now, we'll save to the direction (this would need a new API endpoint)
-      // TODO: Implement backend endpoint to save bitrix24 key stages to direction
+      // Save key stages to direction via API
+      const result = await saveBitrix24DirectionKeyStages(
+        directionId,
+        userAccountId,
+        entityType,
+        validStages
+      );
 
-      setSuccessMessage(`Сохранено ${validStages.length} ключевых этапов`);
+      setSuccessMessage(result.message || `Сохранено ${validStages.length} ключевых этапов`);
 
       if (onSave) {
         onSave();

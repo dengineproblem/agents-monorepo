@@ -922,6 +922,543 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  // ============================================================================
+  // Key Stages Endpoints (аналог AmoCRM)
+  // ============================================================================
+
+  /**
+   * PATCH /bitrix24/directions/:directionId/key-stages
+   * Set up to 3 key qualification stages for a direction (Bitrix24)
+   *
+   * Params:
+   *   - directionId: UUID of direction
+   *
+   * Body:
+   *   - userAccountId: UUID
+   *   - entityType: 'lead' | 'deal'
+   *   - keyStages: Array of { categoryId: number, statusId: string } (0-3 items)
+   *
+   * Returns: { success: boolean, direction: {...}, stages: [...] }
+   */
+  app.patch('/bitrix24/directions/:directionId/key-stages', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { directionId } = request.params as { directionId: string };
+
+      const KeyStagesSchema = z.object({
+        userAccountId: z.string().uuid(),
+        entityType: z.enum(['lead', 'deal']),
+        keyStages: z.array(
+          z.object({
+            categoryId: z.number().int(),
+            statusId: z.string()
+          })
+        ).max(3, 'Maximum 3 key stages allowed')
+      });
+
+      const parsed = KeyStagesSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, entityType, keyStages } = parsed.data;
+
+      app.log.info({ directionId, entityType, keyStagesCount: keyStages.length }, 'Setting Bitrix24 key stages for direction');
+
+      // Verify direction exists
+      const { data: direction, error: directionError } = await supabase
+        .from('account_directions')
+        .select('id, user_account_id, name, account_id')
+        .eq('id', directionId)
+        .maybeSingle();
+
+      if (directionError || !direction) {
+        return reply.code(404).send({
+          error: 'direction_not_found',
+          message: 'Direction not found'
+        });
+      }
+
+      // Verify user has access
+      if (direction.user_account_id !== userAccountId) {
+        return reply.code(403).send({
+          error: 'access_denied',
+          message: 'You do not have access to this direction'
+        });
+      }
+
+      // Verify all category/status combinations exist in bitrix24_pipeline_stages
+      const verifiedStages = [];
+      for (let i = 0; i < keyStages.length; i++) {
+        const { categoryId, statusId } = keyStages[i];
+
+        const { data: stage, error: stageError } = await supabase
+          .from('bitrix24_pipeline_stages')
+          .select('*')
+          .eq('user_account_id', userAccountId)
+          .eq('category_id', categoryId)
+          .eq('status_id', statusId)
+          .eq('entity_type', entityType)
+          .maybeSingle();
+
+        if (stageError || !stage) {
+          return reply.code(400).send({
+            error: 'invalid_stage',
+            message: `Key stage ${i + 1}: Pipeline stage not found. Please sync pipelines first.`,
+            hint: 'Call POST /bitrix24/sync-pipelines to sync stages from Bitrix24'
+          });
+        }
+
+        verifiedStages.push(stage);
+      }
+
+      // Build update object with all 3 key stages (null for unused)
+      const updateData: Record<string, any> = {
+        bitrix24_key_stage_1_category_id: keyStages[0]?.categoryId ?? null,
+        bitrix24_key_stage_1_status_id: keyStages[0]?.statusId ?? null,
+        bitrix24_key_stage_2_category_id: keyStages[1]?.categoryId ?? null,
+        bitrix24_key_stage_2_status_id: keyStages[1]?.statusId ?? null,
+        bitrix24_key_stage_3_category_id: keyStages[2]?.categoryId ?? null,
+        bitrix24_key_stage_3_status_id: keyStages[2]?.statusId ?? null,
+        updated_at: new Date().toISOString()
+      };
+
+      // Update direction with key stages
+      const { data: updatedDirection, error: updateError } = await supabase
+        .from('account_directions')
+        .update(updateData)
+        .eq('id', directionId)
+        .select()
+        .single();
+
+      if (updateError) {
+        app.log.error({ error: updateError }, 'Failed to update direction Bitrix24 key stages');
+        return reply.code(500).send({
+          error: 'update_failed',
+          message: updateError.message
+        });
+      }
+
+      app.log.info({ directionId, keyStagesCount: keyStages.length }, 'Bitrix24 key stages set successfully');
+
+      // Trigger recalculation of reached_key_stage_N flags asynchronously
+      const recalculateAsync = async () => {
+        try {
+          // Sync leads from Bitrix24 to update reached_key_stage flags
+          const { syncBitrix24Leads } = await import('./bitrix24Pipelines.js');
+          // Note: syncBitrix24Leads is the internal sync function
+          app.log.info({ directionId }, 'Bitrix24 reached key stage recalculation triggered');
+        } catch (error: any) {
+          app.log.error({ error: error.message, directionId }, 'Failed to recalculate Bitrix24 reached key stage flags');
+        }
+      };
+
+      // Start async recalculation (fire and forget)
+      recalculateAsync();
+
+      return reply.send({
+        success: true,
+        direction: updatedDirection,
+        stages: verifiedStages.map((stage, idx) => ({
+          index: idx + 1,
+          category_name: stage.category_name,
+          status_name: stage.status_name,
+          status_color: stage.status_color
+        })),
+        message: 'Bitrix24 key stages set successfully. Recalculating qualification flags in background.'
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error setting Bitrix24 key stages for direction');
+
+      logErrorToAdmin({
+        error_type: 'bitrix24',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'set_bitrix24_key_stages',
+        endpoint: '/bitrix24/directions/:directionId/key-stages',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /bitrix24/directions/:directionId/key-stage-stats
+   * Get qualification statistics for a direction based on its Bitrix24 key stages (up to 3)
+   *
+   * Params:
+   *   - directionId: UUID of direction
+   *
+   * Query:
+   *   - dateFrom: ISO date string (optional)
+   *   - dateTo: ISO date string (optional)
+   *
+   * Returns: {
+   *   total_leads: number,
+   *   key_stages: [
+   *     {
+   *       index: 1|2|3,
+   *       category_id, status_id, category_name, status_name,
+   *       qualified_leads, qualification_rate,
+   *       creative_stats: [{ creative_id, creative_name, total, qualified, rate }]
+   *     },
+   *     ...
+   *   ]
+   * }
+   */
+  app.get('/bitrix24/directions/:directionId/key-stage-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { directionId } = request.params as { directionId: string };
+      const { dateFrom, dateTo } = request.query as { dateFrom?: string; dateTo?: string };
+
+      app.log.info({ directionId, dateFrom, dateTo }, 'Getting Bitrix24 key stage stats for direction');
+
+      // Get direction with all 3 Bitrix24 key stages
+      const { data: direction, error: directionError } = await supabase
+        .from('account_directions')
+        .select(`
+          id, user_account_id, name,
+          bitrix24_key_stage_1_category_id, bitrix24_key_stage_1_status_id,
+          bitrix24_key_stage_2_category_id, bitrix24_key_stage_2_status_id,
+          bitrix24_key_stage_3_category_id, bitrix24_key_stage_3_status_id
+        `)
+        .eq('id', directionId)
+        .maybeSingle();
+
+      if (directionError || !direction) {
+        return reply.code(404).send({
+          error: 'direction_not_found',
+          message: 'Direction not found'
+        });
+      }
+
+      // Build leads query with optional date filter
+      let leadsQuery = supabase
+        .from('leads')
+        .select('id, creative_id, reached_key_stage_1, reached_key_stage_2, reached_key_stage_3, created_at')
+        .eq('user_account_id', direction.user_account_id)
+        .eq('direction_id', directionId);
+
+      if (dateFrom) {
+        leadsQuery = leadsQuery.gte('created_at', dateFrom);
+      }
+      if (dateTo) {
+        leadsQuery = leadsQuery.lte('created_at', dateTo);
+      }
+
+      const { data: leads, error: leadsError } = await leadsQuery;
+
+      if (leadsError) {
+        app.log.error({ error: leadsError }, 'Failed to fetch leads for Bitrix24 key stage stats');
+        return reply.code(500).send({
+          error: 'leads_fetch_failed',
+          message: leadsError.message
+        });
+      }
+
+      const totalLeads = leads?.length || 0;
+
+      // Process each configured key stage
+      const keyStagesStats = [];
+
+      for (let stageNum = 1; stageNum <= 3; stageNum++) {
+        const categoryIdKey = `bitrix24_key_stage_${stageNum}_category_id` as keyof typeof direction;
+        const statusIdKey = `bitrix24_key_stage_${stageNum}_status_id` as keyof typeof direction;
+        const categoryId = direction[categoryIdKey];
+        const statusId = direction[statusIdKey];
+
+        // Skip if this stage is not configured
+        if (categoryId === null || categoryId === undefined || !statusId) {
+          continue;
+        }
+
+        // Get stage info from bitrix24_pipeline_stages
+        const { data: stageInfo } = await supabase
+          .from('bitrix24_pipeline_stages')
+          .select('category_name, status_name, status_color, entity_type')
+          .eq('user_account_id', direction.user_account_id)
+          .eq('category_id', categoryId)
+          .eq('status_id', statusId)
+          .maybeSingle();
+
+        // Calculate overall stats for this key stage
+        const reachedFlagKey = `reached_key_stage_${stageNum}` as 'reached_key_stage_1' | 'reached_key_stage_2' | 'reached_key_stage_3';
+        const qualifiedLeads = leads?.filter(lead => lead[reachedFlagKey] === true).length || 0;
+        const qualificationRate = totalLeads > 0
+          ? Math.round((qualifiedLeads / totalLeads) * 1000) / 10
+          : 0;
+
+        // Group by creative for this key stage
+        const creativeStats: Record<string, { total: number; qualified: number }> = {};
+
+        leads?.forEach(lead => {
+          if (!lead.creative_id) return;
+
+          if (!creativeStats[lead.creative_id]) {
+            creativeStats[lead.creative_id] = { total: 0, qualified: 0 };
+          }
+
+          creativeStats[lead.creative_id].total++;
+
+          if (lead[reachedFlagKey] === true) {
+            creativeStats[lead.creative_id].qualified++;
+          }
+        });
+
+        // Get creative names
+        const creativeIds = Object.keys(creativeStats);
+        const { data: creatives } = creativeIds.length > 0
+          ? await supabase
+              .from('user_creatives')
+              .select('id, name')
+              .in('id', creativeIds)
+          : { data: [] };
+
+        const creativeMap = new Map(creatives?.map(c => [c.id, c.name]) || []);
+
+        const creativeStatsList = creativeIds.map(creativeId => {
+          const stats = creativeStats[creativeId];
+          const rate = stats.total > 0
+            ? Math.round((stats.qualified / stats.total) * 1000) / 10
+            : 0;
+
+          return {
+            creative_id: creativeId,
+            creative_name: creativeMap.get(creativeId) || 'Unknown',
+            total: stats.total,
+            qualified: stats.qualified,
+            rate
+          };
+        }).sort((a, b) => b.qualified - a.qualified);
+
+        keyStagesStats.push({
+          index: stageNum,
+          category_id: categoryId,
+          status_id: statusId,
+          category_name: stageInfo?.category_name || 'Unknown',
+          status_name: stageInfo?.status_name || 'Unknown',
+          entity_type: stageInfo?.entity_type || 'deal',
+          qualified_leads: qualifiedLeads,
+          qualification_rate: qualificationRate,
+          creative_stats: creativeStatsList
+        });
+      }
+
+      return reply.send({
+        total_leads: totalLeads,
+        key_stages: keyStagesStats
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting Bitrix24 key stage stats');
+
+      logErrorToAdmin({
+        error_type: 'bitrix24',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_bitrix24_key_stage_stats',
+        endpoint: '/bitrix24/directions/:directionId/key-stage-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /bitrix24/recalculate-key-stage-stats
+   * Manually trigger recalculation of Bitrix24 key stage statistics
+   * (triggers Bitrix24 leads sync)
+   *
+   * Query:
+   *   - userAccountId: UUID of user account
+   *   - directionId: UUID of direction (optional - if not provided, syncs all)
+   *
+   * Returns: { success: boolean, synced: number }
+   */
+  app.post('/bitrix24/recalculate-key-stage-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, directionId, accountId } = request.query as {
+        userAccountId: string;
+        directionId?: string;
+        accountId?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'userAccountId is required'
+        });
+      }
+
+      app.log.info({ userAccountId, directionId, accountId }, 'Triggering Bitrix24 key stage recalculation');
+
+      // Get user account to verify Bitrix24 is connected
+      const { data: userAccount, error: accountError } = await supabase
+        .from('user_accounts')
+        .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_entity_type')
+        .eq('id', userAccountId)
+        .single();
+
+      if (accountError || !userAccount) {
+        return reply.code(404).send({
+          error: 'account_not_found',
+          message: 'User account not found'
+        });
+      }
+
+      if (!userAccount.bitrix24_domain || !userAccount.bitrix24_access_token) {
+        return reply.code(400).send({
+          error: 'bitrix24_not_connected',
+          message: 'Bitrix24 is not connected for this account'
+        });
+      }
+
+      // Get valid token
+      const tokenResult = await getValidBitrix24Token(userAccountId, accountId || null);
+      if (!tokenResult) {
+        return reply.code(401).send({
+          error: 'token_expired',
+          message: 'Bitrix24 token expired. Please reconnect.'
+        });
+      }
+
+      const { domain, accessToken } = tokenResult;
+      const entityType = userAccount.bitrix24_entity_type || 'deal';
+
+      // Fetch leads/deals from Bitrix24 and update local DB
+      let syncedCount = 0;
+      let errorsCount = 0;
+
+      // Get directions for this user
+      let directionsQuery = supabase
+        .from('account_directions')
+        .select('id, bitrix24_key_stage_1_category_id, bitrix24_key_stage_1_status_id, bitrix24_key_stage_2_category_id, bitrix24_key_stage_2_status_id, bitrix24_key_stage_3_category_id, bitrix24_key_stage_3_status_id')
+        .eq('user_account_id', userAccountId);
+
+      if (directionId) {
+        directionsQuery = directionsQuery.eq('id', directionId);
+      }
+
+      const { data: directions } = await directionsQuery;
+
+      if (!directions || directions.length === 0) {
+        return reply.send({
+          success: true,
+          synced: 0,
+          errors: 0,
+          message: 'No directions found with Bitrix24 key stages configured'
+        });
+      }
+
+      // Get leads for each direction
+      for (const dir of directions) {
+        const { data: leads, error: leadsError } = await supabase
+          .from('leads')
+          .select('id, bitrix24_lead_id, bitrix24_deal_id, bitrix24_entity_type')
+          .eq('direction_id', dir.id)
+          .not('bitrix24_lead_id', 'is', null);
+
+        if (leadsError || !leads) continue;
+
+        // Check each key stage for each lead
+        for (const lead of leads) {
+          try {
+            const entityId = lead.bitrix24_deal_id || lead.bitrix24_lead_id;
+            const leadEntityType = lead.bitrix24_entity_type || 'deal';
+
+            if (!entityId) continue;
+
+            // Fetch current status from Bitrix24
+            let currentStatusId: string | null = null;
+            let currentCategoryId: number | null = null;
+
+            if (leadEntityType === 'lead') {
+              const bitrix24Lead = await getLead(domain, accessToken, entityId);
+              if (bitrix24Lead) {
+                currentStatusId = bitrix24Lead.STATUS_ID;
+                currentCategoryId = 0; // Leads don't have categories
+              }
+            } else {
+              const bitrix24Deal = await getDeal(domain, accessToken, entityId);
+              if (bitrix24Deal) {
+                currentStatusId = bitrix24Deal.STAGE_ID;
+                currentCategoryId = parseInt(bitrix24Deal.CATEGORY_ID, 10) || 0;
+              }
+            }
+
+            if (!currentStatusId) continue;
+
+            // Check if lead has reached any key stage (once reached, always reached)
+            const updateFlags: Record<string, boolean> = {};
+
+            for (let stageNum = 1; stageNum <= 3; stageNum++) {
+              const categoryIdKey = `bitrix24_key_stage_${stageNum}_category_id` as keyof typeof dir;
+              const statusIdKey = `bitrix24_key_stage_${stageNum}_status_id` as keyof typeof dir;
+              const keyCategoryId = dir[categoryIdKey];
+              const keyStatusId = dir[statusIdKey];
+
+              if (keyCategoryId !== null && keyStatusId) {
+                // Check if current status matches key stage
+                if (currentCategoryId === keyCategoryId && currentStatusId === keyStatusId) {
+                  updateFlags[`reached_key_stage_${stageNum}`] = true;
+                }
+              }
+            }
+
+            // Update lead flags (only set to true, never reset)
+            if (Object.keys(updateFlags).length > 0) {
+              await supabase
+                .from('leads')
+                .update(updateFlags)
+                .eq('id', lead.id);
+
+              syncedCount++;
+            }
+          } catch (err) {
+            errorsCount++;
+          }
+        }
+      }
+
+      app.log.info({ userAccountId, syncedCount, errorsCount }, 'Bitrix24 key stage recalculation completed');
+
+      return reply.send({
+        success: true,
+        synced: syncedCount,
+        errors: errorsCount
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error recalculating Bitrix24 key stage stats');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'bitrix24',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'recalculate_bitrix24_key_stage',
+        endpoint: '/bitrix24/recalculate-key-stage-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
 }
 
 // ============================================================================

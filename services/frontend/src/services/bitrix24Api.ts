@@ -448,6 +448,144 @@ export async function getBitrix24FunnelStats(params: {
 }
 
 // ============================================================================
+// Key Stages API
+// ============================================================================
+
+export interface KeyStageConfig {
+  categoryId: number;
+  statusId: string;
+}
+
+export interface KeyStageInfo {
+  index: number;
+  category_id: number;
+  status_id: string;
+  category_name: string;
+  status_name: string;
+  entity_type?: string;
+  qualified_leads: number;
+  qualification_rate: number;
+  creative_stats: Array<{
+    creative_id: string;
+    creative_name: string;
+    total: number;
+    qualified: number;
+    rate: number;
+  }>;
+}
+
+export interface KeyStageStatsResponse {
+  total_leads: number;
+  key_stages: KeyStageInfo[];
+}
+
+/**
+ * Save key stages for a direction (Bitrix24)
+ *
+ * @param directionId - Direction UUID
+ * @param userAccountId - User account UUID
+ * @param entityType - Entity type ('lead' or 'deal')
+ * @param keyStages - Array of key stage configs (0-3 items)
+ * @returns Save result
+ */
+export async function saveBitrix24DirectionKeyStages(
+  directionId: string,
+  userAccountId: string,
+  entityType: 'lead' | 'deal',
+  keyStages: KeyStageConfig[]
+): Promise<{ success: boolean; direction: any; stages: any[]; message: string }> {
+  const response = await fetch(
+    `${API_BASE_URL}/bitrix24/directions/${directionId}/key-stages`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAccountId,
+        entityType,
+        keyStages,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to save key stages');
+  }
+
+  return response.json();
+}
+
+/**
+ * Get key stage statistics for a direction (Bitrix24)
+ *
+ * @param directionId - Direction UUID
+ * @param dateFrom - Optional start date (ISO string)
+ * @param dateTo - Optional end date (ISO string)
+ * @returns Key stage statistics
+ */
+export async function getBitrix24DirectionKeyStageStats(
+  directionId: string,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<KeyStageStatsResponse> {
+  const queryParams = new URLSearchParams();
+
+  if (dateFrom) {
+    queryParams.append('dateFrom', dateFrom);
+  }
+  if (dateTo) {
+    queryParams.append('dateTo', dateTo);
+  }
+
+  const queryString = queryParams.toString();
+  const url = `${API_BASE_URL}/bitrix24/directions/${directionId}/key-stage-stats${queryString ? `?${queryString}` : ''}`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch key stage stats');
+  }
+
+  return response.json();
+}
+
+/**
+ * Trigger recalculation of Bitrix24 key stage statistics
+ *
+ * @param userAccountId - User account UUID
+ * @param directionId - Optional direction UUID (if not provided, recalculates all)
+ * @param accountId - Optional ad account ID for multi-account mode
+ * @returns Recalculation result
+ */
+export async function recalculateBitrix24KeyStageStats(
+  userAccountId: string,
+  directionId?: string,
+  accountId?: string
+): Promise<{ success: boolean; synced: number; errors: number }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (directionId) {
+    queryParams.append('directionId', directionId);
+  }
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/bitrix24/recalculate-key-stage-stats?${queryParams.toString()}`,
+    { method: 'POST' }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to recalculate key stage stats');
+  }
+
+  return response.json();
+}
+
+// ============================================================================
 // Helper functions
 // ============================================================================
 

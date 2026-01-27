@@ -31,7 +31,8 @@ const APP_URL = process.env.APP_URL || 'https://api.performanteaiagency.com';
 const AuthQuerySchema = z.object({
   userAccountId: z.string().uuid(),
   domain: z.string().min(1).max(100),
-  entityType: z.enum(['lead', 'deal', 'both']).optional().default('deal')
+  entityType: z.enum(['lead', 'deal', 'both']).optional().default('deal'),
+  accountId: z.string().uuid().optional() // For multi-account mode
 });
 
 /**
@@ -92,7 +93,7 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId, domain, entityType } = parsed.data;
+      const { userAccountId, domain, entityType, accountId } = parsed.data;
 
       if (!BITRIX24_CLIENT_ID || !BITRIX24_REDIRECT_URI) {
         return reply.code(500).send({
@@ -100,8 +101,12 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
         });
       }
 
-      // Encode state with userAccountId, domain, and entityType
-      const state = Buffer.from(`${userAccountId}|${domain}|${entityType}`).toString('base64');
+      // Encode state with userAccountId, domain, entityType, and optional accountId for multi-account mode
+      const stateParts = [userAccountId, domain, entityType];
+      if (accountId) {
+        stateParts.push(accountId);
+      }
+      const state = Buffer.from(stateParts.join('|')).toString('base64');
 
       // Build OAuth URL
       const authUrl = new URL(`https://${domain}/oauth/authorize/`);
@@ -112,6 +117,7 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
 
       app.log.info({
         userAccountId,
+        accountId,
         domain,
         entityType,
         redirectUrl: authUrl.toString()
