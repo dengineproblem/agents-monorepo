@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users, Edit } from 'lucide-react';
 import { toast } from 'sonner';
@@ -2233,16 +2233,16 @@ const Profile: React.FC = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {bitrix24Pipelines?.deals?.map((pipeline) => (
-                            <React.Fragment key={pipeline.categoryId}>
-                              <SelectItem value="" disabled className="font-semibold text-xs text-muted-foreground">
+                            <SelectGroup key={pipeline.categoryId}>
+                              <SelectLabel className="font-semibold text-xs text-muted-foreground">
                                 {pipeline.categoryName}
-                              </SelectItem>
+                              </SelectLabel>
                               {pipeline.stages.map((stage) => (
                                 <SelectItem key={`${pipeline.categoryId}:${stage.statusId}`} value={`${pipeline.categoryId}:${stage.statusId}`}>
                                   {stage.statusName}
                                 </SelectItem>
                               ))}
-                            </React.Fragment>
+                            </SelectGroup>
                           ))}
                         </SelectContent>
                       </Select>
