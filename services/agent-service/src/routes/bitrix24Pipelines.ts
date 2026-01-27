@@ -1673,18 +1673,18 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
 
         return reply.send({
           entityType: adAccount.bitrix24_entity_type || 'lead',
-          leadStatus: adAccount.bitrix24_default_lead_status || null,
-          dealCategory: adAccount.bitrix24_default_deal_category || null,
-          dealStage: adAccount.bitrix24_default_deal_stage || null
+          leadStatus: adAccount.bitrix24_default_lead_status ?? null,
+          dealCategory: adAccount.bitrix24_default_deal_category ?? null,
+          dealStage: adAccount.bitrix24_default_deal_stage ?? null
         });
       }
 
       // Legacy mode: get from user_accounts
       return reply.send({
         entityType: userAccount.bitrix24_entity_type || 'lead',
-        leadStatus: userAccount.bitrix24_default_lead_status || null,
-        dealCategory: userAccount.bitrix24_default_deal_category || null,
-        dealStage: userAccount.bitrix24_default_deal_stage || null
+        leadStatus: userAccount.bitrix24_default_lead_status ?? null,
+        dealCategory: userAccount.bitrix24_default_deal_category ?? null,
+        dealStage: userAccount.bitrix24_default_deal_stage ?? null
       });
 
     } catch (error: any) {
