@@ -181,6 +181,237 @@ function extractName(name: string): { NAME: string; LAST_NAME?: string } {
 }
 
 /**
+ * Lead data for direct push to Bitrix24 (without reading from DB)
+ */
+export interface LeadDataForBitrix24 {
+  name: string | null;
+  phone: string | null;
+  email?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+}
+
+/**
+ * Push lead to Bitrix24 directly (without reading from DB)
+ *
+ * This function accepts lead data directly and pushes to Bitrix24.
+ * Used for parallel processing: save to DB and push to Bitrix24 at the same time.
+ *
+ * @param leadData - Lead data (name, phone, email, utm)
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @param app - Fastify instance for logging
+ * @returns Bitrix24 IDs (leadId, dealId, contactId) or null if failed
+ */
+export async function pushLeadToBitrix24Direct(
+  leadData: LeadDataForBitrix24,
+  userAccountId: string,
+  accountId: string | null,
+  app: FastifyInstance
+): Promise<{
+  bitrix24LeadId: number | null;
+  bitrix24DealId: number | null;
+  bitrix24ContactId: number | null;
+} | null> {
+  const syncStartTime = Date.now();
+
+  try {
+    app.log.info({
+      userAccountId,
+      accountId,
+      hasPhone: !!leadData.phone,
+      hasName: !!leadData.name,
+      timestamp: new Date().toISOString()
+    }, '[Bitrix24Sync] Starting direct push to Bitrix24');
+
+    // 1. Get valid token and entity type
+    const { accessToken, domain, entityType } = await getValidBitrix24Token(userAccountId, accountId);
+
+    // Get default stage settings
+    const defaultStageSettings = await getDefaultStageSettings(userAccountId, accountId);
+
+    // 2. Normalize phone
+    const phone = leadData.phone ? normalizePhone(leadData.phone) : null;
+    const displayName = leadData.name || 'Лид из Facebook';
+
+    if (!phone) {
+      app.log.warn({ userAccountId }, '[Bitrix24Sync] Lead has no phone number - skipping');
+      return null;
+    }
+
+    // 3. Check for existing entity by phone in Bitrix24
+    let bitrix24LeadId: number | null = null;
+    let bitrix24DealId: number | null = null;
+    let bitrix24ContactId: number | null = null;
+
+    if (entityType === 'lead') {
+      // Search for existing LEAD
+      const existingLeads = await findByPhone(domain, accessToken, [phone], 'LEAD');
+
+      if (existingLeads.LEAD && existingLeads.LEAD.length > 0) {
+        bitrix24LeadId = existingLeads.LEAD[0];
+        app.log.info({
+          bitrix24LeadId,
+          phone: `${phone.slice(0, 4)}***`
+        }, '[Bitrix24Sync] Found existing Bitrix24 lead - linking');
+
+        return { bitrix24LeadId, bitrix24DealId: null, bitrix24ContactId: null };
+      }
+    } else {
+      // Search for existing CONTACT
+      const existingContacts = await findByPhone(domain, accessToken, [phone], 'CONTACT');
+
+      if (existingContacts.CONTACT && existingContacts.CONTACT.length > 0) {
+        bitrix24ContactId = existingContacts.CONTACT[0];
+        app.log.info({
+          bitrix24ContactId,
+          phone: `${phone.slice(0, 4)}***`
+        }, '[Bitrix24Sync] Found existing Bitrix24 contact');
+      }
+    }
+
+    // 4. Create entities
+    const { NAME, LAST_NAME } = extractName(displayName);
+
+    if (entityType === 'lead') {
+      // Create Bitrix24 Lead
+      const leadFields: Partial<Bitrix24Lead> = {
+        TITLE: `Лид: ${displayName}`,
+        NAME,
+        LAST_NAME,
+        PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
+        SOURCE_ID: 'WEB',
+        SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+        UTM_SOURCE: leadData.utm_source || undefined,
+        UTM_MEDIUM: leadData.utm_medium || undefined,
+        UTM_CAMPAIGN: leadData.utm_campaign || undefined,
+        UTM_CONTENT: leadData.utm_content || undefined,
+        UTM_TERM: leadData.utm_term || undefined,
+        COMMENTS: leadData.email ? `Email: ${leadData.email}` : undefined
+      };
+
+      if (defaultStageSettings.leadStatus) {
+        leadFields.STATUS_ID = defaultStageSettings.leadStatus;
+      }
+
+      bitrix24LeadId = await createBitrix24Lead(domain, accessToken, leadFields);
+
+      app.log.info({
+        bitrix24LeadId,
+        elapsedMs: Date.now() - syncStartTime
+      }, '[Bitrix24Sync] Bitrix24 lead created successfully');
+
+      await logSync({
+        userAccountId,
+        accountId,
+        bitrix24LeadId,
+        syncType: 'lead_to_bitrix24',
+        syncStatus: 'success',
+        requestJson: leadFields,
+        responseJson: { id: bitrix24LeadId }
+      });
+
+    } else {
+      // Create Contact (if not exists) then Deal
+      if (!bitrix24ContactId) {
+        const contactFields: Partial<Bitrix24Contact> = {
+          NAME,
+          LAST_NAME,
+          PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
+          SOURCE_ID: 'WEB'
+        };
+
+        if (leadData.email) {
+          contactFields.EMAIL = [{ VALUE: leadData.email, VALUE_TYPE: 'WORK' }];
+        }
+
+        bitrix24ContactId = await createBitrix24Contact(domain, accessToken, contactFields);
+
+        app.log.info({
+          bitrix24ContactId,
+          elapsedMs: Date.now() - syncStartTime
+        }, '[Bitrix24Sync] Bitrix24 contact created successfully');
+
+        await logSync({
+          userAccountId,
+          accountId,
+          bitrix24ContactId,
+          syncType: 'contact_to_bitrix24',
+          syncStatus: 'success',
+          requestJson: contactFields,
+          responseJson: { id: bitrix24ContactId }
+        });
+      }
+
+      // Create Deal linked to Contact
+      const dealFields: Partial<Bitrix24Deal> = {
+        TITLE: `Сделка: ${displayName}`,
+        CONTACT_ID: String(bitrix24ContactId),
+        SOURCE_ID: 'WEB',
+        SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+        UTM_SOURCE: leadData.utm_source || undefined,
+        UTM_MEDIUM: leadData.utm_medium || undefined,
+        UTM_CAMPAIGN: leadData.utm_campaign || undefined,
+        UTM_CONTENT: leadData.utm_content || undefined,
+        UTM_TERM: leadData.utm_term || undefined,
+        COMMENTS: leadData.email ? `Email: ${leadData.email}` : undefined
+      };
+
+      if (defaultStageSettings.dealCategory !== null) {
+        dealFields.CATEGORY_ID = String(defaultStageSettings.dealCategory);
+      }
+      if (defaultStageSettings.dealStage) {
+        dealFields.STAGE_ID = defaultStageSettings.dealStage;
+      }
+
+      bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
+
+      app.log.info({
+        bitrix24DealId,
+        bitrix24ContactId,
+        elapsedMs: Date.now() - syncStartTime
+      }, '[Bitrix24Sync] Bitrix24 deal created successfully');
+
+      await logSync({
+        userAccountId,
+        accountId,
+        bitrix24DealId,
+        bitrix24ContactId,
+        syncType: 'deal_to_bitrix24',
+        syncStatus: 'success',
+        requestJson: dealFields,
+        responseJson: { id: bitrix24DealId }
+      });
+    }
+
+    return { bitrix24LeadId, bitrix24DealId, bitrix24ContactId };
+
+  } catch (error: any) {
+    app.log.error({
+      error: error.message,
+      errorStack: error.stack?.split('\n').slice(0, 3).join('\n'),
+      userAccountId,
+      accountId,
+      elapsedMs: Date.now() - syncStartTime
+    }, '[Bitrix24Sync] Failed to push lead to Bitrix24');
+
+    await logSync({
+      userAccountId,
+      accountId,
+      syncType: 'lead_to_bitrix24',
+      syncStatus: 'failed',
+      errorMessage: error.message,
+      errorCode: error.code
+    });
+
+    return null;
+  }
+}
+
+/**
  * Sync a lead from our system to Bitrix24
  *
  * Steps:
@@ -192,6 +423,7 @@ function extractName(name: string): { NAME: string; LAST_NAME?: string } {
  * @param userAccountId - User account UUID
  * @param accountId - Optional ad_account UUID for multi-account mode
  * @param app - Fastify instance for logging
+ * @deprecated Use pushLeadToBitrix24Direct for new code (parallel approach)
  */
 export async function syncLeadToBitrix24(
   leadId: number,

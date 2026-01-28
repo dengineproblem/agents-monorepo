@@ -345,34 +345,71 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             }, 'Resolved creative from lead form ad_id');
           }
 
-          // Create lead in database
-          const { data: lead, error: insertError } = await supabase
+          // Prepare lead data for parallel processing
+          const leadInsertData = {
+            user_account_id: userAccountId,
+            account_id: accountId,
+
+            // Lead form fields
+            name: name || 'Lead Form',
+            phone: phone || null,
+            email: email || null,
+            source_type: 'lead_form',
+
+            // Facebook tracking
+            source_id: ad_id || null,
+            creative_id: creativeId,
+            direction_id: directionId,
+            leadgen_id: leadgen_id,
+
+            // UTM for analytics compatibility
+            utm_source: 'facebook_lead_form',
+            utm_campaign: form_id || null,
+
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+
+          // Check Bitrix24 auto-create BEFORE parallel operations
+          let bitrix24Enabled = false;
+          try {
+            const { checkBitrix24AutoCreate } = await import('../workflows/bitrix24Sync.js');
+            const bitrix24Settings = await checkBitrix24AutoCreate(userAccountId, accountId);
+            bitrix24Enabled = bitrix24Settings.enabled;
+            log.debug({ bitrix24Enabled, accountId }, '[Bitrix24] Auto-create check');
+          } catch (err: any) {
+            log.warn({ err: err.message }, '[Bitrix24] Auto-create check failed');
+          }
+
+          // Run DB save and Bitrix24 push in parallel
+          const dbSavePromise = supabase
             .from('leads')
-            .insert({
-              user_account_id: userAccountId,
-              account_id: accountId,
-
-              // Lead form fields
-              name: name || 'Lead Form',
-              phone: phone || null,
-              email: email || null,
-              source_type: 'lead_form',
-
-              // Facebook tracking
-              source_id: ad_id || null,
-              creative_id: creativeId,
-              direction_id: directionId,
-              leadgen_id: leadgen_id,
-
-              // UTM for analytics compatibility
-              utm_source: 'facebook_lead_form',
-              utm_campaign: form_id || null,
-
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
+            .insert(leadInsertData)
             .select('id')
             .single();
+
+          const bitrix24Promise = bitrix24Enabled && phone
+            ? (async () => {
+                const { pushLeadToBitrix24Direct } = await import('../workflows/bitrix24Sync.js');
+                return pushLeadToBitrix24Direct(
+                  {
+                    name: name || null,
+                    phone,
+                    email: email || null,
+                    utm_source: 'facebook_lead_form',
+                    utm_campaign: form_id || null
+                  },
+                  userAccountId,
+                  accountId,
+                  app
+                );
+              })()
+            : Promise.resolve(null);
+
+          // Wait for both operations
+          const [dbResult, bitrix24Result] = await Promise.all([dbSavePromise, bitrix24Promise]);
+
+          const { data: lead, error: insertError } = dbResult;
 
           if (insertError || !lead) {
             log.error({ error: insertError, leadgen_id }, 'Failed to insert lead');
@@ -388,6 +425,28 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             creativeId,
             directionId
           }, 'Lead form lead created successfully');
+
+          // Update lead with Bitrix24 IDs if push was successful
+          if (bitrix24Result) {
+            const updateData: Record<string, any> = {};
+            if (bitrix24Result.bitrix24LeadId) updateData.bitrix24_lead_id = bitrix24Result.bitrix24LeadId;
+            if (bitrix24Result.bitrix24DealId) updateData.bitrix24_deal_id = bitrix24Result.bitrix24DealId;
+            if (bitrix24Result.bitrix24ContactId) updateData.bitrix24_contact_id = bitrix24Result.bitrix24ContactId;
+
+            if (Object.keys(updateData).length > 0) {
+              await supabase
+                .from('leads')
+                .update(updateData)
+                .eq('id', lead.id);
+
+              log.info({
+                leadId: lead.id,
+                bitrix24LeadId: bitrix24Result.bitrix24LeadId,
+                bitrix24DealId: bitrix24Result.bitrix24DealId,
+                bitrix24ContactId: bitrix24Result.bitrix24ContactId
+              }, '[Bitrix24] Lead updated with Bitrix24 IDs');
+            }
+          }
 
           // Send lead notification to Telegram (per-account)
           if (accountId && LEAD_NOTIFICATIONS[accountId]) {
@@ -418,54 +477,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             }
           );
 
-          // Sync to Bitrix24 if auto-create is enabled
-          try {
-            const { syncLeadToBitrix24, checkBitrix24AutoCreate } = await import('../workflows/bitrix24Sync.js');
-
-            log.debug({
-              leadId: lead?.id,
-              userAccountId,
-              accountId
-            }, '[Bitrix24] Checking auto-create settings');
-
-            const bitrix24Settings = await checkBitrix24AutoCreate(userAccountId, accountId);
-
-            log.debug({
-              enabled: bitrix24Settings.enabled,
-              leadId: lead?.id
-            }, '[Bitrix24] Auto-create check completed');
-
-            if (bitrix24Settings.enabled && lead?.id) {
-              log.info({
-                leadId: lead.id,
-                userAccountId,
-                accountId
-              }, '[Bitrix24] Starting async sync to Bitrix24');
-
-              // Async, don't block webhook response
-              syncLeadToBitrix24(lead.id, userAccountId, accountId, app)
-                .then(() => {
-                  log.info({ leadId: lead.id }, '[Bitrix24] Sync completed successfully');
-                })
-                .catch(err => {
-                  log.error({
-                    err: err.message,
-                    errStack: err.stack?.split('\n').slice(0, 3).join('\n'),
-                    leadId: lead.id,
-                    userAccountId,
-                    accountId
-                  }, '[Bitrix24] Failed to sync lead');
-                });
-            } else if (!bitrix24Settings.enabled) {
-              log.debug({ leadId: lead?.id }, '[Bitrix24] Auto-create disabled - skipping sync');
-            }
-          } catch (bitrix24Err: any) {
-            log.warn({
-              err: bitrix24Err.message,
-              errStack: bitrix24Err.stack?.split('\n').slice(0, 3).join('\n'),
-              leadId: lead?.id
-            }, '[Bitrix24] Sync check failed - skipping');
-          }
+          // Bitrix24 sync is now done in parallel above (pushLeadToBitrix24Direct)
         }
       }
 
