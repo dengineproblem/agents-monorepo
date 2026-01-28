@@ -82,6 +82,10 @@ const CreativeGeneration = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [userData, setUserData] = useState<any>(null);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState<number>(0);
+
+  // Месячный лимит генераций
+  const [generationsUsed, setGenerationsUsed] = useState<number>(0);
+  const [generationsLimit, setGenerationsLimit] = useState<number>(20);
   
   // State для создания креатива
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
@@ -275,8 +279,11 @@ const CreativeGeneration = () => {
             setUserId(data.id);
             console.log('✅ Установлен user ID:', data.id);
             
-            // Загружаем количество доступных генераций
+            // Загружаем количество доступных генераций (legacy)
             setCreativeGenerationsAvailable(data.creative_generations_available || 0);
+
+            // Загружаем месячную статистику генераций
+            loadGenerationsStats(data.id);
           }
         } else {
           console.warn('⚠️ User ID не найден в localStorage');
@@ -285,6 +292,25 @@ const CreativeGeneration = () => {
         console.log('=== Завершение загрузки данных пользователя ===');
       } catch (err) {
         console.error('❌ Критическая ошибка при инициализации данных пользователя:', err);
+      }
+    };
+
+    // Загрузка месячной статистики генераций
+    const loadGenerationsStats = async (userId: string) => {
+      const CREATIVE_API = import.meta.env.VITE_CREATIVE_API_URL
+        || (import.meta.env.VITE_API_URL || 'http://localhost:8082') + '/api/creative';
+
+      try {
+        const response = await fetch(`${CREATIVE_API}/generations-stats?user_id=${userId}`);
+        const data = await response.json();
+
+        if (data.success) {
+          setGenerationsUsed(data.generations_used || 0);
+          setGenerationsLimit(data.generations_limit || 20);
+          console.log(`✅ Месячная статистика: ${data.generations_used}/${data.generations_limit}`);
+        }
+      } catch (err) {
+        console.warn('⚠️ Не удалось загрузить статистику генераций:', err);
       }
     };
 
@@ -661,11 +687,11 @@ const CreativeGeneration = () => {
   };
 
   const generateCreative = async (isEdit: boolean = false) => {
-    // TEMPORARILY DISABLED: Проверяем лимит генераций
-    // if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
-    //   toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
-    //   return;
-    // }
+    // Проверяем месячный лимит генераций
+    if (generationsUsed >= generationsLimit) {
+      toast.error(`Лимит генераций исчерпан. Доступно ${generationsLimit} генераций в месяц.`);
+      return;
+    }
 
     setLoading(prev => ({ ...prev, image: true }));
 
@@ -773,10 +799,16 @@ const CreativeGeneration = () => {
 
         toast.success(isEdit ? 'Креатив успешно отредактирован!' : 'Креатив успешно сгенерирован!');
 
-        // Обновляем счетчик генераций
+        // Обновляем счетчики месячных генераций
+        if (typeof data.generations_used === 'number') {
+          setGenerationsUsed(data.generations_used);
+        }
+        if (typeof data.generations_limit === 'number') {
+          setGenerationsLimit(data.generations_limit);
+        }
         if (typeof data.generations_remaining === 'number') {
           setCreativeGenerationsAvailable(data.generations_remaining);
-          console.log('Счетчик генераций обновлен:', data.generations_remaining);
+          console.log('Счетчик генераций обновлен:', data.generations_used, '/', data.generations_limit);
         }
 
         // Сбрасываем режим редактирования
@@ -1080,32 +1112,37 @@ const CreativeGeneration = () => {
             </Card>
           )}
           
-          {/* TEMPORARILY HIDDEN: Уведомление о количестве оставшихся генераций */}
-          {/* {!isMultiAccountMode && (
-            <Card className="mb-6 shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-muted">
-                    <Wand2 className="h-5 w-5 text-foreground" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-foreground">Доступно генераций:</span>
-                      <Badge variant="secondary" className="font-semibold">
-                        {creativeGenerationsAvailable}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {creativeGenerationsAvailable === 0
-                        ? 'Для генерации креативов приобретите дополнительный пакет'
-                        : `Вы можете сгенерировать еще ${creativeGenerationsAvailable} креатив${creativeGenerationsAvailable === 1 ? '' : creativeGenerationsAvailable < 5 ? 'а' : 'ов'}`
-                      }
-                    </p>
-                  </div>
+          {/* Месячный лимит генераций */}
+          <Card className="mb-6 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-muted">
+                  <Wand2 className="h-5 w-5 text-foreground" />
                 </div>
-              </CardContent>
-            </Card>
-          )} */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-medium text-foreground">Генерации в этом месяце:</span>
+                    <Badge variant={generationsUsed >= generationsLimit ? "destructive" : "secondary"} className="font-semibold">
+                      {generationsUsed} / {generationsLimit}
+                    </Badge>
+                  </div>
+                  {/* Прогресс-бар */}
+                  <div className="w-full bg-muted rounded-full h-2 mb-2">
+                    <div
+                      className={`h-2 rounded-full transition-all ${generationsUsed >= generationsLimit ? 'bg-destructive' : 'bg-primary'}`}
+                      style={{ width: `${Math.min((generationsUsed / generationsLimit) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {generationsUsed >= generationsLimit
+                      ? 'Лимит генераций исчерпан. Лимит сбросится в начале следующего месяца.'
+                      : `Осталось ${generationsLimit - generationsUsed} генерац${(generationsLimit - generationsUsed) === 1 ? 'ия' : (generationsLimit - generationsUsed) < 5 ? 'ии' : 'ий'} в этом месяце`
+                    }
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
           
           <div className="grid gap-6">
             {/* Секции для каждого типа текста */}

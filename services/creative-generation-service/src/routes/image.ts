@@ -48,20 +48,41 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // ВРЕМЕННО: Лимит генераций отключён - безлимитные генерации для всех
-      // TODO: Вернуть проверку лимитов позже
-      // const isMultiAccountMode = user.multi_account_enabled === true;
-      // if (!isMultiAccountMode && (!user.creative_generations_available || user.creative_generations_available <= 0)) {
-      //   app.log.warn(`[Generate Creative] No generations available for user: ${user_id}`);
-      //   return reply.status(403).send({
-      //     success: false,
-      //     error: 'No generations available',
-      //     generations_remaining: 0
-      //   });
-      // }
+      // ====== Месячный лимит генераций: 20 в месяц ======
+      const MONTHLY_LIMIT = 20;
       const isMultiAccountMode = user.multi_account_enabled === true;
 
-      app.log.info(`[Generate Creative] Generations available: ${user.creative_generations_available}`);
+      // Подсчёт генераций за текущий месяц
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+
+      const { count: generationsThisMonth, error: countError } = await supabase
+        .from('generated_creatives')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user_id)
+        .gte('created_at', startOfMonth.toISOString());
+
+      if (countError) {
+        logSupabaseError('Count monthly generations', countError);
+      }
+
+      const generationsUsed = generationsThisMonth || 0;
+      const generationsRemaining = Math.max(0, MONTHLY_LIMIT - generationsUsed);
+
+      app.log.info(`[Generate Creative] Monthly generations: ${generationsUsed}/${MONTHLY_LIMIT}, remaining: ${generationsRemaining}`);
+
+      // Проверяем месячный лимит генераций
+      if (generationsRemaining <= 0) {
+        app.log.warn(`[Generate Creative] Monthly limit exceeded for user: ${user_id}`);
+        return reply.status(403).send({
+          success: false,
+          error: 'Лимит генераций исчерпан. Доступно 20 генераций в месяц.',
+          generations_used: generationsUsed,
+          generations_limit: MONTHLY_LIMIT,
+          generations_remaining: 0
+        });
+      }
 
       // Определяем prompt4: в мультиаккаунтном режиме берём из ad_accounts
       let userPrompt4 = user.prompt4 || '';
@@ -158,7 +179,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           cta,
           style_id: selectedStyle,
           image_url: publicUrlData.publicUrl,
-          status: 'generated'
+          status: 'generated',
+          created_at: new Date().toISOString()
         })
         .select()
         .single();
@@ -175,38 +197,20 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag generated_image');
       });
 
-      // ====== ШАГ 5: Уменьшаем счетчик генераций (только для не-мультиаккаунтного режима) ======
-      let newGenerationsCount = user.creative_generations_available;
+      // ====== ШАГ 5: Возвращаем результат с обновлённым счётчиком ======
+      const newGenerationsUsed = generationsUsed + 1;
+      const newGenerationsRemaining = Math.max(0, MONTHLY_LIMIT - newGenerationsUsed);
 
-      if (!isMultiAccountMode) {
-        newGenerationsCount = user.creative_generations_available - 1;
-
-        const { error: updateError } = await supabase
-          .from('user_accounts')
-          .update({
-            creative_generations_available: newGenerationsCount
-          })
-          .eq('id', user_id);
-
-        if (updateError) {
-          logSupabaseError('Update generations count', updateError);
-          // Не критичная ошибка, продолжаем
-        } else {
-          app.log.info(`[Generate Creative] Generations remaining: ${newGenerationsCount}`);
-        }
-      } else {
-        app.log.info(`[Generate Creative] Multi-account mode - skipping generation counter decrement`);
-      }
-
-      // ====== ШАГ 6: Возвращаем результат ======
       const response: GenerateCreativeResponse = {
         success: true,
         creative_id: creative.id,
         image_url: publicUrlData.publicUrl,
-        generations_remaining: newGenerationsCount
+        generations_used: newGenerationsUsed,
+        generations_limit: MONTHLY_LIMIT,
+        generations_remaining: newGenerationsRemaining
       };
 
-      app.log.info('[Generate Creative] Successfully completed');
+      app.log.info(`[Generate Creative] Successfully completed. Used: ${newGenerationsUsed}/${MONTHLY_LIMIT}`);
       return response;
 
     } catch (error: any) {
@@ -414,6 +418,64 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(500).send({
         success: false,
         error: 'Failed to extract text from image',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  /**
+   * GET /generations-stats
+   *
+   * Возвращает статистику генераций пользователя за текущий месяц
+   */
+  app.get<{
+    Querystring: {
+      user_id: string;
+    };
+  }>('/generations-stats', async (request, reply) => {
+    const { user_id } = request.query;
+
+    if (!user_id) {
+      return reply.status(400).send({
+        success: false,
+        error: 'user_id is required'
+      });
+    }
+
+    try {
+      const MONTHLY_LIMIT = 20;
+
+      // Подсчёт генераций за текущий месяц
+      const startOfMonth = new Date();
+      startOfMonth.setDate(1);
+      startOfMonth.setHours(0, 0, 0, 0);
+
+      const { count, error: countError } = await supabase
+        .from('generated_creatives')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user_id)
+        .gte('created_at', startOfMonth.toISOString());
+
+      if (countError) {
+        logSupabaseError('Count monthly generations', countError);
+      }
+
+      const generationsUsed = count || 0;
+      const generationsRemaining = Math.max(0, MONTHLY_LIMIT - generationsUsed);
+
+      return {
+        success: true,
+        generations_used: generationsUsed,
+        generations_limit: MONTHLY_LIMIT,
+        generations_remaining: generationsRemaining
+      };
+
+    } catch (error: any) {
+      app.log.error('[Generations Stats] Error:', error);
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to get generations stats',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }

@@ -38,7 +38,9 @@ export interface GenerateCreativeResponse {
   success: boolean;
   creative_id?: string;
   image_url?: string;
-  generations_remaining?: number;
+  generations_used?: number;     // Сколько генераций использовано в этом месяце
+  generations_limit?: number;    // Месячный лимит (20)
+  generations_remaining?: number; // Осталось генераций
   error?: string;
 }
 
