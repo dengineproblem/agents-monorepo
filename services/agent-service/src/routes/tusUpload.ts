@@ -280,7 +280,14 @@ async function processTikTokUpload(
     }
 
     // 6. Обновить креатив с tiktok_video_id (optimistic locking)
-    const { error: updateError } = await supabase
+    log.info({
+      correlationId,
+      creativeId,
+      tiktokVideoId,
+      newStatus: 'ready'
+    }, '[TUS-TikTok] Updating creative with tiktok_video_id...');
+
+    const { data: updateData, error: updateError, count } = await supabase
       .from('user_creatives')
       .update({
         tiktok_video_id: tiktokVideoId,
@@ -288,14 +295,50 @@ async function processTikTokUpload(
         updated_at: new Date().toISOString()
       })
       .eq('id', creativeId)
-      .eq('status', 'processing');  // Optimistic locking
+      .eq('status', 'processing')  // Optimistic locking
+      .select('id, status, tiktok_video_id');
 
     if (updateError) {
       log.error({
         correlationId,
         err: updateError,
-        creativeId
-      }, '[TUS-TikTok] Failed to update creative status');
+        creativeId,
+        tiktokVideoId
+      }, '[TUS-TikTok] ❌ Failed to update creative status');
+    } else if (!updateData || updateData.length === 0) {
+      // Optimistic locking failed - статус уже не 'processing'
+      log.warn({
+        correlationId,
+        creativeId,
+        tiktokVideoId
+      }, '[TUS-TikTok] ⚠️ Creative not updated (status was not "processing"). Trying force update...');
+
+      // Пробуем обновить без optimistic locking
+      const { error: forceUpdateError } = await supabase
+        .from('user_creatives')
+        .update({
+          tiktok_video_id: tiktokVideoId,
+          status: 'ready',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', creativeId);
+
+      if (forceUpdateError) {
+        log.error({
+          correlationId,
+          err: forceUpdateError,
+          creativeId
+        }, '[TUS-TikTok] ❌ Force update also failed');
+      } else {
+        log.info({ correlationId, creativeId, tiktokVideoId }, '[TUS-TikTok] ✅ Creative force-updated successfully');
+      }
+    } else {
+      log.info({
+        correlationId,
+        creativeId,
+        tiktokVideoId,
+        updatedRecord: updateData[0]
+      }, '[TUS-TikTok] ✅ Creative updated successfully');
     }
 
     const duration = Date.now() - startTime;

@@ -26,25 +26,34 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 ### Phase 4: TikTok Video Upload & Lead Generation (Latest)
 
 #### TikTok Video Upload
-**File**: `services/agent-service/src/routes/tusUpload.ts`
+**Files**:
+- `services/agent-service/src/routes/tusUpload.ts` - TUS upload handler
+- `services/agent-service/src/adapters/tiktok.ts` - TikTok API adapter
 
 **Features**:
 - Direct upload to TikTok Ads API when direction.platform === 'tiktok'
 - Video transcription with Whisper (same as Facebook)
 - Creates `user_creatives` record with `tiktok_video_id`
+- MD5 signature calculation for UPLOAD_BY_FILE (required by TikTok API)
+- Dynamic timeout based on file size (min 5 min or 10sec/MB)
 
 **Reliability & Error Handling**:
 - ✅ Retry logic с exponential backoff (3 attempts: 2s, 5s, 10s)
 - ✅ Timeout protection for transcription (2 minutes)
+- ✅ Dynamic upload timeout for large files
 - ✅ Path traversal protection (uploadId validation)
 - ✅ Idempotency check (prevents duplicate processing)
-- ✅ Optimistic locking при обновлении статуса
+- ✅ Optimistic locking при обновлении статуса с fallback на force update
 - ✅ Graceful fallback для транскрипции
+- ✅ MD5 hash computed from buffer directly (no double file read)
 
 **Logging & Observability**:
 - ✅ Correlation ID для сквозного трейсинга
 - ✅ Structured logging с step-by-step progress
 - ✅ Performance metrics (durationMs for each step)
+- ✅ File size logging (bytes and MB)
+- ✅ TikTok API response logging with full data
+- ✅ Creative update status logging (success/force-update/failure)
 
 #### TikTok Instant Pages API
 **File**: `services/agent-service/src/routes/tiktokRoutes.ts`

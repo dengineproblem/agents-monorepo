@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket, Download, Zap } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket, Download, Zap, Instagram } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { manualLaunchAds, ManualLaunchResponse } from "@/services/manualLaunchApi";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -23,6 +23,7 @@ import { API_BASE_URL } from "@/config/api";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDirections } from "@/hooks/useDirections";
@@ -32,6 +33,9 @@ import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativ
 import { TestStatusIndicator } from "@/components/TestStatusIndicator";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { TooltipKeys } from "@/content/tooltips";
+import { CreativeAnalysisModal } from "@/components/CreativeAnalysisModal";
+import { cn } from "@/lib/utils";
+import { FEATURES } from "@/config/appReview";
 
 // Утилита для получения thumbnail URL через Supabase Transform
 const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 250): string | null => {
@@ -1358,7 +1362,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
 const Creatives: React.FC = () => {
   const navigate = useNavigate();
-  const { currentAdAccountId, platform } = useAppContext();
+  const { currentAdAccountId, platform, setPlatform } = useAppContext();
   // Передаём currentAdAccountId для фильтрации креативов по выбранному рекламному аккаунту
   const { items, loading, reload, testStatuses } = useUserCreatives(currentAdAccountId, platform);
 
@@ -1370,7 +1374,7 @@ const Creatives: React.FC = () => {
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
   const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
   const [isLaunching, setIsLaunching] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
 
   // Состояния для Manual Launch модалки
   const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
@@ -1459,28 +1463,13 @@ const Creatives: React.FC = () => {
     }
   };
 
-  // Импортировать топ креативы из Facebook
-  const handleImportTopCreatives = async () => {
+  // Открыть модалку анализа топ креативов
+  const handleImportTopCreatives = () => {
     if (!currentAdAccountId) {
       toast.error('Выберите рекламный аккаунт');
       return;
     }
-
-    setIsImporting(true);
-    try {
-      const result = await creativesApi.analyzeTopCreatives(currentAdAccountId, true);
-      if (result.success) {
-        toast.success(`Импортировано ${result.imported || 0} креативов`);
-        await reload();
-      } else {
-        toast.error(result.error || 'Ошибка импорта креативов');
-      }
-    } catch (error: any) {
-      console.error('Ошибка импорта:', error);
-      toast.error(error.message || 'Не удалось импортировать креативы');
-    } finally {
-      setIsImporting(false);
-    }
+    setIsAnalysisModalOpen(true);
   };
 
   // Открыть модалку для запуска с выбранными креативами
@@ -1789,6 +1778,52 @@ const Creatives: React.FC = () => {
           subtitle="Загружайте и управляйте вашими видео креативами"
           tooltipKey={TooltipKeys.CREATIVES_PAGE_OVERVIEW}
         />
+
+        {/* Селектор платформы */}
+        {(() => {
+          const TikTokIcon = () => (
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+            </svg>
+          );
+          return (
+            <div className="flex items-center gap-3 mb-6">
+              <span className="text-sm font-medium text-muted-foreground">Платформа:</span>
+              <Tabs
+                value={platform}
+                onValueChange={(value) => setPlatform(value as 'instagram' | 'tiktok')}
+              >
+                <TabsList className="h-auto bg-transparent p-0 gap-2">
+                  <TabsTrigger
+                    value="instagram"
+                    className={cn(
+                      "gap-2 transition-all duration-200",
+                      "data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:hover:from-purple-600 data-[state=active]:hover:to-pink-600 data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                      "data-[state=inactive]:border data-[state=inactive]:border-purple-200 data-[state=inactive]:text-purple-600 data-[state=inactive]:hover:bg-purple-50 data-[state=inactive]:hover:border-purple-300 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
+                    )}
+                  >
+                    <Instagram className="h-4 w-4" />
+                    Instagram
+                  </TabsTrigger>
+                  {FEATURES.SHOW_TIKTOK && (
+                    <TabsTrigger
+                      value="tiktok"
+                      className={cn(
+                        "gap-2 transition-all duration-200",
+                        "data-[state=active]:bg-gradient-to-r data-[state=active]:from-black data-[state=active]:to-gray-900 data-[state=active]:hover:from-gray-900 data-[state=active]:hover:to-black data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                        "data-[state=inactive]:border data-[state=inactive]:border-gray-300 data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:border-gray-400 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
+                      )}
+                    >
+                      <TikTokIcon />
+                      TikTok
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+              </Tabs>
+            </div>
+          );
+        })()}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1">
             <CardHeader>
@@ -2042,15 +2077,11 @@ const Creatives: React.FC = () => {
                       size="sm"
                       variant="outline"
                       onClick={handleImportTopCreatives}
-                      disabled={isImporting || !currentAdAccountId}
+                      disabled={!currentAdAccountId}
                       className="h-7 px-2 text-xs gap-1"
-                      title="Импортировать топ-5 креативов по CPL из Facebook"
+                      title="Анализировать и импортировать топ-5 креативов по CPL из Facebook"
                     >
-                      {isImporting ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Zap className="h-3.5 w-3.5" />
-                      )}
+                      <Zap className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">Импорт лучших</span>
                     </Button>
                   )}
@@ -2435,6 +2466,17 @@ const Creatives: React.FC = () => {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Модалка анализа топ креативов */}
+        <CreativeAnalysisModal
+          isOpen={isAnalysisModalOpen}
+          onClose={() => setIsAnalysisModalOpen(false)}
+          accountId={currentAdAccountId}
+          onImportComplete={() => {
+            reload();
+            toast.success('Креативы успешно импортированы');
+          }}
+        />
       </div>
     </div>
   );

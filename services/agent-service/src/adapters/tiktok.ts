@@ -16,7 +16,7 @@ import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { createLogger } from '../lib/logger.js';
 import { resolveTikTokError } from '../lib/tiktokErrors.js';
 
@@ -753,27 +753,43 @@ export async function uploadVideo(
   }
 
   // Иначе - загрузка файла
-  const tmpPath = path.join(os.tmpdir(), `tt_video_${randomUUID()}.mp4`);
-
-  if (Buffer.isBuffer(videoSource)) {
-    fs.writeFileSync(tmpPath, videoSource);
-    log.debug({
-      advertiserId,
-      tmp_path: tmpPath,
-      file_size: videoSource.length
-    }, '[TikTok:uploadVideo] Временный файл создан');
-  } else {
-    log.error({ advertiserId }, '[TikTok:uploadVideo] ❌ Неверный источник видео');
+  if (!Buffer.isBuffer(videoSource)) {
+    log.error({ advertiserId, sourceType: typeof videoSource }, '[TikTok:uploadVideo] ❌ Неверный источник видео');
     throw new Error('Invalid video source: must be URL or Buffer');
   }
+
+  const tmpPath = path.join(os.tmpdir(), `tt_video_${randomUUID()}.mp4`);
+  const fileSizeMB = Math.round(videoSource.length / 1024 / 1024);
+
+  // Вычисляем MD5 хеш из buffer напрямую (без повторного чтения файла)
+  const videoSignature = createHash('md5').update(videoSource).digest('hex');
+
+  log.info({
+    advertiserId,
+    file_size_bytes: videoSource.length,
+    file_size_mb: fileSizeMB,
+    video_signature: videoSignature
+  }, '[TikTok:uploadVideo] Подготовка к загрузке файла');
+
+  // Записываем временный файл для streaming upload
+  fs.writeFileSync(tmpPath, videoSource);
+  log.debug({ advertiserId, tmp_path: tmpPath }, '[TikTok:uploadVideo] Временный файл создан');
 
   try {
     const formData = new FormData();
     formData.append('advertiser_id', advertiserId);
     formData.append('upload_type', 'UPLOAD_BY_FILE');
+    formData.append('video_signature', videoSignature);
     formData.append('video_file', fs.createReadStream(tmpPath));
 
-    log.debug({ advertiserId }, '[TikTok:uploadVideo] Отправка файла...');
+    log.info({
+      advertiserId,
+      video_signature: videoSignature,
+      file_size_mb: fileSizeMB
+    }, '[TikTok:uploadVideo] Отправка файла в TikTok API...');
+
+    // Увеличенный timeout для больших файлов (5 минут)
+    const uploadTimeout = Math.max(300000, fileSizeMB * 10000); // минимум 5 мин или 10сек/МБ
 
     const response = await axios.post(
       `${TIKTOK_BASE_URL}/file/video/ad/upload/`,
@@ -784,9 +800,18 @@ export async function uploadVideo(
           ...formData.getHeaders()
         },
         maxBodyLength: Infinity,
-        maxContentLength: Infinity
+        maxContentLength: Infinity,
+        timeout: uploadTimeout
       }
     );
+
+    // Логируем полный ответ для отладки
+    log.info({
+      advertiserId,
+      response_code: response.data.code,
+      response_message: response.data.message,
+      response_data: JSON.stringify(response.data.data || response.data)
+    }, '[TikTok:uploadVideo] Ответ от TikTok API');
 
     if (response.data.code !== 0) {
       log.error({
@@ -797,15 +822,26 @@ export async function uploadVideo(
       throw new Error(response.data.message || 'Video upload failed');
     }
 
+    // TikTok возвращает data как массив: data[0].video_id
+    const dataArray = response.data.data;
+    const videoId = Array.isArray(dataArray)
+      ? dataArray[0]?.video_id
+      : dataArray?.video_id;
+
     const duration = Date.now() - startTime;
     log.info({
       advertiserId,
-      video_id: response.data.data.video_id,
+      video_id: videoId,
       upload_type: 'UPLOAD_BY_FILE',
       duration_ms: duration
     }, '[TikTok:uploadVideo] ✅ Видео загружено из файла');
 
-    return { video_id: response.data.data.video_id };
+    if (!videoId) {
+      log.error({ advertiserId, response_data: response.data }, '[TikTok:uploadVideo] ❌ video_id не найден в ответе');
+      throw new Error('TikTok API did not return video_id');
+    }
+
+    return { video_id: videoId };
 
   } finally {
     if (fs.existsSync(tmpPath)) {
