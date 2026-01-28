@@ -23,8 +23,15 @@ import {
   getStackCapabilities
 } from '../contextGatherer.js';
 import { adsHandlers } from '../agents/ads/handlers.js';
-// Meta-tools orchestrator
+// Meta-tools orchestrator (OpenAI)
 import { processWithMetaTools } from './metaOrchestrator.js';
+// Claude Agent SDK orchestrator
+import { processWithClaudeSDK } from './claudeOrchestrator.js';
+import { ORCHESTRATOR_CONFIG } from '../config.js';
+
+// LLM Provider selection
+const USE_CLAUDE = process.env.LLM_PROVIDER === 'claude' || ORCHESTRATOR_CONFIG.llmProvider === 'claude';
+const ENABLE_FALLBACK = process.env.LLM_FALLBACK === 'true';
 
 // In-memory cache for ad account status
 const adAccountStatusCache = new Map();
@@ -153,16 +160,69 @@ export class Orchestrator {
         stack
       };
 
-      // 2. Route to meta-tools orchestrator
-      logger.info({ mode: 'meta' }, 'Routing to meta-tools orchestrator');
-      layerLogger?.info(2, 'Routing to MetaOrchestrator');
+      // 2. Route to appropriate orchestrator based on LLM provider
+      const provider = USE_CLAUDE ? 'claude' : 'openai';
+      layerLogger?.info(2, `Routing to ${provider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'}`, { provider });
+      logger.info({ provider, fallbackEnabled: ENABLE_FALLBACK }, 'LLM provider selected');
 
-      const metaResult = await processWithMetaTools({
-        message,
-        context: enrichedContext,
-        conversationHistory,
-        toolContext: { ...toolContext, mode }
-      });
+      let metaResult;
+      let usedProvider = provider;
+
+      if (USE_CLAUDE) {
+        try {
+          // Collect results from Claude generator
+          let accumulatedContent = '';
+          let executedTools = [];
+          let plan = null;
+
+          for await (const event of processWithClaudeSDK({
+            message,
+            context: enrichedContext,
+            conversationHistory,
+            toolContext: { ...toolContext, mode }
+          })) {
+            if (event.type === 'text') {
+              accumulatedContent = event.accumulated || accumulatedContent + event.content;
+            } else if (event.type === 'done') {
+              executedTools = event.executedActions || [];
+              plan = event.plan;
+              accumulatedContent = event.content || accumulatedContent;
+            } else if (event.type === 'error') {
+              throw new Error(event.message);
+            }
+          }
+
+          metaResult = {
+            content: accumulatedContent,
+            executedTools,
+            plan,
+            iterations: executedTools.length
+          };
+
+        } catch (claudeError) {
+          if (ENABLE_FALLBACK) {
+            logger.warn({ error: claudeError.message }, 'Claude failed, falling back to OpenAI');
+            usedProvider = 'openai-fallback';
+
+            metaResult = await processWithMetaTools({
+              message,
+              context: enrichedContext,
+              conversationHistory,
+              toolContext: { ...toolContext, mode }
+            });
+          } else {
+            throw claudeError;
+          }
+        }
+      } else {
+        // Use OpenAI
+        metaResult = await processWithMetaTools({
+          message,
+          context: enrichedContext,
+          conversationHistory,
+          toolContext: { ...toolContext, mode }
+        });
+      }
 
       const duration = Date.now() - startTime;
 
@@ -180,24 +240,27 @@ export class Orchestrator {
       logger.info({
         duration,
         iterations: metaResult.iterations,
-        toolCalls: metaResult.executedTools?.length || 0
+        toolCalls: metaResult.executedTools?.length || 0,
+        provider: usedProvider
       }, 'Orchestrator completed');
 
       layerLogger?.end(2, {
         iterations: metaResult.iterations,
-        toolCalls: metaResult.executedTools?.length || 0
+        toolCalls: metaResult.executedTools?.length || 0,
+        provider: usedProvider
       });
 
       return {
-        agent: 'MetaOrchestrator',
+        agent: usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator',
         content: metaResult.content,
         executedActions: metaResult.executedTools || [],
-        classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
+        classification: { domain: 'meta', agents: [usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'] },
         duration,
         metadata: {
           iterations: metaResult.iterations,
           tokens: metaResult.tokens,
-          runId: metaResult.runId
+          runId: metaResult.runId,
+          provider: usedProvider
         }
       };
 
@@ -395,26 +458,98 @@ export class Orchestrator {
         message: 'Обрабатываю запрос...'
       };
 
-      layerLogger?.info(2, 'Routing to MetaOrchestrator');
+      // 2. Route to appropriate orchestrator based on LLM provider
+      const provider = USE_CLAUDE ? 'claude' : 'openai';
+      layerLogger?.info(2, `Routing to ${provider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'}`, { provider });
+      logger.info({ provider, fallbackEnabled: ENABLE_FALLBACK }, 'LLM provider selected');
 
-      // 2. Process via meta-tools
-      // Tool events are sent directly via toolContext.onToolEvent (passed from route handler)
-      const metaResult = await processWithMetaTools({
-        message,
-        context: enrichedContext,
-        conversationHistory,
-        toolContext: { ...toolContext, mode },
-        onToolEvent: toolContext.onToolEvent  // Use callback from toolContext for real-time streaming
-      });
+      let metaResult;
+      let usedProvider = provider;
 
-      layerLogger?.end(2, { iterations: metaResult.iterations });
+      if (USE_CLAUDE) {
+        try {
+          // Use Claude Agent SDK
+          let accumulatedContent = '';
+          let executedTools = [];
+          let plan = null;
 
-      // Yield content
-      yield {
-        type: 'text',
-        content: metaResult.content,
-        accumulated: metaResult.content
-      };
+          for await (const event of processWithClaudeSDK({
+            message,
+            context: enrichedContext,
+            conversationHistory,
+            toolContext: { ...toolContext, mode },
+            onToolEvent: toolContext.onToolEvent
+          })) {
+            // Forward events (except done, we'll create our own)
+            if (event.type === 'text') {
+              accumulatedContent = event.accumulated || accumulatedContent + event.content;
+              yield event;
+            } else if (event.type === 'tool_start' || event.type === 'tool_result') {
+              yield event;
+            } else if (event.type === 'done') {
+              executedTools = event.executedActions || [];
+              plan = event.plan;
+              accumulatedContent = event.content || accumulatedContent;
+            } else if (event.type === 'error' && ENABLE_FALLBACK) {
+              // Fallback to OpenAI on error
+              logger.warn({ error: event.message }, 'Claude failed, falling back to OpenAI');
+              usedProvider = 'openai-fallback';
+              throw new Error(event.message); // Will be caught by fallback
+            } else {
+              yield event;
+            }
+          }
+
+          metaResult = {
+            content: accumulatedContent,
+            executedTools,
+            plan,
+            iterations: executedTools.length
+          };
+
+        } catch (claudeError) {
+          if (ENABLE_FALLBACK) {
+            logger.warn({ error: claudeError.message }, 'Claude failed, falling back to OpenAI');
+            usedProvider = 'openai-fallback';
+
+            // Fallback to OpenAI
+            metaResult = await processWithMetaTools({
+              message,
+              context: enrichedContext,
+              conversationHistory,
+              toolContext: { ...toolContext, mode },
+              onToolEvent: toolContext.onToolEvent
+            });
+
+            // Yield content from OpenAI fallback
+            yield {
+              type: 'text',
+              content: metaResult.content,
+              accumulated: metaResult.content
+            };
+          } else {
+            throw claudeError;
+          }
+        }
+      } else {
+        // Use OpenAI (existing flow)
+        metaResult = await processWithMetaTools({
+          message,
+          context: enrichedContext,
+          conversationHistory,
+          toolContext: { ...toolContext, mode },
+          onToolEvent: toolContext.onToolEvent
+        });
+
+        // Yield content
+        yield {
+          type: 'text',
+          content: metaResult.content,
+          accumulated: metaResult.content
+        };
+      }
+
+      layerLogger?.end(2, { iterations: metaResult.iterations, provider: usedProvider });
 
       const duration = Date.now() - startTime;
 
@@ -431,17 +566,18 @@ export class Orchestrator {
 
       yield {
         type: 'done',
-        agent: 'MetaOrchestrator',
+        agent: usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator',
         content: metaResult.content,
         executedActions: metaResult.executedTools || [],
         toolCalls: [],
         domain: 'meta',
-        classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
+        classification: { domain: 'meta', agents: [usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'] },
         duration,
-        plan: metaResult.plan || null, // Plan from mini-AgentBrain (triggerBrainOptimizationRun)
+        plan: metaResult.plan || null,
         metadata: {
           iterations: metaResult.iterations,
-          tokens: metaResult.tokens
+          tokens: metaResult.tokens,
+          provider: usedProvider
         }
       };
 
