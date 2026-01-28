@@ -379,30 +379,28 @@ export function getAuthUrl(
  *
  * @param domain - Bitrix24 domain
  * @param code - Authorization code from callback
- * @param clientId - Application client ID
- * @param clientSecret - Application client secret
- * @param redirectUri - Redirect URI (must match the one used in auth)
+ * @param clientId - Application client ID (required)
+ * @param clientSecret - Application client secret (required)
+ * @param redirectUri - Redirect URI (optional, falls back to env)
  * @returns Token response
  */
 export async function exchangeCodeForToken(
   domain: string,
   code: string,
-  clientId?: string,
-  clientSecret?: string,
+  clientId: string,
+  clientSecret: string,
   redirectUri?: string
 ): Promise<Bitrix24TokenResponse> {
-  const actualClientId = clientId || process.env.BITRIX24_CLIENT_ID;
-  const actualClientSecret = clientSecret || process.env.BITRIX24_CLIENT_SECRET;
   const actualRedirectUri = redirectUri || process.env.BITRIX24_REDIRECT_URI;
 
-  if (!actualClientId || !actualClientSecret || !actualRedirectUri) {
+  if (!clientId || !clientSecret || !actualRedirectUri) {
     throw new Error('Bitrix24 OAuth credentials not configured');
   }
 
   const params = new URLSearchParams({
     grant_type: 'authorization_code',
-    client_id: actualClientId,
-    client_secret: actualClientSecret,
+    client_id: clientId,
+    client_secret: clientSecret,
     redirect_uri: actualRedirectUri,
     code,
   });
@@ -424,27 +422,24 @@ export async function exchangeCodeForToken(
  *
  * @param domain - Bitrix24 domain
  * @param refreshToken - Refresh token
- * @param clientId - Application client ID
- * @param clientSecret - Application client secret
+ * @param clientId - Application client ID (required)
+ * @param clientSecret - Application client secret (required)
  * @returns New token response
  */
 export async function refreshAccessToken(
   domain: string,
   refreshToken: string,
-  clientId?: string,
-  clientSecret?: string
+  clientId: string,
+  clientSecret: string
 ): Promise<Bitrix24TokenResponse> {
-  const actualClientId = clientId || process.env.BITRIX24_CLIENT_ID;
-  const actualClientSecret = clientSecret || process.env.BITRIX24_CLIENT_SECRET;
-
-  if (!actualClientId || !actualClientSecret) {
+  if (!clientId || !clientSecret) {
     throw new Error('Bitrix24 OAuth credentials not configured');
   }
 
   const params = new URLSearchParams({
     grant_type: 'refresh_token',
-    client_id: actualClientId,
-    client_secret: actualClientSecret,
+    client_id: clientId,
+    client_secret: clientSecret,
     refresh_token: refreshToken,
   });
 
@@ -560,6 +555,24 @@ export async function updateLead(
     accessToken,
     method: 'crm.lead.update',
     params: { id: leadId, fields },
+  });
+}
+
+/**
+ * Get lead standard fields description
+ *
+ * @param domain - Bitrix24 domain
+ * @param accessToken - Access token
+ * @returns Object with field descriptions keyed by field name
+ */
+export async function getLeadFields(
+  domain: string,
+  accessToken: string
+): Promise<Record<string, any>> {
+  return bitrix24Request<Record<string, any>>({
+    domain,
+    accessToken,
+    method: 'crm.lead.fields',
   });
 }
 
@@ -703,6 +716,24 @@ export async function updateDeal(
     accessToken,
     method: 'crm.deal.update',
     params: { id: dealId, fields },
+  });
+}
+
+/**
+ * Get deal standard fields description
+ *
+ * @param domain - Bitrix24 domain
+ * @param accessToken - Access token
+ * @returns Object with field descriptions keyed by field name
+ */
+export async function getDealFields(
+  domain: string,
+  accessToken: string
+): Promise<Record<string, any>> {
+  return bitrix24Request<Record<string, any>>({
+    domain,
+    accessToken,
+    method: 'crm.deal.fields',
   });
 }
 
@@ -938,6 +969,24 @@ export async function findContactByPhone(
     console.error('Error finding contact by phone:', error);
     return null;
   }
+}
+
+/**
+ * Get contact standard fields description
+ *
+ * @param domain - Bitrix24 domain
+ * @param accessToken - Access token
+ * @returns Object with field descriptions keyed by field name
+ */
+export async function getContactFields(
+  domain: string,
+  accessToken: string
+): Promise<Record<string, any>> {
+  return bitrix24Request<Record<string, any>>({
+    domain,
+    accessToken,
+    method: 'crm.contact.fields',
+  });
 }
 
 /**

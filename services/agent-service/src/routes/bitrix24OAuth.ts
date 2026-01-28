@@ -14,7 +14,9 @@ import {
   saveBitrix24TokensToAdAccount,
   disconnectBitrix24,
   getBitrix24Status,
-  setBitrix24EntityType
+  setBitrix24EntityType,
+  getBitrix24Credentials,
+  saveBitrix24Credentials
 } from '../lib/bitrix24Tokens.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { supabase } from '../lib/supabase.js';
@@ -69,6 +71,24 @@ const EntityTypeBodySchema = z.object({
   entityType: z.enum(['lead', 'deal', 'both'])
 });
 
+/**
+ * Query parameters for /credentials endpoint (GET)
+ */
+const CredentialsQuerySchema = z.object({
+  userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional()
+});
+
+/**
+ * Body for /credentials endpoint (POST)
+ */
+const CredentialsBodySchema = z.object({
+  userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1)
+});
+
 export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
   /**
    * GET /bitrix24/auth
@@ -96,9 +116,20 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
 
       const { userAccountId, domain, entityType, accountId } = parsed.data;
 
-      if (!BITRIX24_CLIENT_ID || !BITRIX24_REDIRECT_URI) {
+      // Get OAuth credentials from database
+      const credentials = await getBitrix24Credentials(userAccountId, accountId);
+
+      if (!credentials) {
+        return reply.code(400).send({
+          error: 'credentials_not_configured',
+          message: 'Bitrix24 OAuth credentials are not configured. Please configure them first.'
+        });
+      }
+
+      const redirectUri = BITRIX24_REDIRECT_URI;
+      if (!redirectUri) {
         return reply.code(500).send({
-          error: 'Bitrix24 OAuth not configured on server'
+          error: 'Bitrix24 redirect URI not configured on server'
         });
       }
 
@@ -109,11 +140,11 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
       }
       const state = Buffer.from(stateParts.join('|')).toString('base64');
 
-      // Build OAuth URL
+      // Build OAuth URL with credentials from database
       const authUrl = new URL(`https://${domain}/oauth/authorize/`);
       authUrl.searchParams.set('response_type', 'code');
-      authUrl.searchParams.set('client_id', BITRIX24_CLIENT_ID);
-      authUrl.searchParams.set('redirect_uri', BITRIX24_REDIRECT_URI);
+      authUrl.searchParams.set('client_id', credentials.clientId);
+      authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('state', state);
 
       app.log.info({
@@ -206,12 +237,19 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
         code: code.substring(0, 10) + '...'
       }, 'Received Bitrix24 OAuth callback');
 
-      // Exchange code for tokens
+      // Get OAuth credentials from database
+      const credentials = await getBitrix24Credentials(userAccountId, accountId);
+
+      if (!credentials) {
+        throw new Error('Bitrix24 OAuth credentials not found. Please configure them first.');
+      }
+
+      // Exchange code for tokens using credentials from database
       const tokens = await exchangeCodeForToken(
         domain,
         code,
-        BITRIX24_CLIENT_ID,
-        BITRIX24_CLIENT_SECRET,
+        credentials.clientId,
+        credentials.clientSecret,
         BITRIX24_REDIRECT_URI
       );
 
@@ -513,6 +551,104 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /bitrix24/credentials
+   * External URL: /api/bitrix24/credentials
+   *
+   * Check if OAuth credentials are configured for user
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - accountId: Optional UUID of ad account for multi-account mode
+   *
+   * Returns: { hasCredentials: boolean }
+   */
+  app.get('/bitrix24/credentials', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = CredentialsQuerySchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId } = parsed.data;
+
+      const credentials = await getBitrix24Credentials(userAccountId, accountId);
+
+      return reply.send({
+        hasCredentials: !!credentials
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error checking Bitrix24 credentials');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /bitrix24/credentials
+   * External URL: /api/bitrix24/credentials
+   *
+   * Save OAuth credentials for user
+   *
+   * Body:
+   *   - userAccountId: UUID of user account
+   *   - accountId: Optional UUID of ad account for multi-account mode
+   *   - clientId: Bitrix24 OAuth application client ID
+   *   - clientSecret: Bitrix24 OAuth application client secret
+   *
+   * Returns: { success: true }
+   */
+  app.post('/bitrix24/credentials', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = CredentialsBodySchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId, clientId, clientSecret } = parsed.data;
+
+      await saveBitrix24Credentials(
+        userAccountId,
+        { clientId, clientSecret },
+        accountId
+      );
+
+      app.log.info({ userAccountId, accountId }, 'Bitrix24 credentials saved');
+
+      return reply.send({ success: true });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error saving Bitrix24 credentials');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'bitrix24',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'bitrix24_save_credentials',
+        endpoint: '/bitrix24/credentials',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
    * DELETE /bitrix24/disconnect
    * External URL: /api/bitrix24/disconnect
    *
@@ -608,6 +744,8 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
    * External URL: /api/bitrix24/connect
    *
    * HTML page for connecting Bitrix24
+   * Step 1: Configure OAuth credentials (if not configured)
+   * Step 2: Enter domain and entity type
    *
    * Query params:
    *   - userAccountId: UUID of user account
@@ -624,8 +762,13 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
       });
     }
 
+    // Check if credentials are already configured
+    const credentials = await getBitrix24Credentials(userAccountId, accountId);
+    const hasCredentials = !!credentials;
+
     // Prepare accountId param for OAuth URL
     const accountIdParam = accountId ? `&accountId=${accountId}` : '';
+    const redirectUri = BITRIX24_REDIRECT_URI || 'https://api.performanteaiagency.com/api/bitrix24/callback';
 
     return reply.type('text/html').send(`
       <!DOCTYPE html>
@@ -728,14 +871,65 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
             font-size: 14px;
             color: #0369a1;
           }
+          .info-box p, .info-box ol {
+            margin: 0;
+            color: #0369a1;
+            font-size: 13px;
+          }
+          .info-box ol {
+            padding-left: 20px;
+          }
+          .info-box li {
+            margin-bottom: 4px;
+          }
           .info-box ul {
             margin: 0;
             padding-left: 20px;
             color: #0369a1;
             font-size: 13px;
           }
-          .info-box li {
-            margin-bottom: 4px;
+          .info-box code {
+            background: #e0f2fe;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            word-break: break-all;
+          }
+          .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 24px;
+          }
+          .step {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            margin: 0 8px;
+          }
+          .step.active {
+            background: #1EBBF0;
+            color: white;
+          }
+          .step.inactive {
+            background: #e5e7eb;
+            color: #9ca3af;
+          }
+          .step.completed {
+            background: #10b981;
+            color: white;
+          }
+          .hidden {
+            display: none;
+          }
+          .error-message {
+            color: #dc2626;
+            font-size: 14px;
+            margin-top: 8px;
           }
         </style>
       </head>
@@ -746,39 +940,130 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
             <path d="M30 35h40v8H30zM30 50h40v8H30zM30 65h25v8H30z" fill="white"/>
           </svg>
 
-          <h1>Подключение Bitrix24</h1>
-          <p class="subtitle">Введите адрес вашего портала Bitrix24</p>
-
-          <div class="info-box">
-            <h3>Выберите тип сущностей для работы:</h3>
-            <ul>
-              <li><strong>Сделки</strong> — если вы работаете только со сделками</li>
-              <li><strong>Лиды</strong> — если используете функционал лидов</li>
-              <li><strong>Оба варианта</strong> — для полной интеграции</li>
-            </ul>
+          <div class="step-indicator">
+            <div class="step ${hasCredentials ? 'completed' : 'active'}" id="step1Indicator">${hasCredentials ? '✓' : '1'}</div>
+            <div class="step ${hasCredentials ? 'active' : 'inactive'}" id="step2Indicator">2</div>
           </div>
 
-          <form id="connectForm">
-            <div class="form-group">
-              <label for="domain">Адрес портала Bitrix24</label>
-              <input type="text" id="domain" name="domain" placeholder="example.bitrix24.ru" required>
-              <div class="help-text">Например: mycompany.bitrix24.ru или mycompany.bitrix24.com</div>
+          <!-- Step 1: OAuth Credentials -->
+          <div id="step1" class="${hasCredentials ? 'hidden' : ''}">
+            <h1>Настройка OAuth приложения</h1>
+            <p class="subtitle">Для подключения создайте OAuth приложение в вашем Bitrix24</p>
+
+            <div class="info-box">
+              <h3>Как получить Client ID и Secret:</h3>
+              <ol>
+                <li>Войдите в ваш Bitrix24 портал</li>
+                <li>Перейдите в <strong>Приложения → Разработчикам → Добавить локальное приложение</strong></li>
+                <li>Выберите тип <strong>"Серверное приложение"</strong></li>
+                <li>В поле "Путь вашего обработчика" укажите:<br><code>${redirectUri}</code></li>
+                <li>Выберите права доступа: <strong>CRM</strong> и <strong>Пользователи</strong></li>
+                <li>Сохраните приложение и скопируйте <strong>Client ID</strong> и <strong>Client Secret</strong></li>
+              </ol>
             </div>
 
-            <div class="form-group">
-              <label for="entityType">Тип сущностей</label>
-              <select id="entityType" name="entityType">
-                <option value="deal">Сделки</option>
-                <option value="lead">Лиды</option>
-                <option value="both">Оба варианта (Лиды и Сделки)</option>
-              </select>
+            <form id="credentialsForm">
+              <div class="form-group">
+                <label for="clientId">Client ID (Код приложения)</label>
+                <input type="text" id="clientId" name="clientId" placeholder="local.xxxxxxxx.xxxxxxxx" required>
+              </div>
+
+              <div class="form-group">
+                <label for="clientSecret">Client Secret (Ключ приложения)</label>
+                <input type="password" id="clientSecret" name="clientSecret" placeholder="••••••••••••••••" required>
+              </div>
+
+              <div id="credentialsError" class="error-message hidden"></div>
+
+              <button type="submit" class="btn" id="saveCredentialsBtn">Сохранить и продолжить</button>
+            </form>
+          </div>
+
+          <!-- Step 2: Domain & Entity Type -->
+          <div id="step2" class="${hasCredentials ? '' : 'hidden'}">
+            <h1>Подключение Bitrix24</h1>
+            <p class="subtitle">Введите адрес вашего портала Bitrix24</p>
+
+            <div class="info-box">
+              <h3>Выберите тип сущностей для работы:</h3>
+              <ul>
+                <li><strong>Сделки</strong> — если вы работаете только со сделками</li>
+                <li><strong>Лиды</strong> — если используете функционал лидов</li>
+                <li><strong>Оба варианта</strong> — для полной интеграции</li>
+              </ul>
             </div>
 
-            <button type="submit" class="btn">Подключить Bitrix24</button>
-          </form>
+            <form id="connectForm">
+              <div class="form-group">
+                <label for="domain">Адрес портала Bitrix24</label>
+                <input type="text" id="domain" name="domain" placeholder="example.bitrix24.ru" required>
+                <div class="help-text">Например: mycompany.bitrix24.ru или mycompany.bitrix24.com</div>
+              </div>
+
+              <div class="form-group">
+                <label for="entityType">Тип сущностей</label>
+                <select id="entityType" name="entityType">
+                  <option value="deal">Сделки</option>
+                  <option value="lead">Лиды</option>
+                  <option value="both">Оба варианта (Лиды и Сделки)</option>
+                </select>
+              </div>
+
+              <button type="submit" class="btn">Подключить Bitrix24</button>
+            </form>
+          </div>
         </div>
 
         <script>
+          // Step 1: Save OAuth credentials
+          document.getElementById('credentialsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const clientId = document.getElementById('clientId').value.trim();
+            const clientSecret = document.getElementById('clientSecret').value.trim();
+            const errorEl = document.getElementById('credentialsError');
+            const submitBtn = document.getElementById('saveCredentialsBtn');
+
+            errorEl.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Сохранение...';
+
+            try {
+              const response = await fetch('/api/bitrix24/credentials', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userAccountId: '${userAccountId}',
+                  ${accountId ? `accountId: '${accountId}',` : ''}
+                  clientId,
+                  clientSecret
+                })
+              });
+
+              if (response.ok) {
+                // Show step 2
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2').classList.remove('hidden');
+                document.getElementById('step1Indicator').textContent = '✓';
+                document.getElementById('step1Indicator').classList.remove('active');
+                document.getElementById('step1Indicator').classList.add('completed');
+                document.getElementById('step2Indicator').classList.remove('inactive');
+                document.getElementById('step2Indicator').classList.add('active');
+              } else {
+                const data = await response.json();
+                errorEl.textContent = data.message || 'Ошибка сохранения. Проверьте данные и попробуйте снова.';
+                errorEl.classList.remove('hidden');
+              }
+            } catch (error) {
+              errorEl.textContent = 'Ошибка сети. Попробуйте снова.';
+              errorEl.classList.remove('hidden');
+            } finally {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Сохранить и продолжить';
+            }
+          });
+
+          // Step 2: Connect to Bitrix24
           document.getElementById('connectForm').addEventListener('submit', function(e) {
             e.preventDefault();
 
