@@ -23,6 +23,16 @@ interface UserAccountWithBitrix24 {
   bitrix24_user_id: number | null;
   bitrix24_entity_type: string | null;
   bitrix24_qualification_fields: any[] | null;
+  bitrix24_client_id?: string | null;
+  bitrix24_client_secret?: string | null;
+}
+
+/**
+ * Bitrix24 OAuth credentials (client_id and client_secret)
+ */
+export interface Bitrix24Credentials {
+  clientId: string;
+  clientSecret: string;
 }
 
 /**
@@ -41,20 +51,13 @@ export async function getValidBitrix24Token(
   userAccountId: string,
   accountId?: string | null
 ): Promise<{ accessToken: string; domain: string; entityType: string }> {
-  // First check if multi-account mode is enabled
-  const { data: userAccountCheck } = await supabase
-    .from('user_accounts')
-    .select('multi_account_enabled')
-    .eq('id', userAccountId)
-    .single();
-
-  const isMultiAccountMode = userAccountCheck?.multi_account_enabled && accountId;
-
-  if (isMultiAccountMode) {
+  // If accountId is provided, get credentials from ad_accounts
+  // Otherwise, get credentials from user_accounts (legacy mode)
+  if (accountId) {
     // Multi-account mode: get credentials from ad_accounts
     const { data: adAccount, error: adError } = await supabase
       .from('ad_accounts')
-      .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type')
+      .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type, bitrix24_client_id, bitrix24_client_secret')
       .eq('id', accountId)
       .eq('user_account_id', userAccountId)
       .single();
@@ -91,10 +94,17 @@ export async function getValidBitrix24Token(
     }
 
     // Token expired or about to expire - refresh it
+    // Get OAuth credentials for refresh
+    if (!account.bitrix24_client_id || !account.bitrix24_client_secret) {
+      throw new Error('Bitrix24 OAuth credentials not configured. Please reconnect Bitrix24 with your OAuth application credentials.');
+    }
+
     try {
       const tokens = await refreshAccessToken(
         domain,
-        account.bitrix24_refresh_token
+        account.bitrix24_refresh_token,
+        account.bitrix24_client_id,
+        account.bitrix24_client_secret
       );
 
       // Save new tokens to ad_accounts
@@ -113,7 +123,7 @@ export async function getValidBitrix24Token(
   // Legacy mode: get credentials from user_accounts
   const { data: userAccount, error } = await supabase
     .from('user_accounts')
-    .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type')
+    .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type, bitrix24_client_id, bitrix24_client_secret')
     .eq('id', userAccountId)
     .single();
 
@@ -148,10 +158,17 @@ export async function getValidBitrix24Token(
   }
 
   // Token expired or about to expire - refresh it
+  // Get OAuth credentials for refresh
+  if (!account.bitrix24_client_id || !account.bitrix24_client_secret) {
+    throw new Error('Bitrix24 OAuth credentials not configured. Please reconnect Bitrix24 with your OAuth application credentials.');
+  }
+
   try {
     const tokens = await refreshAccessToken(
       domain,
-      account.bitrix24_refresh_token
+      account.bitrix24_refresh_token,
+      account.bitrix24_client_id,
+      account.bitrix24_client_secret
     );
 
     // Save new tokens to database
@@ -339,10 +356,9 @@ export async function getBitrix24Status(userAccountId: string, accountId?: strin
     return { connected: false };
   }
 
-  const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
-
-  if (isMultiAccountMode) {
-    // Multi-account mode: check ad_accounts
+  // If accountId is provided, check ad_accounts; otherwise check user_accounts
+  if (accountId) {
+    // Check ad_accounts
     const { data: adAccount } = await supabase
       .from('ad_accounts')
       .select('bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_entity_type, bitrix24_connected_at')
@@ -432,5 +448,101 @@ export async function setBitrix24QualificationFields(
 
   if (error) {
     throw new Error(`Failed to set qualification fields: ${error.message}`);
+  }
+}
+
+/**
+ * Get Bitrix24 OAuth credentials from database
+ * Returns credentials from ad_accounts (multi-account) or user_accounts (legacy)
+ *
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Credentials object or null if not configured
+ */
+export async function getBitrix24Credentials(
+  userAccountId: string,
+  accountId?: string | null
+): Promise<Bitrix24Credentials | null> {
+  // First check if multi-account mode is enabled
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled, bitrix24_client_id, bitrix24_client_secret')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!userAccount) {
+    return null;
+  }
+
+  // If accountId is provided, read from ad_accounts; otherwise read from user_accounts
+  if (accountId) {
+    // Read from ad_accounts
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('bitrix24_client_id, bitrix24_client_secret')
+      .eq('id', accountId)
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (adAccount?.bitrix24_client_id && adAccount?.bitrix24_client_secret) {
+      return {
+        clientId: adAccount.bitrix24_client_id,
+        clientSecret: adAccount.bitrix24_client_secret
+      };
+    }
+    return null;
+  }
+
+  // Legacy mode: read from user_accounts
+  if (userAccount.bitrix24_client_id && userAccount.bitrix24_client_secret) {
+    return {
+      clientId: userAccount.bitrix24_client_id,
+      clientSecret: userAccount.bitrix24_client_secret
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Save Bitrix24 OAuth credentials to database
+ *
+ * @param userAccountId - User account UUID
+ * @param credentials - OAuth credentials (clientId, clientSecret)
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ */
+export async function saveBitrix24Credentials(
+  userAccountId: string,
+  credentials: Bitrix24Credentials,
+  accountId?: string | null
+): Promise<void> {
+  // If accountId is provided, save to ad_accounts; otherwise save to user_accounts
+  if (accountId) {
+    // Save to ad_accounts
+    const { error } = await supabase
+      .from('ad_accounts')
+      .update({
+        bitrix24_client_id: credentials.clientId,
+        bitrix24_client_secret: credentials.clientSecret
+      })
+      .eq('id', accountId)
+      .eq('user_account_id', userAccountId);
+
+    if (error) {
+      throw new Error(`Failed to save Bitrix24 credentials to ad_accounts: ${error.message}`);
+    }
+  } else {
+    // Legacy mode: save to user_accounts
+    const { error } = await supabase
+      .from('user_accounts')
+      .update({
+        bitrix24_client_id: credentials.clientId,
+        bitrix24_client_secret: credentials.clientSecret
+      })
+      .eq('id', userAccountId);
+
+    if (error) {
+      throw new Error(`Failed to save Bitrix24 credentials: ${error.message}`);
+    }
   }
 }
