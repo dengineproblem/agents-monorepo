@@ -406,10 +406,16 @@ export default async function facebookWebhooks(app: FastifyInstance) {
               })()
             : Promise.resolve(null);
 
-          // Wait for both operations
-          const [dbResult, bitrix24Result] = await Promise.all([dbSavePromise, bitrix24Promise]);
+          // Wait for both operations - use allSettled so Bitrix24 errors don't block DB save
+          const [dbSettled, bitrix24Settled] = await Promise.allSettled([dbSavePromise, bitrix24Promise]);
 
-          const { data: lead, error: insertError } = dbResult;
+          // Check DB result first (critical)
+          if (dbSettled.status === 'rejected') {
+            log.error({ error: dbSettled.reason, leadgen_id }, 'Failed to insert lead (rejected)');
+            continue;
+          }
+
+          const { data: lead, error: insertError } = dbSettled.value;
 
           if (insertError || !lead) {
             log.error({ error: insertError, leadgen_id }, 'Failed to insert lead');
@@ -425,6 +431,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             creativeId,
             directionId
           }, 'Lead form lead created successfully');
+
+          // Check Bitrix24 result (non-critical - log warning if failed)
+          let bitrix24Result = null;
+          if (bitrix24Settled.status === 'fulfilled') {
+            bitrix24Result = bitrix24Settled.value;
+          } else if (bitrix24Enabled) {
+            log.warn({ error: bitrix24Settled.reason, leadgen_id }, '[Bitrix24] Push failed but lead saved to DB');
+          }
 
           // Update lead with Bitrix24 IDs if push was successful
           if (bitrix24Result) {
