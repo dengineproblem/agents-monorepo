@@ -29,15 +29,20 @@ services:
       - HYBRID_ENABLED=true
       - ENABLE_LAYER_LOGGING=true
       # Claude Agent SDK (ANTHROPIC_API_KEY берётся из .env.brain)
-      - LLM_PROVIDER=claude
+      - LLM_PROVIDER=moltbot
       - LLM_FALLBACK=true
       - CLAUDE_MODEL=claude-sonnet-4-20250514
       - CLAUDE_MAX_TURNS=10
       - CLAUDE_TIMEOUT_MS=120000
       - MCP_ENABLED=true
+      # Moltbot Gateway
+      - MOLTBOT_GATEWAY_URL=ws://moltbot:18789
+      - MOLTBOT_TOKEN=moltbot-dev-token-2026
     ports:
       - "7080:7080"
     restart: unless-stopped
+    depends_on:
+      - moltbot
 
   creative-analyzer:
     build: ./services/agent-brain
@@ -339,6 +344,46 @@ services:
     volumes:
       - evolution-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
+
+  # Moltbot - AI Agent Gateway
+  # Uses beta channel (moltbot@beta) which has the CLI
+  # Using Debian-slim for better native module support (vs Alpine/musl)
+  moltbot:
+    image: node:22-slim
+    container_name: moltbot
+    working_dir: /root/clawd
+    env_file:
+      - ./.env.brain
+    command:
+      - sh
+      - -c
+      - |
+        apt-get update && apt-get install -y git ca-certificates python3 make g++ curl --no-install-recommends
+        rm -rf /var/lib/apt/lists/*
+        git config --global --replace-all url."https://github.com/".insteadOf "ssh://git@github.com/"
+        git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+        echo "Git config:" && cat ~/.gitconfig
+        npm install -g moltbot@beta
+        # Setup Anthropic + OpenAI auth profiles for Moltbot
+        mkdir -p /root/.clawdbot/agents/main/agent
+        echo "{\"profiles\":[{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\",\"default\":true},{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\"}]}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
+        echo "Auth profiles configured for Anthropic (default) + OpenAI (fallback)"
+        moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose
+    ports:
+      - "18789:18789"
+    environment:
+      # API Keys для auth-profiles.json (передаются явно для shell command)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AGENT_SERVICE_URL=http://agent-service:8082
+      - MOLTBOT_TOKEN=moltbot-dev-token-2026
+    volumes:
+      - ./moltbot-workspace:/root/clawd
+    restart: unless-stopped
+    networks:
+      - default
+    depends_on:
+      - agent-service
 
 volumes:
   loki-data:

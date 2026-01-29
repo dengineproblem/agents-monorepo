@@ -1,8 +1,10 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-# Установка FFmpeg для обработки видео и yt-dlp для скачивания
-RUN apk add --no-cache ffmpeg python3 py3-pip curl \
-    && pip3 install --break-system-packages yt-dlp
+# Установка FFmpeg и yt-dlp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg python3 python3-pip curl ca-certificates \
+    && pip3 install --break-system-packages yt-dlp \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
