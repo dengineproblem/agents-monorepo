@@ -50,27 +50,24 @@ export interface Bitrix24Credentials {
 export async function getValidBitrix24Token(
   userAccountId: string,
   accountId?: string | null
-): Promise<{ accessToken: string; domain: string; entityType: string }> {
-  // If accountId is provided, get credentials from ad_accounts
-  // Otherwise, get credentials from user_accounts (legacy mode)
-  if (accountId) {
-    // Multi-account mode: get credentials from ad_accounts
+): Promise<{ accessToken: string; domain: string; entityType: string; resolvedAccountId?: string }> {
+  // Helper function to get token from ad_account
+  const getTokenFromAdAccount = async (adAccountId: string) => {
     const { data: adAccount, error: adError } = await supabase
       .from('ad_accounts')
       .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type, bitrix24_client_id, bitrix24_client_secret')
-      .eq('id', accountId)
+      .eq('id', adAccountId)
       .eq('user_account_id', userAccountId)
       .single();
 
     if (adError || !adAccount) {
-      throw new Error(`Failed to fetch ad account: ${adError?.message || 'Not found'}`);
+      return null;
     }
 
     const account = adAccount as UserAccountWithBitrix24;
 
-    // Check if Bitrix24 is connected
     if (!account.bitrix24_domain || !account.bitrix24_access_token || !account.bitrix24_refresh_token) {
-      throw new Error('Bitrix24 is not connected for this ad account');
+      return null;
     }
 
     const domain = account.bitrix24_domain;
@@ -79,48 +76,50 @@ export async function getValidBitrix24Token(
       ? new Date(account.bitrix24_token_expires_at)
       : new Date(0);
 
-    // Check if token is still valid (with 5 minute buffer)
-    // Bitrix24 tokens expire in 1 hour, so buffer is important
     const now = new Date();
-    const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const bufferTime = 5 * 60 * 1000;
 
     if (expiresAt.getTime() > now.getTime() + bufferTime) {
-      // Token is still valid
       return {
         accessToken: account.bitrix24_access_token,
         domain,
-        entityType
+        entityType,
+        resolvedAccountId: adAccountId
       };
     }
 
-    // Token expired or about to expire - refresh it
-    // Get OAuth credentials for refresh
+    // Token expired - refresh it
     if (!account.bitrix24_client_id || !account.bitrix24_client_secret) {
-      throw new Error('Bitrix24 OAuth credentials not configured. Please reconnect Bitrix24 with your OAuth application credentials.');
+      throw new Error('Bitrix24 OAuth credentials not configured for ad_account');
     }
 
-    try {
-      const tokens = await refreshAccessToken(
-        domain,
-        account.bitrix24_refresh_token,
-        account.bitrix24_client_id,
-        account.bitrix24_client_secret
-      );
+    const tokens = await refreshAccessToken(
+      domain,
+      account.bitrix24_refresh_token,
+      account.bitrix24_client_id,
+      account.bitrix24_client_secret
+    );
 
-      // Save new tokens to ad_accounts
-      await saveBitrix24TokensToAdAccount(accountId!, domain, tokens);
+    await saveBitrix24TokensToAdAccount(adAccountId, domain, tokens);
 
-      return {
-        accessToken: tokens.access_token,
-        domain,
-        entityType
-      };
-    } catch (error: any) {
-      throw new Error(`Failed to refresh Bitrix24 token: ${error.message}`);
+    return {
+      accessToken: tokens.access_token,
+      domain,
+      entityType,
+      resolvedAccountId: adAccountId
+    };
+  };
+
+  // If accountId is provided, get credentials from ad_accounts
+  if (accountId) {
+    const result = await getTokenFromAdAccount(accountId);
+    if (result) {
+      return result;
     }
+    throw new Error('Bitrix24 is not connected for this ad account');
   }
 
-  // Legacy mode: get credentials from user_accounts
+  // Try legacy mode first: get credentials from user_accounts
   const { data: userAccount, error } = await supabase
     .from('user_accounts')
     .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_entity_type, bitrix24_client_id, bitrix24_client_secret')
@@ -133,55 +132,73 @@ export async function getValidBitrix24Token(
 
   const account = userAccount as UserAccountWithBitrix24;
 
-  // Check if Bitrix24 is connected
-  if (!account.bitrix24_domain || !account.bitrix24_access_token || !account.bitrix24_refresh_token) {
-    throw new Error('Bitrix24 is not connected for this user account');
+  // Check if Bitrix24 is connected in user_accounts (legacy mode)
+  if (account.bitrix24_domain && account.bitrix24_access_token && account.bitrix24_refresh_token) {
+    const domain = account.bitrix24_domain;
+    const entityType = account.bitrix24_entity_type || 'deal';
+    const expiresAt = account.bitrix24_token_expires_at
+      ? new Date(account.bitrix24_token_expires_at)
+      : new Date(0);
+
+    const now = new Date();
+    const bufferTime = 5 * 60 * 1000;
+
+    if (expiresAt.getTime() > now.getTime() + bufferTime) {
+      return {
+        accessToken: account.bitrix24_access_token,
+        domain,
+        entityType
+      };
+    }
+
+    // Token expired - refresh it
+    if (!account.bitrix24_client_id || !account.bitrix24_client_secret) {
+      throw new Error('Bitrix24 OAuth credentials not configured. Please reconnect Bitrix24.');
+    }
+
+    try {
+      const tokens = await refreshAccessToken(
+        domain,
+        account.bitrix24_refresh_token,
+        account.bitrix24_client_id,
+        account.bitrix24_client_secret
+      );
+
+      await saveBitrix24Tokens(userAccountId, domain, tokens);
+
+      return {
+        accessToken: tokens.access_token,
+        domain,
+        entityType
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to refresh Bitrix24 token: ${error.message}`);
+    }
   }
 
-  const domain = account.bitrix24_domain;
-  const entityType = account.bitrix24_entity_type || 'deal';
-  const expiresAt = account.bitrix24_token_expires_at
-    ? new Date(account.bitrix24_token_expires_at)
-    : new Date(0);
+  // Fallback: no token in user_accounts, try to find in any ad_account for this user
+  const { data: adAccounts } = await supabase
+    .from('ad_accounts')
+    .select('id, bitrix24_domain, bitrix24_access_token')
+    .eq('user_account_id', userAccountId)
+    .not('bitrix24_access_token', 'is', null);
 
-  // Check if token is still valid (with 5 minute buffer)
-  const now = new Date();
-  const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
-
-  if (expiresAt.getTime() > now.getTime() + bufferTime) {
-    // Token is still valid
-    return {
-      accessToken: account.bitrix24_access_token,
-      domain,
-      entityType
-    };
+  if (adAccounts && adAccounts.length > 0) {
+    // Try each ad_account until we find a valid one
+    for (const aa of adAccounts) {
+      try {
+        const result = await getTokenFromAdAccount(aa.id);
+        if (result) {
+          return result;
+        }
+      } catch {
+        // Try next ad_account
+        continue;
+      }
+    }
   }
 
-  // Token expired or about to expire - refresh it
-  // Get OAuth credentials for refresh
-  if (!account.bitrix24_client_id || !account.bitrix24_client_secret) {
-    throw new Error('Bitrix24 OAuth credentials not configured. Please reconnect Bitrix24 with your OAuth application credentials.');
-  }
-
-  try {
-    const tokens = await refreshAccessToken(
-      domain,
-      account.bitrix24_refresh_token,
-      account.bitrix24_client_id,
-      account.bitrix24_client_secret
-    );
-
-    // Save new tokens to database
-    await saveBitrix24Tokens(userAccountId, domain, tokens);
-
-    return {
-      accessToken: tokens.access_token,
-      domain,
-      entityType
-    };
-  } catch (error: any) {
-    throw new Error(`Failed to refresh Bitrix24 token: ${error.message}`);
-  }
+  throw new Error('Bitrix24 is not connected for this user account or any ad_account');
 }
 
 /**
