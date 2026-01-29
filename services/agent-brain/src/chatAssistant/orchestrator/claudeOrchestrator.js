@@ -12,11 +12,12 @@
  */
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { executeMetaTool, mapSdkMessageToSseEvent } from '../metaTools/claudeAdapter.js';
+import { mapSdkMessageToSseEvent } from '../metaTools/claudeAdapter.js';
 import { buildMetaSystemPrompt } from './metaSystemPrompt.js';
 import { runsStore } from '../stores/runsStore.js';
 import { logger } from '../../lib/logger.js';
 import { createSession, deleteSession } from '../../mcp/sessions.js';
+import { createEmbeddedMcpServer } from '../../mcp/sdkMcpBridge.js';
 import { ORCHESTRATOR_CONFIG } from '../config.js';
 
 // Model configuration
@@ -117,16 +118,6 @@ export async function* processWithClaudeSDK({
     hasIntegrations: !!context?.integrations
   }, 'Claude MCP session created');
 
-  // Enrich context for tool execution
-  const enrichedToolContext = {
-    ...toolContext,
-    sessionId,
-    dangerousPolicy,
-    layerLogger,
-    onToolEvent,
-    integrations: context?.integrations
-  };
-
   // Build system prompt
   const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy });
 
@@ -167,159 +158,95 @@ export async function* processWithClaudeSDK({
   let totalOutputTokens = 0;
 
   try {
-    // Custom tool handler for META_TOOLS
-    const toolHandler = async (toolName, args) => {
-      layerLogger?.start(4, { toolName });
+    // Create embedded SDK MCP server with all tools
+    const { server: mcpServer, allowedToolNames, registeredCount } = createEmbeddedMcpServer({
+      userAccountId: toolContext.userAccountId,
+      adAccountId: toolContext.adAccountId,
+      adAccountDbId: toolContext.adAccountDbId,
+      accessToken: toolContext.accessToken,
+      dangerousPolicy,
+      conversationId,
+      onToolCall: (event) => {
+        // Track tool execution
+        if (event.started) {
+          layerLogger?.start(4, { toolName: event.name });
+          onToolEvent?.({ type: 'tool_start', name: event.name, args: event.args });
+          logger.info({ requestId, toolName: event.name, argsKeys: Object.keys(event.args || {}) }, 'Claude MCP tool started');
+        } else {
+          const toolEntry = {
+            tool: event.name,
+            args: event.args,
+            result: event.success ? 'success' : 'failed',
+            latencyMs: event.latencyMs
+          };
+          if (!event.success) toolEntry.message = event.error;
+          executedTools.push(toolEntry);
 
-      const toolStartTime = Date.now();
-      const toolCallId = `tool-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          // Record in runsStore
+          if (runId) {
+            runsStore.recordToolExecution(runId, {
+              name: event.name,
+              args: event.args,
+              success: event.success,
+              latencyMs: event.latencyMs,
+              ...(event.error && { error: event.error })
+            }).catch(err => logger.warn({ error: err.message }, 'Failed to record tool execution'));
+          }
 
-      logger.info({
-        requestId,
-        toolCallId,
-        toolName,
-        argsKeys: Object.keys(args || {}),
-        argsPreview: JSON.stringify(args).substring(0, 200)
-      }, 'Claude tool execution starting');
+          layerLogger?.end(4, { toolName: event.name, success: event.success, latencyMs: event.latencyMs });
+          onToolEvent?.({
+            type: 'tool_result',
+            name: event.name,
+            success: event.success,
+            duration: event.latencyMs,
+            ...(event.error && { error: event.error })
+          });
 
-      onToolEvent?.({ type: 'tool_start', name: toolName, args });
-
-      try {
-        const result = await executeMetaTool(toolName, args, enrichedToolContext);
-        const toolLatency = Date.now() - toolStartTime;
-
-        // Extract plan if present
-        if (result?.plan && !extractedPlan) {
-          extractedPlan = result.plan;
           logger.info({
             requestId,
-            toolCallId,
-            toolName,
-            planSteps: result.plan.steps?.length || 0
-          }, 'Plan extracted from Claude tool result');
-          layerLogger?.info(4, 'Plan extracted', { toolName, steps: result.plan.steps?.length || 0 });
+            toolName: event.name,
+            success: event.success,
+            latencyMs: event.latencyMs
+          }, 'Claude MCP tool completed');
         }
-
-        executedTools.push({
-          tool: toolName,
-          args,
-          result: 'success',
-          latencyMs: toolLatency
-        });
-
-        // Record tool execution
-        if (runId) {
-          await runsStore.recordToolExecution(runId, {
-            name: toolName,
-            args,
-            success: true,
-            latencyMs: toolLatency
-          });
-        }
-
-        logger.info({
-          requestId,
-          toolCallId,
-          toolName,
-          success: true,
-          latencyMs: toolLatency,
-          resultType: typeof result,
-          hasData: !!result?.data
-        }, 'Claude tool execution completed');
-
-        layerLogger?.end(4, { toolName, success: true, latencyMs: toolLatency });
-        onToolEvent?.({ type: 'tool_result', name: toolName, success: true, duration: toolLatency });
-
-        return result;
-      } catch (error) {
-        const toolLatency = Date.now() - toolStartTime;
-
-        executedTools.push({
-          tool: toolName,
-          args,
-          result: 'failed',
-          message: error.message,
-          latencyMs: toolLatency
-        });
-
-        if (runId) {
-          await runsStore.recordToolExecution(runId, {
-            name: toolName,
-            args,
-            success: false,
-            latencyMs: toolLatency,
-            error: error.message
-          });
-        }
-
-        logger.error({
-          requestId,
-          toolCallId,
-          toolName,
-          error: error.message,
-          errorStack: error.stack?.split('\n').slice(0, 3).join('\n'),
-          latencyMs: toolLatency
-        }, 'Claude tool execution failed');
-
-        layerLogger?.error(4, error, { toolName });
-        onToolEvent?.({ type: 'tool_result', name: toolName, success: false, error: error.message, duration: toolLatency });
-
-        throw error;
       }
-    };
-
-    // Prepare messages for Claude
-    const claudeMessages = conversationHistory.map(msg => ({
-      role: msg.role === 'assistant' ? 'assistant' : 'user',
-      content: msg.content
-    }));
-
-    // Add current user message
-    claudeMessages.push({
-      role: 'user',
-      content: message
     });
+
+    logger.info({ requestId, registeredCount, allowedToolsCount: allowedToolNames.length }, 'Embedded MCP server created');
+
+    // Build prompt with conversation history
+    // SDK query() only supports type: "user" in prompt generator,
+    // so we embed history as context in a single user message
+    let promptText = message;
+
+    if (conversationHistory.length > 0) {
+      const historyText = conversationHistory
+        .map(msg => `${msg.role === 'assistant' ? 'assistant' : 'user'}: ${msg.content}`)
+        .join('\n');
+      promptText = `<conversation_history>\n${historyText}\n</conversation_history>\n\n${message}`;
+    }
 
     // Create async generator for prompt
     async function* generatePrompt() {
-      for (const msg of claudeMessages) {
-        yield {
-          type: msg.role,
-          message: msg
-        };
-      }
+      yield {
+        type: 'user',
+        message: { role: 'user', content: promptText }
+      };
     }
 
-    // Query Claude Agent SDK
+    // Query Claude Agent SDK with embedded MCP server
     const sdkOptions = {
       systemPrompt,
       model: MODEL,
       maxTurns: MAX_TURNS,
       cwd: process.cwd(),
-      // Enable Skills from .claude/skills/
-      settingSources: ['project'],
-      // Allow tools
-      allowedTools: [
-        'Skill',  // Support for skills (/ads-optimizer, etc.)
-        // Meta-tools will be handled via hooks
-      ],
-      // Hooks for custom tool execution
-      hooks: {
-        preToolUse: async ({ tool }) => {
-          // Check if it's a meta-tool
-          if (['getAvailableDomains', 'getDomainTools', 'executeTools', 'executeTool'].includes(tool.name)) {
-            return { decision: 'allow' };
-          }
-          return { decision: 'allow' };
-        },
-        // Note: Claude Agent SDK handles tool execution internally
-        // We'll intercept results via stream events
-      }
+      // Embedded MCP server (no HTTP, tools run in-process)
+      mcpServers: {
+        'meta-ads': mcpServer
+      },
+      // Allow all registered MCP tools without permission prompts
+      allowedTools: allowedToolNames
     };
-
-    // Note: Claude Agent SDK may not support custom tool handlers directly
-    // We need to use MCP servers or built-in tools
-    // For now, we'll use a simplified approach with system prompt instructions
 
     // Query Claude SDK with timeout wrapper
     logger.info({ requestId, model: MODEL, maxTurns: MAX_TURNS }, 'Starting Claude SDK query');
@@ -379,18 +306,7 @@ export async function* processWithClaudeSDK({
               accumulated: accumulatedText
             };
           } else if (event.type === 'tool_start') {
-            // Try to execute meta-tool if recognized
-            const toolName = event.name;
-            logger.info({ requestId, toolName, isMetaTool: ['getAvailableDomains', 'getDomainTools', 'executeTools', 'executeTool'].includes(toolName) }, 'Tool start event');
-
-            if (['getAvailableDomains', 'getDomainTools', 'executeTools', 'executeTool'].includes(toolName)) {
-              try {
-                const result = await toolHandler(toolName, event.args);
-                logger.info({ requestId, toolName, hasResult: !!result }, 'Meta-tool executed successfully');
-              } catch (err) {
-                logger.error({ requestId, error: err.message, toolName }, 'Meta-tool execution failed');
-              }
-            }
+            // Tools execute automatically via embedded MCP server
             yield event;
           } else if (event.type === 'done') {
             logger.info({ requestId, hasContent: !!accumulatedText, toolCount: executedTools.length }, 'Claude done event');

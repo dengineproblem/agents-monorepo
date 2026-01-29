@@ -28,6 +28,13 @@ services:
       - OPENAI_MAX_RETRIES=3
       - HYBRID_ENABLED=true
       - ENABLE_LAYER_LOGGING=true
+      # Claude Agent SDK (ANTHROPIC_API_KEY берётся из .env.brain)
+      - LLM_PROVIDER=claude
+      - LLM_FALLBACK=true
+      - CLAUDE_MODEL=claude-sonnet-4-20250514
+      - CLAUDE_MAX_TURNS=10
+      - CLAUDE_TIMEOUT_MS=120000
+      - MCP_ENABLED=true
     ports:
       - "7080:7080"
     restart: unless-stopped

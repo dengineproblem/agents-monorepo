@@ -36,6 +36,8 @@ Orchestrator (index.js)
 | `src/chatAssistant/orchestrator/metaOrchestrator.js` | OpenAI orchestrator (fallback) |
 | `src/chatAssistant/metaTools/claudeAdapter.js` | Адаптер для маппинга SDK → SSE events |
 | `src/chatAssistant/config.js` | Конфигурация LLM провайдеров |
+| `src/mcp/sdkMcpBridge.js` | Embedded MCP server для Claude SDK |
+| `src/mcp/tools/definitions.js` | Определения 89 MCP tools |
 
 ## Конфигурация
 
@@ -129,6 +131,71 @@ Claude orchestrator пишет детальные логи:
 - `totalInputTokens` / `totalOutputTokens` - использование токенов
 - `latencyMs` - общее время выполнения
 
+## MCP Integration (Embedded Server)
+
+Claude Agent SDK использует **embedded MCP server** для доступа к 89 инструментам.
+
+### Архитектура
+
+```
+Claude SDK query()
+       │
+       ▼
+mcpServers: { 'meta-ads': server }
+       │
+       ▼
+sdkMcpBridge.js
+       │
+       ├── tool() from SDK (создаёт инструменты)
+       ├── createSdkMcpServer() (регистрирует сервер)
+       └── allowedTools: ['mcp__meta-ads__*']
+       │
+       ▼
+Tool Handlers (из definitions.js)
+       │
+       ▼
+Facebook API / Supabase / etc.
+```
+
+### Ключевые особенности
+
+1. **Embedded MCP** - сервер работает in-process, без HTTP
+2. **tool() function** - инструменты создаются через SDK helper
+3. **Zod shape maps** - схемы извлекаются из `z.object()._def.shape()`
+4. **allowedTools** - разрешает MCP tools без permission prompts
+
+### Пример создания tool
+
+```javascript
+import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+
+const myTool = tool(
+  'getCampaigns',
+  'Get Facebook campaigns',
+  { period: z.string(), status: z.string().optional() },
+  async (args) => {
+    const result = await handler(args, context);
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+  }
+);
+
+const server = createSdkMcpServer({
+  name: 'meta-ads',
+  version: '1.0.0',
+  tools: [myTool]
+});
+```
+
+### Dangerous Tools
+
+13 tools требуют approval (pauseCampaign, updateBudget, etc.):
+
+```javascript
+if (isDangerousTool(name) && dangerousPolicy === 'block') {
+  // Возвращает { approval_required: true } вместо выполнения
+}
+```
+
 ## Skills Support
 
 Claude Agent SDK поддерживает skills из `.claude/skills/`:
@@ -167,9 +234,15 @@ Claude query exceeded total timeout of 120000ms
 
 ## Docker
 
-Dockerfile использует `--legacy-peer-deps` для совместимости с zod:
+Dockerfile устанавливает Claude Code CLI глобально (требуется для SDK):
 
 ```dockerfile
+FROM node:20-alpine
+
+# Claude Code CLI (требуется для Claude Agent SDK)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Зависимости с legacy-peer-deps для совместимости с zod
 RUN npm ci --omit=dev --legacy-peer-deps
 ```
 
@@ -177,15 +250,23 @@ RUN npm ci --omit=dev --legacy-peer-deps
 
 ```json
 {
-  "@anthropic-ai/claude-agent-sdk": "^0.2.22"
+  "@anthropic-ai/claude-agent-sdk": "^0.2.22",
+  "@anthropic-ai/claude-code": "global (в Docker)"
 }
 ```
 
 Требования:
-- Node.js 18+
+- Node.js 20+
 - zod (peer dependency, любая версия 3.x или 4.x)
+- Claude Code CLI установлен глобально
 
 ## История изменений
+
+### 2026-01-29
+- Исправлена интеграция MCP: использование `tool()` функции SDK
+- Добавлен embedded MCP server (sdkMcpBridge.js)
+- Исправлено зависание tool execution (передача tools в createSdkMcpServer)
+- 89 tools зарегистрировано, 0 skipped
 
 ### 2026-01-28
 - Миграция с OpenAI GPT-5.2 на Claude Agent SDK

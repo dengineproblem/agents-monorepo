@@ -1,7 +1,16 @@
 FROM node:20-alpine
+
 WORKDIR /app
+
+# Установить Claude Code CLI глобально
+RUN npm install -g @anthropic-ai/claude-code
+
+# Установить зависимости приложения
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --legacy-peer-deps
+
 COPY src ./src
+
 ENV NODE_ENV=production
+
 CMD ["node", "src/server.js"]
