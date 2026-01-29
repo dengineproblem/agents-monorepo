@@ -27,10 +27,13 @@ import { adsHandlers } from '../agents/ads/handlers.js';
 import { processWithMetaTools } from './metaOrchestrator.js';
 // Claude Agent SDK orchestrator
 import { processWithClaudeSDK } from './claudeOrchestrator.js';
+// Moltbot orchestrator
+import { processStreamRequest as processWithMoltbot } from '../../moltbot/orchestrator.js';
 import { ORCHESTRATOR_CONFIG } from '../config.js';
 
 // LLM Provider selection
 const USE_CLAUDE = process.env.LLM_PROVIDER === 'claude' || ORCHESTRATOR_CONFIG.llmProvider === 'claude';
+const USE_MOLTBOT = process.env.LLM_PROVIDER === 'moltbot';
 const ENABLE_FALLBACK = process.env.LLM_FALLBACK === 'true';
 
 // In-memory cache for ad account status
@@ -459,14 +462,64 @@ export class Orchestrator {
       };
 
       // 2. Route to appropriate orchestrator based on LLM provider
-      const provider = USE_CLAUDE ? 'claude' : 'openai';
-      layerLogger?.info(2, `Routing to ${provider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'}`, { provider });
+      const provider = USE_MOLTBOT ? 'moltbot' : (USE_CLAUDE ? 'claude' : 'openai');
+      layerLogger?.info(2, `Routing to ${provider} orchestrator`, { provider });
       logger.info({ provider, fallbackEnabled: ENABLE_FALLBACK }, 'LLM provider selected');
 
       let metaResult;
       let usedProvider = provider;
 
-      if (USE_CLAUDE) {
+      // Moltbot: forward to Gateway, let it handle everything
+      if (USE_MOLTBOT) {
+        try {
+          const moltbotResult = await processWithMoltbot({
+            message,
+            conversationId: toolContext.conversationId,
+            sendEvent: (event) => {
+              // Events will be yielded via callback pattern
+            },
+            context: {
+              adAccountId: toolContext.adAccountId,
+              userAccountId: toolContext.userAccountId,
+              accessToken: toolContext.accessToken
+            },
+            history: conversationHistory
+          });
+
+          // Yield the accumulated content
+          yield {
+            type: 'text',
+            content: moltbotResult.content,
+            accumulated: moltbotResult.content
+          };
+
+          metaResult = {
+            content: moltbotResult.content,
+            executedTools: moltbotResult.toolCalls || [],
+            iterations: moltbotResult.toolCalls?.length || 0
+          };
+        } catch (moltbotError) {
+          if (ENABLE_FALLBACK) {
+            logger.warn({ error: moltbotError.message }, 'Moltbot failed, falling back to OpenAI');
+            usedProvider = 'openai-fallback';
+
+            metaResult = await processWithMetaTools({
+              message,
+              context: enrichedContext,
+              conversationHistory,
+              toolContext: { ...toolContext, mode }
+            });
+
+            yield {
+              type: 'text',
+              content: metaResult.content,
+              accumulated: metaResult.content
+            };
+          } else {
+            throw moltbotError;
+          }
+        }
+      } else if (USE_CLAUDE) {
         try {
           // Use Claude Agent SDK
           let accumulatedContent = '';
@@ -564,14 +617,18 @@ export class Orchestrator {
         });
       }
 
+      const agentName = usedProvider === 'moltbot' ? 'MoltbotOrchestrator'
+        : usedProvider === 'claude' ? 'ClaudeOrchestrator'
+        : 'MetaOrchestrator';
+
       yield {
         type: 'done',
-        agent: usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator',
+        agent: agentName,
         content: metaResult.content,
         executedActions: metaResult.executedTools || [],
         toolCalls: [],
         domain: 'meta',
-        classification: { domain: 'meta', agents: [usedProvider === 'claude' ? 'ClaudeOrchestrator' : 'MetaOrchestrator'] },
+        classification: { domain: 'meta', agents: [agentName] },
         duration,
         plan: metaResult.plan || null,
         metadata: {

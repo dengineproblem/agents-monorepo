@@ -11,19 +11,31 @@
  * - SSE streaming совместимый с frontend
  */
 
+// Using stdio transport instead of embedded MCP to avoid SDK bugs #114 and #41
+// See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/114
+
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { mapSdkMessageToSseEvent } from '../metaTools/claudeAdapter.js';
 import { buildMetaSystemPrompt } from './metaSystemPrompt.js';
 import { runsStore } from '../stores/runsStore.js';
 import { logger } from '../../lib/logger.js';
 import { createSession, deleteSession } from '../../mcp/sessions.js';
-import { createEmbeddedMcpServer } from '../../mcp/sdkMcpBridge.js';
+import { allMCPTools } from '../../mcp/tools/definitions.js';
 import { ORCHESTRATOR_CONFIG } from '../config.js';
+
+const MCP_SERVER_NAME = 'meta-ads';
 
 // Model configuration
 const MODEL = process.env.CLAUDE_MODEL || ORCHESTRATOR_CONFIG.claudeModel || 'claude-sonnet-4-20250514';
 const MAX_TURNS = parseInt(process.env.CLAUDE_MAX_TURNS || String(ORCHESTRATOR_CONFIG.claudeMaxTurns) || '10', 10);
 const QUERY_TIMEOUT_MS = parseInt(process.env.CLAUDE_TIMEOUT_MS || '120000', 10); // 2 minutes default
+
+// Pricing per 1M tokens (USD)
+const CLAUDE_PRICING = {
+  'claude-sonnet-4-20250514': { input: 3.00, output: 15.00 },
+  'claude-opus-4-20250514': { input: 15.00, output: 75.00 },
+  'claude-3-5-sonnet-latest': { input: 3.00, output: 15.00 }
+};
 
 /**
  * Create a timeout promise that rejects after specified ms
@@ -156,63 +168,30 @@ export async function* processWithClaudeSDK({
   let extractedPlan = null;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let apiCallCount = 0;
 
   try {
-    // Create embedded SDK MCP server with all tools
-    const { server: mcpServer, allowedToolNames, registeredCount } = createEmbeddedMcpServer({
-      userAccountId: toolContext.userAccountId,
-      adAccountId: toolContext.adAccountId,
-      adAccountDbId: toolContext.adAccountDbId,
-      accessToken: toolContext.accessToken,
-      dangerousPolicy,
-      conversationId,
-      onToolCall: (event) => {
-        // Track tool execution
-        if (event.started) {
-          layerLogger?.start(4, { toolName: event.name });
-          onToolEvent?.({ type: 'tool_start', name: event.name, args: event.args });
-          logger.info({ requestId, toolName: event.name, argsKeys: Object.keys(event.args || {}) }, 'Claude MCP tool started');
-        } else {
-          const toolEntry = {
-            tool: event.name,
-            args: event.args,
-            result: event.success ? 'success' : 'failed',
-            latencyMs: event.latencyMs
-          };
-          if (!event.success) toolEntry.message = event.error;
-          executedTools.push(toolEntry);
+    // Build allowed tools list from definitions
+    const allowedToolNames = allMCPTools
+      .filter(t => t.zodSchema) // Only tools with schema
+      .map(t => `mcp__${MCP_SERVER_NAME}__${t.name}`);
 
-          // Record in runsStore
-          if (runId) {
-            runsStore.recordToolExecution(runId, {
-              name: event.name,
-              args: event.args,
-              success: event.success,
-              latencyMs: event.latencyMs,
-              ...(event.error && { error: event.error })
-            }).catch(err => logger.warn({ error: err.message }, 'Failed to record tool execution'));
-          }
-
-          layerLogger?.end(4, { toolName: event.name, success: event.success, latencyMs: event.latencyMs });
-          onToolEvent?.({
-            type: 'tool_result',
-            name: event.name,
-            success: event.success,
-            duration: event.latencyMs,
-            ...(event.error && { error: event.error })
-          });
-
-          logger.info({
-            requestId,
-            toolName: event.name,
-            success: event.success,
-            latencyMs: event.latencyMs
-          }, 'Claude MCP tool completed');
-        }
+    // Use HTTP MCP server (already running on localhost:7080)
+    // Context is passed via Mcp-Session-Id header
+    const mcpServerConfig = {
+      type: 'http',
+      url: 'http://localhost:7080/mcp',
+      headers: {
+        'Mcp-Session-Id': sessionId
       }
-    });
+    };
 
-    logger.info({ requestId, registeredCount, allowedToolsCount: allowedToolNames.length }, 'Embedded MCP server created');
+    logger.info({
+      requestId,
+      allowedToolsCount: allowedToolNames.length,
+      mcpUrl: mcpServerConfig.url,
+      sessionId: sessionId.substring(0, 8)
+    }, 'HTTP MCP server configured');
 
     // Build prompt with conversation history
     // SDK query() only supports type: "user" in prompt generator,
@@ -234,16 +213,17 @@ export async function* processWithClaudeSDK({
       };
     }
 
-    // Query Claude Agent SDK with embedded MCP server
+    // Query Claude Agent SDK with HTTP MCP server
     const sdkOptions = {
       systemPrompt,
       model: MODEL,
       maxTurns: MAX_TURNS,
       cwd: process.cwd(),
-      // Embedded MCP server (no HTTP, tools run in-process)
-      mcpServers: {
-        'meta-ads': mcpServer
-      },
+      // HTTP MCP server (uses existing server on localhost:7080)
+      // mcpServers is an array of AgentMcpServerSpec
+      mcpServers: [
+        { [MCP_SERVER_NAME]: mcpServerConfig }
+      ],
       // Allow all registered MCP tools without permission prompts
       allowedTools: allowedToolNames
     };
@@ -280,15 +260,24 @@ export async function* processWithClaudeSDK({
 
       // Track tokens if available
       if (sdkMessage.usage) {
-        totalInputTokens += sdkMessage.usage.input_tokens || 0;
-        totalOutputTokens += sdkMessage.usage.output_tokens || 0;
-        logger.debug({
+        apiCallCount++;
+        const inputTokens = sdkMessage.usage.input_tokens || 0;
+        const outputTokens = sdkMessage.usage.output_tokens || 0;
+        const cacheCreation = sdkMessage.usage.cache_creation_input_tokens || 0;
+        const cacheRead = sdkMessage.usage.cache_read_input_tokens || 0;
+
+        totalInputTokens += inputTokens;
+        totalOutputTokens += outputTokens;
+
+        logger.info({
           requestId,
-          inputTokens: sdkMessage.usage.input_tokens,
-          outputTokens: sdkMessage.usage.output_tokens,
-          totalInput: totalInputTokens,
-          totalOutput: totalOutputTokens
-        }, 'Claude token usage update');
+          apiCall: apiCallCount,
+          inputTokens,
+          outputTokens,
+          cacheCreation,
+          cacheRead,
+          runningTotal: { input: totalInputTokens, output: totalOutputTokens }
+        }, 'Claude API call usage');
       }
 
       // Map SDK message to SSE event(s)
@@ -306,7 +295,7 @@ export async function* processWithClaudeSDK({
               accumulated: accumulatedText
             };
           } else if (event.type === 'tool_start') {
-            // Tools execute automatically via embedded MCP server
+            // Tools execute automatically via HTTP MCP server
             yield event;
           } else if (event.type === 'done') {
             logger.info({ requestId, hasContent: !!accumulatedText, toolCount: executedTools.length }, 'Claude done event');
@@ -336,12 +325,28 @@ export async function* processWithClaudeSDK({
     }
 
     const latency = Date.now() - startTime;
+
+    // Calculate cost
+    const pricing = CLAUDE_PRICING[MODEL] || CLAUDE_PRICING['claude-sonnet-4-20250514'];
+    const inputCost = (totalInputTokens / 1_000_000) * pricing.input;
+    const outputCost = (totalOutputTokens / 1_000_000) * pricing.output;
+    const totalCost = inputCost + outputCost;
+
     logger.info({
       requestId,
       model: MODEL,
       toolCalls: executedTools.length,
-      inputTokens: totalInputTokens,
-      outputTokens: totalOutputTokens,
+      apiCalls: apiCallCount,
+      tokens: {
+        input: totalInputTokens,
+        output: totalOutputTokens,
+        total: totalInputTokens + totalOutputTokens
+      },
+      costUsd: {
+        input: inputCost.toFixed(6),
+        output: outputCost.toFixed(6),
+        total: totalCost.toFixed(6)
+      },
       latencyMs: latency,
       contentLength: accumulatedText?.length || 0,
       hasPlan: !!extractedPlan

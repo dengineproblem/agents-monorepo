@@ -16,6 +16,37 @@
 
 import { getSession, getSessionAsync, getStoreType } from './sessions.js';
 import { handleMCPRequest } from './protocol.js';
+import { executeToolWithContext } from './tools/executor.js';
+import { getToolByName, allMCPTools } from './tools/definitions.js';
+import { supabase } from '../lib/supabase.js';
+
+/**
+ * Get access token from database by fb_ad_account_id
+ * @param {string} fbAdAccountId - Facebook ad account ID (act_...)
+ * @returns {Promise<{accessToken: string|null, dbId: string|null}>}
+ */
+async function getAccessTokenByFbAccountId(fbAdAccountId) {
+  if (!fbAdAccountId) return { accessToken: null, dbId: null };
+
+  try {
+    const { data, error } = await supabase
+      .from('ad_accounts')
+      .select('id, access_token')
+      .eq('fb_ad_account_id', fbAdAccountId)
+      .single();
+
+    if (error || !data) {
+      return { accessToken: null, dbId: null };
+    }
+
+    return {
+      accessToken: data.access_token,
+      dbId: data.id
+    };
+  } catch (err) {
+    return { accessToken: null, dbId: null };
+  }
+}
 
 // Rate limiting: 100 requests per minute per session
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -235,7 +266,218 @@ export function registerMCPRoutes(fastify) {
     };
   });
 
-  fastify.log.info('MCP routes registered: POST /mcp, GET /mcp, GET /mcp/health');
+  /**
+   * POST /brain/tools/:toolName - Direct tool execution for Moltbot
+   *
+   * Moltbot skills call this endpoint via curl to execute tools.
+   * Context is passed in request body or headers.
+   *
+   * Security:
+   * - Tool name validation (alphanumeric + underscore only)
+   * - No tool list exposure on 404
+   * - Timeout on execution
+   */
+  fastify.post('/brain/tools/:toolName', async (request, reply) => {
+    const { toolName } = request.params;
+    const args = request.body || {};
+    const startTime = Date.now();
+    const requestId = `tool-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+
+    // Validate tool name format (security: prevent injection)
+    if (!toolName || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(toolName)) {
+      fastify.log.warn({
+        requestId,
+        toolName,
+        reason: 'invalid_format'
+      }, 'Invalid tool name format');
+
+      return reply.code(400).send({
+        success: false,
+        error: 'invalid_tool_name',
+        message: 'Tool name must start with a letter and contain only alphanumeric characters and underscores'
+      });
+    }
+
+    // Extract context from body or use defaults
+    const {
+      adAccountId,
+      userAccountId,
+      accessToken: providedAccessToken,
+      dangerousPolicy = 'allow', // Moltbot manages its own approval flow
+      ...toolArgs
+    } = args;
+
+    // If accessToken not provided, try to get it from database by adAccountId
+    let accessToken = providedAccessToken;
+    let adAccountDbId = null;
+
+    if (!accessToken && adAccountId) {
+      const dbResult = await getAccessTokenByFbAccountId(adAccountId);
+      accessToken = dbResult.accessToken;
+      adAccountDbId = dbResult.dbId;
+    }
+
+    fastify.log.info({
+      requestId,
+      endpoint: '/brain/tools/:toolName',
+      toolName,
+      hasAdAccountId: !!adAccountId,
+      hasUserAccountId: !!userAccountId,
+      hasAccessToken: !!accessToken,
+      tokenSource: providedAccessToken ? 'request' : (accessToken ? 'database' : 'none'),
+      argKeys: Object.keys(toolArgs)
+    }, 'Moltbot tool call received');
+
+    // Check if tool exists (don't expose tool list on 404)
+    const tool = getToolByName(toolName);
+    if (!tool) {
+      fastify.log.warn({
+        requestId,
+        toolName
+      }, 'Tool not found');
+
+      return reply.code(404).send({
+        success: false,
+        error: 'tool_not_found',
+        message: `Tool "${toolName}" not found`
+        // Security: Don't expose availableTools list
+      });
+    }
+
+    try {
+      // Build context for tool execution
+      const context = {
+        adAccountId,
+        adAccountDbId,  // UUID from database for internal queries
+        userAccountId,
+        accessToken,
+        dangerousPolicy,
+        // No session limits for Moltbot direct calls
+        sessionId: null,
+        useRedis: false
+      };
+
+      // Execute the tool with timeout (2 minutes)
+      const TOOL_TIMEOUT = 120000;
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Tool execution timeout after ${TOOL_TIMEOUT}ms`)), TOOL_TIMEOUT);
+      });
+
+      const result = await Promise.race([
+        executeToolWithContext(toolName, toolArgs, context),
+        timeoutPromise
+      ]);
+
+      const duration = Date.now() - startTime;
+
+      fastify.log.info({
+        requestId,
+        toolName,
+        duration,
+        success: result?.success !== false,
+        resultType: typeof result
+      }, 'Moltbot tool executed successfully');
+
+      return {
+        success: true,
+        toolName,
+        duration,
+        requestId,
+        result
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      const isTimeout = error.message.includes('timeout');
+
+      fastify.log.error({
+        requestId,
+        toolName,
+        duration,
+        error: error.message,
+        isTimeout,
+        stack: error.stack?.split('\n').slice(0, 3).join('\n')
+      }, 'Moltbot tool execution failed');
+
+      return reply.code(isTimeout ? 504 : 500).send({
+        success: false,
+        error: isTimeout ? 'timeout' : 'execution_error',
+        message: error.message,
+        toolName,
+        duration,
+        requestId
+      });
+    }
+  });
+
+  /**
+   * GET /brain/tools - List available tools for Moltbot
+   */
+  fastify.get('/brain/tools', async (request, reply) => {
+    const { category, search } = request.query;
+
+    let tools = allMCPTools.map(t => ({
+      name: t.name,
+      description: t.description,
+      agent: t.agent,
+      inputSchema: t.inputSchema
+    }));
+
+    // Filter by category/agent if provided
+    if (category) {
+      tools = tools.filter(t => t.agent === category);
+    }
+
+    // Search by name/description if provided
+    if (search) {
+      const searchLower = search.toLowerCase();
+      tools = tools.filter(t =>
+        t.name.toLowerCase().includes(searchLower) ||
+        t.description?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    fastify.log.info({
+      totalTools: allMCPTools.length,
+      filteredTools: tools.length,
+      category,
+      search
+    }, 'Tools list requested');
+
+    return {
+      count: tools.length,
+      totalAvailable: allMCPTools.length,
+      tools
+    };
+  });
+
+  /**
+   * GET /brain/health - Health check for Moltbot integration
+   */
+  fastify.get('/brain/health', async (request, reply) => {
+    const { checkHealth } = await import('../moltbot/orchestrator.js');
+
+    const moltbotHealth = await checkHealth();
+
+    fastify.log.info({
+      moltbotStatus: moltbotHealth.status,
+      toolsCount: allMCPTools.length
+    }, 'Brain health check');
+
+    const isHealthy = moltbotHealth.status === 'healthy';
+
+    return reply.code(isHealthy ? 200 : 503).send({
+      status: isHealthy ? 'ok' : 'degraded',
+      service: 'agent-brain',
+      moltbot: moltbotHealth,
+      tools: {
+        count: allMCPTools.length,
+        categories: [...new Set(allMCPTools.map(t => t.agent))].filter(Boolean)
+      },
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  fastify.log.info('MCP routes registered: POST /mcp, GET /mcp, GET /mcp/health, POST /brain/tools/:toolName, GET /brain/tools, GET /brain/health');
 }
 
 export default { registerMCPRoutes };

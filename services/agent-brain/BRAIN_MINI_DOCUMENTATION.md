@@ -18,7 +18,7 @@
 ## 1. Обзор
 
 ### Назначение
-**Brain Mini** (agent-brain) — это AI-агент для автоматизированного управления рекламными кампаниями в Facebook Ads. Использует OpenAI GPT модели для анализа метрик, принятия решений по оптимизации бюджетов и предоставления рекомендаций.
+**Brain Mini** (agent-brain) — это AI-агент для автоматизированного управления рекламными кампаниями в Facebook Ads. Использует Claude Agent SDK (primary) с fallback на OpenAI GPT для анализа метрик, принятия решений по оптимизации бюджетов и предоставления рекомендаций.
 
 ### Ключевые возможности
 - **Скоринг кампаний** — расчёт Health Score (HS) для оценки эффективности
@@ -33,7 +33,7 @@
 | Runtime | Node.js 20+ (ES Modules) |
 | HTTP Server | Fastify 4.x |
 | Database | Supabase (PostgreSQL) |
-| AI/LLM | OpenAI GPT-4.1, GPT-5.2, GPT-4o-mini |
+| AI/LLM | Claude Agent SDK (claude-sonnet-4), OpenAI GPT-4.1/GPT-5.2 (fallback) |
 | Ads API | Facebook Graph API v23.0, TikTok Ads API |
 | Messaging | Evolution API (WhatsApp), Telegram Bot API |
 
@@ -55,9 +55,10 @@ services/agent-brain/
 │   │   ├── contextGatherer.js       # Сбор контекста (directions, metrics)
 │   │   ├── planExecutor.js          # Выполнение планов действий
 │   │   │
-│   │   ├── orchestrator/            # Meta-Tools Orchestrator
-│   │   │   ├── index.js             # Класс Orchestrator
-│   │   │   ├── metaOrchestrator.js  # Meta-tools обработка
+│   │   ├── orchestrator/            # LLM Orchestrators
+│   │   │   ├── index.js             # Класс Orchestrator (роутинг Claude/OpenAI)
+│   │   │   ├── claudeOrchestrator.js # Claude Agent SDK orchestrator (primary)
+│   │   │   ├── metaOrchestrator.js  # OpenAI Meta-tools обработка (fallback)
 │   │   │   ├── metaSystemPrompt.js  # System prompt генератор
 │   │   │   └── memoryTools.js       # Инструменты памяти
 │   │   │

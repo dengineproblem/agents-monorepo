@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.22",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.23",
     "@fastify/cors": "^9.0.1",
     "@modelcontextprotocol/sdk": "^1.25.0",
     "@supabase/supabase-js": "^2.46.1",
