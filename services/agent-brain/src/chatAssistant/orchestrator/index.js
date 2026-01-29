@@ -479,7 +479,8 @@ export class Orchestrator {
               // Events will be yielded via callback pattern
             },
             context: {
-              adAccountId: toolContext.adAccountId,
+              adAccountId: toolContext.adAccountId,      // Facebook act_xxx for API calls
+              accountId: toolContext.adAccountDbId,       // UUID from ad_accounts.id for DB queries
               userAccountId: toolContext.userAccountId,
               accessToken: toolContext.accessToken
             },

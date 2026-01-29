@@ -374,12 +374,19 @@ function buildContextMessage(context) {
 
   const parts = ['[Контекст сессии]'];
 
-  if (context.adAccountId) {
-    parts.push(`Ad Account ID: ${context.adAccountId}`);
-  }
-
+  // User Account ID (UUID) - always required
   if (context.userAccountId) {
     parts.push(`User Account ID: ${context.userAccountId}`);
+  }
+
+  // Account ID (UUID from ad_accounts) - for multi-account mode
+  if (context.accountId) {
+    parts.push(`Account ID: ${context.accountId}`);
+  }
+
+  // Ad Account ID (Facebook act_xxx) - for API calls
+  if (context.adAccountId) {
+    parts.push(`Ad Account ID: ${context.adAccountId}`);
   }
 
   if (context.accessToken) {
@@ -388,8 +395,9 @@ function buildContextMessage(context) {
   }
 
   log.debug({
-    hasAdAccountId: !!context.adAccountId,
     hasUserAccountId: !!context.userAccountId,
+    hasAccountId: !!context.accountId,
+    hasAdAccountId: !!context.adAccountId,
     hasAccessToken: !!context.accessToken
   }, 'Context message built');
 
