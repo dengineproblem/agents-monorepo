@@ -18,7 +18,7 @@ import { getSession, getSessionAsync, getStoreType } from './sessions.js';
 import { handleMCPRequest } from './protocol.js';
 import { executeToolWithContext } from './tools/executor.js';
 import { getToolByName, allMCPTools } from './tools/definitions.js';
-import { supabase } from '../lib/supabase.js';
+import { supabase } from '../lib/supabaseClient.js';
 
 /**
  * Get credentials based on multi-account mode

@@ -491,6 +491,8 @@ WHERE user_account_id = 'user-uuid';
 | `agents-monorepo-agent-service-1` | 8082 | 8082 | Backend API (Facebook, workflows) |
 | `agents-monorepo-creative-analyzer-1` | 7081 | 7081 | LLM анализатор креативов |
 | `agents-monorepo-agent-brain-1` | 7080 | 7080 | Scoring agent (cron jobs) |
+| `moltbot` | 18789 | 18789 | Moltbot Gateway (WebSocket для AI Chat) |
+| `moltbot-telegram` | - | - | Moltbot Telegram транспорт (прямая интеграция) |
 | `agents-monorepo-creative-generation-service-1` | 7082 | 7082 | Генерация креативов (Gemini) |
 | `agents-monorepo-loki-1` | 3100 | 3100 | Логирование (Grafana Loki) |
 | `agents-monorepo-grafana-1` | 3000 | 3000 | Мониторинг и визуализация логов |
@@ -523,6 +525,8 @@ agents-monorepo-frontend-1
 agents-monorepo-frontend-appreview-1
 agents-monorepo-agent-service-1
 agents-monorepo-agent-brain-1
+moltbot
+moltbot-telegram
 agents-monorepo-creative-analyzer-1
 agents-monorepo-creative-generation-service-1
 agents-monorepo-chatbot-service-1

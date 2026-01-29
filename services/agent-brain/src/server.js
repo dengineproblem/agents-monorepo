@@ -7681,6 +7681,79 @@ if (CRON_ENABLED) {
   fastify.log.info({ where: 'cron', status: 'disabled' });
 }
 
+// =============================================================================
+// API Context Endpoint (для Moltbot Skills)
+// =============================================================================
+
+/**
+ * GET /api/context — получить credentials по telegram_id
+ * Используется skills в Moltbot для получения контекста пользователя
+ */
+fastify.get('/api/context', async (request, reply) => {
+  const telegramId = request.headers['x-telegram-id'];
+
+  if (!telegramId) {
+    return reply.code(400).send({ error: 'X-Telegram-Id header required' });
+  }
+
+  fastify.log.info({ telegramId }, 'Context request received');
+
+  try {
+    // Найти пользователя по telegram_id (проверяем все поля telegram_id, telegram_id_2, telegram_id_3, telegram_id_4)
+    const { data: users, error: userError } = await supabase
+      .from('user_accounts')
+      .select('id, access_token, ad_account_id, multi_account_enabled')
+      .or(`telegram_id.eq.${telegramId},telegram_id_2.eq.${telegramId},telegram_id_3.eq.${telegramId},telegram_id_4.eq.${telegramId}`)
+      .limit(1);
+
+    const user = users?.[0];
+
+    if (userError || !user) {
+      fastify.log.warn({ telegramId, error: userError?.message }, 'User not found by telegram_id');
+      return reply.code(404).send({ error: 'User not found' });
+    }
+
+    // Базовые credentials
+    let credentials = {
+      userAccountId: user.id,
+      accessToken: user.access_token,
+      adAccountId: user.ad_account_id
+    };
+
+    // Multi-account: получить активный аккаунт
+    if (user.multi_account_enabled) {
+      const { data: activeAccount, error: accError } = await supabase
+        .from('ad_accounts')
+        .select('id, access_token, ad_account_id')
+        .eq('user_account_id', user.id)
+        .eq('is_active', true)
+        .single();
+
+      if (activeAccount && !accError) {
+        credentials = {
+          userAccountId: user.id,
+          accountId: activeAccount.id,
+          accessToken: activeAccount.access_token,
+          adAccountId: activeAccount.ad_account_id
+        };
+      }
+    }
+
+    fastify.log.info({
+      telegramId,
+      userAccountId: credentials.userAccountId,
+      hasAccountId: !!credentials.accountId,
+      hasAccessToken: !!credentials.accessToken
+    }, 'Context resolved');
+
+    return credentials;
+
+  } catch (error) {
+    fastify.log.error({ telegramId, error: error.message }, 'Context lookup failed');
+    return reply.code(500).send({ error: 'Internal server error' });
+  }
+});
+
 // Register Chat Assistant routes
 registerChatRoutes(fastify);
 

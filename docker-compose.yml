@@ -348,6 +348,7 @@ services:
   # Moltbot - AI Agent Gateway
   # Uses beta channel (moltbot@beta) which has the CLI
   # Using Debian-slim for better native module support (vs Alpine/musl)
+  # Telegram интеграция через channels add (не отдельный контейнер)
   moltbot:
     image: node:22-slim
     container_name: moltbot
@@ -366,19 +367,33 @@ services:
         npm install -g moltbot@beta
         # Setup Anthropic + OpenAI auth profiles for Moltbot
         mkdir -p /root/.clawdbot/agents/main/agent
-        echo "{\"profiles\":[{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\",\"default\":true},{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\"}]}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
-        echo "Auth profiles configured for Anthropic (default) + OpenAI (fallback)"
+        echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}]}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
+        echo "Auth profiles configured for OpenAI gpt-5.2 (default) + Anthropic (fallback)"
+
+        # Настройка gateway mode
+        moltbot config set gateway.mode local
+        moltbot config set gateway.auth.token "moltbot-dev-token-2026"
+
+        # Включаем Telegram плагин и добавляем канал
+        if [ -n "$MOLTBOT_TELEGRAM_BOT_TOKEN" ]; then
+          echo "Enabling Telegram plugin..."
+          moltbot plugins enable telegram
+          echo "Adding Telegram channel..."
+          moltbot channels add --channel telegram --token "$MOLTBOT_TELEGRAM_BOT_TOKEN" || echo "Telegram channel may already exist"
+          echo "Telegram configured"
+        fi
+
         moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose
     ports:
       - "18789:18789"
     environment:
-      # API Keys для auth-profiles.json (передаются явно для shell command)
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Только переменные которых нет в env_file
       - AGENT_SERVICE_URL=http://agent-service:8082
       - MOLTBOT_TOKEN=moltbot-dev-token-2026
+      # API Keys и MOLTBOT_TELEGRAM_BOT_TOKEN приходят из env_file (.env.brain)
     volumes:
       - ./moltbot-workspace:/root/clawd
+      - moltbot-config:/root/.moltbot
     restart: unless-stopped
     networks:
       - default
@@ -391,3 +406,4 @@ volumes:
   evolution-redis-data:
   evolution-postgres-data:
   redis-chatbot-data:
+  moltbot-config:
