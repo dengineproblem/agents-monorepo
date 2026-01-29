@@ -69,3 +69,4 @@ coverage/
 
 # MCP config with tokens
 .mcp.json
+moltbot-workspace/
