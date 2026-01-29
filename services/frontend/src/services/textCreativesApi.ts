@@ -70,7 +70,7 @@ export const textCreativesApi = {
       );
       return response.data;
     } catch (error: any) {
-      console.error('[Text Creatives API] Error generating text:', error);
+
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to generate text creative'
@@ -92,7 +92,7 @@ export const textCreativesApi = {
       );
       return response.data;
     } catch (error: any) {
-      console.error('[Text Creatives API] Error editing text:', error);
+
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to edit text creative'

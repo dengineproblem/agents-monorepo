@@ -98,7 +98,7 @@ export const creativesApi = {
     const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
-      console.error('creativesApi.list error:', error);
+
       return [];
     }
 
@@ -236,7 +236,7 @@ export const creativesApi = {
 
       return { text: textParts.join('\n\n') || null };
     } catch (e) {
-      console.error('getCreativeText error:', e);
+
       return { text: null };
     }
   },
@@ -255,7 +255,7 @@ export const creativesApi = {
       .select('*')
       .single();
     if (error) {
-      console.error('creativesApi.createPlaceholder error:', error);
+
       return null;
     }
     return data as unknown as UserCreative;
@@ -267,7 +267,7 @@ export const creativesApi = {
       .update(payload)
       .eq('id', id);
     if (error) {
-      console.error('creativesApi.update error:', error);
+
       return false;
     }
     return true;
@@ -284,7 +284,7 @@ export const creativesApi = {
       .eq('id', id);
     
     if (error) {
-      console.error('Ошибка удаления креатива:', error);
+
       return false;
     }
     return true;
@@ -301,13 +301,13 @@ export const creativesApi = {
         .maybeSingle();
       
       if (error) {
-        console.error('creativesApi.getCreativeTestStatus error:', error);
+
         return null;
       }
       
       return data as CreativeTestStatus | null;
     } catch (e) {
-      console.error('creativesApi.getCreativeTestStatus exception:', e);
+
       return null;
     }
   },
@@ -323,7 +323,7 @@ export const creativesApi = {
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('creativesApi.getCreativeTestStatuses error:', error);
+
         return {};
       }
 
@@ -343,7 +343,7 @@ export const creativesApi = {
       
       return result;
     } catch (e) {
-      console.error('creativesApi.getCreativeTestStatuses exception:', e);
+
       return {};
     }
   },
@@ -386,7 +386,7 @@ export const creativesApi = {
         text: data.data?.transcription?.text
       };
     } catch (error) {
-      console.error('creativesApi.reTranscribe error:', error);
+
       return {
         success: false,
         error: 'Network error during re-transcription'
@@ -407,8 +407,6 @@ export const creativesApi = {
     const isImage = (file?.type || '').startsWith('image/');
     const userId = getUserId();
     if (!userId) return false;
-
-    console.log('[creativesApi.uploadToWebhook] directionId:', directionId);
 
     // Для изображений используем обычный XHR (без TUS)
     if (isImage) {
@@ -446,7 +444,7 @@ export const creativesApi = {
         });
         return true;
       } catch (e) {
-        console.error('uploadToWebhook image exception', e);
+
         return false;
       }
     }
@@ -467,11 +465,11 @@ export const creativesApi = {
     if (!recordId) metadata.client_request_id = genId();
     if (description) metadata.description = description;
     if (directionId) {
-      console.log('[creativesApi.uploadToWebhook] TUS metadata direction_id:', directionId);
+
       metadata.direction_id = directionId;
     }
     if (adAccountId) {
-      console.log('[creativesApi.uploadToWebhook] TUS metadata account_id:', adAccountId);
+
       metadata.account_id = adAccountId;
     }
 
@@ -492,13 +490,13 @@ export const creativesApi = {
         chunkSize: 5 * 1024 * 1024, // 5MB chunks
         metadata,
         onError: (error) => {
-          console.error('[TUS] Upload error:', error);
+
           // Сохраняем URL для возможного resume
           if (upload.url) {
             try {
               localStorage.setItem(storageKey, upload.url);
             } catch (e) {
-              console.warn('[TUS] Failed to save resume URL:', e);
+
             }
           }
           resolve(false);
@@ -508,7 +506,7 @@ export const creativesApi = {
           onProgress?.(pct);
         },
         onSuccess: async () => {
-          console.log('[TUS] File upload completed, waiting for processing...');
+
           // Удаляем сохранённый URL после успешной загрузки файла
           try {
             localStorage.removeItem(storageKey);
@@ -523,7 +521,7 @@ export const creativesApi = {
             const urlParts = upload.url.split('/tus/');
             if (urlParts.length > 1) {
               uploadId = urlParts[1].split('?')[0]; // убираем query params если есть
-              console.log('[TUS] Extracted upload_id:', uploadId);
+
             }
           }
 
@@ -548,23 +546,22 @@ export const creativesApi = {
 
               const response = await fetch(statusUrl.toString());
               if (!response.ok) {
-                console.warn('[TUS] Status check failed:', response.status);
+
                 await new Promise(r => setTimeout(r, pollInterval));
                 continue;
               }
 
               const status = await response.json();
-              console.log('[TUS] Processing status:', status);
 
               if (status.status === 'success') {
-                console.log('[TUS] Processing completed successfully');
+
                 onProgress?.(100);
                 resolve(true);
                 return;
               }
 
               if (status.status === 'error') {
-                console.error('[TUS] Processing failed:', status.error);
+
                 resolve(false);
                 return;
               }
@@ -572,13 +569,13 @@ export const creativesApi = {
               // status === 'processing' - продолжаем ждать
               await new Promise(r => setTimeout(r, pollInterval));
             } catch (e) {
-              console.warn('[TUS] Status check error:', e);
+
               await new Promise(r => setTimeout(r, pollInterval));
             }
           }
 
           // Таймаут - считаем ошибкой
-          console.error('[TUS] Processing timeout after 3 minutes');
+
           resolve(false);
         }
       });
@@ -586,14 +583,14 @@ export const creativesApi = {
       // Пытаемся восстановить незавершённую загрузку
       const previousUrl = localStorage.getItem(storageKey);
       if (previousUrl) {
-        console.log('[TUS] Resuming previous upload from:', previousUrl);
+
         upload.url = previousUrl;
       }
 
       // Проверяем, можно ли продолжить предыдущую загрузку
       upload.findPreviousUploads().then((previousUploads) => {
         if (previousUploads.length > 0) {
-          console.log('[TUS] Found previous uploads, resuming...');
+
           upload.resumeFromPreviousUpload(previousUploads[0]);
         }
         upload.start();
@@ -646,7 +643,7 @@ export const creativesApi = {
         already_imported: data.already_imported || 0
       };
     } catch (error) {
-      console.error('creativesApi.getTopCreativesPreview error:', error);
+
       return {
         success: false,
         creatives: [],
@@ -709,7 +706,7 @@ export const creativesApi = {
         message: data.message
       };
     } catch (error) {
-      console.error('creativesApi.importSelectedCreatives error:', error);
+
       return {
         success: false,
         imported: 0,
@@ -748,7 +745,7 @@ export const creativesApi = {
       const data = await response.json();
 
       if (!response.ok) {
-        console.error('getImportedCreativesStatus error:', data.error);
+
         return { hasImported: false, count: 0, creatives: [] };
       }
 
@@ -758,7 +755,7 @@ export const creativesApi = {
         creatives: data.creatives || []
       };
     } catch (error) {
-      console.error('creativesApi.getImportedCreativesStatus error:', error);
+
       return { hasImported: false, count: 0, creatives: [] };
     }
   },

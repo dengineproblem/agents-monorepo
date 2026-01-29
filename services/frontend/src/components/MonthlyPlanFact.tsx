@@ -59,13 +59,11 @@ const MonthlyPlanFact: React.FC = () => {
           since: format(firstDay, 'yyyy-MM-dd'),
           until: format(currentDate, 'yyyy-MM-dd')
         };
-        
-        console.log('Загружаем данные за месяц:', monthRange);
-        
+
         // Получаем пользователя из localStorage
         const storedUser = localStorage.getItem('user');
         if (!storedUser) {
-          console.error('Пользователь не найден в localStorage');
+
           return;
         }
         const user = JSON.parse(storedUser);
@@ -87,7 +85,7 @@ const MonthlyPlanFact: React.FC = () => {
         const [stats, plansData] = await Promise.all([
           facebookApi.getCampaignStats(monthRange, includeLeadForms, campaigns),
           getUserDirectionsWithPlans(user.id).catch(error => {
-            console.warn('Ошибка загрузки планов:', error);
+
             return []; // Возвращаем пустой массив при ошибке
           })
         ]);
@@ -102,12 +100,11 @@ const MonthlyPlanFact: React.FC = () => {
         setActiveCampaigns(activeCampaignsOnly);
         setMonthlyStats(activeStats);
         setDirectionsWithPlans(plansData);
-        
-        console.log('Загружено активных кампаний:', activeCampaignsOnly.length);
-        console.log('Статистика для активных кампаний:', activeStats.length);
-        console.log('Загружено планов:', plansData.length);
+
+
+
       } catch (error) {
-        console.error('Ошибка загрузки месячных данных:', error);
+
         setActiveCampaigns([]);
         setMonthlyStats([]);
       } finally {
@@ -300,7 +297,7 @@ const MonthlyPlanFact: React.FC = () => {
       
       setPlansDialogOpen(false);
     } catch (error) {
-      console.error('Ошибка сохранения планов:', error);
+
       toast({
         title: "Ошибка сохранения",
         description: "Не удалось сохранить планы. Попробуйте еще раз.",

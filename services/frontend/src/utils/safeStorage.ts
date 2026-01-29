@@ -102,7 +102,6 @@ export function clearAllCaches(): number {
     }
   }
 
-  console.log(`[SafeStorage] Очищено ${removed} кэшей`);
   return removed;
 }
 
@@ -137,7 +136,6 @@ export function clearExpiredCaches(): number {
     }
   }
 
-  console.log(`[SafeStorage] Очищено ${removed} устаревших кэшей`);
   return removed;
 }
 
@@ -154,7 +152,6 @@ export function clearTemporaryData(): number {
     }
   }
 
-  console.log(`[SafeStorage] Очищено ${removed} временных записей`);
   return removed;
 }
 
@@ -173,7 +170,6 @@ export function emergencyCleanup(): number {
     }
   }
 
-  console.warn(`[SafeStorage] Экстренная очистка: удалено ${removed} записей`);
   return removed;
 }
 
@@ -188,7 +184,6 @@ export function safeSetItem(key: string, value: string): boolean {
   } catch (error) {
     if (error instanceof DOMException &&
         (error.name === 'QuotaExceededError' || error.code === 22)) {
-      console.warn(`[SafeStorage] Квота превышена при записи ${key}, очищаю кэши...`);
 
       // Стадия 1: очистить устаревшие кэши
       clearExpiredCaches();
@@ -217,12 +212,11 @@ export function safeSetItem(key: string, value: string): boolean {
         localStorage.setItem(key, value);
         return true;
       } catch (finalError) {
-        console.error(`[SafeStorage] Не удалось сохранить ${key} даже после полной очистки`);
+
         return false;
       }
     }
 
-    console.error(`[SafeStorage] Ошибка при сохранении ${key}:`, error);
     return false;
   }
 }
@@ -234,7 +228,7 @@ export function safeGetItem(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch (error) {
-    console.error(`[SafeStorage] Ошибка при чтении ${key}:`, error);
+
     return null;
   }
 }
@@ -247,7 +241,7 @@ export function safeRemoveItem(key: string): boolean {
     localStorage.removeItem(key);
     return true;
   } catch (error) {
-    console.error(`[SafeStorage] Ошибка при удалении ${key}:`, error);
+
     return false;
   }
 }
@@ -261,7 +255,7 @@ export function safeGetJSON<T>(key: string, defaultValue: T): T {
     if (!value) return defaultValue;
     return JSON.parse(value) as T;
   } catch (error) {
-    console.error(`[SafeStorage] Ошибка при парсинге ${key}:`, error);
+
     return defaultValue;
   }
 }
@@ -273,7 +267,7 @@ export function safeSetJSON<T>(key: string, value: T): boolean {
   try {
     return safeSetItem(key, JSON.stringify(value));
   } catch (error) {
-    console.error(`[SafeStorage] Ошибка при сериализации ${key}:`, error);
+
     return false;
   }
 }
@@ -284,7 +278,6 @@ export function safeSetJSON<T>(key: string, value: T): boolean {
  */
 export function initSafeStorage(): void {
   const stats = getStorageStats();
-  console.log(`[SafeStorage] Инициализация: ${stats.totalSize}, ${stats.itemCount} записей (${stats.cacheCount} кэшей)`);
 
   // Проактивная очистка устаревших кэшей
   clearExpiredCaches();
@@ -292,7 +285,7 @@ export function initSafeStorage(): void {
   // Если используется > 4MB (из 5MB лимита), очищаем кэши
   const size = getStorageSize();
   if (size > 4 * 1024 * 1024) {
-    console.warn('[SafeStorage] Использовано более 4MB, очищаю кэши...');
+
     clearAllCaches();
   }
 }

@@ -120,7 +120,7 @@ export function AllAccountsExecutionsSection({
           }
         }
       } catch (error) {
-        console.error('[AllAccountsExecutionsSection] Error:', error);
+
       } finally {
         setLoading(false);
       }

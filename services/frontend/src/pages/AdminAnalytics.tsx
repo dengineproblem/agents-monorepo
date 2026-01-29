@@ -206,7 +206,7 @@ const AdminAnalytics: React.FC = () => {
         setSummary(data);
       }
     } catch (error) {
-      console.error('Failed to fetch analytics data:', error);
+
     } finally {
       setLoading(false);
     }
@@ -221,7 +221,7 @@ const AdminAnalytics: React.FC = () => {
         setUserDetail(data);
       }
     } catch (error) {
-      console.error('Failed to fetch user details:', error);
+
     }
   };
 

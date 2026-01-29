@@ -167,8 +167,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   useEffect(() => {
     if (!currentAdAccountId) return;
 
-    console.log('[CarouselTab] Смена аккаунта, сбрасываем состояние');
-
     // Сбрасываем все локальное состояние
     setCarouselIdea('');
     setCardsCount(3);
@@ -320,7 +318,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         toast.error(response.error || 'Ошибка генерации текстов');
       }
     } catch (error) {
-      console.error('Error generating texts:', error);
+
       toast.error('Ошибка при генерации текстов');
     } finally {
       setIsGeneratingTexts(false);
@@ -357,7 +355,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         toast.error(response.error || 'Ошибка перегенерации');
       }
     } catch (error) {
-      console.error('Error regenerating text:', error);
+
       toast.error('Ошибка при перегенерации текста');
     } finally {
       setIsRegeneratingText(false);
@@ -441,7 +439,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         }
       }
     } catch (error) {
-      console.error('Error generating carousel:', error);
 
       // Очищаем все таймеры
       clearTimeout(promptTimer);
@@ -532,7 +529,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         }
       }
     } catch (error) {
-      console.error('Error regenerating all carousel:', error);
 
       // Очищаем все таймеры
       clearTimeout(promptTimer);
@@ -581,14 +577,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       // и массив как reference_images
       const referenceImage = referenceImages.length > 0 ? referenceImages[0] : undefined;
 
-      console.log('[CarouselTab] Regenerating card:', {
-        cardIndex,
-        hasCustomPrompt: !!customPrompt,
-        customPromptLength: customPrompt?.length || 0,
-        referenceImagesCount: referenceImages.length,
-        changeOptions: changeOptions.length > 0 ? changeOptions : 'all (default)'
-      });
-
       const response = await carouselApi.regenerateCard({
         user_id: userId,
         account_id: currentAdAccountId || undefined,
@@ -631,7 +619,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         toast.error(response.error || 'Ошибка перегенерации карточки');
       }
     } catch (error) {
-      console.error('Error regenerating card:', error);
+
       toast.error('Ошибка при перегенерации карточки');
     } finally {
       setRegeneratingCardIndex(null);
@@ -737,7 +725,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       };
       reader.readAsDataURL(blob);
     } catch (error) {
-      console.error('Error adding carousel card as reference:', error);
+
       toast.error('Ошибка загрузки изображения');
     }
   };
@@ -812,7 +800,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       // Очищаем выбор после скачивания
       setSelectedCardsForDownload([]);
     } catch (error) {
-      console.error('Error downloading:', error);
+
       if (progressToastId) {
         toast.error('Ошибка при скачивании', { id: progressToastId });
       }
@@ -855,7 +843,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         toast.error(errorMessage, { id: toastId });
       }
     } catch (error: any) {
-      console.error('[CarouselTab] Error creating creative:', error);
+
       toast.error('Ошибка при создании креатива', { id: toastId });
     } finally {
       setIsCreatingCreative(false);

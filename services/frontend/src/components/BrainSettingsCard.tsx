@@ -62,7 +62,7 @@ export function BrainSettingsCard({ className }: BrainSettingsCardProps) {
           setTimezone(acc.brain_timezone || 'Asia/Almaty');
         }
       } catch (error) {
-        console.error('Error loading account:', error);
+
       } finally {
         setLoading(false);
       }
@@ -111,7 +111,7 @@ export function BrainSettingsCard({ className }: BrainSettingsCardProps) {
         toast.error(result.error || 'Ошибка сохранения');
       }
     } catch (error) {
-      console.error('Error saving brain settings:', error);
+
       toast.error('Не удалось сохранить настройки');
     } finally {
       setSaving(false);

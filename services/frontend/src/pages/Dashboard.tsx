@@ -81,7 +81,7 @@ const Dashboard: React.FC = () => {
       }
       return `${since} — ${until}`;
     } catch (error) {
-      console.error('Не удалось форматировать период дат:', error);
+
       return null;
     }
   }, [dateRange]);
@@ -125,7 +125,7 @@ const Dashboard: React.FC = () => {
             .single();
 
           if (error) {
-            console.error('Ошибка загрузки тарифа:', error);
+
             return;
           }
 
@@ -137,7 +137,7 @@ const Dashboard: React.FC = () => {
           }
         }
       } catch (error) {
-        console.error('Ошибка парсинга данных пользователя:', error);
+
       }
     };
 

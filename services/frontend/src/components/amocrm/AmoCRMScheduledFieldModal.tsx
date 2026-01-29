@@ -81,11 +81,11 @@ export const AmoCRMScheduledFieldModal: React.FC<AmoCRMScheduledFieldModalProps>
           setSelectedFields([{ fieldId: null, enumId: null }]);
         }
       } catch (settingsErr: any) {
-        console.warn('Could not load saved scheduled settings:', settingsErr.message);
+
         setSelectedFields([{ fieldId: null, enumId: null }]);
       }
     } catch (err: any) {
-      console.error('Failed to load scheduled field data:', err);
+
       setError(err.message || 'Не удалось загрузить данные');
     } finally {
       setLoading(false);
@@ -172,7 +172,7 @@ export const AmoCRMScheduledFieldModal: React.FC<AmoCRMScheduledFieldModalProps>
         onClose();
       }, 1500);
     } catch (err: any) {
-      console.error('Failed to save scheduled fields:', err);
+
       setError(err.message || 'Не удалось сохранить настройки');
     } finally {
       setSaving(false);

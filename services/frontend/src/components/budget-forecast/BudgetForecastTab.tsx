@@ -42,7 +42,7 @@ export const BudgetForecastTab: React.FC<Props> = ({ campaignId }) => {
           setError('Нет данных для прогнозирования');
         }
       } catch (err) {
-        console.error('[BudgetForecastTab] Error:', err);
+
         setError('Ошибка загрузки прогноза');
       } finally {
         setLoading(false);

@@ -45,7 +45,7 @@ export async function getUserDirectionsWithPlans(userId: string): Promise<Direct
       .eq('user_id', userId);
 
     if (directionsError) {
-      console.error('Ошибка при получении направлений:', directionsError);
+
       throw new Error(`Не удалось загрузить направления: ${directionsError.message}`);
     }
 
@@ -61,7 +61,7 @@ export async function getUserDirectionsWithPlans(userId: string): Promise<Direct
       .in('user_direction_id', directionIds);
 
     if (metricsError) {
-      console.error('Ошибка при получении метрик:', metricsError);
+
       throw new Error(`Не удалось загрузить метрики: ${metricsError.message}`);
     }
 
@@ -78,7 +78,7 @@ export async function getUserDirectionsWithPlans(userId: string): Promise<Direct
       };
     });
   } catch (error) {
-    console.error('Ошибка в getUserDirectionsWithPlans:', error);
+
     throw error;
   }
 }
@@ -98,7 +98,7 @@ export async function saveUserDirectionPlans(
       .eq('user_id', userId);
 
     if (getError) {
-      console.error('Ошибка при получении существующих направлений:', getError);
+
       throw new Error(`Не удалось получить существующие направления: ${getError.message}`);
     }
 
@@ -113,7 +113,7 @@ export async function saveUserDirectionPlans(
         .in('user_direction_id', directionIds);
 
       if (deleteMetricsError) {
-        console.error('Ошибка при удалении старых метрик:', deleteMetricsError);
+
         throw new Error(`Не удалось удалить старые метрики: ${deleteMetricsError.message}`);
       }
 
@@ -124,7 +124,7 @@ export async function saveUserDirectionPlans(
         .eq('user_id', userId);
 
       if (deleteDirectionsError) {
-        console.error('Ошибка при удалении старых направлений:', deleteDirectionsError);
+
         throw new Error(`Не удалось удалить старые направления: ${deleteDirectionsError.message}`);
       }
     }
@@ -143,15 +143,14 @@ export async function saveUserDirectionPlans(
         .single();
 
       if (directionError || !direction) {
-        console.error('Ошибка при создании направления:', directionError);
+
         throw new Error(`Не удалось создать направление: ${directionError?.message}`);
       }
 
       // 2. Создаем метрики для этого направления
-      console.log('Создаем метрики для направления ID:', direction.id);
-      console.log('План лидов:', plan.monthlyLeadsPlan);
-      console.log('План затрат:', plan.monthlySpendPlan);
-      
+
+
+
       // Создаем метрики по одной для лучшей отладки
       const { error: leadsError } = await supabase
         .from('planned_metrics')
@@ -162,7 +161,7 @@ export async function saveUserDirectionPlans(
         });
 
       if (leadsError) {
-        console.error('Ошибка при создании метрики лидов:', leadsError);
+
         throw new Error(`Не удалось создать метрику лидов: ${leadsError.message}`);
       }
 
@@ -175,16 +174,15 @@ export async function saveUserDirectionPlans(
         });
 
       if (spendError) {
-        console.error('Ошибка при создании метрики затрат:', spendError);
+
         throw new Error(`Не удалось создать метрику затрат: ${spendError.message}`);
       }
 
 
     }
 
-    console.log(`Успешно сохранено ${plans.length} направлений с планами для пользователя ${userId}`);
   } catch (error) {
-    console.error('Ошибка в saveUserDirectionPlans:', error);
+
     throw error;
   }
 }
@@ -207,11 +205,11 @@ export async function updatePlannedMetric(
       });
 
     if (error) {
-      console.error('Ошибка при обновлении метрики:', error);
+
       throw new Error(`Не удалось обновить метрику: ${error.message}`);
     }
   } catch (error) {
-    console.error('Ошибка в updatePlannedMetric:', error);
+
     throw error;
   }
 }
@@ -227,11 +225,11 @@ export async function deleteUserDirection(directionId: number): Promise<void> {
       .eq('id', directionId);
 
     if (error) {
-      console.error('Ошибка при удалении направления:', error);
+
       throw new Error(`Не удалось удалить направление: ${error.message}`);
     }
   } catch (error) {
-    console.error('Ошибка в deleteUserDirection:', error);
+
     throw error;
   }
 }

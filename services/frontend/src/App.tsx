@@ -130,12 +130,7 @@ const AppRoutes = () => {
       // Мультиаккаунт: проверяем connection_status активного аккаунта
       const currentAccount = adAccounts.find(acc => acc.is_active !== false);
       result = currentAccount?.connection_status === 'connected';
-      console.log('[isFbConnected] MultiAccount mode:', {
-        adAccountsCount: adAccounts.length,
-        currentAccount: currentAccount?.id,
-        connectionStatus: currentAccount?.connection_status,
-        result,
-      });
+
     } else {
       // Legacy: проверяем access_token в user
       const storedUser = localStorage.getItem('user');
@@ -143,11 +138,7 @@ const AppRoutes = () => {
         try {
           const parsed = JSON.parse(storedUser);
           result = !!(parsed.access_token && parsed.ad_account_id);
-          console.log('[isFbConnected] Legacy mode:', {
-            hasAccessToken: !!parsed.access_token,
-            hasAdAccountId: !!parsed.ad_account_id,
-            result,
-          });
+
         } catch {
           result = false;
         }
@@ -184,31 +175,25 @@ const AppRoutes = () => {
     const handleMultiAccountLoaded = () => {
       const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
       const storedUser = localStorage.getItem('user');
-      console.log('[Onboarding Debug] multiAccountLoaded:', {
-        isMultiAccount,
-        multiAccountEnabledRaw: localStorage.getItem('multiAccountEnabled'),
-        hasUser: !!storedUser,
-        userPrompt1: storedUser ? JSON.parse(storedUser).prompt1 : null,
-      });
 
       // Онбординг ТОЛЬКО для НЕ-мультиаккаунта без prompt1
       const wasDismissed = localStorage.getItem('onboardingDismissed') === 'true';
 
       if (isMultiAccount) {
-        console.log('[Onboarding Debug] Multi-account mode - NOT showing onboarding');
+
         setShowOnboarding(false);
       } else if (!wasDismissed) {
         if (storedUser) {
           try {
             const parsedUser = JSON.parse(storedUser);
             if (!parsedUser.prompt1) {
-              console.log('[Onboarding Debug] Legacy mode, no prompt1 - SHOWING onboarding');
+
               setShowOnboarding(true);
             }
           } catch {}
         }
       } else {
-        console.log('[Onboarding Debug] Onboarding was dismissed - NOT showing');
+
       }
     };
 
@@ -219,7 +204,7 @@ const AppRoutes = () => {
   // Слушаем событие openOnboarding для добавления нового аккаунта в мультиаккаунтном режиме
   useEffect(() => {
     const handleOpenOnboarding = () => {
-      console.log('[Onboarding Debug] openOnboarding event - SHOWING onboarding');
+
       // Сбрасываем флаг, т.к. пользователь явно хочет добавить аккаунт
       localStorage.removeItem('onboardingDismissed');
       setShowOnboarding(true);
@@ -275,7 +260,7 @@ const AppRoutes = () => {
           }
         }
       } catch (error) {
-        console.error('Ошибка при обновлении user после онбординга:', error);
+
       }
     }
   };
@@ -289,7 +274,7 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
       } catch (error) {
-        console.error('Ошибка при обновлении user после Facebook подключения:', error);
+
       }
     }
   };

@@ -92,7 +92,7 @@ const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({
           );
         }
       } catch (err) {
-        console.error('Error searching users:', err);
+
       } finally {
         setLoading(false);
       }

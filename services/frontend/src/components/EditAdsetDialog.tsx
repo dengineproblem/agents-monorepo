@@ -68,7 +68,7 @@ const EditAdsetDialog: React.FC<EditAdsetDialogProps> = ({
       });
 
     } catch (error: any) {
-      console.error('Ошибка при сохранении ad set:', error);
+
       toast.error(error.message || 'Не удалось сохранить изменения');
     } finally {
       setSaving(false);

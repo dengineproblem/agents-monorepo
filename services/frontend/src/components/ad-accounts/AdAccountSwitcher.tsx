@@ -50,11 +50,7 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
   // Debug: логируем при изменении аккаунта (до условных return!)
   useEffect(() => {
     if (currentAdAccountId) {
-      console.log('[AdAccountSwitcher] ACCOUNT CHANGED:', {
-        currentAdAccountId,
-        currentAccountName: currentAccount?.name,
-        currentAccountId: currentAccount?.id,
-      });
+
     }
   }, [currentAdAccountId, currentAccount]);
 
@@ -153,7 +149,7 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
               <DropdownMenuItem
                 key={account.id}
                 onClick={() => {
-                  console.log('[AdAccountSwitcher] select:', account.name);
+
                   setCurrentAdAccountId(account.id);
                 }}
                 className="cursor-pointer"

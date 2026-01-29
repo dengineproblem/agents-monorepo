@@ -174,7 +174,6 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   useEffect(() => {
     if (!currentAdAccountId) return;
 
-    console.log('[VideoUpload] Смена аккаунта, сбрасываем состояние');
     setSelectedDirectionId('');
     setSelectedCreativeId('');
     setSelectedCreativeIds([]);
@@ -262,17 +261,17 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         if (localUserData.id) {
           // ВСЕГДА делаем запрос к Supabase по id
-          console.log('Запрашиваем данные пользователя из Supabase:', localUserData.id);
+
           const { data, error } = await supabase
             .from('user_accounts')
             .select('*')
             .eq('id', localUserData.id)
             .single();
           if (error) {
-            console.error('Ошибка загрузки данных пользователя из Supabase:', error);
+
             setUserData(localUserData); // fallback
           } else if (data) {
-            console.log('Получены данные пользователя из Supabase:', data);
+
             const combinedData = { ...localUserData, ...data };
             localStorage.setItem('user', JSON.stringify(combinedData));
             setUserData(combinedData);
@@ -281,7 +280,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           setUserData(localUserData);
         }
       } catch (error) {
-        console.error('Ошибка при загрузке данных пользователя:', error);
+
       }
     }
     fetchUserData();
@@ -299,10 +298,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
-        console.log('Загружены пиксели (VideoUpload):', list);
         setPixels(Array.isArray(list) ? list : []);
       } catch (e) {
-        console.error('Ошибка загрузки пикселей:', e);
+
         setPixels([]);
       } finally {
         setIsLoadingPixels(false);
@@ -325,12 +323,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           .maybeSingle();
 
         if (error) {
-          console.error('Ошибка загрузки дефолтных настроек:', error);
+
           return;
         }
 
         if (data) {
-          console.log('Загружены дефолтные настройки:', data);
+
           // Применяем настройки
           if (data.cities && data.cities.length > 0) {
             setSelectedCities(data.cities);
@@ -365,7 +363,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           // Настройки применены тихо, без уведомления
         }
       } catch (error) {
-        console.error('Ошибка при загрузке дефолтных настроек:', error);
+
       }
     };
     
@@ -392,14 +390,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           .order('created_at', { ascending: false });
 
         if (error) {
-          console.error('Ошибка загрузки креативов:', error);
+
           toast.error('Не удалось загрузить креативы');
           setAvailableCreatives([]);
         } else {
           setAvailableCreatives(data || []);
         }
       } catch (error) {
-        console.error('Ошибка при загрузке креативов:', error);
+
         setAvailableCreatives([]);
       } finally {
         setLoadingCreatives(false);
@@ -471,7 +469,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         toast.error(result.error || 'Ошибка запуска рекламы');
       }
     } catch (error: any) {
-      console.error('Ошибка запуска рекламы:', error);
+
       toast.error(error.message || 'Ошибка запуска рекламы');
     } finally {
       setManualLaunchLoading(false);
@@ -504,13 +502,11 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
   // Функция для попытки retry
   const attemptRetry = (formData: FormData, webhookUrl: string, currentAttempt: number = retryAttempt) => {
-    console.log(`attemptRetry вызван с currentAttempt: ${currentAttempt}, MAX_RETRY_ATTEMPTS: ${MAX_RETRY_ATTEMPTS}`);
-    
+
     const nextAttempt = currentAttempt + 1;
-    console.log(`nextAttempt: ${nextAttempt}`);
-    
+
     if (nextAttempt > MAX_RETRY_ATTEMPTS) {
-      console.log(`Достигнут лимит попыток: ${nextAttempt} > ${MAX_RETRY_ATTEMPTS}`);
+
       toast.error(`Не удалось загрузить файл после ${MAX_RETRY_ATTEMPTS} попыток`);
       setIsUploading(false);
       setIsRetrying(false);
@@ -562,13 +558,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           .update({ current_campaign_goal: goal, current_campaign_goal_changed_at: new Date().toISOString() })
           .eq('id', localUserData.id);
         if (error) {
-          console.error('Не удалось обновить current_campaign_goal:', error);
+
           return;
         }
         const updated = { ...localUserData, current_campaign_goal: goal, current_campaign_goal_changed_at: new Date().toISOString() };
         localStorage.setItem('user', JSON.stringify(updated));
       } catch (e) {
-        console.error('Ошибка при обновлении current_campaign_goal:', e);
+
       }
     };
 
@@ -717,12 +713,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
       toast.error('Файл слишком большой (максимум 512 МБ)');
-      console.error('Ограничение: файл превышает 512 МБ, размер:', file.size);
+
       return;
     }
     if (!file.type.startsWith('video/')) {
       toast.error('Пожалуйста, выберите видео-файл');
-      console.error('Выбран не видео-файл:', file.type);
+
       return;
     }
     setSelectedFile(file);
@@ -735,7 +731,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     
     setShowVideoForm(true); // Автоматически показываем форму после выбора файла
     toast.info(`Выбран файл: ${file.name}`);
-    console.log('Файл выбран для загрузки:', file.name, 'Размер:', file.size, 'Тип:', file.type);
+
     // Сбрасываем value, чтобы повторный выбор того же файла снова триггерил onChange
     try {
       (event.target as HTMLInputElement).value = '';
@@ -892,7 +888,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     }
     if (!(selectedFile instanceof File)) {
       toast.error('Ошибка: выбранный файл не является File-объектом!');
-      console.error('video_file не является File:', selectedFile);
+
       return;
     }
     if (!campaignName.trim()) {
@@ -912,8 +908,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
     try {
       const actualUserData = userData || {};
-      console.log('userData перед отправкой:', actualUserData);
-      
+
       const form = new FormData();
       if (actualUserData.id) form.append('user_id', actualUserData.id);
       if (selectedDirectionId) form.append('direction_id', selectedDirectionId);
@@ -999,22 +994,18 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         const instagramBudgetInCents = Math.round(Number(dailyBudgetInstagram) * 100);
         form.append('daily_budget_instagram', String(instagramBudgetInCents));
         form.append('daily_budget_tiktok', String(Math.round(Number(dailyBudgetTiktok))));
-        console.log('Бюджеты: IG (¢)', instagramBudgetInCents, 'TT (₸)', dailyBudgetTiktok);
       } else if (placement === 'tiktok') {
         // TikTok — бюджет в тенге, НЕ умножаем
         form.append('daily_budget_tiktok', String(Math.round(Number(dailyBudgetTiktok))));
-        console.log('Дневной бюджет TikTok (₸):', dailyBudgetTiktok);
       } else {
         // Instagram — бюджет в долларах, в центах
         const budgetInCents = Math.round(Number(dailyBudgetInstagram) * 100);
         form.append('daily_budget', String(budgetInCents));
-        console.log('Дневной бюджет Instagram (¢):', budgetInCents);
       }
       
       // Передаем тип запуска
       form.append('start_type', startType);
-      console.log('Тип запуска:', startType);
-      
+
       // Передаем возрастные ограничения
       let min = Number(ageMin);
       let max = Number(ageMax);
@@ -1058,8 +1049,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         // Дублируем под каноническое имя для ноды n8n
         form.append('age_groups', JSON.stringify(uniqueSelected));
       }
-      console.log('Возрастная группа:', min, '-', max);
-      
+
       // Передаем пол
       form.append('genders', JSON.stringify(getGendersArray()));
       // TikTok gender mapping
@@ -1067,14 +1057,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         const ttGender = selectedGender === 'male' ? 'GENDER_MALE' : selectedGender === 'female' ? 'GENDER_FEMALE' : 'GENDER_UNLIMITED';
         form.append('tiktok_gender', ttGender);
       }
-      console.log('Выбранный пол:', selectedGender, '- массив:', getGendersArray());
       
       form.append('video_file', selectedFile);
       
       const fileInForm = form.get('video_file');
       if (!(fileInForm instanceof File)) {
         toast.error('Ошибка: video_file в FormData не является File!');
-        console.error('video_file в FormData не File:', fileInForm);
+
         return;
       }
       
@@ -1083,19 +1072,19 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       // Выбираем webhook на основе площадки и цели объявления
       if (placement === 'tiktok') {
         webhookUrl = TIKTOK_VIDEO_WEBHOOK_URL;
-        console.log('Используем webhook для TikTok:', webhookUrl);
+
       } else if (placement === 'instagram') {
         if (campaignGoal === 'site_leads') {
           webhookUrl = SITE_LEADS_WEBHOOK_URL;
-          console.log('Используем webhook для Site Leads:', webhookUrl);
+
         } else if (campaignGoal === 'instagram_traffic') {
           webhookUrl = INSTAGRAM_TRAFFIC_WEBHOOK_URL;
-          console.log('Используем webhook для Instagram traffic:', webhookUrl);
+
         } else if (actualUserData.webhook_url && String(actualUserData.webhook_url).trim() !== '') {
           webhookUrl = actualUserData.webhook_url;
-          console.log('Используем индивидуальный webhook URL из Supabase:', webhookUrl);
+
         } else {
-          console.log('В Supabase не найден индивидуальный webhook, используем стандартный:', webhookUrl);
+
         }
       } else if (placement === 'both') {
         // Для обеих площадок отправляем на общий вебхук, который умеет форкать; если нет — по умолчанию Instagram
@@ -1105,19 +1094,19 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         } else if (campaignGoal === 'instagram_traffic') {
           webhookUrl = INSTAGRAM_TRAFFIC_WEBHOOK_URL;
         }
-        console.log('Выбраны обе площадки, используем Instagram маршрут и передаем оба бюджета');
+
       }
       
       if (!isValidUrl(webhookUrl)) {
         toast.error('Некорректный адрес webhook!');
-        console.error('Некорректный webhookUrl:', webhookUrl);
+
         return;
       }
 
       performUpload(form, webhookUrl, 0, 'video');
       
     } catch (error) {
-      console.error('Ошибка при загрузке видео:', error);
+
       toast.error('Ошибка при загрузке видео: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
       setIsUploading(false);
       setProgress(0);
@@ -1202,8 +1191,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       setShowSaleForm(false);
       
     } catch (error) {
-      console.error('Ошибка добавления продажи:', error);
-      
+
       if (error instanceof Error && error.message.includes('не найден в базе лидов')) {
         // Лид не найден - показываем форму выбора креатива
         setShowCreateLead(true);
@@ -1247,8 +1235,6 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         return;
       }
 
-      console.log('Запускаем рекламу для всех активных направлений:', { userId, currentAdAccountId });
-
       // Проверяем account_id только для мультиаккаунтности (legacy режим не требует)
       if (multiAccountEnabled && !currentAdAccountId) {
         toast.error('Рекламный аккаунт не выбран. Выберите аккаунт в настройках.');
@@ -1281,7 +1267,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         toast.error(data.error || 'Не удалось запустить рекламу');
       }
     } catch (error) {
-      console.error('Ошибка запуска рекламы:', error);
+
       toast.error('Ошибка при запуске рекламы');
     } finally {
       setLaunchLoading(false);
@@ -1293,7 +1279,6 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     setIsLoadingCreatives(true);
     try {
       const userAccountId = await salesApi.getCurrentUserAccountId();
-      console.log('🔍 Загружаем креативы для user_account_id:', userAccountId);
 
       if (userAccountId) {
         // Загружаем креативы из user_creatives (колонка называется user_id)
@@ -1304,15 +1289,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           .eq('status', 'ready')
           .order('created_at', { ascending: false });
 
-        console.log('🔍 Результат загрузки креативов:', { creatives, error, count: creatives?.length });
-
         if (error) throw error;
         setExistingCreatives(creatives || []);
       } else {
-        console.error('❌ user_account_id не найден!');
+
       }
     } catch (error) {
-      console.error('Ошибка загрузки креативов:', error);
+
       toast.error('Не удалось загрузить список креативов');
     } finally {
       setIsLoadingCreatives(false);
@@ -1376,7 +1359,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       resetSaleForm();
 
     } catch (error) {
-      console.error('Ошибка добавления продажи с креативом:', error);
+
       toast.error('Не удалось добавить продажу. Попробуйте еще раз.');
     } finally {
       setIsUploading(false);
@@ -1483,12 +1466,10 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       // Выбираем webhook на основе цели объявления
       if (campaignGoal === 'site_leads') {
         webhookUrl = SITE_LEADS_WEBHOOK_URL;
-        console.log('Используем webhook для Site Leads (изображение):', webhookUrl);
       } else if (campaignGoal === 'instagram_traffic') {
         webhookUrl = INSTAGRAM_TRAFFIC_WEBHOOK_URL;
-        console.log('Используем webhook для Instagram traffic (изображение):', webhookUrl);
       } else {
-        console.log('Используем стандартный webhook для изображений:', webhookUrl);
+
       }
       
       if (!isValidUrl(webhookUrl)) {
@@ -1497,7 +1478,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       }
       performUpload(form, webhookUrl, 0, 'image');
     } catch (error) {
-      console.error('Ошибка при загрузке изображения:', error);
+
       toast.error('Ошибка при загрузке изображения: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
       setIsUploading(false);
       setProgress(0);

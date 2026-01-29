@@ -133,17 +133,17 @@ const LOG_PREFIX = '[MultiAccountDashboard]';
 
 const logger = {
   info: (message: string, data?: Record<string, unknown>) => {
-    console.log(`${LOG_PREFIX} ${message}`, data ? data : '');
+
   },
   warn: (message: string, data?: Record<string, unknown>) => {
-    console.warn(`${LOG_PREFIX} ${message}`, data ? data : '');
+
   },
   error: (message: string, error?: unknown, data?: Record<string, unknown>) => {
-    console.error(`${LOG_PREFIX} ${message}`, { error, ...data });
+
   },
   debug: (message: string, data?: Record<string, unknown>) => {
     if (process.env.NODE_ENV === 'development') {
-      console.debug(`${LOG_PREFIX} ${message}`, data ? data : '');
+
     }
   },
 };
@@ -538,7 +538,6 @@ const MultiAccountDashboard: React.FC = () => {
   // но сохраняем кэши списков (campaignsListCacheRef, adsetsListCacheRef, adsListCacheRef)
   // Это позволяет при повторном раскрытии загружать только статистику, а не списки
   useEffect(() => {
-    console.log('[MultiAccountDashboard] dateRange изменился, очищаем статистику (списки в кэше сохраняются)');
     setCampaignsData({});
     setAdsetsData({});
     setAdsData({});
@@ -1564,7 +1563,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
       toast.success(checked ? 'Кампания запущена' : 'Кампания остановлена');
     } catch (error) {
       toast.error('Ошибка изменения статуса кампании');
-      console.error('Campaign toggle error:', error);
+
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -1768,7 +1767,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
         setCurrentBudget(newBudget);
         setIsEditing(false);
       } catch (e) {
-        console.error('Failed to update budget', e);
+
         setEditedBudget(currentBudget.toFixed(2));
       }
     }
@@ -1794,7 +1793,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     } catch (error) {
       const label = platform === 'tiktok' ? 'Ad Group' : 'адсета';
       toast.error(`Ошибка изменения статуса ${label}`);
-      console.error('Adset/AdGroup toggle error:', error);
+
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -2043,7 +2042,7 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
       toast.success(checked ? 'Объявление запущено' : 'Объявление остановлено');
     } catch (error) {
       toast.error('Ошибка изменения статуса объявления');
-      console.error('Ad toggle error:', error);
+
     } finally {
       setIsUpdatingStatus(false);
     }

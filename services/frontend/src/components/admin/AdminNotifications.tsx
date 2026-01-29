@@ -69,7 +69,7 @@ const AdminNotifications: React.FC<AdminNotificationsProps> = ({ unreadCount = 0
         setNotifications(data.notifications || []);
       }
     } catch (err) {
-      console.error('Error fetching notifications:', err);
+
     } finally {
       setLoading(false);
     }
@@ -84,7 +84,7 @@ const AdminNotifications: React.FC<AdminNotificationsProps> = ({ unreadCount = 0
         prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
       );
     } catch (err) {
-      console.error('Error marking notification as read:', err);
+
     }
   };
 
@@ -95,7 +95,7 @@ const AdminNotifications: React.FC<AdminNotificationsProps> = ({ unreadCount = 0
       });
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
     } catch (err) {
-      console.error('Error marking all as read:', err);
+
     }
   };
 

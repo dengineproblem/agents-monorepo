@@ -39,7 +39,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
             });
           }
         } catch (error) {
-          console.error('Error parsing user data:', error);
+
         }
       }
     };
@@ -56,7 +56,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
     const errorDescription = params.get('error_description');
 
     if (fbError) {
-      console.error('Facebook OAuth error:', { fbError, errorReason, errorDescription });
+
       setError(errorDescription || fbError);
       toast.error(`Facebook connection failed: ${errorDescription || fbError}`);
       // Clear URL params
@@ -74,7 +74,6 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
     setError(null);
 
     try {
-      console.log('Exchanging OAuth code for access token...');
 
       // Get current user from localStorage
       const storedUser = localStorage.getItem('user');
@@ -101,12 +100,6 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to connect Facebook account');
       }
-
-      console.log('Successfully connected Facebook:', {
-        user: data.user,
-        ad_accounts_count: data.ad_accounts?.length || 0,
-        pages_count: data.pages?.length || 0,
-      });
 
       // Check if user has ad accounts and pages
       if (!data.ad_accounts || data.ad_accounts.length === 0) {
@@ -159,7 +152,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
       setIsLoading(false);
 
     } catch (error) {
-      console.error('Error connecting Facebook:', error);
+
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect Facebook account';
       setError(errorMessage);
       toast.error(errorMessage);
@@ -180,8 +173,6 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
       `scope=${FB_SCOPE}&` +
       `response_type=code&` +
       `state=${Date.now()}`; // Add state for CSRF protection
-
-    console.log('Redirecting to Facebook OAuth:', authUrl);
 
     // Redirect to Facebook OAuth
     window.location.href = authUrl;
@@ -207,7 +198,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
         setFbData(null);
         toast.success('Facebook account disconnected');
       } catch (error) {
-        console.error('Error disconnecting Facebook:', error);
+
         toast.error('Failed to disconnect Facebook');
       }
     }

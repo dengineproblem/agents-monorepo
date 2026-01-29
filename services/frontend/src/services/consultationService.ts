@@ -40,13 +40,13 @@ export const getConsultants = async (): Promise<Consultant[]> => {
       .order('name');
 
     if (error) {
-      console.error('Ошибка получения консультантов:', error);
+
       throw error;
     }
     
     return data || [];
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -70,7 +70,7 @@ export const getConsultations = async (date?: string): Promise<ConsultationWithD
     const { data, error } = await query;
 
     if (error) {
-      console.error('Ошибка получения консультаций:', error);
+
       throw error;
     }
     
@@ -97,7 +97,7 @@ export const getConsultations = async (date?: string): Promise<ConsultationWithD
     
     return consultations;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -109,7 +109,7 @@ export const getConsultationStats = async (): Promise<ConsultationStats> => {
       .select('status');
 
     if (error) {
-      console.error('Ошибка получения статистики:', error);
+
       throw error;
     }
 
@@ -124,7 +124,7 @@ export const getConsultationStats = async (): Promise<ConsultationStats> => {
 
     return stats;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -159,7 +159,7 @@ export const createConsultation = async (consultation: CreateConsultationData): 
       .single();
 
     if (error) {
-      console.error('Ошибка создания консультации:', error);
+
       throw error;
     }
     
@@ -168,7 +168,7 @@ export const createConsultation = async (consultation: CreateConsultationData): 
       status: data.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     };
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -183,7 +183,7 @@ export const updateConsultation = async (id: string, updates: Partial<Consultati
       .single();
 
     if (error) {
-      console.error('Ошибка обновления консультации:', error);
+
       throw error;
     }
     
@@ -192,7 +192,7 @@ export const updateConsultation = async (id: string, updates: Partial<Consultati
       status: data.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     };
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -205,13 +205,13 @@ export const cancelConsultation = async (consultationId: string): Promise<boolea
       .eq('id', consultationId);
 
     if (error) {
-      console.error('Ошибка отмены консультации:', error);
+
       throw error;
     }
     
     return true;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -231,13 +231,13 @@ export const createConsultant = async (data: CreateConsultantData): Promise<Cons
       .single();
 
     if (error) {
-      console.error('Ошибка создания консультанта:', error);
+
       throw error;
     }
     
     return result;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 };
@@ -294,7 +294,7 @@ export const getConsultationsByDateRange = async (
       .order('start_time', { ascending: true });
 
     if (error) {
-      console.error('Ошибка получения консультаций по диапазону дат:', error);
+
       throw error;
     }
     
@@ -303,7 +303,7 @@ export const getConsultationsByDateRange = async (
       status: item.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     }));
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+
     throw error;
   }
 }; 

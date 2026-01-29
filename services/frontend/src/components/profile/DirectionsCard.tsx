@@ -56,14 +56,13 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
 
   // Отладка
   React.useEffect(() => {
-    console.log('[DirectionsCard] userAccountId:', userAccountId);
-    console.log('[DirectionsCard] directions:', directions);
-    console.log('[DirectionsCard] loading:', loading);
+
+
+
   }, [userAccountId, directions, loading]);
 
   // Обработчик создания направления
   const handleCreate = async (data: CreateDirectionFormData) => {
-    console.log('[DirectionsCard] Создание направления с настройками:', data);
 
     const stripSettings = (settings?: CreateDefaultSettingsInput) => {
       if (!settings) return undefined;

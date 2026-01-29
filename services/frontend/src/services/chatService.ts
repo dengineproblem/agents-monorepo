@@ -31,12 +31,12 @@ export const getChats = async (): Promise<ChatHistory[]> => {
       .order('id', { ascending: false });
 
     if (error) {
-      console.error('Ошибка загрузки сообщений:', error);
+
       return [];
     }
 
     if (!data || data.length === 0) {
-      console.log('Нет данных в таблице n8n_chat_histories');
+
       return [];
     }
 
@@ -70,10 +70,9 @@ export const getChats = async (): Promise<ChatHistory[]> => {
       };
     });
 
-    console.log(`Загружено ${chats.length} чатов`);
     return chats;
   } catch (error) {
-    console.error('Ошибка при получении чатов:', error);
+
     return [];
   }
 };
@@ -88,12 +87,12 @@ export const getChatMessages = async (sessionId: string): Promise<ChatMessage[]>
       .order('id', { ascending: true });
 
     if (error) {
-      console.error('Ошибка загрузки сообщений:', error);
+
       return [];
     }
 
     if (!messagesData || messagesData.length === 0) {
-      console.log('Сообщения не найдены для chat_id:', sessionId);
+
       return [];
     }
 
@@ -122,10 +121,9 @@ export const getChatMessages = async (sessionId: string): Promise<ChatMessage[]>
       };
     });
 
-    console.log(`Загружено ${messages.length} сообщений для чата ${sessionId}`);
     return messages;
   } catch (error) {
-    console.error('Ошибка при получении сообщений чата:', error);
+
     return [];
   }
 };
@@ -149,7 +147,7 @@ export const sendMessage = async (sessionId: string, message: string): Promise<b
 
     return true;
   } catch (error) {
-    console.error('Ошибка отправки сообщения:', error);
+
     return false;
   }
 };
@@ -165,7 +163,7 @@ export const updateChatFunnelStage = async (sessionId: string, funnelStage: stri
       .single();
 
     if (selectError && selectError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Ошибка проверки записи в follow_up_simple:', selectError);
+
       return false;
     }
 
@@ -180,7 +178,7 @@ export const updateChatFunnelStage = async (sessionId: string, funnelStage: stri
         .eq('chat_id', sessionId);
 
       if (updateError) {
-        console.error('Ошибка обновления статуса в follow_up_simple:', updateError);
+
         return false;
       }
     } else {
@@ -196,15 +194,14 @@ export const updateChatFunnelStage = async (sessionId: string, funnelStage: stri
         });
 
       if (insertError) {
-        console.error('Ошибка создания записи в follow_up_simple:', insertError);
+
         return false;
       }
     }
 
-    console.log(`Статус воронки обновлен для ${sessionId}: ${funnelStage}`);
     return true;
   } catch (error) {
-    console.error('Ошибка при обновлении статуса чата:', error);
+
     return false;
   }
 };
@@ -256,7 +253,7 @@ export const getLastMessage = async (sessionId: string): Promise<string | null> 
     const messageJson = messagesData[0].message_data as any;
     return messageJson.content || null;
   } catch (error) {
-    console.error('Ошибка получения последнего сообщения:', error);
+
     return null;
   }
 }; 

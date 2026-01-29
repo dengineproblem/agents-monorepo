@@ -364,7 +364,7 @@ export async function* sendMessageStream(
             yield data as StreamEvent;
           } catch {
             // Skip malformed JSON
-            console.warn('Failed to parse SSE data:', line);
+
           }
         }
       }
@@ -662,7 +662,7 @@ export async function* runBrainMiniStream(
             yield data as BrainMiniEvent;
           } catch {
             // Skip malformed JSON
-            console.warn('Failed to parse Brain Mini SSE data:', line);
+
           }
         }
       }

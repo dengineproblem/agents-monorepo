@@ -77,7 +77,7 @@ const AdminSettings: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Error fetching settings:', err);
+
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ const AdminSettings: React.FC = () => {
         setCronStatuses(data.crons || []);
       }
     } catch (err) {
-      console.error('Error fetching cron statuses:', err);
+
     }
   };
 

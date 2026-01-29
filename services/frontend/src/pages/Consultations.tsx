@@ -121,7 +121,7 @@ const Consultations: React.FC = () => {
       setStats(statsData);
       setAvailableServices(servicesData);
     } catch (error) {
-      console.error('Ошибка загрузки данных:', error);
+
       toast.error('Не удалось загрузить данные');
     } finally {
       setIsLoadingData(false);
@@ -160,8 +160,6 @@ const Consultations: React.FC = () => {
         notes: newConsultation.notes || ''
       };
 
-      console.log('Создание консультации:', consultationData);
-      
       // Вызываем API для создания консультации
       const createdConsultation = await createConsultation(consultationData);
       
@@ -182,7 +180,7 @@ const Consultations: React.FC = () => {
       // Перезагружаем данные
       await loadData();
     } catch (error) {
-      console.error('Ошибка создания консультации:', error);
+
       toast.error('Не удалось создать консультацию');
     }
   };
@@ -225,7 +223,7 @@ const Consultations: React.FC = () => {
       setIsSaleModalOpen(false);
       await loadData();
     } catch (error) {
-      console.error('Ошибка закрытия продажи:', error);
+
       toast.error('Не удалось закрыть продажу');
     }
   };
@@ -313,7 +311,7 @@ const Consultations: React.FC = () => {
       });
       await loadData(); // Обновляем список услуг
     } catch (error) {
-      console.error('Ошибка создания услуги:', error);
+
       toast.error('Не удалось создать услугу');
     }
   };
@@ -337,7 +335,7 @@ const Consultations: React.FC = () => {
       });
       await loadData(); // Обновляем список услуг
     } catch (error) {
-      console.error('Ошибка обновления услуги:', error);
+
       toast.error('Не удалось обновить услугу');
     }
   };
@@ -353,7 +351,7 @@ const Consultations: React.FC = () => {
       toast.success('Услуга удалена');
       await loadData(); // Обновляем список услуг
     } catch (error) {
-      console.error('Ошибка удаления услуги:', error);
+
       toast.error('Не удалось удалить услугу');
     }
   };

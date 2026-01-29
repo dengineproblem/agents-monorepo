@@ -128,7 +128,7 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[ConnectionsGrid] Button clicked:', it.id, it.connected);
+
                   it.onClick();
                 }}
                 disabled={it.disabled}

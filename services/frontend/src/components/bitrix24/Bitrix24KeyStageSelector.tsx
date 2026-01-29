@@ -105,12 +105,12 @@ export const Bitrix24KeyStageSelector: React.FC<Bitrix24KeyStageSelectorProps> =
       if (Array.isArray(pipelinesData)) {
         setPipelines(pipelinesData);
       } else {
-        console.error('[Bitrix24KeyStageSelector] Pipelines data is not an array:', pipelinesData);
+
         setError('Некорректный формат данных воронок');
         setPipelines([]);
       }
     } catch (err: any) {
-      console.error('[Bitrix24KeyStageSelector] Failed to load pipelines:', err);
+
       if (err.message?.includes('Failed to fetch') || err.message?.includes('битрикс')) {
         setError('Bitrix24 недоступен. На production это будет работать.');
       } else {
@@ -184,7 +184,7 @@ export const Bitrix24KeyStageSelector: React.FC<Bitrix24KeyStageSelectorProps> =
       }, 3000);
 
     } catch (err: any) {
-      console.error('Failed to save key stages:', err);
+
       setError(err.message || 'Не удалось сохранить ключевые этапы');
     } finally {
       setSaving(false);

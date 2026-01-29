@@ -48,7 +48,7 @@ export const Bitrix24KeyStageSettings: React.FC<Bitrix24KeyStageSettingsProps> =
       setDirections(data);
       setExpandedDirections(new Set(data.map(d => d.id)));
     } catch (err: any) {
-      console.error('[Bitrix24KeyStageSettings] Failed to load directions:', err);
+
       setError(err.message || 'Не удалось загрузить направления');
     } finally {
       setLoading(false);
@@ -71,7 +71,7 @@ export const Bitrix24KeyStageSettings: React.FC<Bitrix24KeyStageSettingsProps> =
         setSuccessMessage(null);
       }, 5000);
     } catch (err: any) {
-      console.error('[Bitrix24KeyStageSettings] Failed to sync:', err);
+
       if (err.message?.includes('Failed to fetch')) {
         setError('Bitrix24 недоступен (локальная разработка). На production это будет работать.');
       } else {

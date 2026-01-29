@@ -53,8 +53,8 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
     setIsLoading(true);
     try {
       const url = `${API_BASE_URL}/directions/${directionId}/adsets?user_account_id=${userAccountId}`;
-      console.log('[DirectionAdSets] Fetching from:', url);
-      console.log('[DirectionAdSets] API_BASE_URL:', API_BASE_URL);
+
+
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -64,7 +64,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       const data = await response.json();
       setAdsets(data.adsets || []);
     } catch (error) {
-      console.error('Error fetching ad sets:', error);
+
       toast.error('Failed to load ad sets');
     } finally {
       setIsLoading(false);
@@ -117,7 +117,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
 
           successCount++;
         } catch (error: any) {
-          console.error(`Error linking ad set ${fbAdSetId}:`, error);
+
           toast.error(error.message || `Ошибка при привязке ${fbAdSetId}`);
           failCount++;
         }
@@ -133,7 +133,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       setFbAdSetIds(['']);
       fetchAdSets();
     } catch (error: any) {
-      console.error('Error linking ad sets:', error);
+
       toast.error(error.message || 'Ошибка при привязке ad sets');
     } finally {
       setIsLinking(false);
@@ -181,7 +181,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       toast.success('Ad set успешно отвязан');
       fetchAdSets();
     } catch (error) {
-      console.error('Error unlinking ad set:', error);
+
       toast.error('Не удалось отвязать ad set');
     }
   };
@@ -208,7 +208,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       toast.success(`Synced ${data.synced_count} ad sets successfully`);
       fetchAdSets();
     } catch (error) {
-      console.error('Error syncing ad sets:', error);
+
       toast.error('Failed to sync ad sets');
     } finally {
       setIsSyncing(false);

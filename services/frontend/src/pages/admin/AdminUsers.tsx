@@ -114,7 +114,7 @@ const AdminUsers: React.FC = () => {
         setTotal(data.total || 0);
       }
     } catch (err) {
-      console.error('Error fetching users:', err);
+
     } finally {
       setLoading(false);
     }
@@ -147,7 +147,7 @@ const AdminUsers: React.FC = () => {
         window.location.href = '/';
       }
     } catch (err) {
-      console.error('Error impersonating user:', err);
+
     }
   };
 

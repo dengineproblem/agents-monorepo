@@ -43,7 +43,7 @@ export const TextGalleryTab: React.FC<TextGalleryTabProps> = ({ onUseAsReference
         toast.error('Не удалось загрузить галерею');
       }
     } catch (error) {
-      console.error('Error loading gallery:', error);
+
       toast.error('Ошибка загрузки галереи');
     } finally {
       setLoading(false);

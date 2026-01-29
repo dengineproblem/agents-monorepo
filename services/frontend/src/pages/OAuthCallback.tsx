@@ -20,7 +20,7 @@ const OAuthCallback = () => {
 
         // Check for OAuth errors
         if (error) {
-          console.error('OAuth error:', error, errorDescription);
+
           const errorMsg = errorDescription || error;
           setStatus('error');
           setMessage(`OAuth failed: ${errorMsg}`);
@@ -35,7 +35,7 @@ const OAuthCallback = () => {
         const actualCode = authCode || code;
         
         if (!actualCode) {
-          console.error('No authorization code received');
+
           setStatus('error');
           setMessage('No authorization code received');
           toast.error('OAuth callback missing authorization code');
@@ -48,7 +48,7 @@ const OAuthCallback = () => {
           await handleTikTokCallback(authCode, state);
         } else {
           // Unknown OAuth flow
-          console.warn('Unknown OAuth callback', { code: actualCode, state });
+
           setStatus('error');
           setMessage('Unknown OAuth provider');
           toast.error('Unknown OAuth provider');
@@ -56,7 +56,7 @@ const OAuthCallback = () => {
         }
 
       } catch (error) {
-        console.error('Error in OAuth callback:', error);
+
         setStatus('error');
         setMessage('An error occurred during authentication');
         toast.error('OAuth callback failed');
@@ -70,7 +70,6 @@ const OAuthCallback = () => {
   const handleTikTokCallback = async (authCode: string, state: string) => {
     try {
       setMessage('Connecting TikTok...');
-      console.log('Processing TikTok OAuth callback');
 
       // Decode state to get user_id and ad_account_id
       let userId = '';
@@ -79,9 +78,9 @@ const OAuthCallback = () => {
         const decodedState = JSON.parse(atob(decodeURIComponent(state)));
         userId = decodedState.user_id || decodedState.uid;
         adAccountId = decodedState.ad_account_id || null;
-        console.log('Decoded state:', { userId, adAccountId, isMultiAccount: !!adAccountId });
+
       } catch (e) {
-        console.error('Failed to decode state:', e);
+
         throw new Error('Invalid state parameter');
       }
 
@@ -91,7 +90,6 @@ const OAuthCallback = () => {
 
       // Call backend to exchange code for token
       const API_URL = 'https://performanteaiagency.com/api';
-      console.log('Calling TikTok OAuth exchange endpoint', { adAccountId });
 
       const response = await fetch(`${API_URL}/tiktok/oauth/exchange`, {
         method: 'POST',
@@ -105,12 +103,6 @@ const OAuthCallback = () => {
       });
 
       const data = await response.json();
-      console.log('TikTok OAuth response:', {
-        success: data.success,
-        hasToken: !!data.access_token,
-        hasBusinessId: !!data.business_id,
-        savedToAdAccount: data.ad_account_id || null
-      });
 
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'Failed to connect TikTok');
@@ -127,26 +119,23 @@ const OAuthCallback = () => {
             userData.tiktok_business_id = data.business_id;
             userData.tiktok_account_id = data.account_id;
             localStorage.setItem('user', JSON.stringify(userData));
-            console.log('Updated localStorage with TikTok credentials (legacy mode)');
           } catch (e) {
-            console.error('Failed to update localStorage:', e);
+
           }
         }
       } else {
-        console.log('Multi-account mode: TikTok credentials saved to ad_accounts table', { adAccountId });
+
       }
 
       setStatus('success');
       setMessage('TikTok connected successfully!');
       toast.success('TikTok connected successfully!');
 
-      console.log('TikTok OAuth completed, redirecting to profile');
-
       // Redirect to profile after 1 second
       setTimeout(() => navigate('/profile'), 1000);
 
     } catch (error: any) {
-      console.error('TikTok OAuth error:', error);
+
       setStatus('error');
       setMessage(error.message || 'Failed to connect TikTok');
       toast.error(error.message || 'Failed to connect TikTok');

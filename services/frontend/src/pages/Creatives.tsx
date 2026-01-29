@@ -487,18 +487,17 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
   const fetchData = useCallback(async (forceRefresh: boolean = false) => {
     const transcriptPromise = creativesService.getCreativeText(creativeId, mediaType || 'video', carouselData).catch((error) => {
-      console.error("creative text load error", error);
+
       return { text: null };
     });
 
     const analyticsPromise = (async () => {
       try {
-        console.log(`[CreativeAnalytics] Загружаем аналитику для креатива: ${creativeId}, force: ${forceRefresh}`);
 
         // Получаем userId
         const storedUser = localStorage.getItem('user');
         if (!storedUser) {
-          console.error('[CreativeAnalytics] Пользователь не авторизован');
+
           return null;
         }
 
@@ -506,21 +505,15 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         const userId = userData.id;
 
         if (!userId) {
-          console.error('[CreativeAnalytics] ID пользователя не найден');
+
           return null;
         }
 
         const data = await getCreativeAnalytics(creativeId, userId, forceRefresh);
-        console.log('[CreativeAnalytics] Получена аналитика:', {
-          data_source: data.data_source,
-          has_test: data.test !== null,
-          has_production: data.production !== null,
-          has_analysis: data.analysis !== null
-        });
 
         return data;
       } catch (error) {
-        console.error("[CreativeAnalytics] Ошибка при загрузке аналитики:", error);
+
         return null;
       }
     })();
@@ -531,25 +524,18 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
   // Загружаем данные при открытии креатива
   useEffect(() => {
-    console.log(`[CreativeDetails] useEffect triggered для креатива: ${creativeId}`);
-    
+
     const loadData = async () => {
       setLoading(true);
       setLoadError(null);
       try {
-        console.log(`[CreativeDetails] Начинаем загрузку данных...`);
+
         const { transcript: t, analytics: analyticsData } = await fetchData();
-        
-        console.log(`[CreativeDetails] Результат загрузки:`, { 
-          hasTranscript: !!t, 
-          hasAnalytics: !!analyticsData,
-          dataSource: analyticsData?.data_source,
-        });
-        
+
         setTranscript(t);
         setAnalytics(analyticsData);
       } catch (error) {
-        console.error("[CreativeDetails] Ошибка загрузки данных:", error);
+
         setLoadError("Ошибка загрузки данных");
       } finally {
         setLoading(false);
@@ -566,11 +552,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
     if (!analytics?.test?.exists) return;
     if (analytics.test.status !== 'running') return;
 
-    console.log('[CreativeDetails] Запуск polling для running теста');
-
     // Обновляем analytics каждые 30 секунд
     const intervalId = setInterval(async () => {
-      console.log('[CreativeDetails] Polling: обновление аналитики...');
+
       try {
         const storedUser = localStorage.getItem('user');
         if (!storedUser) return;
@@ -582,23 +566,18 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         const updatedAnalytics = await getCreativeAnalytics(creativeId, userId);
         setAnalytics(updatedAnalytics);
 
-        console.log('[CreativeDetails] Polling: аналитика обновлена', {
-          test_status: updatedAnalytics.test?.status,
-          impressions: updatedAnalytics.test?.metrics?.impressions,
-        });
-
         // Останавливаем polling если тест завершился
         if (updatedAnalytics.test?.status !== 'running') {
-          console.log('[CreativeDetails] Тест завершён, останавливаем polling');
+
           clearInterval(intervalId);
         }
       } catch (error) {
-        console.error('[CreativeDetails] Polling: ошибка обновления', error);
+
       }
     }, 30000); // 30 секунд
 
     return () => {
-      console.log('[CreativeDetails] Очистка polling interval');
+
       clearInterval(intervalId);
     };
   }, [analytics?.test?.exists, analytics?.test?.status, creativeId]);
@@ -738,13 +717,13 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
             setAnalytics(freshData.analytics);
           }
         } catch (e) {
-          console.warn('[CreativeDetails] Не удалось обновить аналитику после запуска теста:', e);
+
         }
       } else {
         toast.error('Не удалось запустить тест');
       }
     } catch (error) {
-      console.error('Ошибка запуска теста:', error);
+
       toast.error('Ошибка при запуске теста креатива');
     } finally {
       setQuickTestLoading(false);
@@ -816,10 +795,10 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
           setAnalytics(freshData.analytics);
         }
       } catch (e) {
-        console.warn('[CreativeDetails] Не удалось обновить аналитику после остановки теста:', e);
+
       }
     } catch (error) {
-      console.error('Ошибка остановки теста:', error);
+
       toast.error('Ошибка при остановке теста');
     } finally {
       setStopTestLoading(false);
@@ -830,7 +809,6 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
     setRefreshLoading(true);
     setLoadError(null);
     try {
-      console.log('[CreativeDetails] Ручное обновление данных...');
 
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
@@ -850,10 +828,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       const updatedAnalytics = await getCreativeAnalytics(creativeId, userId, true);
       setAnalytics(updatedAnalytics);
 
-      console.log('[CreativeDetails] Данные успешно обновлены');
       toast.success('Данные обновлены');
     } catch (error) {
-      console.error('[CreativeDetails] Ошибка обновления данных:', error);
+
       toast.error('Не удалось обновить данные');
       setLoadError('Ошибка обновления данных');
     } finally {
@@ -882,7 +859,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         });
       }
     } catch (error) {
-      console.error('Transcription error:', error);
+
       toast.error('Ошибка транскрибации', {
         description: 'Проверьте подключение и попробуйте снова',
       });
@@ -1458,7 +1435,7 @@ const Creatives: React.FC = () => {
       await reload();
       toast.success(`Удалено ${selectedCreativeIds.size} креативов`);
     } catch (error) {
-      console.error('Ошибка при удалении креативов:', error);
+
       toast.error('Не удалось удалить креативы');
     }
   };
@@ -1561,7 +1538,7 @@ const Creatives: React.FC = () => {
         toast.error(result.error || 'Ошибка создания adset');
       }
     } catch (error: any) {
-      console.error('Ошибка создания adset:', error);
+
       toast.error(error.message || 'Не удалось создать adset');
     } finally {
       setIsLaunching(false);
@@ -1636,7 +1613,7 @@ const Creatives: React.FC = () => {
 
   // Повторная загрузка неудачного элемента
   const retryItem = useCallback((itemId: string) => {
-    console.log(`retryItem: Повторная загрузка элемента ${itemId}`);
+
     setQueue(prev => prev.map(item =>
       item.id === itemId
         ? { ...item, status: "queued" as const, progress: 0, error: undefined }
@@ -1646,7 +1623,7 @@ const Creatives: React.FC = () => {
 
   // Повторная загрузка всех неудачных элементов
   const retryAllFailed = useCallback(() => {
-    console.log('retryAllFailed: Повторная загрузка всех неудачных элементов');
+
     setQueue(prev => prev.map(item =>
       item.status === "error"
         ? { ...item, status: "queued" as const, progress: 0, error: undefined }
@@ -1657,25 +1634,7 @@ const Creatives: React.FC = () => {
   const processNext = useCallback(async (): Promise<boolean> => {
     return new Promise((resolve) => {
       setQueue(prev => {
-        console.log('processNext: Текущая очередь:', prev.map(i => `${i.name} (${i.status})`).join(', '));
-        
-        const nextIndex = prev.findIndex(i => i.status === "queued");
-        if (nextIndex === -1) {
-          console.log('processNext: Нет файлов в очереди со статусом "queued"');
-          resolve(false);
-          return prev;
-        }
 
-        const item = prev[nextIndex];
-        console.log(`processNext: ✅ Начинаем загрузку файла "${item.name}", ID: ${item.id}, статус: ${item.status}`);
-        
-        // Асинхронная загрузка
-        (async () => {
-          try {
-            // НЕ создаем placeholder - пусть webhook сам создаст запись
-            console.log(`processNext: Загружаем на webhook для "${item.name}" (без placeholder)`);
-            console.log('[processNext] selectedDirectionId:', selectedDirectionId);
-            console.log('[processNext] Передаем directionId:', selectedDirectionId || null);
       const ok = await creativesApi.uploadToWebhook(
         item.file,
         item.name,
@@ -1690,28 +1649,28 @@ const Creatives: React.FC = () => {
       );
 
       if (!ok) {
-              console.log(`processNext: ❌ Ошибка загрузки для "${item.name}"`);
+
               setQueue(prev2 => prev2.map((it) => it.id === item.id ? { ...it, status: "error", error: "Ошибка загрузки" } : it));
         toast.error(`Не удалось загрузить: ${item.name}`);
       } else {
-              console.log(`processNext: ✅ Успешно загружено "${item.name}"`);
+
               setQueue(prev2 => prev2.map((it) => it.id === item.id ? { ...it, status: "success", progress: 100, recordId: null } : it));
         toast.success(`Загружено: ${item.name}`);
         // Обновляем список креативов после успешной загрузки
         reload();
       }
     } catch (e) {
-            console.error(`processNext: ❌ Исключение при загрузке "${item.name}"`, e);
+
             setQueue(prev2 => prev2.map((it) => it.id === item.id ? { ...it, status: "error", error: "Исключение при загрузке" } : it));
       toast.error(`Ошибка при загрузке: ${item.name}`);
           } finally {
-            console.log(`processNext: Завершена обработка "${item.name}"`);
+
             resolve(true);
           }
         })();
         
         // Сразу помечаем как uploading
-        console.log(`processNext: Меняем статус "${item.name}" с "queued" на "uploading"`);
+
         return prev.map((it, idx) => idx === nextIndex ? { ...it, status: "uploading", progress: 0 } : it);
       });
     });
@@ -1719,11 +1678,9 @@ const Creatives: React.FC = () => {
 
   const startProcessing = useCallback(async () => {
     if (processingRef.current) {
-      console.log('startProcessing: Уже выполняется (ref), выход');
       return;
     }
-    
-    console.log('startProcessing: Начинаем обработку очереди');
+
     processingRef.current = true;
     setIsProcessing(true);
     
@@ -1735,10 +1692,10 @@ const Creatives: React.FC = () => {
         const progressed = await processNext();
         if (progressed) {
           processedCount++;
-          console.log(`startProcessing: Обработано файлов: ${processedCount}`);
+
         } else {
           continueProcessing = false;
-          console.log('startProcessing: Больше нет файлов для обработки');
+
         }
       }
       
@@ -1748,17 +1705,17 @@ const Creatives: React.FC = () => {
         toast.info('Нет файлов для загрузки');
       }
     } catch (error) {
-      console.error('startProcessing: Критическая ошибка', error);
+
       toast.error('Ошибка при обработке очереди');
     } finally {
-      console.log('startProcessing: Завершение обработки');
+
       processingRef.current = false;
       setIsProcessing(false);
     }
   }, [processNext]);
 
   const stopProcessing = useCallback(() => {
-    console.log('stopProcessing: Остановка обработки');
+
     processingRef.current = false;
     setIsProcessing(false);
     // Помечаем все "queued" как отмененные, оставляя только uploading

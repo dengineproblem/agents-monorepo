@@ -86,10 +86,9 @@ export function useOptimization() {
    * Запустить процесс оптимизации через прямой API (без LLM)
    */
   const startOptimization = useCallback(async (scope: OptimizationScope) => {
-    console.log('[Optimization] startOptimization called with scope:', scope);
 
     const userAccountId = getUserAccountId();
-    console.log('[Optimization] userAccountId:', userAccountId);
+
     if (!userAccountId) {
       toast.error('Пользователь не авторизован');
       return;
@@ -108,7 +107,6 @@ export function useOptimization() {
 
     // Таймаут 5 минут (300000 мс) - прямой API быстрее чем через LLM
     const timeoutId = setTimeout(() => {
-      console.log('[Optimization] Timeout reached (5 min), aborting...');
       isTimeout = true;
       abortController.abort();
     }, 300000);
@@ -133,12 +131,6 @@ export function useOptimization() {
     streamingStateRef.current = initialState;
 
     try {
-      console.log('[Optimization] Starting Brain Mini direct stream with:', {
-        userAccountId,
-        adAccountId: scope.accountId,
-        directionId: scope.directionId,
-        campaignId: scope.campaignId,
-      });
 
       // Используем прямой API вместо LLM chat
       // Если accountId пустая строка - передаём undefined, backend сам определит аккаунт
@@ -161,17 +153,16 @@ export function useOptimization() {
       let errorMessage: string | null = null;
 
       for await (const event of stream) {
-        console.log('[Optimization] Brain Mini event:', event.type, event);
 
         if (abortController.signal.aborted) {
-          console.log('[Optimization] Aborted');
+
           break;
         }
 
         // Обрабатываем события Brain Mini
         switch (event.type) {
           case 'progress':
-            console.log('[Optimization] Progress:', event.message);
+
             setState(prev => ({
               ...prev,
               progressMessage: event.message,
@@ -179,11 +170,6 @@ export function useOptimization() {
             break;
 
           case 'done':
-            console.log('[Optimization] Done event:', {
-              success: event.success,
-              proposalsCount: event.proposals?.length,
-              hasPlan: !!event.plan,
-            });
 
             if (event.success) {
               finalProposals = event.proposals || [];
@@ -233,17 +219,11 @@ export function useOptimization() {
             break;
 
           case 'error':
-            console.log('[Optimization] Error event:', event.message);
+
             errorMessage = event.message || 'Ошибка при анализе';
             break;
         }
       }
-
-      console.log('[Optimization] Stream finished:', {
-        hasPlan: !!finalPlan,
-        proposalsCount: finalProposals.length,
-        error: errorMessage,
-      });
 
       // Очищаем таймаут
       clearTimeout(timeoutId);
@@ -264,12 +244,11 @@ export function useOptimization() {
     } catch (error) {
       // Очищаем таймаут
       clearTimeout(timeoutId);
-      console.log('[Optimization] Catch block, error:', error, 'isTimeout:', isTimeout);
 
       if ((error as Error).name === 'AbortError') {
         if (isTimeout) {
           // Таймаут - показываем ошибку пользователю
-          console.log('[Optimization] Timeout AbortError');
+
           setState(prev => ({
             ...prev,
             isLoading: false,
@@ -279,11 +258,10 @@ export function useOptimization() {
           return;
         }
         // Ручная отмена - просто выходим
-        console.log('[Optimization] Manual AbortError, returning');
+
         return;
       }
 
-      console.error('[Optimization] Error:', error);
       setState(prev => ({
         ...prev,
         isLoading: false,
@@ -343,7 +321,6 @@ export function useOptimization() {
     try {
       // Фильтруем только выбранные proposals по индексам
       const selectedProposals = stepIndices.map(i => state.proposals[i]).filter(Boolean);
-      console.log('[Optimization] Executing Brain Mini with selected proposals:', selectedProposals.length, 'of', state.proposals.length);
 
       // Передаём только выбранные proposals для выполнения (без повторного анализа)
       const stream = runBrainMiniStream(
@@ -362,7 +339,6 @@ export function useOptimization() {
       let message = '';
 
       for await (const event of stream) {
-        console.log('[Optimization] Execute event:', event.type, event);
 
         if (event.type === 'done') {
           success = event.success;
@@ -379,7 +355,7 @@ export function useOptimization() {
         toast.error(message || 'Ошибка при выполнении плана');
       }
     } catch (error) {
-      console.error('Execute Brain Mini error:', error);
+
       toast.error('Не удалось выполнить оптимизацию');
     } finally {
       setState(prev => ({ ...prev, isExecuting: false }));

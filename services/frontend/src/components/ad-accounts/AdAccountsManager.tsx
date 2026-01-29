@@ -118,7 +118,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       const response = await adAccountsApi.list(userData.id);
       setAccounts(response.ad_accounts);
     } catch (error) {
-      console.error('Error loading accounts:', error);
+
       toast.error('Не удалось загрузить аккаунты');
     } finally {
       setLoading(false);
@@ -514,7 +514,7 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
     try {
       // Явная проверка accountId - это обязательный параметр для multi-account режима
       if (!accountId) {
-        console.error('[TikTok OAuth] accountId is required but not provided');
+
         toast.error('Ошибка: аккаунт не выбран. Сначала сохраните аккаунт.');
         return;
       }
@@ -522,7 +522,7 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
       // Собираем state для OAuth callback
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
-        console.error('[TikTok OAuth] User not found in localStorage');
+
         toast.error('Пользователь не найден. Пожалуйста, войдите в систему заново.');
         return;
       }
@@ -531,13 +531,13 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
       try {
         userData = JSON.parse(storedUser);
       } catch (parseError) {
-        console.error('[TikTok OAuth] Failed to parse user data:', parseError);
+
         toast.error('Ошибка данных пользователя. Пожалуйста, войдите заново.');
         return;
       }
 
       if (!userData?.id) {
-        console.error('[TikTok OAuth] User ID not found in user data');
+
         toast.error('ID пользователя не найден');
         return;
       }
@@ -549,31 +549,20 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
         ts: Date.now(),
       };
 
-      console.log('[TikTok OAuth] Initiating OAuth flow', {
-        userId: userData.id,
-        adAccountId: accountId,
-        timestamp: statePayload.ts,
-      });
-
       const state = btoa(JSON.stringify(statePayload));
       const appId = import.meta.env.VITE_TIKTOK_APP_ID || '7457939636746919942';
       const redirectUri = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
 
       const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=${appId}&state=${state}&redirect_uri=${redirectUri}`;
 
-      console.log('[TikTok OAuth] Redirecting to TikTok auth', { authUrl: authUrl.substring(0, 100) + '...' });
       window.location.href = authUrl;
     } catch (error) {
-      console.error('[TikTok OAuth] Unexpected error:', error);
+
       toast.error('Произошла ошибка при подключении TikTok');
     }
   };
 
   const handleDisconnectTikTok = () => {
-    console.log('[TikTok] Disconnecting TikTok account', {
-      adAccountId: selectedAccountId || 'legacy mode',
-      hadBusinessId: !!formData.tiktok_business_id,
-    });
 
     setFormData(prev => ({
       ...prev,

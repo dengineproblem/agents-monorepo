@@ -77,7 +77,7 @@ export default function Competitors() {
         }
       }
     } catch (error) {
-      console.error('Error parsing user from localStorage:', error);
+
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ export default function Competitors() {
       const data = await competitorsApi.list(userId, currentAdAccountId || undefined);
       setCompetitors(data);
     } catch (error) {
-      console.error('Error fetching competitors:', error);
+
       toast.error('Ошибка загрузки конкурентов');
     }
   }, [userId, currentAdAccountId]);
@@ -106,7 +106,6 @@ export default function Competitors() {
   useEffect(() => {
     if (!currentAdAccountId) return;
 
-    console.log('[Competitors] Смена аккаунта, сбрасываем выбранного конкурента');
     setSelectedCompetitorId(null);
     setCreatives([]);
     setPagination({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -142,7 +141,7 @@ export default function Competitors() {
       setCreatives(result.creatives);
       setPagination(result.pagination);
     } catch (error) {
-      console.error('Error fetching creatives:', error);
+
       toast.error('Ошибка загрузки креативов');
     } finally {
       setCreativesLoading(false);

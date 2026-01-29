@@ -144,7 +144,7 @@ const AdminErrors: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Error fetching errors:', err);
+
     } finally {
       setLoading(false);
     }
@@ -189,7 +189,7 @@ const AdminErrors: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Error resolving:', err);
+
     } finally {
       setResolving(false);
     }

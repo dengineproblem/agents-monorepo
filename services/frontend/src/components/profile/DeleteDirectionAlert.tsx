@@ -32,7 +32,7 @@ export const DeleteDirectionAlert: React.FC<DeleteDirectionAlertProps> = ({
       await onConfirm();
       onOpenChange(false);
     } catch (error) {
-      console.error('Ошибка при удалении направления:', error);
+
     } finally {
       setIsDeleting(false);
     }

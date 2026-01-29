@@ -62,7 +62,7 @@ const ChatsList: React.FC = () => {
         toast.info('Пока нет данных о чатах в таблице n8n_chat_histories');
       }
     } catch (error) {
-      console.error('Ошибка загрузки чатов:', error);
+
       toast.error('Не удалось загрузить чаты');
     } finally {
       setIsLoadingChats(false);
@@ -95,7 +95,7 @@ const ChatsList: React.FC = () => {
       const messages = await getChatMessages(chat.session_id);
       setChatHistory(messages);
     } catch (error) {
-      console.error('Ошибка загрузки сообщений:', error);
+
       toast.error('Не удалось загрузить историю чата');
     } finally {
       setIsLoadingChat(false);
@@ -128,7 +128,7 @@ const ChatsList: React.FC = () => {
         toast.success('Сообщение отправлено');
       }
     } catch (error) {
-      console.error('Ошибка отправки сообщения:', error);
+
       toast.error('Ошибка отправки сообщения');
       setChatHistory(prev => prev.filter(msg => msg.id !== tempMessage.id));
     }
@@ -153,7 +153,7 @@ const ChatsList: React.FC = () => {
         toast.error('Не удалось обновить статус');
       }
     } catch (error) {
-      console.error('Ошибка обновления статуса:', error);
+
       toast.error('Ошибка обновления статуса');
     }
   };

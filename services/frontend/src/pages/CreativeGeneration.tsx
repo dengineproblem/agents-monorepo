@@ -233,13 +233,13 @@ const CreativeGeneration = () => {
   useEffect(() => {
     const loadUserData = async () => {
       try {
-        console.log('=== Начало загрузки данных пользователя ===');
+
         const storedUser = localStorage.getItem('user');
-        console.log('Данные из localStorage:', storedUser);
+
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         
         if (localUserData.id) {
-          console.log('Запрашиваем данные пользователя из Supabase:', localUserData.id);
+
           const { data, error } = await supabase
             .from('user_accounts')
             .select('*')
@@ -247,70 +247,29 @@ const CreativeGeneration = () => {
             .single();
             
           if (error) {
-            console.error('❌ Ошибка загрузки данных пользователя из Supabase:', error);
-            console.error('Детали ошибки:', JSON.stringify(error, null, 2));
+
             setUserData(localUserData); // fallback
             
             // Устанавливаем данные из localStorage как fallback
             if (localUserData.id) {
               setUserId(localUserData.id);
-              console.log('⚠️ Используем user ID из localStorage:', localUserData.id);
+
             }
             if (localUserData.prompt4) {
               setUserPrompt(localUserData.prompt4);
-              console.log('⚠️ Используем prompt из localStorage');
+
             }
           } else if (data) {
-            console.log('✅ Получены данные пользователя из Supabase');
-            console.log('User ID:', data.id);
-            console.log('Prompt4:', data.prompt4 ? `Загружен (${data.prompt4.length} символов)` : 'НЕ НАСТРОЕН');
-            console.log('Доступных генераций:', data.creative_generations_available);
-            
-            const combinedData = { ...localUserData, ...data };
-            localStorage.setItem('user', JSON.stringify(combinedData));
-            setUserData(combinedData);
-            
-            if (data.prompt4) {
-              setUserPrompt(data.prompt4);
-              console.log('✅ Загружен prompt');
-            } else {
-              console.warn('⚠️ prompt4 не найден в данных пользователя');
-            }
-            setUserId(data.id);
-            console.log('✅ Установлен user ID:', data.id);
-            
-            // Загружаем количество доступных генераций (legacy)
-            setCreativeGenerationsAvailable(data.creative_generations_available || 0);
 
-            // Загружаем месячную статистику генераций
-            loadGenerationsStats(data.id);
-          }
-        } else {
-          console.warn('⚠️ User ID не найден в localStorage');
-          setUserData(localUserData);
-        }
-        console.log('=== Завершение загрузки данных пользователя ===');
-      } catch (err) {
-        console.error('❌ Критическая ошибка при инициализации данных пользователя:', err);
-      }
-    };
-
-    // Загрузка месячной статистики генераций
-    const loadGenerationsStats = async (userId: string) => {
-      const CREATIVE_API = import.meta.env.VITE_CREATIVE_API_URL
-        || (import.meta.env.VITE_API_URL || 'http://localhost:8082') + '/api/creative';
-
-      try {
-        const response = await fetch(`${CREATIVE_API}/generations-stats?user_id=${userId}`);
         const data = await response.json();
 
         if (data.success) {
           setGenerationsUsed(data.generations_used || 0);
           setGenerationsLimit(data.generations_limit || 20);
-          console.log(`✅ Месячная статистика: ${data.generations_used}/${data.generations_limit}`);
+
         }
       } catch (err) {
-        console.warn('⚠️ Не удалось загрузить статистику генераций:', err);
+
       }
     };
 
@@ -320,8 +279,6 @@ const CreativeGeneration = () => {
   // Сброс состояния при смене аккаунта
   useEffect(() => {
     if (!currentAdAccountId) return;
-
-    console.log('[CreativeGeneration] Смена аккаунта, сбрасываем состояние');
 
     // Сбрасываем все локальное состояние
     setTexts({ offer: '', bullets: '', profits: '' });
@@ -345,7 +302,7 @@ const CreativeGeneration = () => {
       if (!multiAccountEnabled || !currentAdAccountId || !userId) return;
 
       try {
-        console.log('[CreativeGeneration] Загрузка prompt4 для ad_account:', currentAdAccountId);
+
         const { data: adAccount, error } = await supabase
           .from('ad_accounts')
           .select('prompt4')
@@ -353,19 +310,19 @@ const CreativeGeneration = () => {
           .single();
 
         if (error) {
-          console.error('[CreativeGeneration] Ошибка загрузки prompt4 из ad_accounts:', error);
+
           return;
         }
 
         if (adAccount?.prompt4) {
-          console.log('[CreativeGeneration] ✅ Загружен prompt4 из ad_accounts:', adAccount.prompt4.length, 'символов');
+
           setUserPrompt(adAccount.prompt4);
         } else {
-          console.warn('[CreativeGeneration] ⚠️ prompt4 не найден в ad_accounts');
+
           // Не сбрасываем userPrompt - оставляем из user_accounts как fallback
         }
       } catch (err) {
-        console.error('[CreativeGeneration] Ошибка загрузки prompt4:', err);
+
       }
     };
 
@@ -383,14 +340,14 @@ const CreativeGeneration = () => {
     try {
       // Проверяем, что user_id загружен
       if (!userId) {
-        console.error('User ID не загружен');
+
         throw new Error('Не удалось определить пользователя. Пожалуйста, перезагрузите страницу.');
       }
 
       // Проверяем, что prompt загружен
       if (!userPrompt) {
-        console.error('User prompt не загружен');
-        console.error('User data:', userData);
+
+
         throw new Error('Промпт не настроен. Пожалуйста, настройте prompt4 в профиле.');
       }
 
@@ -434,10 +391,9 @@ const CreativeGeneration = () => {
         ...competitorReferenceData
       };
 
-      console.log(`Отправляем запрос на генерацию ${type}:`, requestData);
-      console.log(`User ID: ${userId}, Prompt length: ${userPrompt?.length || 0}`);
+
       if (competitorReference) {
-        console.log('Competitor reference:', competitorReference.competitor_name);
+
       }
 
       // Вызываем новый API creative-generation-service
@@ -454,8 +410,7 @@ const CreativeGeneration = () => {
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
           const errorData = await response.json();
-          console.error('Ошибка от сервера:', errorData);
-          
+
           if (response.status === 404) {
             errorMessage = 'Пользователь не найден в системе. Попробуйте перезайти в систему.';
           } else if (errorData.error) {
@@ -465,77 +420,36 @@ const CreativeGeneration = () => {
             }
           }
         } catch (e) {
-          console.error('Не удалось распарсить ошибку от сервера');
+
         }
         throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      console.log(`=== Получен ответ от API для ${type} ===`);
-      console.log(`Полный ответ:`, JSON.stringify(data, null, 2));
-      console.log(`Тип data:`, typeof data);
-      console.log(`Ключи в data:`, Object.keys(data));
-      
+
       if (!data.success) {
         throw new Error(data.error || 'Ошибка генерации');
       }
 
       // Получаем значение из основного поля
-      console.log(`\n--- Поиск значения для поля "${type}" ---`);
-      console.log(`data.hasOwnProperty("${type}"):`, data.hasOwnProperty(type));
-      console.log(`data["${type}"]:`, data[type]);
-      console.log(`Тип data["${type}"]:`, typeof data[type]);
-      
-      // Проверяем все возможные варианты названий полей
-      const fieldMappings: Record<string, string[]> = {
-        offer: ['offer', 'headline', 'title', 'generated_offer'],
-        bullets: ['bullets', 'bullet_points', 'generated_bullets'],
-        profits: ['profits', 'benefits', 'generated_benefits', 'generated_profits']
-      };
-      
-      const possibleFields = [type, ...(fieldMappings[type] || []), 'text', 'result', 'generated_text'];
-      console.log(`Возможные поля для проверки:`, possibleFields);
-      
-      let generatedText: string | undefined;
-      let foundField: string | undefined;
-      
-      for (const field of possibleFields) {
-        const value = data[field];
-        console.log(`\nПроверяем поле "${field}":`, {
-          exists: data.hasOwnProperty(field),
-          value: value,
-          type: typeof value,
-          isString: typeof value === 'string',
-          length: typeof value === 'string' ? value.length : 'N/A',
-          trimmedLength: typeof value === 'string' ? value.trim().length : 'N/A'
-        });
-        
-        if (typeof value === 'string' && value.trim().length > 0) {
-          generatedText = value;
-          foundField = field;
-          console.log(`✅ Найдено значение в поле "${field}": "${value.substring(0, 100)}..."`);
+
           break;
         }
       }
 
-      console.log(`\n--- Результат поиска ---`);
-      console.log(`Найдено поле:`, foundField);
-      console.log(`Значение:`, generatedText);
-      
+
+
       if (generatedText && generatedText.trim().length > 0) {
         const cleanedText = cleanText(generatedText);
-        console.log(`✅ Очищенный текст для ${type} (${cleanedText.length} символов):`, cleanedText);
-        setTexts(prev => ({ ...prev, [type]: cleanedText }));
-        toast.success(`${getTypeLabel(type)} сгенерирован!`);
+
       } else {
-        console.error('\n❌ === ОШИБКА: Текст не найден ===');
-        console.error('Доступные поля:', Object.keys(data));
-        console.error('Значения всех полей:', data);
-        console.error('Проверенные варианты:', possibleFields);
+
+
+
         throw new Error(`Некорректный ответ от сервера. Ожидалось непустое текстовое поле "${type}", но все проверенные варианты пусты или отсутствуют. Доступные поля: ${Object.keys(data).join(', ')}`);
       }
     } catch (error: any) {
-      console.error(`Error generating ${type}:`, error);
+
       toast.error(error.message || `Ошибка генерации ${getTypeLabel(type).toLowerCase()}`);
     } finally {
       setLoading(prev => ({ ...prev, [type]: false }));
@@ -641,7 +555,7 @@ const CreativeGeneration = () => {
       };
       reader.readAsDataURL(blob);
     } catch (error) {
-      console.error('Error loading reference image:', error);
+
       toast.error('Не удалось загрузить изображение');
     }
   };
@@ -679,7 +593,7 @@ const CreativeGeneration = () => {
         toast.error(response.error || 'Не удалось сохранить черновик');
       }
     } catch (error: any) {
-      console.error('Error saving draft:', error);
+
       toast.error('Ошибка сохранения черновика');
     } finally {
       setIsSavingDraft(false);
@@ -758,14 +672,6 @@ const CreativeGeneration = () => {
         ...competitorReferenceData
       };
 
-      console.log(`Отправляем запрос на генерацию креатива через Gemini API (isEdit: ${isEdit}):`, {
-        ...requestData,
-        reference_image: referenceImageBase64 ? '[base64 data]' : undefined,
-        reference_images_count: referenceImagesBase64.length,
-        reference_image_prompt_length: requestData.reference_image_prompt?.length || 0,
-        has_competitor_reference: !!competitorReference
-      });
-
       // Вызываем новый API creative-generation-service
       const response = await fetch(`${CREATIVE_API_BASE}/generate-creative`, {
         method: 'POST',
@@ -781,8 +687,7 @@ const CreativeGeneration = () => {
       }
 
       const data = await response.json();
-      console.log('✅ Получен ответ от API:', data);
-      
+
       if (!data.success) {
         throw new Error(data.error || 'Ошибка генерации');
       }
@@ -794,7 +699,7 @@ const CreativeGeneration = () => {
         // Сохраняем creative_id для upscale
         if (data.creative_id) {
           setGeneratedCreativeId(data.creative_id);
-          console.log('Creative ID сохранен:', data.creative_id);
+
         }
 
         toast.success(isEdit ? 'Креатив успешно отредактирован!' : 'Креатив успешно сгенерирован!');
@@ -808,7 +713,7 @@ const CreativeGeneration = () => {
         }
         if (typeof data.generations_remaining === 'number') {
           setCreativeGenerationsAvailable(data.generations_remaining);
-          console.log('Счетчик генераций обновлен:', data.generations_used, '/', data.generations_limit);
+
         }
 
         // Сбрасываем режим редактирования
@@ -821,7 +726,7 @@ const CreativeGeneration = () => {
         throw new Error('Не удалось получить URL изображения');
       }
     } catch (error: any) {
-      console.error('Error generating creative:', error);
+
       toast.error(error.message || 'Ошибка генерации креатива');
     } finally {
       setLoading(prev => ({ ...prev, image: false }));
@@ -899,7 +804,7 @@ const CreativeGeneration = () => {
 
       toast.success('4K изображение скачано', { id: 'upscale' });
     } catch (error) {
-      console.error('Error downloading image:', error);
+
       toast.error('Ошибка при скачивании изображения', { id: 'upscale' });
     }
   };
@@ -992,7 +897,7 @@ const CreativeGeneration = () => {
       // Очищаем черновик после успешного создания
       clearImageDraft();
     } catch (error: any) {
-      console.error('Ошибка при создании креатива:', error);
+
       toast.error(error.message || 'Ошибка создания креатива', { id: 'upscale-create' });
     } finally {
       setIsCreatingCreative(false);

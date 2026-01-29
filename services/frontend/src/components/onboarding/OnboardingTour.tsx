@@ -29,18 +29,11 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
   // Автоматический запуск тура при первом входе после подключения FB
   useEffect(() => {
     const shouldStart = shouldShowTour(isFbConnected);
-    console.log('[OnboardingTour] Check:', {
-      autoStart,
-      isFbConnected,
-      shouldStart,
-      isActive,
-      isTourCompleted: localStorage.getItem('onboardingTourCompleted'),
-    });
 
     if (autoStart && shouldStart && !isActive) {
-      console.log('[OnboardingTour] Starting tour in 500ms...');
+
       const timer = setTimeout(() => {
-        console.log('[OnboardingTour] Starting tour NOW');
+
         startTour();
       }, 500);
 
@@ -51,7 +44,7 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({
   // Слушаем событие принудительного запуска тура
   useEffect(() => {
     const handleForceStart = () => {
-      console.log('[OnboardingTour] Force start event received');
+
       startTour();
     };
 

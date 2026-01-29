@@ -93,18 +93,16 @@ export async function getCapiStats(since: string, until: string): Promise<CapiSt
   const userId = getUserId();
 
   if (!userId) {
-    console.warn('[capiApi] No user ID found in localStorage');
+
     return null;
   }
 
   // Validate date format
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(since) || !dateRegex.test(until)) {
-    console.error('[capiApi] Invalid date format:', { since, until });
+
     return null;
   }
-
-  console.debug('[capiApi] Fetching CAPI stats:', { userId, since, until });
 
   let lastError: Error | null = null;
 
@@ -132,11 +130,6 @@ export async function getCapiStats(since: string, until: string): Promise<CapiSt
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('[capiApi] API error:', {
-          status: response.status,
-          error: errorData,
-          attempt: attempt + 1,
-        });
 
         // Don't retry on 4xx errors (client errors)
         if (response.status >= 400 && response.status < 500) {
@@ -150,18 +143,11 @@ export async function getCapiStats(since: string, until: string): Promise<CapiSt
 
       // Validate response structure
       if (!isValidCapiStats(data)) {
-        console.error('[capiApi] Invalid response structure:', data);
+
         return null;
       }
 
       const durationMs = Date.now() - startTime;
-      console.debug('[capiApi] Successfully fetched CAPI stats:', {
-        capiEnabled: data.capiEnabled,
-        lead: data.lead,
-        registration: data.registration,
-        schedule: data.schedule,
-        durationMs,
-      });
 
       return data;
     } catch (error) {
@@ -169,24 +155,11 @@ export async function getCapiStats(since: string, until: string): Promise<CapiSt
       const isAbortError = lastError.name === 'AbortError';
       const isLastAttempt = attempt === MAX_RETRIES;
 
-      console.warn('[capiApi] Request failed:', {
-        error: lastError.message,
-        isTimeout: isAbortError,
-        attempt: attempt + 1,
-        maxRetries: MAX_RETRIES + 1,
-        willRetry: !isLastAttempt,
-      });
-
       if (!isLastAttempt) {
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
     }
   }
-
-  console.error('[capiApi] All retries exhausted:', {
-    error: lastError?.message,
-    durationMs: Date.now() - startTime,
-  });
 
   return null;
 }

@@ -101,12 +101,12 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
       if (Array.isArray(data)) {
         setPipelines(data);
       } else {
-        console.error('[KeyStageSelector] Pipelines data is not an array:', data);
+
         setError('Некорректный формат данных воронок');
         setPipelines([]);
       }
     } catch (err: any) {
-      console.error('[KeyStageSelector] Failed to load pipelines:', err);
+
       // На локалхосте без AmoCRM показываем информативное сообщение
       if (err.message?.includes('Failed to fetch') || err.message?.includes('амокрм')) {
         setError('AmoCRM недоступен (локальная разработка). На production это будет работать.');
@@ -176,7 +176,7 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
       }, 3000);
 
     } catch (err: any) {
-      console.error('Failed to save key stages:', err);
+
       setError(err.message || 'Не удалось сохранить ключевые этапы');
     } finally {
       setSaving(false);

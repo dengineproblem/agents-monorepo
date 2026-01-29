@@ -58,7 +58,7 @@ export const CarouselHistoryTab: React.FC<CarouselHistoryTabProps> = ({ userId, 
         toast.error('Не удалось загрузить историю');
       }
     } catch (error) {
-      console.error('Error loading history:', error);
+
       toast.error('Ошибка загрузки истории');
     } finally {
       setLoading(false);

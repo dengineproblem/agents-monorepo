@@ -32,7 +32,7 @@ export const useDirections = (
       const data = await directionsApi.list(userAccountId, accountId, platform);
       setDirections(data);
     } catch (err) {
-      console.error('Ошибка при загрузке направлений:', err);
+
       setError('Не удалось загрузить направления');
     } finally {
       setLoading(false);

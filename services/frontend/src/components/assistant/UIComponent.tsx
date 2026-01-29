@@ -41,7 +41,7 @@ export function UIComponent({ component, onAction }: UIComponentProps) {
       return <UIMetricsComparison data={data} title={component.title} />;
 
     default:
-      console.warn(`Unknown UI component type: ${type}`);
+
       return null;
   }
 }

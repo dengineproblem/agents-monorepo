@@ -27,7 +27,7 @@ export function useUserAccounts(): UseUserAccountsResult {
           setCurrentAccount(null);
         }
       } catch (e) {
-        console.error('Error loading user account:', e);
+
         setCurrentAccount(null);
       } finally {
         setLoading(false);

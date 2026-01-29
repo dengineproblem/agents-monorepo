@@ -39,7 +39,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
       await whatsappApi.disconnectInstance(instanceName);
       refresh(); // Обновить список после отключения
     } catch (error) {
-      console.error('Failed to disconnect WhatsApp instance:', error);
+
       alert('Не удалось отключить WhatsApp. Попробуйте позже.');
     }
   };
@@ -55,7 +55,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
       await whatsappApi.resetConnection(numberId, userAccountId);
       refresh(); // Обновить список после сброса
     } catch (error) {
-      console.error('Failed to reset WhatsApp connection:', error);
+
       alert('Не удалось сбросить подключение. Попробуйте позже.');
     }
   };

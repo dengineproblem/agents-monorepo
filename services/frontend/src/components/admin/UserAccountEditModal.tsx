@@ -125,7 +125,7 @@ export function UserAccountEditModal({
         toast.error('Не удалось загрузить данные пользователя');
       }
     } catch (err) {
-      console.error('Error fetching user:', err);
+
       toast.error('Ошибка при загрузке');
     } finally {
       setLoading(false);
@@ -152,7 +152,7 @@ export function UserAccountEditModal({
         toast.error(data.error || 'Ошибка при сохранении');
       }
     } catch (err) {
-      console.error('Error saving user:', err);
+
       toast.error('Ошибка при сохранении');
     } finally {
       setSaving(false);

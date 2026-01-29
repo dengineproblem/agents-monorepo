@@ -142,7 +142,7 @@ const AdSettings: React.FC = () => {
         setSettings(loadedSettings);
       }
     } catch (error) {
-      console.error('Ошибка загрузки настроек:', error);
+
       toastT.error('settingsLoadError');
     } finally {
       setIsLoading(false);
@@ -184,7 +184,7 @@ const AdSettings: React.FC = () => {
 
       toastT.success('settingsSaved');
     } catch (error) {
-      console.error('Ошибка сохранения настроек:', error);
+
       toastT.error('settingsSaveError');
     } finally {
       setIsSaving(false);

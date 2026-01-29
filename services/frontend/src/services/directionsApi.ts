@@ -21,7 +21,6 @@ export const directionsApi = {
     platform?: 'facebook' | 'tiktok'
   ): Promise<Direction[]> {
     try {
-      console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId, 'account_id:', accountId);
 
       // Строим URL с параметрами
       const params = new URLSearchParams({ userAccountId });
@@ -35,25 +34,22 @@ export const directionsApi = {
 
       const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);
 
-      console.log('[directionsApi.list] HTTP статус:', response.status);
-
       if (!response.ok) {
-        console.error('[directionsApi.list] Ошибка HTTP:', response.statusText);
+
         return [];
       }
 
       const data = await response.json();
-      console.log('[directionsApi.list] Результат от API:', data);
 
       // Бэкенд возвращает: { success: true, directions: [...] }
       if (data.success && data.directions) {
-        console.log('[directionsApi.list] Найдено направлений:', data.directions.length);
+
         return data.directions;
       }
 
       return [];
     } catch (error) {
-      console.error('[directionsApi.list] Исключение при получении направлений:', error);
+
       return [];
     }
   },
@@ -93,7 +89,7 @@ export const directionsApi = {
         default_settings: data.default_settings || null,
       };
     } catch (error) {
-      console.error('Исключение при создании направления:', error);
+
       return {
         success: false,
         error: 'Произошла ошибка при создании направления',
@@ -131,7 +127,7 @@ export const directionsApi = {
         direction: data.direction,
       };
     } catch (error) {
-      console.error('Исключение при обновлении направления:', error);
+
       return {
         success: false,
         error: 'Произошла ошибка при обновлении направления',
@@ -161,7 +157,7 @@ export const directionsApi = {
         success: true,
       };
     } catch (error) {
-      console.error('Исключение при удалении направления:', error);
+
       return {
         success: false,
         error: 'Произошла ошибка при удалении направления',

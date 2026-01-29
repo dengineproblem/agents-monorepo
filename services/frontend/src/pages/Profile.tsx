@@ -77,7 +77,7 @@ const Profile: React.FC = () => {
   // Проверка валидности данных пользователя
   useEffect(() => {
     if (storedUser && user && !user.username) {
-      console.error('Некорректные данные пользователя: отсутствует username. Выход...');
+
       localStorage.removeItem('user');
       toastT.error('loginRequired');
       navigate('/login', { replace: true });
@@ -217,7 +217,7 @@ const Profile: React.FC = () => {
       const error = params.get('error');
 
       if (error) {
-        console.error('Facebook OAuth error:', error);
+
         toast.error(appReviewText(`Facebook connection failed: ${error}`, `Не удалось подключиться к Facebook: ${error}`));
         window.history.replaceState({}, document.title, '/profile');
         return;
@@ -226,15 +226,10 @@ const Profile: React.FC = () => {
       if (code) {
         try {
           // Проверка наличия username
-          console.log('Facebook OAuth callback - проверка пользователя:', {
-            hasUser: !!user,
-            username: user?.username,
-            userId: user?.id
-          });
 
           if (!user?.username) {
             toastT.error('loginRequired');
-            console.error('Username отсутствует в localStorage. Данные пользователя:', user);
+
             window.history.replaceState({}, document.title, '/profile');
             return;
           }
@@ -246,8 +241,6 @@ const Profile: React.FC = () => {
             code,
             username: user.username
           };
-          
-          console.log('Отправка запроса на /facebook/oauth/token с данными:', requestBody);
 
           const response = await fetch(`${API_URL}/facebook/oauth/token`, {
             method: 'POST',
@@ -256,25 +249,23 @@ const Profile: React.FC = () => {
           });
 
           const data = await response.json();
-          console.log('Ответ от /facebook/oauth/token:', data);
 
           if (!response.ok || !data.success) {
             throw new Error(data.error || 'Failed to connect Facebook');
           }
 
           // Сохраняем данные для выбора и показываем модальное окно
-          console.log('📋 All available pages:', data.pages.map((p: any) => ({ id: p.id, name: p.name })));
           setFacebookData(data);
           setSelectedAdAccount(data.ad_accounts[0]?.id || '');
           setSelectedPage(data.pages[0]?.id || '');
-          console.log('🔧 Default selected page:', data.pages[0]?.id, data.pages[0]?.name);
+
           setFacebookSelectionModal(true);
 
           // Clear URL params
           window.history.replaceState({}, document.title, '/profile');
 
         } catch (error) {
-          console.error('Error connecting Facebook:', error);
+
           toast.error(
             error instanceof Error
               ? error.message
@@ -301,7 +292,7 @@ const Profile: React.FC = () => {
           .single() as any);
 
         if (error) {
-          console.error('Ошибка загрузки данных пользователя:', error);
+
           // Используем данные из localStorage как fallback
           setTarif((user.tarif as Tarif) ?? null);
           setTarifExpires(user.tarif_expires ?? null);
@@ -336,7 +327,7 @@ const Profile: React.FC = () => {
           localStorage.setItem('user', JSON.stringify(updatedUser));
         }
       } catch (error) {
-        console.error('Ошибка при загрузке данных:', error);
+
         // Используем данные из localStorage как fallback
       setTarif((user.tarif as Tarif) ?? null);
       setTarifExpires(user.tarif_expires ?? null);
@@ -362,12 +353,12 @@ const Profile: React.FC = () => {
       try {
         const response = await fetch(`${API_BASE_URL}/amocrm/status?userAccountId=${user.id}`);
         if (!response.ok) {
-          console.error('Failed to load AmoCRM status');
+
           return;
         }
 
         const data = await response.json();
-        console.log('AmoCRM status loaded:', data);
+
         setAmocrmConnected(data.connected);
         setAmocrmSubdomain(data.subdomain || '');
 
@@ -377,17 +368,17 @@ const Profile: React.FC = () => {
             const webhookRes = await fetch(`${API_BASE_URL}/amocrm/webhook-status?userAccountId=${user.id}`);
             if (webhookRes.ok) {
               const webhookData = await webhookRes.json();
-              console.log('Webhook status:', webhookData);
+
               setAmocrmWebhookActive(webhookData.registered);
             }
           } catch (error) {
-            console.error('Failed to check webhook status:', error);
+
           }
 
           // REMOVED: Qualification now configured at direction level via CAPI settings
         }
       } catch (error) {
-        console.error('Failed to load AmoCRM status:', error);
+
       }
     };
 
@@ -403,12 +394,12 @@ const Profile: React.FC = () => {
         // In multi-account mode, pass accountId to check correct table
         const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
         const status = await getBitrix24Status(user.id, accountId);
-        console.log('Bitrix24 status loaded:', status);
+
         setBitrix24Connected(status.connected);
         setBitrix24Domain(status.domain || '');
         setBitrix24EntityType(status.entityType || 'lead');
       } catch (error) {
-        console.error('Failed to load Bitrix24 status:', error);
+
       }
     };
 
@@ -420,7 +411,7 @@ const Profile: React.FC = () => {
     if (!user?.id) return;
 
     const cleanup = onBitrix24Connected((data) => {
-      console.log('Bitrix24 connected:', data);
+
       setBitrix24Connected(true);
       setBitrix24Domain(data.domain);
       setBitrix24EntityType(data.entityType as 'lead' | 'deal' | 'both');
@@ -497,7 +488,7 @@ const Profile: React.FC = () => {
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      console.error('Ошибка при смене пароля:', error);
+
       toast.error(appReviewText('An error occurred while changing the password', 'Произошла ошибка при смене пароля'));
     } finally {
       setIsChangingPassword(false);
@@ -533,7 +524,7 @@ const Profile: React.FC = () => {
         toast.success(appReviewText('Telegram ID removed successfully', 'Telegram ID успешно удален'));
         setTelegramIdModal(false);
       } catch (error) {
-        console.error('Ошибка при удалении Telegram ID:', error);
+
         toast.error(appReviewText('An error occurred while removing the Telegram ID', 'Произошла ошибка при удалении'));
       } finally {
         setIsSavingTelegramId(false);
@@ -574,7 +565,7 @@ const Profile: React.FC = () => {
       toast.success(appReviewText('Telegram ID updated successfully', 'Telegram ID успешно обновлен'));
       setTelegramIdModal(false);
     } catch (error) {
-      console.error('Ошибка при сохранении Telegram ID:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingTelegramId(false);
@@ -607,7 +598,7 @@ const Profile: React.FC = () => {
       setUsernameModal(false);
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
-      console.error('Ошибка при сохранении имени:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingUsername(false);
@@ -648,16 +639,12 @@ const Profile: React.FC = () => {
       toast.success(appReviewText('Instagram disconnected successfully', 'Instagram успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
-      console.error('Ошибка при отключении Instagram:', error);
+
       toast.error(appReviewText('An error occurred while disconnecting', 'Произошла ошибка при отключении'));
     }
   };
 
   const handleSaveFacebookSelection = async () => {
-    console.log('🔵 handleSaveFacebookSelection called with:', {
-      selectedAdAccount,
-      selectedPage,
-      allPages: facebookData?.pages?.map((p: any) => ({ id: p.id, name: p.name }))
     });
 
     if (!selectedAdAccount || !selectedPage) {
@@ -668,14 +655,6 @@ const Profile: React.FC = () => {
     try {
       const selectedPageData = facebookData.pages.find((p: any) => p.id === selectedPage);
       const instagramId = selectedPageData?.instagram_id || null;
-
-      console.log('📤 Frontend sending to /facebook/save-selection:', {
-        username: user?.username,
-        ad_account_id: selectedAdAccount,
-        page_id: selectedPage,
-        page_name: selectedPageData?.name,
-        instagram_id: instagramId
-      });
 
       const API_URL = 'https://performanteaiagency.com/api';
       const response = await fetch(`${API_URL}/facebook/save-selection`, {
@@ -710,11 +689,11 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setFacebookSelectionModal(false);
       toastT.success('facebookConnected');
-      console.log('✅ Save completed successfully! Reloading page...');
+
       window.location.reload();
 
     } catch (error) {
-      console.error('Error saving Facebook selection:', error);
+
       toast.error(
         error instanceof Error
           ? error.message
@@ -775,7 +754,7 @@ const Profile: React.FC = () => {
       toast.success(appReviewText('TikTok disconnected successfully', 'TikTok успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
-      console.error('Ошибка при отключении TikTok:', error);
+
       toast.error(appReviewText('An error occurred while disconnecting', 'Произошла ошибка при отключении'));
     }
   };
@@ -828,7 +807,7 @@ const Profile: React.FC = () => {
       toast.success(appReviewText('Maximum budget saved successfully', 'Максимальный бюджет успешно сохранен'));
       setMaxBudgetModal(false);
     } catch (error) {
-      console.error('Ошибка при сохранении:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingMaxBudget(false);
@@ -867,7 +846,7 @@ const Profile: React.FC = () => {
       toast.success(appReviewText('Planned cost per lead saved successfully', 'Плановая стоимость заявки успешно сохранена'));
       setPlannedCplModal(false);
     } catch (error) {
-      console.error('Ошибка при сохранении:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingPlannedCpl(false);
@@ -893,7 +872,7 @@ const Profile: React.FC = () => {
         .eq('id', user.id));
       
       if (error) {
-        console.error('Ошибка при сохранении:', error);
+
         toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
@@ -908,7 +887,7 @@ const Profile: React.FC = () => {
       setNewOpenaiKey('');
       setShowOpenaiKey(false);
     } catch (error) {
-      console.error('Ошибка при сохранении:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingOpenaiKey(false);
@@ -928,7 +907,7 @@ const Profile: React.FC = () => {
         .eq('id', user.id));
       
       if (error) {
-        console.error('Ошибка при сохранении:', error);
+
         toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
@@ -942,7 +921,7 @@ const Profile: React.FC = () => {
       setAudienceModal(false);
       setNewAudienceId('');
     } catch (error) {
-      console.error('Ошибка при сохранении:', error);
+
       toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingAudienceId(false);
@@ -951,12 +930,12 @@ const Profile: React.FC = () => {
 
   // AmoCRM handlers
   const handleAmoCRMConnect = () => {
-    console.log('[Profile] handleAmoCRMConnect called, amocrmConnected:', amocrmConnected);
+
     if (amocrmConnected) {
-      console.log('[Profile] Opening management modal');
+
       setAmocrmModal(true); // Open management modal
     } else {
-      console.log('[Profile] Opening connection modal');
+
       setAmocrmConnectModal(true); // Open connection modal
     }
   };
@@ -990,7 +969,7 @@ const Profile: React.FC = () => {
         toast.error('Ошибка при отключении AmoCRM');
       }
     } catch (error) {
-      console.error('Error disconnecting AmoCRM:', error);
+
       toast.error('Ошибка при отключении AmoCRM');
     }
   };
@@ -1012,7 +991,7 @@ const Profile: React.FC = () => {
         toast.error('Ошибка синхронизации');
       }
     } catch (error) {
-      console.error('Error syncing AmoCRM:', error);
+
       toast.error('Ошибка синхронизации');
     } finally {
       setIsSyncingAmocrm(false);
@@ -1021,12 +1000,12 @@ const Profile: React.FC = () => {
 
   // Bitrix24 handlers
   const handleBitrix24Connect = () => {
-    console.log('[Profile] handleBitrix24Connect called, bitrix24Connected:', bitrix24Connected);
+
     if (bitrix24Connected) {
-      console.log('[Profile] Opening Bitrix24 management modal');
+
       setBitrix24Modal(true);
     } else {
-      console.log('[Profile] Opening Bitrix24 connect window');
+
       if (user?.id) {
         // Pass accountId for multi-account mode
         const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
@@ -1045,7 +1024,7 @@ const Profile: React.FC = () => {
       toast.success('Bitrix24 отключен');
       setBitrix24Modal(false);
     } catch (error) {
-      console.error('Error disconnecting Bitrix24:', error);
+
       toast.error('Ошибка при отключении Bitrix24');
     }
   };
@@ -1066,7 +1045,7 @@ const Profile: React.FC = () => {
         toast.error('Ошибка синхронизации');
       }
     } catch (error) {
-      console.error('Error syncing Bitrix24:', error);
+
       toast.error('Ошибка синхронизации');
     } finally {
       setIsSyncingBitrix24(false);
@@ -1085,7 +1064,7 @@ const Profile: React.FC = () => {
           const result = await getBitrix24AutoCreateSetting(user.id, accountId || undefined);
           setBitrix24AutoCreate(result.enabled);
         } catch (error) {
-          console.error('Error loading auto-create setting:', error);
+
         } finally {
           setLoadingAutoCreate(false);
         }
@@ -1106,7 +1085,7 @@ const Profile: React.FC = () => {
           setDefaultDealStage(defaults.dealStage);
           setDefaultStagesDirty(false); // Reset dirty flag after loading
         } catch (error) {
-          console.error('Error loading pipelines:', error);
+
         } finally {
           setLoadingPipelines(false);
         }
@@ -1129,7 +1108,7 @@ const Profile: React.FC = () => {
         toast.success(enabled ? 'Авто-создание лидов включено' : 'Авто-создание лидов отключено');
       }
     } catch (error) {
-      console.error('Error updating auto-create setting:', error);
+
       toast.error('Ошибка при изменении настройки');
     } finally {
       setLoadingAutoCreate(false);
@@ -1185,7 +1164,7 @@ const Profile: React.FC = () => {
       setDefaultStagesDirty(false);
       toast.success('Настройки сохранены');
     } catch (error) {
-      console.error('Error saving default stages:', error);
+
       toast.error('Ошибка при сохранении настроек');
     } finally {
       setSavingDefaultStages(false);
@@ -1203,7 +1182,7 @@ const Profile: React.FC = () => {
       setBitrix24Pipelines(pipelines);
       toast.success('Воронки синхронизированы');
     } catch (error) {
-      console.error('Error syncing pipelines:', error);
+
       toast.error('Ошибка синхронизации воронок');
     } finally {
       setLoadingPipelines(false);
@@ -1227,15 +1206,7 @@ const Profile: React.FC = () => {
     : Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '');
 
   // TikTok: в мульти-режиме из ad_accounts, иначе из user_accounts
-  console.log('[Profile] TikTok check:', {
-    multiAccountEnabled,
-    currentAdAccount: currentAdAccount ? {
-      id: currentAdAccount.id,
-      tiktok_access_token: currentAdAccount.tiktok_access_token ? '***set***' : null,
-      tiktok_business_id: currentAdAccount.tiktok_business_id,
-    } : null,
-    user_tiktok: user?.tiktok_access_token ? '***set***' : null,
-  });
+
   const isTikTokConnected = multiAccountEnabled
     ? Boolean(currentAdAccount?.tiktok_access_token && currentAdAccount?.tiktok_business_id)
     : Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
@@ -1981,7 +1952,6 @@ const Profile: React.FC = () => {
                     <label
                       key={page.id}
                       className="flex items-center p-2 hover:bg-gray-50 cursor-pointer rounded"
-                      onClick={() => console.log('🖱️ Radio button clicked for page:', page.id, page.name)}
                     >
                       <input
                         type="radio"
@@ -1989,14 +1959,10 @@ const Profile: React.FC = () => {
                         value={page.id}
                         checked={selectedPage === page.id}
                         onChange={(e) => {
-                          console.log('🔄 onChange triggered!', e.target.value);
+
                           const newPageId = e.target.value;
                           const pageName = filteredPages.find((p: any) => p.id === newPageId)?.name;
-                          console.log('📝 User selected page:', {
-                            page_id: newPageId,
-                            page_name: pageName,
-                            previous_page_id: selectedPage
-                          });
+
                           setSelectedPage(newPageId);
                         }}
                         className="mr-3"

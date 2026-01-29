@@ -50,7 +50,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
       const data = await response.json();
       setNumbers(data.numbers || []);
     } catch (error) {
-      console.error('Error loading WhatsApp numbers:', error);
+
       toast.error('Не удалось загрузить номера');
     } finally {
       setLoading(false);

@@ -43,7 +43,7 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
         setLeads(data);
       }
     } catch (e) {
-      console.error('Error loading leads:', e);
+
     } finally {
       setLoading(false);
     }

@@ -31,26 +31,20 @@ export const AmoCRMKeyStageSettings: React.FC<AmoCRMKeyStageSettingsProps> = ({
     try {
       setLoading(true);
       setError(null);
-      console.log('[AmoCRMKeyStageSettings] Loading directions for userAccountId:', userAccountId);
+
       const { data, error: dirError } = await salesApi.getDirections(userAccountId);
 
       if (dirError) {
-        console.error('[AmoCRMKeyStageSettings] Error loading directions:', dirError);
+
         throw new Error(dirError);
       }
 
-      console.log('[AmoCRMKeyStageSettings] Loaded directions:', data);
       setDirections(data);
 
       // Auto-expand all directions initially
       setExpandedDirections(new Set(data.map(d => d.id)));
     } catch (err: any) {
-      console.error('[AmoCRMKeyStageSettings] Failed to load directions:', {
-        userAccountId,
-        error: err,
-        message: err.message,
-        stack: err.stack
-      });
+
       setError(err.message || 'Не удалось загрузить направления');
     } finally {
       setLoading(false);
@@ -63,9 +57,7 @@ export const AmoCRMKeyStageSettings: React.FC<AmoCRMKeyStageSettingsProps> = ({
       setError(null);
       setSuccessMessage(null);
 
-      console.log('[AmoCRMKeyStageSettings] Recalculating key stage stats for userAccountId:', userAccountId);
       const result = await recalculateKeyStageStats(userAccountId);
-      console.log('[AmoCRMKeyStageSettings] Recalculation result:', result);
 
       setSuccessMessage(
         `Статистика пересчитана успешно! Обновлено лидов: ${result.synced}`
@@ -76,12 +68,7 @@ export const AmoCRMKeyStageSettings: React.FC<AmoCRMKeyStageSettingsProps> = ({
         setSuccessMessage(null);
       }, 5000);
     } catch (err: any) {
-      console.error('[AmoCRMKeyStageSettings] Failed to recalculate stats:', {
-        userAccountId,
-        error: err,
-        message: err.message,
-        stack: err.stack
-      });
+
       // На локалхосте без AmoCRM показываем информативное сообщение
       if (err.message?.includes('Failed to fetch') || err.message?.includes('амокрм')) {
         setError('AmoCRM недоступен (локальная разработка). На production это будет работать.');

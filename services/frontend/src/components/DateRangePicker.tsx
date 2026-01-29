@@ -71,8 +71,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
       default:
         newRange = { ...dateRange };
     }
-    
-    console.log('Selected option:', option, 'New range:', newRange);
+
     setDateRange(newRange);
     onOpenChange(false);
   };
@@ -83,7 +82,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
         since: format(customRange.from, 'yyyy-MM-dd'),
         until: format(customRange.to, 'yyyy-MM-dd')
       };
-      console.log('Applied custom range:', newRange);
+
       setDateRange(newRange);
       onOpenChange(false);
     }

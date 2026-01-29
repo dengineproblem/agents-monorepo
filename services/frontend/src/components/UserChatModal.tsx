@@ -100,7 +100,7 @@ const UserChatModal: React.FC<UserChatModalProps> = ({
       }
     } catch (err) {
       setError('Не удалось загрузить сообщения');
-      console.error('Error fetching messages:', err);
+
     } finally {
       setLoading(false);
     }
@@ -140,7 +140,7 @@ const UserChatModal: React.FC<UserChatModalProps> = ({
       setTimeout(scrollToBottom, 100);
     } catch (err: any) {
       setError(err.message || 'Не удалось отправить сообщение');
-      console.error('Error sending message:', err);
+
     } finally {
       setSending(false);
     }

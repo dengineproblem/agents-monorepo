@@ -54,7 +54,7 @@ const AdminLayout: React.FC = () => {
           setUnreadNotifications(data.count || 0);
         }
       } catch (err) {
-        console.error('Error fetching admin stats:', err);
+
       }
     };
 

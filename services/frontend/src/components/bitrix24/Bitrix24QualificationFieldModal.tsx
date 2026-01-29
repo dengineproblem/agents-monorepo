@@ -119,13 +119,13 @@ export const Bitrix24QualificationFieldModal: React.FC<Bitrix24QualificationFiel
           ]);
         }
       } catch (settingsErr: any) {
-        console.warn('Could not load saved settings:', settingsErr.message);
+
         setSelectedFields([
           { entityType: entityType === 'deal' ? 'deal' : 'lead', fieldId: null, fieldName: null, enumId: null }
         ]);
       }
     } catch (err: any) {
-      console.error('Failed to load qualification field data:', err);
+
       setError(err.message || 'Не удалось загрузить данные');
     } finally {
       setLoading(false);
@@ -247,7 +247,7 @@ export const Bitrix24QualificationFieldModal: React.FC<Bitrix24QualificationFiel
         onClose();
       }, 1500);
     } catch (err: any) {
-      console.error('Failed to save qualification fields:', err);
+
       setError(err.message || 'Не удалось сохранить настройки');
     } finally {
       setSaving(false);

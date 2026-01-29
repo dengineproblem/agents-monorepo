@@ -85,7 +85,7 @@ export const adInsightsApi = {
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.sync] Error:', error);
+
       return { success: false, accountId, error: 'Network error' };
     }
   },
@@ -112,13 +112,13 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getAnomalies] HTTP error:', res.status);
+
         return { anomalies: [], total: 0 };
       }
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getAnomalies] Error:', error);
+
       return { anomalies: [], total: 0 };
     }
   },
@@ -132,7 +132,7 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url, { method: 'POST' });
       return res.ok;
     } catch (error) {
-      console.error('[adInsightsApi.acknowledgeAnomaly] Error:', error);
+
       return false;
     }
   },
@@ -157,13 +157,13 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getBurnoutPredictions] HTTP error:', res.status);
+
         return { predictions: [], total: 0 };
       }
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getBurnoutPredictions] Error:', error);
+
       return { predictions: [], total: 0 };
     }
   },
@@ -179,7 +179,7 @@ export const adInsightsApi = {
       if (!res.ok) return null;
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getBurnoutPrediction] Error:', error);
+
       return null;
     }
   },
@@ -196,7 +196,7 @@ export const adInsightsApi = {
       const data = await res.json();
       return data.stats || [];
     } catch (error) {
-      console.error('[adInsightsApi.getLagStats] Error:', error);
+
       return [];
     }
   },
@@ -214,13 +214,13 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getRecoveryPredictions] HTTP error:', res.status);
+
         return { predictions: [], total: 0 };
       }
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getRecoveryPredictions] Error:', error);
+
       return { predictions: [], total: 0 };
     }
   },
@@ -236,7 +236,7 @@ export const adInsightsApi = {
       if (!res.ok) return null;
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getRecoveryPrediction] Error:', error);
+
       return null;
     }
   },
@@ -251,7 +251,7 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getDecayRecoveryAnalysis] HTTP error:', res.status);
+
         return { analysis: [] };
       }
 
@@ -312,7 +312,7 @@ export const adInsightsApi = {
 
       return { analysis: Array.from(analysisMap.values()) };
     } catch (error) {
-      console.error('[adInsightsApi.getDecayRecoveryAnalysis] Error:', error);
+
       return { analysis: [] };
     }
   },
@@ -382,7 +382,7 @@ export const adInsightsApi = {
         },
       };
     } catch (error) {
-      console.error('[adInsightsApi.getYearlyAudit] Error:', error);
+
       return null;
     }
   },
@@ -402,7 +402,7 @@ export const adInsightsApi = {
       if (!res.ok) return null;
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getTrackingHealth] Error:', error);
+
       return null;
     }
   },
@@ -437,7 +437,7 @@ export const adInsightsApi = {
         trackingHealthScore: tracking?.overallHealth ?? 100,
       };
     } catch (error) {
-      console.error('[adInsightsApi.getDashboardStats] Error:', error);
+
       return null;
     }
   },
@@ -464,7 +464,7 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getSeasonality] HTTP error:', res.status);
+
         return {
           success: false,
           buckets: [],
@@ -474,7 +474,7 @@ export const adInsightsApi = {
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getSeasonality] Error:', error);
+
       return {
         success: false,
         buckets: [],
@@ -497,7 +497,7 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getPatternsMetrics] HTTP error:', res.status);
+
         return {
           success: false,
           total_anomalies: 0,
@@ -509,7 +509,7 @@ export const adInsightsApi = {
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getPatternsMetrics] Error:', error);
+
       return {
         success: false,
         total_anomalies: 0,
@@ -530,7 +530,7 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-        console.error('[adInsightsApi.getPatternsSummary] HTTP error:', res.status);
+
         return {
           success: false,
           total_anomalies: 0,
@@ -545,7 +545,7 @@ export const adInsightsApi = {
 
       return await res.json();
     } catch (error) {
-      console.error('[adInsightsApi.getPatternsSummary] Error:', error);
+
       return {
         success: false,
         total_anomalies: 0,

@@ -71,7 +71,7 @@ export const WhatsAppQRDialog: React.FC<WhatsAppQRDialogProps> = ({
       // Начать проверку статуса подключения
       startPolling(result.instance.instance_name);
     } catch (err) {
-      console.error('Failed to create WhatsApp instance:', err);
+
       setError(err instanceof Error ? err.message : 'Не удалось создать инстанс');
       setStatus('error');
     }
@@ -93,7 +93,7 @@ export const WhatsAppQRDialog: React.FC<WhatsAppQRDialogProps> = ({
           }, 2000);
         }
       } catch (err) {
-        console.error('Error polling status:', err);
+
       }
     }, 3000); // Проверяем каждые 3 секунды
 

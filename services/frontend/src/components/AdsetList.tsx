@@ -51,21 +51,21 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange, forceRefre
     
     // Загружаем из API
     setLoading(true);
-    console.log(`[AdsetList] Загрузка ad sets для кампании: ${campaignId}`);
+
     facebookApi.getAdsetsByCampaign(campaignId)
       .then((data) => {
-        console.log(`[AdsetList] Получено ${data.length} ad sets для кампании ${campaignId}`);
+
         setAdsets(data);
         // НЕ кэшируем пустые массивы - они могут быть временным состоянием
         if (data.length > 0) {
           setCachedData(cacheKey, data, 10); // Кэш на 10 минут
-          console.log(`[AdsetList] Ad sets закэшированы`);
+
         } else {
-          console.warn(`[AdsetList] Пустой результат НЕ закэширован - будет повторный запрос`);
+
         }
       })
       .catch((e) => {
-        console.error('[AdsetList] Ошибка загрузки ad sets:', e);
+
         setAdsets([]);
       })
       .finally(() => setLoading(false));
@@ -93,7 +93,7 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange, forceRefre
         setCachedData(statsCacheKey, stats, 5); // Кэш на 5 минут
       })
       .catch((e) => {
-        console.error('Ошибка загрузки статистики ad sets:', e);
+
         setAdsetStats([]);
       });
   }, [campaignId, dateRange.since, dateRange.until, forceRefresh]);
@@ -162,7 +162,7 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange, forceRefre
           : 'Ad set успешно приостановлен'
       );
     } catch (error) {
-      console.error('Ошибка изменения статуса ad set:', error);
+
       toast.error('Не удалось изменить статус ad set');
     } finally {
       setUpdatingStatus(prev => ({ ...prev, [adsetId]: false }));

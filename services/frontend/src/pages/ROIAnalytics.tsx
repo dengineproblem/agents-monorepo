@@ -348,12 +348,12 @@ const ROIAnalytics: React.FC = () => {
     try {
       const { data, error } = await salesApi.getDirections(userAccountId, directionsPlatform, accountId);
       if (error) {
-        console.error('Ошибка загрузки направлений:', error);
+
         return;
       }
       setDirections(data);
     } catch (err) {
-      console.error('Ошибка загрузки направлений:', err);
+
     }
   };
 
@@ -363,10 +363,10 @@ const ROIAnalytics: React.FC = () => {
     try {
       const { getDirectionKeyStageStats } = await import('@/services/amocrmApi');
       const stats = await getDirectionKeyStageStats(directionId);
-      console.log('📊 Loaded qualification stats:', stats);
+
       setQualificationStats(stats);
     } catch (err) {
-      console.error('❌ Ошибка загрузки статистики квалификации:', err);
+
       // Просто скрываем карточку при ошибке, не показываем моки
       setQualificationStats(null);
     }
@@ -390,12 +390,6 @@ const ROIAnalytics: React.FC = () => {
         throw new Error('User ID не найден');
       }
 
-      console.log('🔄 Загружаем ROI данные...', {
-        userId,
-        directionId: selectedDirectionId || 'все',
-        timeframe: tf || 'all'
-      });
-      
       const data = await salesApi.getROIData(
         userId,
         selectedDirectionId,
@@ -404,11 +398,10 @@ const ROIAnalytics: React.FC = () => {
         currentAdAccountId || undefined,  // UUID для мультиаккаунтности
         platform
       );
-      
-      console.log('✅ ROI данные загружены:', data);
+
       setRoiData(data);
     } catch (err) {
-      console.error('Ошибка загрузки ROI данных:', err);
+
       setError(err instanceof Error ? err.message : 'Ошибка загрузки данных');
     } finally {
       setLoading(false);
@@ -444,7 +437,7 @@ const ROIAnalytics: React.FC = () => {
           });
         } catch (e) {
           // Игнорируем ошибки отдельных креативов
-          console.warn(`Ошибка синхронизации креатива ${creativeId}:`, e);
+
         }
       });
 
@@ -453,7 +446,7 @@ const ROIAnalytics: React.FC = () => {
       // 3. После синхронизации обновляем таблицу ещё раз чтобы показать новые данные
       await loadROIData();
     } catch (err) {
-      console.error('Ошибка синхронизации CRM:', err);
+
     } finally {
       setIsSyncing(false);
     }
@@ -483,12 +476,7 @@ const ROIAnalytics: React.FC = () => {
       // Load qualification stats only if direction is selected and has at least one key stage configured
       if (selectedDirectionId && directions.length > 0) {
         const direction = directions.find(d => d.id === selectedDirectionId);
-        console.log('🔍 Direction found:', direction);
-        console.log('🔍 Key stages:', {
-          stage1: { pipeline: direction?.key_stage_1_pipeline_id, status: direction?.key_stage_1_status_id },
-          stage2: { pipeline: direction?.key_stage_2_pipeline_id, status: direction?.key_stage_2_status_id },
-          stage3: { pipeline: direction?.key_stage_3_pipeline_id, status: direction?.key_stage_3_status_id }
-        });
+
 
         const hasKeyStage = (
           (direction?.key_stage_1_pipeline_id && direction?.key_stage_1_status_id) ||
@@ -497,10 +485,10 @@ const ROIAnalytics: React.FC = () => {
         );
 
         if (hasKeyStage) {
-          console.log('✅ Has key stages, loading stats for direction:', selectedDirectionId);
+
           loadQualificationStats(selectedDirectionId);
         } else {
-          console.log('⚠️ No key stages configured for direction:', selectedDirectionId);
+
           setQualificationStats(null);
         }
       } else {
@@ -553,24 +541,23 @@ const ROIAnalytics: React.FC = () => {
       ]);
 
       if (metricsResult.error) {
-        console.error('Ошибка загрузки метрик:', metricsResult.error);
+
         setCreativeMetrics([]);
       } else {
         setCreativeMetrics(metricsResult.data || []);
       }
 
       if (analysisResult.error) {
-        console.log('Анализ не найден (ожидаемо при первой загрузке)', analysisResult.error);
         setCreativeAnalysis(null);
       } else {
-        console.log('✅ Загружен анализ креатива:', analysisResult.data);
+
         setCreativeAnalysis(analysisResult.data);
       }
 
       setCreativeTranscript(textData.text);
 
     } catch (err) {
-      console.error('Ошибка загрузки данных креатива:', err);
+
       setCreativeMetrics([]);
       setCreativeAnalysis(null);
       setCreativeTranscript(null);
@@ -606,8 +593,7 @@ const ROIAnalytics: React.FC = () => {
       }
 
       const result = await response.json();
-      console.log('✅ Анализ креатива завершен:', result);
-      
+
       // Обновляем состояние анализа напрямую из результата
       if (result.analysis) {
         setCreativeAnalysis(result.analysis);
@@ -628,7 +614,7 @@ const ROIAnalytics: React.FC = () => {
       }
       
     } catch (err) {
-      console.error('Ошибка анализа креатива:', err);
+
       alert('Ошибка при запуске анализа креатива');
     } finally {
       setAnalyzingCreative(null);

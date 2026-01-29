@@ -89,7 +89,7 @@ export async function manualLaunchAds(
 
     return data;
   } catch (error: any) {
-    console.error('Manual launch error:', error);
+
     return {
       success: false,
       error: error.message || 'Ошибка запуска рекламы',
