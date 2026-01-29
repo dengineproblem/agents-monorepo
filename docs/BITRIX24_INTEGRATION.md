@@ -28,6 +28,8 @@ services/agent-service/src/
 │   └── bitrix24.ts              # API адаптер с rate limiting (2 req/sec)
 ├── lib/
 │   └── bitrix24Tokens.ts        # OAuth токены (legacy + multi-account)
+├── workflows/
+│   └── bitrix24Sync.ts          # Авто-создание лидов из Facebook Lead Forms
 └── routes/
     ├── bitrix24OAuth.ts         # OAuth flow + подключение
     ├── bitrix24Pipelines.ts     # Воронки, sync-leads, key stages
@@ -114,6 +116,43 @@ POST /bitrix24/sync-leads
             └── getDeals(batch) -> update current_status_id, current_pipeline_id
 ```
 
+### Auto-Create Leads Flow (из Facebook Lead Forms)
+
+```
+Facebook Lead Form Webhook
+    │
+    ├── facebookWebhooks.ts получает лид
+    │
+    ├── Проверка: bitrix24_auto_create_leads = true?
+    │   │
+    │   └── Да → Вызов syncLeadToBitrix24(leadId)
+    │
+    └── workflows/bitrix24Sync.ts
+        │
+        ├── STEP 1: Поиск существующего по телефону
+        │   │
+        │   ├── entityType='lead' → findByPhone(LEAD)
+        │   └── entityType='deal' → findByPhone(CONTACT)
+        │
+        ├── STEP 2: Если найден → связать (update local lead)
+        │
+        └── STEP 3: Если не найден → создать в Bitrix24
+            │
+            ├── entityType='lead':
+            │   └── createLead(NAME, LAST_NAME, PHONE, UTM, SOURCE)
+            │
+            └── entityType='deal':
+                ├── createContact(NAME, PHONE)
+                └── createDeal(CONTACT_ID, TITLE, SOURCE)
+```
+
+**Передаваемые поля (hardcoded):**
+- `NAME`, `LAST_NAME` — из имени лида
+- `PHONE` — телефон
+- `UTM_SOURCE`, `UTM_MEDIUM`, `UTM_CAMPAIGN`, `UTM_CONTENT`, `UTM_TERM` — UTM-метки
+- `SOURCE_ID` — если настроен `bitrix24_default_source_id`
+- `COMMENTS` — дополнительная информация
+
 ---
 
 ## База данных
@@ -125,6 +164,7 @@ POST /bitrix24/sync-leads
 | `102_add_bitrix24_integration.sql` | Основные таблицы и колонки |
 | `103_bitrix24_key_stages.sql` | Key stages в account_directions |
 | `104_bitrix24_multi_account.sql` | Bitrix24 колонки в ad_accounts |
+| `110_add_bitrix24_auto_create_leads.sql` | Авто-создание лидов (колонка в user_accounts и ad_accounts) |
 
 ### Таблица user_accounts (Legacy mode)
 
@@ -139,6 +179,8 @@ bitrix24_user_id             INTEGER   -- ID пользователя Bitrix24
 bitrix24_entity_type         TEXT      -- 'lead', 'deal', 'both'
 bitrix24_qualification_fields JSONB    -- Поля квалификации (max 3)
 bitrix24_connected_at        TIMESTAMP -- Время подключения
+bitrix24_auto_create_leads   BOOLEAN   -- Авто-создание лидов из FB Lead Forms
+bitrix24_default_source_id   TEXT      -- ID источника по умолчанию
 ```
 
 ### Таблица ad_accounts (Multi-account mode)
@@ -153,6 +195,8 @@ bitrix24_member_id           TEXT
 bitrix24_user_id             INTEGER
 bitrix24_entity_type         TEXT
 bitrix24_connected_at        TIMESTAMP
+bitrix24_auto_create_leads   BOOLEAN   -- Авто-создание лидов из FB Lead Forms
+bitrix24_default_source_id   TEXT      -- ID источника по умолчанию
 ```
 
 ### Таблица leads
@@ -235,6 +279,17 @@ bitrix24_key_stage_3_status_id    TEXT
 }
 ```
 
+### Авто-создание лидов
+
+| Endpoint | Метод | Body/Query | Описание |
+|----------|-------|------------|----------|
+| `/bitrix24/auto-create-leads` | GET | query: `userAccountId, accountId?` | Получить настройку авто-создания |
+| `/bitrix24/auto-create-leads` | PATCH | `{userAccountId, accountId?, enabled}` | Включить/выключить авто-создание |
+| `/bitrix24/default-source` | GET | query: `userAccountId, accountId?` | Получить источник по умолчанию |
+| `/bitrix24/default-source` | PATCH | `{userAccountId, accountId?, sourceId}` | Установить источник по умолчанию |
+
+**Примечание:** При включённом авто-создании, каждый новый лид из Facebook Lead Form автоматически создаётся/связывается в Bitrix24.
+
 ### Ключевые этапы (Key Stages)
 
 | Endpoint | Метод | Body | Описание |
@@ -310,6 +365,9 @@ const rateLimiter = new RateLimiter(2, 1000); // 2 requests per second
 | `getLead(id)` | Получить один лид |
 | `getDeal(id)` | Получить одну сделку |
 | `getContact(id)` | Получить контакт |
+| `createLead(fields)` | Создать лид |
+| `createDeal(fields)` | Создать сделку |
+| `createContact(fields)` | Создать контакт |
 | `findByPhone(phones, entityType)` | Поиск по телефону через `crm.duplicate.findbycomm` |
 | `extractPhone(entity)` | Извлечь телефон из сущности |
 | `normalizePhone(phone)` | Нормализация телефона (только цифры) |
@@ -361,6 +419,7 @@ BITRIX24_REDIRECT_URI=https://app.performanteaiagency.com/api/bitrix24/callback
 migrations/102_add_bitrix24_integration.sql
 migrations/103_bitrix24_key_stages.sql
 migrations/104_bitrix24_multi_account.sql
+migrations/110_add_bitrix24_auto_create_leads.sql
 ```
 
 ### 4. Деплой
@@ -380,11 +439,13 @@ docker compose up -d --build agent-service
 - [x] Миграция 102 применена
 - [x] Миграция 103 применена (key stages)
 - [x] Миграция 104 применена (multi-account)
+- [x] Миграция 110 применена (auto-create leads)
 - [x] agent-service пересобран
 - [x] Frontend пересобран
 - [x] Тестовое подключение успешно
 - [x] Webhooks получают события
 - [x] sync-leads работает
+- [x] auto-create-leads работает
 
 ---
 
@@ -418,6 +479,11 @@ docker logs agents-monorepo-agent-service-1 --since 5m 2>&1 | grep -i "linking\|
 
 ### Deal not found in Bitrix24
 Это warning от webhook — сделка была удалена в CRM. Локальный лид отвязывается автоматически.
+
+### Лид не создаётся автоматически
+1. Проверьте что `bitrix24_auto_create_leads = true` в настройках
+2. Проверьте логи: `docker logs agents-monorepo-agent-service-1 --since 5m 2>&1 | grep -i "sync.*bitrix"`
+3. Убедитесь что лид содержит телефон (phone IS NOT NULL)
 
 ---
 
