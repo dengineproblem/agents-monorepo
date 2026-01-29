@@ -605,26 +605,89 @@ export const creativesApi = {
   },
 
   /**
-   * Запускает анализ топ креативов из Facebook и импортирует лучшие
+   * Получает превью топ креативов из Facebook (без импорта)
+   * Пользователь может выбрать какие из них импортировать
    */
-  async analyzeTopCreatives(accountId?: string | null, force: boolean = false): Promise<{
+  async getTopCreativesPreview(accountId?: string | null): Promise<{
     success: boolean;
-    imported?: number;
+    creatives: TopCreativePreview[];
+    total_found: number;
+    already_imported: number;
     error?: string;
   }> {
     const userId = getUserId();
     if (!userId) {
-      return { success: false, error: 'User not authenticated' };
+      return { success: false, creatives: [], total_found: 0, already_imported: 0, error: 'User not authenticated' };
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/analyze-top-creatives`, {
+      const params = new URLSearchParams({ user_id: userId });
+      if (accountId) {
+        params.set('account_id', accountId);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/analyze-top-creatives/preview?${params.toString()}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          creatives: [],
+          total_found: 0,
+          already_imported: 0,
+          error: data.error || 'Failed to fetch preview'
+        };
+      }
+
+      return {
+        success: true,
+        creatives: data.creatives || [],
+        total_found: data.total_found || 0,
+        already_imported: data.already_imported || 0
+      };
+    } catch (error) {
+      console.error('creativesApi.getTopCreativesPreview error:', error);
+      return {
+        success: false,
+        creatives: [],
+        total_found: 0,
+        already_imported: 0,
+        error: 'Network error during preview'
+      };
+    }
+  },
+
+  /**
+   * Импортирует выбранные креативы из Facebook
+   * @param adIds - массив ad_id для импорта
+   * @param accountId - UUID рекламного аккаунта
+   * @param directionMappings - маппинг ad_id -> direction_id (опционально)
+   */
+  async importSelectedCreatives(
+    adIds: string[],
+    accountId?: string | null,
+    directionMappings?: Array<{ ad_id: string; direction_id: string | null }>
+  ): Promise<{
+    success: boolean;
+    imported: number;
+    results: ImportResult[];
+    message?: string;
+    error?: string;
+  }> {
+    const userId = getUserId();
+    if (!userId) {
+      return { success: false, imported: 0, results: [], error: 'User not authenticated' };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/analyze-top-creatives/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
           account_id: accountId || undefined,
-          force
+          ad_ids: adIds,
+          direction_mappings: directionMappings || undefined
         })
       });
 
@@ -633,19 +696,25 @@ export const creativesApi = {
       if (!response.ok) {
         return {
           success: false,
-          error: data.error || 'Failed to analyze creatives'
+          imported: 0,
+          results: [],
+          error: data.error || 'Failed to import creatives'
         };
       }
 
       return {
         success: true,
-        imported: data.imported
+        imported: data.imported || 0,
+        results: data.results || [],
+        message: data.message
       };
     } catch (error) {
-      console.error('creativesApi.analyzeTopCreatives error:', error);
+      console.error('creativesApi.importSelectedCreatives error:', error);
       return {
         success: false,
-        error: 'Network error during analysis'
+        imported: 0,
+        results: [],
+        error: 'Network error during import'
       };
     }
   },
@@ -694,3 +763,28 @@ export const creativesApi = {
     }
   },
 };
+
+// Типы для превью креатива
+export interface TopCreativePreview {
+  ad_id: string;
+  ad_name: string;
+  creative_id: string;
+  video_id: string | null;
+  thumbnail_url: string | null;
+  spend: number;
+  leads: number;
+  cpl: number;
+  cpl_cents: number;
+  already_imported: boolean;
+  is_video: boolean;
+  preview_url: string; // Ссылка на Ads Manager для просмотра
+}
+
+// Результат импорта одного креатива
+export interface ImportResult {
+  ad_id: string;
+  ad_name: string;
+  success: boolean;
+  creative_id?: string;
+  error?: string;
+}
