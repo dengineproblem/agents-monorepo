@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import 'dotenv/config';
 import OpenAI from 'openai';
 import cron from 'node-cron';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { logger as baseLogger } from './lib/logger.js';
 import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
@@ -7710,7 +7710,11 @@ fastify.get('/api/context', async (request, reply) => {
 
     if (userError || !user) {
       fastify.log.warn({ telegramId, error: userError?.message }, 'User not found by telegram_id');
-      return reply.code(404).send({ error: 'User not found' });
+      return reply.code(404).send({
+        error: 'User not found',
+        needsOnboarding: true,
+        message: 'Пользователь не найден. Пройдите регистрацию через /onboarding'
+      });
     }
 
     // Базовые credentials
@@ -7750,6 +7754,189 @@ fastify.get('/api/context', async (request, reply) => {
 
   } catch (error) {
     fastify.log.error({ telegramId, error: error.message }, 'Context lookup failed');
+    return reply.code(500).send({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Helper functions for onboarding
+ */
+
+function generateUsername() {
+  const randomPart = randomBytes(4).toString('hex');
+  return `user_${randomPart}`;
+}
+
+async function generateUniqueUsername(maxAttempts = 5) {
+  let username;
+  let attempts = 0;
+
+  do {
+    const randomPart = randomBytes(4).toString('hex');
+    username = `user_${randomPart}`;
+
+    const { data } = await supabase
+      .from('user_accounts')
+      .select('id')
+      .eq('username', username)
+      .single();
+
+    if (!data) return username;
+    attempts++;
+  } while (attempts < maxAttempts);
+
+  // Fallback с timestamp
+  return `user_${Date.now().toString(36)}`;
+}
+
+function generatePassword(length = 8) {
+  const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowercase = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const allChars = uppercase + lowercase + digits;
+
+  const bytes = randomBytes(length);
+  let password = '';
+
+  password += uppercase[bytes[0] % uppercase.length];
+  password += lowercase[bytes[1] % lowercase.length];
+  password += digits[bytes[2] % digits.length];
+
+  for (let i = 3; i < length; i++) {
+    password += allChars[bytes[i] % allChars.length];
+  }
+
+  return password.split('').sort(() => Math.random() - 0.5).join('');
+}
+
+function buildFacebookOAuthUrl(userId) {
+  const FB_APP_ID = process.env.FB_APP_ID || '690472653668355';
+  const FB_REDIRECT_URI = 'https://app.performanteaiagency.com/profile';
+  const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads,pages_read_engagement';
+  const state = `user_${userId}_${Date.now()}`;
+
+  return (
+    `https://www.facebook.com/v21.0/dialog/oauth?` +
+    `client_id=${FB_APP_ID}&` +
+    `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
+    `scope=${FB_SCOPE}&` +
+    `response_type=code&` +
+    `state=${state}`
+  );
+}
+
+/**
+ * POST /api/onboarding/create-user
+ *
+ * Создание нового пользователя из Moltbot onboarding
+ * Вызывается после того как пользователь ответил на 15 вопросов
+ */
+fastify.post('/api/onboarding/create-user', async (request, reply) => {
+  try {
+    const { telegramId, answers } = request.body;
+
+    if (!telegramId) {
+      return reply.code(400).send({ error: 'telegramId required' });
+    }
+
+    // Проверяем обязательные поля
+    if (!answers?.business_name || !answers?.business_niche) {
+      return reply.code(400).send({
+        error: 'Required fields: business_name, business_niche'
+      });
+    }
+
+    fastify.log.info({ telegramId, answers }, 'Onboarding create-user request');
+
+    // 1. Проверяем существование пользователя
+    const { data: existingUser } = await supabase
+      .from('user_accounts')
+      .select('id, username')
+      .eq('telegram_id', telegramId)
+      .single();
+
+    if (existingUser) {
+      fastify.log.info({ telegramId, existingUserId: existingUser.id }, 'User already exists');
+      return reply.send({
+        success: true,
+        alreadyExists: true,
+        userId: existingUser.id,
+        username: existingUser.username,
+        message: 'Пользователь уже зарегистрирован'
+      });
+    }
+
+    // 2. Генерируем уникальный username и password
+    const username = await generateUniqueUsername();
+    const password = generatePassword();
+
+    // 3. Создаём user_accounts
+    const { data: newUser, error: userError } = await supabase
+      .from('user_accounts')
+      .insert({
+        telegram_id: telegramId,
+        username,
+        password,
+        onboarding_stage: 'registered',
+        is_active: true,
+        multi_account_enabled: false,
+        access_token: '',
+        ad_account_id: '',
+        page_id: ''
+      })
+      .select('id')
+      .single();
+
+    if (userError || !newUser) {
+      fastify.log.error({ error: userError, telegramId }, 'Failed to create user');
+      return reply.code(500).send({ error: 'Failed to create user' });
+    }
+
+    const userId = newUser.id;
+
+    // 4. Сохраняем ответы в user_briefing_responses
+    const { error: briefingError } = await supabase
+      .from('user_briefing_responses')
+      .insert({
+        user_id: userId,
+        business_name: answers.business_name,
+        business_niche: answers.business_niche,
+        instagram_url: answers.instagram_url || null,
+        website_url: answers.website_url || null,
+        target_audience: answers.target_audience || null,
+        geography: answers.geography || null,
+        main_pains: answers.main_pains || null,
+        main_services: answers.main_services || null,
+        competitive_advantages: answers.competitive_advantages || null,
+        price_segment: answers.price_segment || null,
+        tone_of_voice: answers.tone_of_voice || null,
+        main_promises: answers.main_promises || null,
+        social_proof: answers.social_proof || null,
+        guarantees: answers.guarantees || null,
+        competitor_instagrams: answers.competitor_instagrams || []
+      });
+
+    if (briefingError) {
+      fastify.log.error({ error: briefingError, userId }, 'Failed to save briefing responses');
+      // Не критично - пользователь создан, продолжаем
+    }
+
+    // 5. Генерируем Facebook OAuth URL
+    const fbOAuthUrl = buildFacebookOAuthUrl(userId);
+
+    fastify.log.info({ userId, username, telegramId }, 'User created successfully');
+
+    // 6. Возвращаем результат
+    return reply.send({
+      success: true,
+      userId,
+      username,
+      password,
+      fbOAuthUrl
+    });
+
+  } catch (error) {
+    fastify.log.error({ error: error.message, stack: error.stack }, 'Onboarding error');
     return reply.code(500).send({ error: 'Internal server error' });
   }
 });
