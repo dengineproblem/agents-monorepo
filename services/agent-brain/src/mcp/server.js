@@ -21,30 +21,99 @@ import { getToolByName, allMCPTools } from './tools/definitions.js';
 import { supabase } from '../lib/supabase.js';
 
 /**
- * Get access token from database by fb_ad_account_id
- * @param {string} fbAdAccountId - Facebook ad account ID (act_...)
- * @returns {Promise<{accessToken: string|null, dbId: string|null}>}
+ * Get credentials based on multi-account mode
+ * See docs/MULTI_ACCOUNT_GUIDE.md for full documentation
+ *
+ * @param {string} userAccountId - UUID from user_accounts.id
+ * @param {string|null} accountId - UUID from ad_accounts.id (required if multi_account_enabled)
+ * @returns {Promise<{success: boolean, credentials: object|null, error: string|null}>}
  */
-async function getAccessTokenByFbAccountId(fbAdAccountId) {
-  if (!fbAdAccountId) return { accessToken: null, dbId: null };
+async function getCredentials(userAccountId, accountId) {
+  if (!userAccountId) {
+    return { success: false, credentials: null, error: 'userAccountId is required' };
+  }
 
   try {
-    const { data, error } = await supabase
-      .from('ad_accounts')
-      .select('id, access_token')
-      .eq('fb_ad_account_id', fbAdAccountId)
+    // 1. Get user and check multi_account_enabled flag
+    const { data: user, error: userError } = await supabase
+      .from('user_accounts')
+      .select(`
+        id, multi_account_enabled,
+        access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id
+      `)
+      .eq('id', userAccountId)
       .single();
 
-    if (error || !data) {
-      return { accessToken: null, dbId: null };
+    if (userError || !user) {
+      return { success: false, credentials: null, error: `User not found: ${userAccountId}` };
     }
 
+    // 2. Branch based on multi_account_enabled flag (NOT by presence of accountId!)
+    if (user.multi_account_enabled) {
+      // MULTI-ACCOUNT MODE: require accountId, get credentials from ad_accounts
+      if (!accountId) {
+        return {
+          success: false,
+          credentials: null,
+          error: 'accountId is required when multi_account_enabled is true'
+        };
+      }
+
+      const { data: adAccount, error: adError } = await supabase
+        .from('ad_accounts')
+        .select(`
+          id, access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id
+        `)
+        .eq('id', accountId)
+        .eq('user_account_id', userAccountId)  // Security: verify ownership
+        .single();
+
+      if (adError || !adAccount) {
+        return {
+          success: false,
+          credentials: null,
+          error: `Ad account not found or access denied: ${accountId}`
+        };
+      }
+
+      return {
+        success: true,
+        credentials: {
+          accessToken: adAccount.access_token,
+          adAccountId: adAccount.ad_account_id,  // Facebook act_xxx
+          pageId: adAccount.page_id,
+          instagramId: adAccount.instagram_id,
+          instagramUsername: adAccount.instagram_username,
+          businessId: adAccount.business_id,
+          // Meta
+          isMultiAccountMode: true,
+          dbAccountId: adAccount.id,  // UUID for internal queries
+          userAccountId: userAccountId
+        },
+        error: null
+      };
+    }
+
+    // LEGACY MODE: get credentials from user_accounts
     return {
-      accessToken: data.access_token,
-      dbId: data.id
+      success: true,
+      credentials: {
+        accessToken: user.access_token,
+        adAccountId: user.ad_account_id,  // Facebook act_xxx
+        pageId: user.page_id,
+        instagramId: user.instagram_id,
+        instagramUsername: user.instagram_username,
+        businessId: user.business_id,
+        // Meta
+        isMultiAccountMode: false,
+        dbAccountId: null,
+        userAccountId: userAccountId
+      },
+      error: null
     };
+
   } catch (err) {
-    return { accessToken: null, dbId: null };
+    return { success: false, credentials: null, error: err.message };
   }
 }
 
@@ -298,33 +367,43 @@ export function registerMCPRoutes(fastify) {
       });
     }
 
-    // Extract context from body or use defaults
+    // Extract context from body
+    // See docs/MULTI_ACCOUNT_GUIDE.md for userAccountId vs accountId
     const {
-      adAccountId,
-      userAccountId,
-      accessToken: providedAccessToken,
+      userAccountId,  // Required: UUID from user_accounts.id
+      accountId,      // Required if multi_account_enabled: UUID from ad_accounts.id
       dangerousPolicy = 'allow', // Moltbot manages its own approval flow
       ...toolArgs
     } = args;
 
-    // If accessToken not provided, try to get it from database by adAccountId
-    let accessToken = providedAccessToken;
-    let adAccountDbId = null;
+    // Get credentials based on multi-account mode
+    const { success: credsSuccess, credentials, error: credsError } = await getCredentials(userAccountId, accountId);
 
-    if (!accessToken && adAccountId) {
-      const dbResult = await getAccessTokenByFbAccountId(adAccountId);
-      accessToken = dbResult.accessToken;
-      adAccountDbId = dbResult.dbId;
+    if (!credsSuccess) {
+      fastify.log.warn({
+        requestId,
+        toolName,
+        userAccountId,
+        accountId,
+        error: credsError
+      }, 'Failed to get credentials');
+
+      return reply.code(400).send({
+        success: false,
+        error: 'credentials_error',
+        message: credsError
+      });
     }
 
     fastify.log.info({
       requestId,
       endpoint: '/brain/tools/:toolName',
       toolName,
-      hasAdAccountId: !!adAccountId,
-      hasUserAccountId: !!userAccountId,
-      hasAccessToken: !!accessToken,
-      tokenSource: providedAccessToken ? 'request' : (accessToken ? 'database' : 'none'),
+      userAccountId,
+      accountId,
+      isMultiAccountMode: credentials.isMultiAccountMode,
+      hasAccessToken: !!credentials.accessToken,
+      adAccountId: credentials.adAccountId,  // Facebook act_xxx
       argKeys: Object.keys(toolArgs)
     }, 'Moltbot tool call received');
 
@@ -345,12 +424,21 @@ export function registerMCPRoutes(fastify) {
     }
 
     try {
-      // Build context for tool execution
+      // Build context for tool execution using credentials from getCredentials()
       const context = {
-        adAccountId,
-        adAccountDbId,  // UUID from database for internal queries
-        userAccountId,
-        accessToken,
+        // Facebook IDs
+        adAccountId: credentials.adAccountId,      // Facebook act_xxx for API calls
+        pageId: credentials.pageId,
+        instagramId: credentials.instagramId,
+        instagramUsername: credentials.instagramUsername,
+        businessId: credentials.businessId,
+        // Auth
+        accessToken: credentials.accessToken,
+        // Internal IDs
+        accountId: credentials.dbAccountId,        // UUID from ad_accounts.id (for DB queries)
+        userAccountId: credentials.userAccountId,
+        // Mode
+        isMultiAccountMode: credentials.isMultiAccountMode,
         dangerousPolicy,
         // No session limits for Moltbot direct calls
         sessionId: null,
