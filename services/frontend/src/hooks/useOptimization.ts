@@ -141,10 +141,11 @@ export function useOptimization() {
       });
 
       // Используем прямой API вместо LLM chat
+      // Если accountId пустая строка - передаём undefined, backend сам определит аккаунт
       const stream = runBrainMiniStream(
         {
           userAccountId,
-          adAccountId: scope.accountId,
+          adAccountId: scope.accountId || undefined,
           directionId: scope.directionId,
           campaignId: scope.campaignId,
           dryRun: true, // Всегда dry_run - показываем предложения для подтверждения
@@ -348,7 +349,7 @@ export function useOptimization() {
       const stream = runBrainMiniStream(
         {
           userAccountId,
-          adAccountId: state.scope.accountId,
+          adAccountId: state.scope.accountId || undefined,
           directionId: state.scope.directionId,
           campaignId: state.scope.campaignId,
           dryRun: false, // Реальное выполнение

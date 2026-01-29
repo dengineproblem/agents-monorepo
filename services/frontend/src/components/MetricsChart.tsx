@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { formatShortDate, formatCurrency, formatNumber } from '../utils/formatters';
+import { formatShortDate, formatCurrency, formatCurrencyKZT, formatNumber } from '../utils/formatters';
 import {
   LineChart,
   Line,
@@ -13,22 +13,27 @@ import {
   Bar
 } from 'recharts';
 import { facebookApi } from '../services/facebookApi';
+import { tiktokApi } from '../services/tiktokApi';
 
 interface MetricsChartProps {
   campaignId: string;
 }
 
 const MetricsChart: React.FC<MetricsChartProps> = ({ campaignId }) => {
-  const { dateRange } = useAppContext();
+  const { dateRange, platform } = useAppContext();
   const [chartStats, setChartStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    facebookApi.getCampaignStatsByDay(campaignId, dateRange)
+    const fetchStats = platform === 'tiktok'
+      ? tiktokApi.getCampaignStatsByDay(campaignId, dateRange)
+      : facebookApi.getCampaignStatsByDay(campaignId, dateRange);
+
+    fetchStats
       .then(setChartStats)
       .finally(() => setLoading(false));
-  }, [campaignId, dateRange]);
+  }, [campaignId, dateRange, platform]);
 
   const chartData = useMemo(() => {
     if (!chartStats || chartStats.length === 0) return [];
@@ -83,15 +88,15 @@ const MetricsChart: React.FC<MetricsChartProps> = ({ campaignId }) => {
               axisLine={false}
               interval={Math.ceil(chartData.length / 10)}
             />
-            <YAxis 
-              tick={{ fontSize: 12 }} 
-              tickLine={false} 
-              axisLine={false} 
-              tickFormatter={(value) => `₽${value}`}
-              width={40}
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value) => platform === 'tiktok' ? `₸${value}` : `$${value}`}
+              width={50}
             />
-            <Tooltip 
-              formatter={(value) => [formatCurrency(Number(value)), 'Расход']}
+            <Tooltip
+              formatter={(value) => [platform === 'tiktok' ? formatCurrencyKZT(Number(value)) : formatCurrency(Number(value)), 'Расход']}
               labelFormatter={(label) => `Дата: ${label}`}
             />
             <Bar dataKey="spend" fill="#0088cc" radius={[4, 4, 0, 0]} />
@@ -100,7 +105,7 @@ const MetricsChart: React.FC<MetricsChartProps> = ({ campaignId }) => {
       </div>
 
       <div className="p-4 bg-card rounded-lg border border-border">
-        <h3 className="text-sm font-medium mb-2">Лиды по дням</h3>
+        <h3 className="text-sm font-medium mb-2">{platform === 'tiktok' ? 'Клики по дням' : 'Лиды по дням'}</h3>
         <ResponsiveContainer width="100%" height={250}>
           <LineChart
             data={chartData}
@@ -112,21 +117,21 @@ const MetricsChart: React.FC<MetricsChartProps> = ({ campaignId }) => {
             }}
           >
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis 
-              dataKey="date" 
-              tick={{ fontSize: 12 }} 
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 12 }}
               tickLine={false}
               axisLine={false}
               interval={Math.ceil(chartData.length / 10)}
             />
-            <YAxis 
-              tick={{ fontSize: 12 }} 
-              tickLine={false} 
+            <YAxis
+              tick={{ fontSize: 12 }}
+              tickLine={false}
               axisLine={false}
               width={25}
             />
-            <Tooltip 
-              formatter={(value) => [formatNumber(Number(value)), 'Лиды']}
+            <Tooltip
+              formatter={(value) => [formatNumber(Number(value)), platform === 'tiktok' ? 'Клики' : 'Лиды']}
               labelFormatter={(label) => `Дата: ${label}`}
             />
             <Line 

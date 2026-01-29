@@ -44,6 +44,57 @@ export interface TikTokInstantPage {
   modify_time?: string;
 }
 
+export interface TikTokAdGroup {
+  id: string;
+  name: string;
+  status: 'ENABLE' | 'DISABLE' | 'DELETE';
+  campaign_id: string;
+  budget: number;
+  daily_budget?: number;
+  create_time?: string;
+}
+
+export interface TikTokAdGroupStat {
+  adgroup_id: string;
+  adgroup_name: string;
+  campaign_id: string;
+  status?: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  leads: number;  // conversions / clicks для TikTok
+  cpl: number;    // cost per lead / CPC
+  daily_budget?: number;
+  date?: string;
+  _is_real_data?: boolean;
+}
+
+export interface TikTokAd {
+  id: string;
+  name: string;
+  status: 'ENABLE' | 'DISABLE' | 'DELETE';
+  adgroup_id: string;
+  thumbnail_url?: string;
+  create_time?: string;
+}
+
+export interface TikTokAdStat {
+  ad_id: string;
+  ad_name: string;
+  adgroup_id: string;
+  status?: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  leads: number;
+  cpl: number;
+  thumbnail_url?: string;
+  date?: string;
+  _is_real_data?: boolean;
+}
+
 // Функция для получения данных текущего пользователя TikTok
 const getCurrentUserTikTokConfig = async () => {
   // Получаем данные из localStorage
@@ -673,6 +724,376 @@ export const tiktokApi = {
       console.error('[tiktokApi] Exception fetching instant pages:', error);
       toast.error('Ошибка при получении списка Instant Forms');
       return [];
+    }
+  },
+
+  // Получить Ad Groups для кампании
+  getAdGroupsByCampaign: async (campaignId: string): Promise<TikTokAdGroup[]> => {
+    console.log('[tiktokApi] getAdGroupsByCampaign:', campaignId);
+
+    if (!await hasValidTikTokConfig()) {
+      console.warn('Нет данных для получения TikTok Ad Groups');
+      return [];
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `adgroup/get/`;
+      const params = {
+        advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+        campaign_ids: [campaignId],
+        fields: ['adgroup_id', 'adgroup_name', 'operation_status', 'campaign_id', 'budget', 'create_time'],
+        page: 1,
+        page_size: 100
+      };
+
+      const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
+
+      if (response.code !== 0) {
+        console.error('TikTok API error:', response.message);
+        throw new Error(`TikTok API Error: ${response.message}`);
+      }
+
+      if (!response.data?.list || response.data.list.length === 0) {
+        console.log('No ad groups found for campaign:', campaignId);
+        return [];
+      }
+
+      return (response.data.list || []).map((adgroup: any) => ({
+        id: adgroup.adgroup_id,
+        name: adgroup.adgroup_name,
+        status: adgroup.operation_status === 'ENABLE' ? 'ENABLE' : 'DISABLE',
+        campaign_id: adgroup.campaign_id,
+        budget: Number(adgroup.budget) || 0,
+        daily_budget: Number(adgroup.budget) || 0,
+        create_time: adgroup.create_time
+      }));
+    } catch (error) {
+      console.error('Error fetching TikTok ad groups:', error);
+      toast.error('Не удалось загрузить Ad Groups');
+      return [];
+    }
+  },
+
+  // Получить статистику Ad Groups для кампании
+  getAdGroupStats: async (campaignId: string, dateRange: DateRange): Promise<TikTokAdGroupStat[]> => {
+    console.log('[tiktokApi] getAdGroupStats:', { campaignId, dateRange });
+
+    if (!await hasValidTikTokConfig()) {
+      return [];
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `report/integrated/get/`;
+
+      // TikTok ограничивает 30 днями
+      const MAX_DAYS = 30;
+      const startDate = new Date(dateRange.since);
+      const endDate = new Date(dateRange.until);
+      const allItems: any[] = [];
+
+      let windowStart = new Date(startDate);
+      while (windowStart <= endDate) {
+        const windowEnd = new Date(Math.min(
+          addDays(windowStart, MAX_DAYS - 1).getTime(),
+          endDate.getTime()
+        ));
+
+        const params = {
+          advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+          report_type: 'BASIC',
+          service_type: 'AUCTION',
+          data_level: 'AUCTION_ADGROUP',
+          dimensions: ['adgroup_id', 'stat_time_day'],
+          metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
+          filtering: [{
+            field_name: 'campaign_id',
+            filter_type: 'IN',
+            filter_value: JSON.stringify([campaignId])
+          }],
+          start_date: format(windowStart, 'yyyy-MM-dd'),
+          end_date: format(windowEnd, 'yyyy-MM-dd'),
+          page: 1,
+          page_size: 1000
+        };
+
+        const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+        if (response.code !== 0) {
+          throw new Error(`TikTok API Error: ${response.message}`);
+        }
+        const items = response.data?.list || [];
+        allItems.push(...items);
+
+        windowStart = addDays(windowStart, MAX_DAYS);
+      }
+
+      // Агрегируем по adgroup_id
+      const statsMap = new Map<string, TikTokAdGroupStat>();
+
+      for (const stat of allItems) {
+        const adgroupId = stat.dimensions?.adgroup_id;
+        if (!adgroupId) continue;
+
+        const existing = statsMap.get(adgroupId);
+        const spend = parseFloat(stat.metrics?.spend || '0');
+        const impressions = parseInt(stat.metrics?.impressions || '0', 10);
+        const clicks = parseInt(stat.metrics?.clicks || '0', 10);
+
+        if (existing) {
+          existing.spend += spend;
+          existing.impressions += impressions;
+          existing.clicks += clicks;
+          existing.leads += clicks; // Используем clicks как leads для TikTok
+        } else {
+          statsMap.set(adgroupId, {
+            adgroup_id: adgroupId,
+            adgroup_name: stat.dimensions?.adgroup_name || 'Unknown Ad Group',
+            campaign_id: campaignId,
+            spend,
+            impressions,
+            clicks,
+            ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+            leads: clicks,
+            cpl: clicks > 0 ? spend / clicks : 0,
+            _is_real_data: true
+          });
+        }
+      }
+
+      // Пересчитываем CTR и CPL после агрегации
+      const result = Array.from(statsMap.values()).map(s => ({
+        ...s,
+        ctr: s.impressions > 0 ? (s.clicks / s.impressions) * 100 : 0,
+        cpl: s.leads > 0 ? s.spend / s.leads : 0
+      }));
+
+      console.log('[tiktokApi] Ad Group stats result:', result.length);
+      return result;
+    } catch (error) {
+      console.error('Error fetching TikTok ad group stats:', error);
+      toast.error('Не удалось загрузить статистику Ad Groups');
+      return [];
+    }
+  },
+
+  // Получить Ads для Ad Group
+  getAdsByAdGroup: async (adGroupId: string): Promise<TikTokAd[]> => {
+    console.log('[tiktokApi] getAdsByAdGroup:', adGroupId);
+
+    if (!await hasValidTikTokConfig()) {
+      return [];
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `ad/get/`;
+      const params = {
+        advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+        adgroup_ids: [adGroupId],
+        fields: ['ad_id', 'ad_name', 'operation_status', 'adgroup_id', 'create_time'],
+        page: 1,
+        page_size: 100
+      };
+
+      const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
+
+      if (response.code !== 0) {
+        console.error('TikTok API error:', response.message);
+        throw new Error(`TikTok API Error: ${response.message}`);
+      }
+
+      if (!response.data?.list || response.data.list.length === 0) {
+        console.log('No ads found for ad group:', adGroupId);
+        return [];
+      }
+
+      return (response.data.list || []).map((ad: any) => ({
+        id: ad.ad_id,
+        name: ad.ad_name,
+        status: ad.operation_status === 'ENABLE' ? 'ENABLE' : 'DISABLE',
+        adgroup_id: ad.adgroup_id,
+        thumbnail_url: ad.image_ids?.[0] || undefined,
+        create_time: ad.create_time
+      }));
+    } catch (error) {
+      console.error('Error fetching TikTok ads:', error);
+      toast.error('Не удалось загрузить объявления');
+      return [];
+    }
+  },
+
+  // Получить статистику Ads для Ad Group
+  getAdStatsByAdGroup: async (adGroupId: string, dateRange: DateRange): Promise<TikTokAdStat[]> => {
+    console.log('[tiktokApi] getAdStatsByAdGroup:', { adGroupId, dateRange });
+
+    if (!await hasValidTikTokConfig()) {
+      return [];
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `report/integrated/get/`;
+
+      const MAX_DAYS = 30;
+      const startDate = new Date(dateRange.since);
+      const endDate = new Date(dateRange.until);
+      const allItems: any[] = [];
+
+      let windowStart = new Date(startDate);
+      while (windowStart <= endDate) {
+        const windowEnd = new Date(Math.min(
+          addDays(windowStart, MAX_DAYS - 1).getTime(),
+          endDate.getTime()
+        ));
+
+        const params = {
+          advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+          report_type: 'BASIC',
+          service_type: 'AUCTION',
+          data_level: 'AUCTION_AD',
+          dimensions: ['ad_id', 'stat_time_day'],
+          metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
+          filtering: [{
+            field_name: 'adgroup_id',
+            filter_type: 'IN',
+            filter_value: JSON.stringify([adGroupId])
+          }],
+          start_date: format(windowStart, 'yyyy-MM-dd'),
+          end_date: format(windowEnd, 'yyyy-MM-dd'),
+          page: 1,
+          page_size: 1000
+        };
+
+        const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+        if (response.code !== 0) {
+          throw new Error(`TikTok API Error: ${response.message}`);
+        }
+        const items = response.data?.list || [];
+        allItems.push(...items);
+
+        windowStart = addDays(windowStart, MAX_DAYS);
+      }
+
+      // Агрегируем по ad_id
+      const statsMap = new Map<string, TikTokAdStat>();
+
+      for (const stat of allItems) {
+        const adId = stat.dimensions?.ad_id;
+        if (!adId) continue;
+
+        const existing = statsMap.get(adId);
+        const spend = parseFloat(stat.metrics?.spend || '0');
+        const impressions = parseInt(stat.metrics?.impressions || '0', 10);
+        const clicks = parseInt(stat.metrics?.clicks || '0', 10);
+
+        if (existing) {
+          existing.spend += spend;
+          existing.impressions += impressions;
+          existing.clicks += clicks;
+          existing.leads += clicks;
+        } else {
+          statsMap.set(adId, {
+            ad_id: adId,
+            ad_name: stat.dimensions?.ad_name || 'Unknown Ad',
+            adgroup_id: adGroupId,
+            spend,
+            impressions,
+            clicks,
+            ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+            leads: clicks,
+            cpl: clicks > 0 ? spend / clicks : 0,
+            _is_real_data: true
+          });
+        }
+      }
+
+      const result = Array.from(statsMap.values()).map(s => ({
+        ...s,
+        ctr: s.impressions > 0 ? (s.clicks / s.impressions) * 100 : 0,
+        cpl: s.leads > 0 ? s.spend / s.leads : 0
+      }));
+
+      console.log('[tiktokApi] Ad stats result:', result.length);
+      return result;
+    } catch (error) {
+      console.error('Error fetching TikTok ad stats:', error);
+      toast.error('Не удалось загрузить статистику объявлений');
+      return [];
+    }
+  },
+
+  // Обновить статус Ad Group
+  updateAdGroupStatus: async (adGroupId: string, isActive: boolean): Promise<boolean> => {
+    console.log(`[tiktokApi] updateAdGroupStatus: ${adGroupId} -> ${isActive ? 'ENABLE' : 'DISABLE'}`);
+
+    if (!await hasValidTikTokConfig()) {
+      toast.warning('Нет подключения к TikTok');
+      return false;
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `adgroup/status/update/`;
+      const status = isActive ? 'ENABLE' : 'DISABLE';
+
+      const params = {
+        advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+        adgroup_ids: [adGroupId],
+        operation_status: status
+      };
+
+      const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+
+      if (response.code !== 0) {
+        console.error('TikTok API error:', response.message);
+        toast.error('Не удалось изменить статус Ad Group');
+        return false;
+      }
+
+      toast.success(`Ad Group ${isActive ? 'запущена' : 'приостановлена'}`);
+      return true;
+    } catch (error) {
+      console.error('Error updating TikTok ad group status:', error);
+      toast.error('Не удалось обновить статус Ad Group');
+      return false;
+    }
+  },
+
+  // Обновить статус Ad
+  updateAdStatus: async (adId: string, isActive: boolean): Promise<boolean> => {
+    console.log(`[tiktokApi] updateAdStatus: ${adId} -> ${isActive ? 'ENABLE' : 'DISABLE'}`);
+
+    if (!await hasValidTikTokConfig()) {
+      toast.warning('Нет подключения к TikTok');
+      return false;
+    }
+
+    try {
+      const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
+      const endpoint = `ad/status/update/`;
+      const status = isActive ? 'ENABLE' : 'DISABLE';
+
+      const params = {
+        advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
+        ad_ids: [adId],
+        operation_status: status
+      };
+
+      const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+
+      if (response.code !== 0) {
+        console.error('TikTok API error:', response.message);
+        toast.error('Не удалось изменить статус объявления');
+        return false;
+      }
+
+      toast.success(`Объявление ${isActive ? 'запущено' : 'приостановлено'}`);
+      return true;
+    } catch (error) {
+      console.error('Error updating TikTok ad status:', error);
+      toast.error('Не удалось обновить статус объявления');
+      return false;
     }
   }
 }; 

@@ -23,6 +23,9 @@ interface AppContextType {
   aiAutopilot: boolean;
   toggleAiAutopilot: (enabled: boolean) => Promise<void>;
   aiAutopilotLoading: boolean;
+  aiAutopilotTiktok: boolean;
+  toggleAiAutopilotTiktok: (enabled: boolean) => Promise<void>;
+  aiAutopilotTiktokLoading: boolean;
   optimization: string;
   updateOptimization: (optimizationType: string) => Promise<void>;
   businessId: string | null;
@@ -56,6 +59,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [accountStatusError, setAccountStatusError] = useState<string | null>(null);
   const [aiAutopilot, setAiAutopilot] = useState(false);
   const [aiAutopilotLoading, setAiAutopilotLoading] = useState(false);
+  const [aiAutopilotTiktok, setAiAutopilotTiktok] = useState(false);
+  const [aiAutopilotTiktokLoading, setAiAutopilotTiktokLoading] = useState(false);
   const [optimization, setOptimization] = useState('lead_cost');
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [currentCampaignGoal, setCurrentCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | null>(null);
@@ -313,7 +318,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           // Мультиаккаунтный режим — берём из ad_accounts
           const { data, error } = await (supabase as any)
             .from('ad_accounts')
-            .select('autopilot')
+            .select('autopilot, autopilot_tiktok')
             .eq('id', currentAdAccountId)
             .single();
 
@@ -323,14 +328,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               error: error.message
             });
             setAiAutopilot(false);
+            setAiAutopilotTiktok(false);
             return;
           }
 
           const autopilotStatus = data?.autopilot ?? false;
+          const autopilotTiktokStatus = data?.autopilot_tiktok ?? false;
           setAiAutopilot(autopilotStatus);
+          setAiAutopilotTiktok(autopilotTiktokStatus);
           console.log('[AppContext] Загружен статус autopilot (multi-account):', {
             accountId: currentAdAccountId,
             autopilot: autopilotStatus,
+            autopilot_tiktok: autopilotTiktokStatus,
             source: 'ad_accounts'
           });
         } else if (!multiAccountEnabled) {
@@ -340,7 +349,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             const userData = JSON.parse(storedUser);
             const { data, error } = await supabase
               .from('user_accounts')
-              .select('autopilot')
+              .select('autopilot, autopilot_tiktok')
               .eq('id', userData.id)
               .single();
 
@@ -350,14 +359,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
                 error: error.message
               });
               setAiAutopilot(false);
+              setAiAutopilotTiktok(false);
               return;
             }
 
             const autopilotStatus = data?.autopilot ?? false;
+            const autopilotTiktokStatus = (data as any)?.autopilot_tiktok ?? false;
             setAiAutopilot(autopilotStatus);
+            setAiAutopilotTiktok(autopilotTiktokStatus);
             console.log('[AppContext] Загружен статус autopilot (legacy):', {
               userId: userData.id,
               autopilot: autopilotStatus,
+              autopilot_tiktok: autopilotTiktokStatus,
               source: 'user_accounts'
             });
           }
@@ -365,6 +378,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       } catch (err) {
         console.error('[AppContext] Критическая ошибка в loadAutopilotStatus:', err);
         setAiAutopilot(false);
+        setAiAutopilotTiktok(false);
       }
     };
 
@@ -422,6 +436,60 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       toast.error('Произошла ошибка при обновлении настроек');
     } finally {
       setAiAutopilotLoading(false);
+    }
+  };
+
+  // Функция для переключения состояния AI автопилота TikTok
+  const toggleAiAutopilotTiktok = async (enabled: boolean) => {
+    setAiAutopilotTiktokLoading(true);
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
+        toast.error('Пользователь не авторизован');
+        return;
+      }
+
+      const userData = JSON.parse(storedUser);
+      if (!userData.id) {
+        toast.error('ID пользователя не найден');
+        return;
+      }
+
+      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot_tiktok
+      if (multiAccountEnabled && currentAdAccountId) {
+        const { error } = await (supabase as any)
+          .from('ad_accounts')
+          .update({ autopilot_tiktok: enabled })
+          .eq('id', currentAdAccountId);
+
+        if (error) {
+          console.error('Ошибка при обновлении autopilot_tiktok в ad_accounts:', error);
+          toast.error('Не удалось обновить состояние TikTok автопилота');
+          return;
+        }
+        console.log('Обновлено состояние TikTok автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
+      } else {
+        // Legacy режим - обновляем user_accounts.autopilot_tiktok
+        const { error } = await supabase
+          .from('user_accounts')
+          .update({ autopilot_tiktok: enabled } as any)
+          .eq('id', userData.id);
+
+        if (error) {
+          console.error('Ошибка при обновлении состояния TikTok автопилота:', error);
+          toast.error('Не удалось обновить состояние TikTok автопилота');
+          return;
+        }
+        console.log('Обновлено состояние TikTok автопилота в user_accounts:', enabled);
+      }
+
+      setAiAutopilotTiktok(enabled);
+      toast.success(`TikTok автопилот ${enabled ? 'включен' : 'выключен'}`);
+    } catch (err) {
+      console.error('Ошибка при переключении TikTok автопилота:', err);
+      toast.error('Произошла ошибка при обновлении настроек');
+    } finally {
+      setAiAutopilotTiktokLoading(false);
     }
   };
 
@@ -1051,6 +1119,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       aiAutopilot,
       toggleAiAutopilot,
       aiAutopilotLoading,
+      aiAutopilotTiktok,
+      toggleAiAutopilotTiktok,
+      aiAutopilotTiktokLoading,
       optimization,
       updateOptimization,
       businessId,

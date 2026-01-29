@@ -17,13 +17,15 @@ import {
   XCircle,
   FileText,
   Eye,
-  Building2
+  Building2,
+  Brain
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { API_BASE_URL } from '@/config/api';
 import { useAppContext } from '@/context/AppContext';
+import type { OptimizationScope } from '@/hooks/useOptimization';
 
 interface BrainExecution {
   id: string;
@@ -47,6 +49,7 @@ interface AdAccount {
 interface AllAccountsExecutionsSectionProps {
   userAccountId: string;
   adAccounts: AdAccount[];
+  onOptimize?: (scope: OptimizationScope) => void;
 }
 
 // Карта типов действий на понятные названия
@@ -78,7 +81,8 @@ function getActionLabel(actionType: string): string {
 
 export function AllAccountsExecutionsSection({
   userAccountId,
-  adAccounts
+  adAccounts,
+  onOptimize
 }: AllAccountsExecutionsSectionProps) {
   const { platform } = useAppContext();
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
@@ -175,6 +179,24 @@ export function AllAccountsExecutionsSection({
                 </p>
               </div>
             </div>
+            {onOptimize && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => {
+                  // Если есть аккаунты - оптимизируем первый, иначе без accountId (legacy)
+                  const defaultAccount = adAccounts[0];
+                  onOptimize({
+                    accountId: defaultAccount?.id || '',
+                    accountName: defaultAccount?.name || 'Все кампании',
+                  });
+                }}
+              >
+                <Brain className="h-4 w-4" />
+                Brain Mini
+              </Button>
+            )}
           </div>
         </CardHeader>
 

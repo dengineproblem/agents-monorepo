@@ -26,6 +26,7 @@ import { API_BASE_URL } from '@/config/api';
 import DateRangePicker from '../components/DateRangePicker';
 import { toast } from 'sonner';
 import { facebookApi } from '@/services/facebookApi';
+import { tiktokApi } from '@/services/tiktokApi';
 import { useOptimization, type OptimizationScope } from '@/hooks/useOptimization';
 import { OptimizeButton, OptimizationModal } from '@/components/optimization';
 import { AllAccountsExecutionsSection } from '@/components/AllAccountsExecutionsSection';
@@ -1154,6 +1155,7 @@ const MultiAccountDashboard: React.FC = () => {
         <AllAccountsExecutionsSection
           userAccountId={getUserIdFromStorage() || ''}
           adAccounts={accountStats.map(a => ({ id: a.id, name: a.name }))}
+          onOptimize={optimization.startOptimization}
         />
 
       </div>
@@ -1515,6 +1517,7 @@ interface CampaignRowProps {
   accountId?: string;
   accountName?: string;
   onOptimize?: (scope: OptimizationScope) => void;
+  platform?: 'instagram' | 'tiktok';
 }
 
 const CampaignRow: React.FC<CampaignRowProps> = ({
@@ -1531,6 +1534,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   accountId,
   accountName,
   onOptimize,
+  platform = 'instagram',
 }) => {
   const [campaignActive, setCampaignActive] = useState(campaign.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
@@ -1551,7 +1555,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
-      await facebookApi.updateCampaignStatus(campaign.campaign_id, checked);
+      if (platform === 'tiktok') {
+        await tiktokApi.updateCampaignStatus(campaign.campaign_id, checked);
+      } else {
+        await facebookApi.updateCampaignStatus(campaign.campaign_id, checked);
+      }
       setCampaignActive(checked);
       toast.success(checked ? 'Кампания запущена' : 'Кампания остановлена');
     } catch (error) {
@@ -1610,8 +1618,8 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   onOptimize({
-                    accountId,
-                    accountName,
+                    accountId: accountId || '',
+                    accountName: accountName || 'Все кампании',
                     directionId: direction?.id,
                     directionName: direction?.name || campaign.campaign_name,
                     campaignId: campaign.campaign_id,
@@ -1694,6 +1702,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
                 ads={adsData[adset.adset_id] || []}
                 targetCplCents={getTargetCplForLevel(campaign.campaign_id, directions)}
                 isWhatsAppCampaign={isWhatsAppCampaign}
+                platform={platform}
               />
             ))
           )}
@@ -1715,6 +1724,7 @@ interface AdsetRowProps {
   ads: AdStats[];
   targetCplCents: number | null;
   isWhatsAppCampaign: boolean;
+  platform?: 'instagram' | 'tiktok';
 }
 
 const AdsetRow: React.FC<AdsetRowProps> = ({
@@ -1725,6 +1735,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   ads,
   targetCplCents,
   isWhatsAppCampaign,
+  platform = 'instagram',
 }) => {
   // Качество лидов показываем только для WhatsApp кампаний
   const displayQualityRate = isWhatsAppCampaign ? adset.qualityRate : 0;
@@ -1772,12 +1783,18 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
-      await facebookApi.updateAdsetStatus(adset.adset_id, checked);
+      if (platform === 'tiktok') {
+        await tiktokApi.updateAdGroupStatus(adset.adset_id, checked);
+      } else {
+        await facebookApi.updateAdsetStatus(adset.adset_id, checked);
+      }
       setAdsetActive(checked);
-      toast.success(checked ? 'Адсет запущен' : 'Адсет остановлен');
+      const label = platform === 'tiktok' ? 'Ad Group' : 'Адсет';
+      toast.success(checked ? `${label} запущен` : `${label} остановлен`);
     } catch (error) {
-      toast.error('Ошибка изменения статуса адсета');
-      console.error('Adset toggle error:', error);
+      const label = platform === 'tiktok' ? 'Ad Group' : 'адсета';
+      toast.error(`Ошибка изменения статуса ${label}`);
+      console.error('Adset/AdGroup toggle error:', error);
     } finally {
       setIsUpdatingStatus(false);
     }
@@ -1823,7 +1840,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 flex-shrink-0">
-            adset
+            {platform === 'tiktok' ? 'ad group' : 'adset'}
           </Badge>
           <Switch
             checked={adsetActive}
@@ -1977,7 +1994,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             </div>
           ) : (
             ads.map((ad) => (
-              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} adsetBudget={adset.daily_budget} isWhatsAppCampaign={isWhatsAppCampaign} />
+              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} adsetBudget={adset.daily_budget} isWhatsAppCampaign={isWhatsAppCampaign} platform={platform} />
             ))
           )}
         </div>
@@ -1995,9 +2012,10 @@ interface AdRowProps {
   targetCplCents: number | null;
   adsetBudget: number; // Бюджет родительского адсета
   isWhatsAppCampaign: boolean;
+  platform?: 'instagram' | 'tiktok';
 }
 
-const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsAppCampaign }) => {
+const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsAppCampaign, platform = 'instagram' }) => {
   const [adActive, setAdActive] = React.useState(ad.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
 
@@ -2016,7 +2034,11 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
     e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
-      await facebookApi.updateAdStatus(ad.ad_id, checked);
+      if (platform === 'tiktok') {
+        await tiktokApi.updateAdStatus(ad.ad_id, checked);
+      } else {
+        await facebookApi.updateAdStatus(ad.ad_id, checked);
+      }
       setAdActive(checked);
       toast.success(checked ? 'Объявление запущено' : 'Объявление остановлено');
     } catch (error) {

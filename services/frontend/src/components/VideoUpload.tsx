@@ -1589,19 +1589,41 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
               <CallbackRequest />
             </div>
           ) : platform === 'tiktok' ? (
-            /* Действия для TikTok - только загрузка видео */
-            <div className="grid grid-cols-1 gap-3">
+            /* Действия для TikTok */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               <Button
                 variant="outline"
-                onClick={() => {
-                  document.getElementById('video-upload')?.click();
-                }}
+                onClick={() => setManualLaunchDialogOpen(true)}
+                disabled={isUploading || directions.length === 0}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Rocket className="mr-2 h-4 w-4" />
+                Запустить рекламу
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowSaleForm(true)}
                 disabled={isUploading}
                 className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
               >
-                <Video className="mr-2 h-4 w-4" />
-                Загрузить видео
+                <DollarSign className="mr-2 h-4 w-4" />
+                Добавить продажу
               </Button>
+              {/* Brain Mini - оптимизация на уровне аккаунта */}
+              {multiAccountEnabled && currentAdAccountId && currentAccount && (
+                <Button
+                  variant="outline"
+                  onClick={() => optimization.startOptimization({
+                    accountId: currentAdAccountId,
+                    accountName: currentAccount.name || 'Аккаунт',
+                  })}
+                  disabled={isUploading || optimization.state.isLoading}
+                  className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+                >
+                  <Brain className="mr-2 h-4 w-4" />
+                  AI-оптимизация
+                </Button>
+              )}
             </div>
           ) : (
             /* Полный набор кнопок для Instagram */

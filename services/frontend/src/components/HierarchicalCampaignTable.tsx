@@ -3,6 +3,7 @@ import { useAppContext } from '../context/AppContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { facebookApi } from '@/services/facebookApi';
+import { tiktokApi } from '@/services/tiktokApi';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
 import {
@@ -59,6 +60,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
     campaigns: contextCampaigns,
     campaignStats: contextCampaignStats,
     loading: contextLoading,
+    platform,
   } = useAppContext();
 
   const effectiveAccountId = accountId || currentAdAccountId;
@@ -171,36 +173,67 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsetsLoading((prev) => new Set(prev).add(campaignId));
 
         try {
-          // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
-          // getAdsetsByCampaign() и getAdsetStats() не зависят друг от друга
-          const [adsetsList, adsetsStatsRaw] = await Promise.all([
-            facebookApi.getAdsetsByCampaign(campaignId),
-            facebookApi.getAdsetStats(campaignId, dateRange)
-          ]);
+          let adsetStats: AdsetStats[];
 
-          // Создаем Map статистики для быстрого поиска
-          const statsMap = new Map<string, any>(adsetsStatsRaw.map((s: any) => [s.adset_id, s]));
+          if (platform === 'tiktok') {
+            // TikTok: используем Ad Groups
+            const [adGroupsList, adGroupsStatsRaw] = await Promise.all([
+              tiktokApi.getAdGroupsByCampaign(campaignId),
+              tiktokApi.getAdGroupStats(campaignId, dateRange)
+            ]);
 
-          // Создаем данные для ВСЕХ адсетов, добавляя статистику если есть
-          const adsetStats: AdsetStats[] = adsetsList.map((a: any) => {
-            const stats: any = statsMap.get(a.id);
-            return {
-              adset_id: a.id,
-              adset_name: a.name,
-              status: a.status,
-              spend: stats?.spend || 0,
-              leads: stats?.leads || 0,
-              impressions: stats?.impressions || 0,
-              clicks: stats?.clicks || 0,
-              ctr: stats?.impressions > 0 ? (stats.clicks / stats.impressions) * 100 : 0,
-              cpl: stats?.cpl || 0,
-              messagingLeads: stats?.messagingLeads || 0,
-              qualityLeads: stats?.qualityLeads || 0,
-              cpql: stats?.cpql || 0,
-              qualityRate: stats?.qualityRate || 0,
-              daily_budget: parseFloat(a.daily_budget || '0') / 100,
-            };
-          });
+            const statsMap = new Map<string, any>(adGroupsStatsRaw.map((s: any) => [s.adgroup_id, s]));
+
+            adsetStats = adGroupsList.map((a: any) => {
+              const stats: any = statsMap.get(a.id);
+              // Преобразуем TikTok статус в формат Facebook для UI
+              const normalizedStatus = a.status === 'ENABLE' ? 'ACTIVE' : 'PAUSED';
+              return {
+                adset_id: a.id,
+                adset_name: a.name,
+                status: normalizedStatus,
+                spend: stats?.spend || 0,
+                leads: stats?.leads || 0,
+                impressions: stats?.impressions || 0,
+                clicks: stats?.clicks || 0,
+                ctr: stats?.ctr || 0,
+                cpl: stats?.cpl || 0,
+                messagingLeads: 0,
+                qualityLeads: 0,
+                cpql: 0,
+                qualityRate: 0,
+                daily_budget: a.daily_budget || 0,
+              };
+            });
+          } else {
+            // Facebook: используем Adsets
+            const [adsetsList, adsetsStatsRaw] = await Promise.all([
+              facebookApi.getAdsetsByCampaign(campaignId),
+              facebookApi.getAdsetStats(campaignId, dateRange)
+            ]);
+
+            const statsMap = new Map<string, any>(adsetsStatsRaw.map((s: any) => [s.adset_id, s]));
+
+            adsetStats = adsetsList.map((a: any) => {
+              const stats: any = statsMap.get(a.id);
+              return {
+                adset_id: a.id,
+                adset_name: a.name,
+                status: a.status,
+                spend: stats?.spend || 0,
+                leads: stats?.leads || 0,
+                impressions: stats?.impressions || 0,
+                clicks: stats?.clicks || 0,
+                ctr: stats?.impressions > 0 ? (stats.clicks / stats.impressions) * 100 : 0,
+                cpl: stats?.cpl || 0,
+                messagingLeads: stats?.messagingLeads || 0,
+                qualityLeads: stats?.qualityLeads || 0,
+                cpql: stats?.cpql || 0,
+                qualityRate: stats?.qualityRate || 0,
+                daily_budget: parseFloat(a.daily_budget || '0') / 100,
+              };
+            });
+          }
 
           // Сортировка: ACTIVE наверху
           adsetStats.sort((a, b) => {
@@ -212,8 +245,8 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
 
           setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
         } catch (err) {
-          logger.error('Failed to load adsets', err, { campaignId });
-          toast.error('Ошибка загрузки адсетов');
+          logger.error('Failed to load adsets/ad groups', err, { campaignId });
+          toast.error(platform === 'tiktok' ? 'Ошибка загрузки Ad Groups' : 'Ошибка загрузки адсетов');
           setAdsetsData((prev) => ({ ...prev, [campaignId]: [] }));
         } finally {
           setAdsetsLoading((prev) => {
@@ -224,9 +257,9 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         }
       }
     }
-  }, [expandedCampaigns, adsetsData, adsetsLoading, dateRange]);
+  }, [expandedCampaigns, adsetsData, adsetsLoading, dateRange, platform]);
 
-  // Обработчик раскрытия адсета
+  // Обработчик раскрытия адсета / Ad Group
   const handleAdsetExpand = useCallback(async (adsetId: string) => {
     const isExpanded = expandedAdsets.has(adsetId);
 
@@ -243,36 +276,66 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsLoading((prev) => new Set(prev).add(adsetId));
 
         try {
-          // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
-          // getAdsByAdset() и getAdStatsByAdset() не зависят друг от друга
-          const [adsList, adsStatsRaw] = await Promise.all([
-            facebookApi.getAdsByAdset(adsetId),
-            facebookApi.getAdStatsByAdset(adsetId, dateRange)
-          ]);
+          let adStats: AdStats[];
 
-          // Создаем Map статистики для быстрого поиска
-          const statsMap = new Map<string, any>(adsStatsRaw.map((s: any) => [s.ad_id, s]));
+          if (platform === 'tiktok') {
+            // TikTok: используем Ads из Ad Group
+            const [adsList, adsStatsRaw] = await Promise.all([
+              tiktokApi.getAdsByAdGroup(adsetId),
+              tiktokApi.getAdStatsByAdGroup(adsetId, dateRange)
+            ]);
 
-          // Создаем данные для ВСЕХ объявлений, добавляя статистику если есть
-          const adStats: AdStats[] = adsList.map((a) => {
-            const stats: any = statsMap.get(a.id);
-            return {
-              ad_id: a.id,
-              ad_name: a.name,
-              status: a.status,
-              thumbnail_url: a.thumbnail_url,
-              spend: stats?.spend || 0,
-              leads: stats?.leads || 0,
-              impressions: stats?.impressions || 0,
-              clicks: stats?.clicks || 0,
-              ctr: stats?.ctr || 0,
-              cpl: stats?.cpl || 0,
-              messagingLeads: stats?.messagingLeads || 0,
-              qualityLeads: stats?.qualityLeads || 0,
-              cpql: stats?.cpql || 0,
-              qualityRate: stats?.qualityRate || 0,
-            };
-          });
+            const statsMap = new Map<string, any>(adsStatsRaw.map((s: any) => [s.ad_id, s]));
+
+            adStats = adsList.map((a: any) => {
+              const stats: any = statsMap.get(a.id);
+              const normalizedStatus = a.status === 'ENABLE' ? 'ACTIVE' : 'PAUSED';
+              return {
+                ad_id: a.id,
+                ad_name: a.name,
+                status: normalizedStatus,
+                thumbnail_url: a.thumbnail_url,
+                spend: stats?.spend || 0,
+                leads: stats?.leads || 0,
+                impressions: stats?.impressions || 0,
+                clicks: stats?.clicks || 0,
+                ctr: stats?.ctr || 0,
+                cpl: stats?.cpl || 0,
+                messagingLeads: 0,
+                qualityLeads: 0,
+                cpql: 0,
+                qualityRate: 0,
+              };
+            });
+          } else {
+            // Facebook: используем Ads из Adset
+            const [adsList, adsStatsRaw] = await Promise.all([
+              facebookApi.getAdsByAdset(adsetId),
+              facebookApi.getAdStatsByAdset(adsetId, dateRange)
+            ]);
+
+            const statsMap = new Map<string, any>(adsStatsRaw.map((s: any) => [s.ad_id, s]));
+
+            adStats = adsList.map((a) => {
+              const stats: any = statsMap.get(a.id);
+              return {
+                ad_id: a.id,
+                ad_name: a.name,
+                status: a.status,
+                thumbnail_url: a.thumbnail_url,
+                spend: stats?.spend || 0,
+                leads: stats?.leads || 0,
+                impressions: stats?.impressions || 0,
+                clicks: stats?.clicks || 0,
+                ctr: stats?.ctr || 0,
+                cpl: stats?.cpl || 0,
+                messagingLeads: stats?.messagingLeads || 0,
+                qualityLeads: stats?.qualityLeads || 0,
+                cpql: stats?.cpql || 0,
+                qualityRate: stats?.qualityRate || 0,
+              };
+            });
+          }
 
           // Сортировка: ACTIVE наверху
           adStats.sort((a, b) => {
@@ -296,7 +359,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         }
       }
     }
-  }, [expandedAdsets, adsData, adsLoading, dateRange]);
+  }, [expandedAdsets, adsData, adsLoading, dateRange, platform]);
 
   // Loading state
   if (campaignsLoading && campaigns.length === 0) {
@@ -358,6 +421,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
               accountId={effectiveAccountId}
               accountName={accountName}
               onOptimize={onOptimize}
+              platform={platform}
             />
           ))}
         </div>
