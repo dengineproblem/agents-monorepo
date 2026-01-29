@@ -14,10 +14,12 @@ import AdminHeader from './AdminHeader';
 import AdminCommandPalette from './AdminCommandPalette';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 
 const AdminLayout: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Stats for badges
   const [unreadChats, setUnreadChats] = useState(0);
@@ -87,24 +89,43 @@ const AdminLayout: React.FC = () => {
         unresolvedErrors={unresolvedErrors}
         unreadNotifications={unreadNotifications}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
       />
 
-      {/* Sidebar */}
-      <AdminSidebar
-        collapsed={sidebarCollapsed}
-        onToggle={handleSidebarToggle}
-        unreadChats={unreadChats}
-        unresolvedErrors={unresolvedErrors}
-      />
+      {/* Desktop Sidebar - скрыт на мобилке */}
+      <div className="hidden lg:block">
+        <AdminSidebar
+          collapsed={sidebarCollapsed}
+          onToggle={handleSidebarToggle}
+          unreadChats={unreadChats}
+          unresolvedErrors={unresolvedErrors}
+        />
+      </div>
+
+      {/* Mobile Sidebar - через Sheet */}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent side="left" className="w-64 p-0">
+          <AdminSidebar
+            collapsed={false}
+            onToggle={() => setMobileSidebarOpen(false)}
+            unreadChats={unreadChats}
+            unresolvedErrors={unresolvedErrors}
+            isMobile
+            onNavigate={() => setMobileSidebarOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
 
       {/* Main Content */}
       <main
         className={cn(
           'pt-[60px] min-h-screen transition-all duration-300',
-          sidebarCollapsed ? 'pl-16' : 'pl-64'
+          // На мобилке без отступа, на десктопе с отступом под сайдбар
+          'lg:pl-16',
+          !sidebarCollapsed && 'lg:pl-64'
         )}
       >
-        <div className="p-6">
+        <div className="p-4 lg:p-6">
           <Outlet />
         </div>
       </main>

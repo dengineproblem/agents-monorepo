@@ -1,9 +1,16 @@
 import { toastT } from '@/utils/toastUtils';
 import React from 'react';
-import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle, Users2, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle, Users2, HelpCircle, MoreVertical } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import logoPlaceholder from '@/assets/logo-placeholder.svg';
 import { toast } from 'sonner';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -284,99 +291,154 @@ const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Ad Account Switcher - скрыт на /dashboard (там свой выбор аккаунтов) */}
+            {/* Ad Account Switcher - полная версия на десктопе, компактная на мобилке */}
             {location.pathname !== '/dashboard' && (
-              <AdAccountSwitcher className="hidden sm:flex ml-4" />
+              <>
+                {/* Десктоп версия */}
+                <AdAccountSwitcher className="hidden sm:flex ml-4" />
+                {/* Мобильная компактная версия */}
+                <AdAccountSwitcher className="flex sm:hidden ml-2" compact showAddButton={false} />
+              </>
             )}
           </div>
         
         <TooltipProvider>
           <div className="flex items-center gap-1">
-            {/* Notification Bell */}
+            {/* Notification Bell - всегда видно */}
             <NotificationBell />
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleValidateFacebook}>
-                  <CheckCircle className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Validate Facebook', 'Проверить Facebook')}</p>
-              </TooltipContent>
-            </Tooltip>
+            {/* Основные кнопки - скрыты на мобилке */}
+            <div className="hidden sm:flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleValidateFacebook}>
+                    <CheckCircle className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Validate Facebook', 'Проверить Facebook')}</p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => setOpenBudget(true)}>
-                  <DollarSign className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Budget', 'Бюджет')}</p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => setOpenBudget(true)}>
+                    <DollarSign className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Budget', 'Бюджет')}</p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={toggleTheme}>
-                  {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {theme === 'dark'
-                    ? appReviewText('Light theme', 'Светлая тема')
-                    : appReviewText('Dark theme', 'Тёмная тема')}
-                </p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={toggleTheme}>
+                    {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    {theme === 'dark'
+                      ? appReviewText('Light theme', 'Светлая тема')
+                      : appReviewText('Dark theme', 'Тёмная тема')}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={onOpenDatePicker}>
-                  <Calendar className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Select period', 'Выбрать период')}</p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={onOpenDatePicker}>
+                    <Calendar className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Select period', 'Выбрать период')}</p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleRefresh}>
-                  <RefreshCw className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Refresh', 'Обновить')}</p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleRefresh}>
+                    <RefreshCw className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Refresh', 'Обновить')}</p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={() => navigate('/knowledge-base')}>
-                  <HelpCircle className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Help', 'База знаний')}</p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={() => navigate('/knowledge-base')}>
+                    <HelpCircle className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Help', 'База знаний')}</p>
+                </TooltipContent>
+              </Tooltip>
 
-            <Separator orientation="vertical" className="h-6 mx-1" />
+              <Separator orientation="vertical" className="h-6 mx-1" />
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleSignOut}>
-                  <LogOut className="h-5 w-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{appReviewText('Log out', 'Выйти')}</p>
-              </TooltipContent>
-            </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={handleSignOut}>
+                    <LogOut className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{appReviewText('Log out', 'Выйти')}</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* Мобильное меню - видно только на мобилке */}
+            <div className="flex sm:hidden items-center gap-1">
+              {/* Календарь - всегда видно на мобилке */}
+              <Button variant="ghost" size="icon" onClick={onOpenDatePicker}>
+                <Calendar className="h-5 w-5" />
+              </Button>
+
+              {/* Обновить - всегда видно на мобилке */}
+              <Button variant="ghost" size="icon" onClick={handleRefresh}>
+                <RefreshCw className="h-5 w-5" />
+              </Button>
+
+              {/* Dropdown с остальными опциями */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <MoreVertical className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={handleValidateFacebook}>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    {appReviewText('Validate Facebook', 'Проверить Facebook')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setOpenBudget(true)}>
+                    <DollarSign className="h-4 w-4 mr-2" />
+                    {appReviewText('Budget', 'Бюджет')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={toggleTheme}>
+                    {theme === 'dark' ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
+                    {theme === 'dark'
+                      ? appReviewText('Light theme', 'Светлая тема')
+                      : appReviewText('Dark theme', 'Тёмная тема')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/knowledge-base')}>
+                    <HelpCircle className="h-4 w-4 mr-2" />
+                    {appReviewText('Help', 'База знаний')}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut} className="text-red-600">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    {appReviewText('Log out', 'Выйти')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </TooltipProvider>
       </div>

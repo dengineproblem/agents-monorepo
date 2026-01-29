@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 interface AdAccountSwitcherProps {
   className?: string;
   showAddButton?: boolean;
+  compact?: boolean; // Для мобильной версии - только аватар
 }
 
 const STATUS_ICONS = {
@@ -28,7 +29,7 @@ const STATUS_COLORS = {
   error: 'text-red-500',
 };
 
-export function AdAccountSwitcher({ className, showAddButton = true }: AdAccountSwitcherProps) {
+export function AdAccountSwitcher({ className, showAddButton = true, compact = false }: AdAccountSwitcherProps) {
   const {
     multiAccountEnabled,
     adAccounts,
@@ -104,46 +105,81 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
     <div className={cn('flex items-center gap-2', className)}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
-            key={`btn-${currentAdAccountId}`}
-            variant="outline"
-            className="w-[200px] h-9 justify-between px-3"
-            data-current-account={currentAccount?.name}
-          >
-            {currentAccount ? (
-              <div key={currentAccount.id} className="flex items-center gap-2 flex-1 min-w-0">
-                {/* Аватар напрямую с Facebook Graph API */}
-                {currentAccount.fb_page_id && !imageErrors[currentAccount.id] ? (
-                  <img
-                    key={currentAccount.id}
-                    src={getAvatarSrc(currentAccount.fb_page_id)}
-                    alt={currentAccount.name}
-                    className="h-5 w-5 rounded-full flex-shrink-0 object-cover"
-                    referrerPolicy="no-referrer"
-                    loading="eager"
-                    onError={() => handleImageError(currentAccount.id)}
-                  />
-                ) : (
-                  <div className="h-5 w-5 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-[10px]">
-                    {currentAccount.name?.charAt(0)?.toUpperCase() || 'A'}
-                  </div>
-                )}
-                <span key={`name-${currentAccount.id}`} className="truncate flex-1 text-left">
-                  {currentAccount.name}
-                </span>
-                {currentAccount.connection_status && (
-                  <span className={cn('h-2 w-2 rounded-full flex-shrink-0', {
-                    'bg-green-500': currentAccount.connection_status === 'connected',
-                    'bg-yellow-500': currentAccount.connection_status === 'pending',
-                    'bg-red-500': currentAccount.connection_status === 'error',
-                  })} />
-                )}
-              </div>
-            ) : (
-              <span className="text-muted-foreground">Выберите аккаунт</span>
-            )}
-            <ChevronDown className="h-4 w-4 opacity-50 flex-shrink-0 ml-2" />
-          </Button>
+          {compact ? (
+            // Компактный режим для мобильных - только аватар
+            <Button
+              key={`btn-compact-${currentAdAccountId}`}
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full p-0"
+              data-current-account={currentAccount?.name}
+            >
+              {currentAccount?.fb_page_id && !imageErrors[currentAccount.id] ? (
+                <img
+                  key={currentAccount.id}
+                  src={getAvatarSrc(currentAccount.fb_page_id)}
+                  alt={currentAccount.name}
+                  className="h-7 w-7 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                  loading="eager"
+                  onError={() => handleImageError(currentAccount.id)}
+                />
+              ) : (
+                <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                  {currentAccount?.name?.charAt(0)?.toUpperCase() || 'A'}
+                </div>
+              )}
+              {currentAccount?.connection_status && (
+                <span className={cn('absolute bottom-0 right-0 h-2 w-2 rounded-full border border-background', {
+                  'bg-green-500': currentAccount.connection_status === 'connected',
+                  'bg-yellow-500': currentAccount.connection_status === 'pending',
+                  'bg-red-500': currentAccount.connection_status === 'error',
+                })} />
+              )}
+            </Button>
+          ) : (
+            // Полный режим для десктопа
+            <Button
+              key={`btn-${currentAdAccountId}`}
+              variant="outline"
+              className="w-[200px] h-9 justify-between px-3"
+              data-current-account={currentAccount?.name}
+            >
+              {currentAccount ? (
+                <div key={currentAccount.id} className="flex items-center gap-2 flex-1 min-w-0">
+                  {/* Аватар напрямую с Facebook Graph API */}
+                  {currentAccount.fb_page_id && !imageErrors[currentAccount.id] ? (
+                    <img
+                      key={currentAccount.id}
+                      src={getAvatarSrc(currentAccount.fb_page_id)}
+                      alt={currentAccount.name}
+                      className="h-5 w-5 rounded-full flex-shrink-0 object-cover"
+                      referrerPolicy="no-referrer"
+                      loading="eager"
+                      onError={() => handleImageError(currentAccount.id)}
+                    />
+                  ) : (
+                    <div className="h-5 w-5 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-[10px]">
+                      {currentAccount.name?.charAt(0)?.toUpperCase() || 'A'}
+                    </div>
+                  )}
+                  <span key={`name-${currentAccount.id}`} className="truncate flex-1 text-left">
+                    {currentAccount.name}
+                  </span>
+                  {currentAccount.connection_status && (
+                    <span className={cn('h-2 w-2 rounded-full flex-shrink-0', {
+                      'bg-green-500': currentAccount.connection_status === 'connected',
+                      'bg-yellow-500': currentAccount.connection_status === 'pending',
+                      'bg-red-500': currentAccount.connection_status === 'error',
+                    })} />
+                  )}
+                </div>
+              ) : (
+                <span className="text-muted-foreground">Выберите аккаунт</span>
+              )}
+              <ChevronDown className="h-4 w-4 opacity-50 flex-shrink-0 ml-2" />
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[200px]">
           {activeAccounts.map((account) => {

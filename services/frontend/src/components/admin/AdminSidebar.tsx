@@ -38,6 +38,8 @@ interface AdminSidebarProps {
   onToggle: () => void;
   unreadChats?: number;
   unresolvedErrors?: number;
+  isMobile?: boolean;
+  onNavigate?: () => void;
 }
 
 const menuItems: MenuItem[] = [
@@ -93,9 +95,19 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   onToggle,
   unreadChats = 0,
   unresolvedErrors = 0,
+  isMobile = false,
+  onNavigate,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+
+  const handleNavigate = (path: string) => {
+    navigate(path);
+    // Закрываем мобильное меню после навигации
+    if (isMobile && onNavigate) {
+      onNavigate();
+    }
+  };
 
   // Добавляем бейджи к пунктам меню
   const itemsWithBadges = menuItems.map((item) => {
@@ -119,8 +131,10 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     <TooltipProvider>
       <aside
         className={cn(
-          'fixed left-0 top-[60px] bottom-0 z-40 flex flex-col border-r bg-background transition-all duration-300',
-          collapsed ? 'w-16' : 'w-64'
+          'flex flex-col bg-background transition-all duration-300',
+          // Для мобильной версии (в Sheet) - без fixed позиционирования
+          isMobile ? 'h-full pt-4' : 'fixed left-0 top-[60px] bottom-0 z-40 border-r',
+          !isMobile && (collapsed ? 'w-16' : 'w-64')
         )}
       >
         {/* Navigation */}
@@ -135,9 +149,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 variant={active ? 'secondary' : 'ghost'}
                 className={cn(
                   'w-full justify-start gap-3 relative',
-                  collapsed && 'justify-center px-2'
+                  collapsed && !isMobile && 'justify-center px-2'
                 )}
-                onClick={() => navigate(item.path)}
+                onClick={() => handleNavigate(item.path)}
               >
                 <Icon className="h-5 w-5 flex-shrink-0" />
                 {!collapsed && <span>{item.label}</span>}
@@ -172,27 +186,29 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           })}
         </nav>
 
-        {/* Collapse Toggle */}
-        <div className="p-2 border-t">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-center"
-            onClick={onToggle}
-          >
-            {collapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronLeft className="h-4 w-4 mr-2" />
-                <span>Свернуть</span>
-              </>
-            )}
-          </Button>
-        </div>
+        {/* Collapse Toggle - только для десктопа */}
+        {!isMobile && (
+          <div className="p-2 border-t">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-center"
+              onClick={onToggle}
+            >
+              {collapsed ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <>
+                  <ChevronLeft className="h-4 w-4 mr-2" />
+                  <span>Свернуть</span>
+                </>
+              )}
+            </Button>
+          </div>
+        )}
 
         {/* Footer */}
-        {!collapsed && (
+        {!collapsed && !isMobile && (
           <div className="p-4 border-t">
             <p className="text-xs text-muted-foreground text-center">
               Admin Panel v1.0
