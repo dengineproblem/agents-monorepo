@@ -1966,13 +1966,22 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets, accountUUID 
  * @param {string} accessToken - Facebook Access Token
  * @param {string|null} accountUUID - UUID рекламного аккаунта (для мультиаккаунтности), NULL для legacy
  */
-export async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken, accountUUID = null) {
+export async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken, accountUUID = null, targetDate = null) {
   if (!readyCreatives || !readyCreatives.length) return;
-  
-  // Вчерашний день (метрики собираются на следующий день после показов)
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  // Дата для сохранения метрик (по умолчанию - вчера)
+  let targetDateStr;
+  if (targetDate) {
+    // Если передана конкретная дата (для восстановления исторических данных)
+    targetDateStr = typeof targetDate === 'string' ? targetDate : targetDate.toISOString().split('T')[0];
+  } else {
+    // По умолчанию - вчерашний день
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    targetDateStr = yesterday.toISOString().split('T')[0];
+  }
+
+  const yesterdayStr = targetDateStr; // Для обратной совместимости с остальным кодом
   
   const records = [];
   

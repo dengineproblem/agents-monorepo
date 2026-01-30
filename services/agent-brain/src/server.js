@@ -447,6 +447,227 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
   }
 });
 
+// Test endpoint: save metrics only (no actions, no telegram report)
+fastify.post('/api/brain/test-save-metrics', async (request, reply) => {
+  try {
+    const { userAccountId, accountId } = request.body;
+    if (!userAccountId && !accountId) {
+      return reply.code(400).send({ error: 'userAccountId or accountId required' });
+    }
+
+    fastify.log.info({
+      where: 'test_save_metrics',
+      userAccountId,
+      accountId,
+      status: 'started'
+    });
+
+    let user_account_id = userAccountId;
+    let account_uuid = accountId;
+    let adAccountId = null;
+    let accessToken = null;
+
+    // Если передан accountId (multi-account), загружаем из ad_accounts
+    if (accountId) {
+      const { data: account, error: accountError } = await supabase
+        .from('ad_accounts')
+        .select('user_account_id, ad_account_id, fb_ad_account_id, access_token, user_accounts(access_token)')
+        .eq('id', accountId)
+        .single();
+
+      if (accountError || !account) {
+        return reply.code(404).send({ error: 'Account not found' });
+      }
+
+      user_account_id = account.user_account_id;
+      adAccountId = account.fb_ad_account_id || account.ad_account_id;
+      accessToken = account.access_token || account.user_accounts?.access_token;
+    } else {
+      // Legacy: загружаем из user_accounts
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('ad_account_id, access_token')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      adAccountId = userAccount.ad_account_id;
+      accessToken = userAccount.access_token;
+
+      // Получаем account_uuid для legacy
+      const { data: legacyAccount } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+
+      account_uuid = legacyAccount?.id || null;
+    }
+
+    if (!adAccountId || !accessToken) {
+      return reply.code(400).send({ error: 'Missing ad_account_id or access_token' });
+    }
+
+    // Вызываем saveMetricsIfNotSavedToday
+    const result = await saveMetricsIfNotSavedToday(
+      user_account_id,
+      account_uuid,
+      adAccountId,
+      accessToken
+    );
+
+    fastify.log.info({
+      where: 'test_save_metrics',
+      userAccountId: user_account_id,
+      accountId: account_uuid,
+      result,
+      status: 'completed'
+    });
+
+    return reply.send({
+      success: true,
+      userAccountId: user_account_id,
+      accountId: account_uuid,
+      adAccountId,
+      ...result
+    });
+
+  } catch (e) {
+    fastify.log.error({
+      where: 'test_save_metrics',
+      error: String(e),
+      stack: e.stack
+    });
+
+    return reply.code(500).send({
+      error: String(e),
+      stack: e.stack
+    });
+  }
+});
+
+// Test endpoint: restore metrics for date range (historical backfill)
+fastify.post('/api/brain/test-restore-metrics', async (request, reply) => {
+  try {
+    const { userAccountId, accountId, dateFrom, dateTo } = request.body;
+
+    if (!userAccountId && !accountId) {
+      return reply.code(400).send({ error: 'userAccountId or accountId required' });
+    }
+
+    if (!dateFrom || !dateTo) {
+      return reply.code(400).send({ error: 'dateFrom and dateTo required (YYYY-MM-DD)' });
+    }
+
+    fastify.log.info({
+      where: 'test_restore_metrics',
+      userAccountId,
+      accountId,
+      dateFrom,
+      dateTo,
+      status: 'started'
+    });
+
+    let user_account_id = userAccountId;
+    let account_uuid = accountId;
+    let adAccountId = null;
+    let accessToken = null;
+
+    // Если передан accountId (multi-account), загружаем из ad_accounts
+    if (accountId) {
+      const { data: account, error: accountError } = await supabase
+        .from('ad_accounts')
+        .select('user_account_id, ad_account_id, fb_ad_account_id, access_token, user_accounts(access_token)')
+        .eq('id', accountId)
+        .single();
+
+      if (accountError || !account) {
+        return reply.code(404).send({ error: 'Account not found' });
+      }
+
+      user_account_id = account.user_account_id;
+      adAccountId = account.fb_ad_account_id || account.ad_account_id;
+      accessToken = account.access_token || account.user_accounts?.access_token;
+    } else {
+      // Legacy: загружаем из user_accounts
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('ad_account_id, access_token')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      adAccountId = userAccount.ad_account_id;
+      accessToken = userAccount.access_token;
+
+      // Получаем account_uuid для legacy
+      const { data: legacyAccount } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single();
+
+      account_uuid = legacyAccount?.id || null;
+    }
+
+    if (!adAccountId || !accessToken) {
+      return reply.code(400).send({ error: 'Missing ad_account_id or access_token' });
+    }
+
+    // Вызываем восстановление метрик за диапазон дат
+    const result = await restoreMetricsForDateRange(
+      user_account_id,
+      account_uuid,
+      adAccountId,
+      accessToken,
+      dateFrom,
+      dateTo
+    );
+
+    fastify.log.info({
+      where: 'test_restore_metrics',
+      userAccountId: user_account_id,
+      accountId: account_uuid,
+      result,
+      status: 'completed'
+    });
+
+    return reply.send({
+      success: result.success,
+      userAccountId: user_account_id,
+      accountId: account_uuid,
+      adAccountId,
+      dateFrom,
+      dateTo,
+      ...result
+    });
+
+  } catch (e) {
+    fastify.log.error({
+      where: 'test_restore_metrics',
+      error: String(e),
+      stack: e.stack
+    });
+
+    return reply.code(500).send({
+      error: String(e),
+      stack: e.stack
+    });
+  }
+});
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const FB_API_VERSION = 'v20.0';
@@ -5785,6 +6006,148 @@ async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId,
     });
     return { saved: false, creativesCount: 0, error: String(err) };
   }
+}
+
+/**
+ * Восстанавливает метрики за диапазон дат (для исторических данных)
+ * @param {string} userAccountId - User account ID
+ * @param {string} accountId - Account UUID (ad_accounts.id)
+ * @param {string} adAccountId - Facebook ad account ID
+ * @param {string} accessToken - Facebook access token
+ * @param {string} dateFrom - Start date (YYYY-MM-DD)
+ * @param {string} dateTo - End date (YYYY-MM-DD)
+ * @returns {Object} { success: boolean, datesProcessed: number, totalCreatives: number, errors: string[] }
+ */
+async function restoreMetricsForDateRange(userAccountId, accountId, adAccountId, accessToken, dateFrom, dateTo) {
+  const startTime = Date.now();
+
+  fastify.log.info({
+    where: 'restoreMetricsForDateRange',
+    userAccountId,
+    accountId,
+    dateFrom,
+    dateTo,
+    status: 'started'
+  });
+
+  const results = [];
+  const errors = [];
+
+  // Генерируем список дат
+  const dates = [];
+  const currentDate = new Date(dateFrom);
+  const endDate = new Date(dateTo);
+
+  while (currentDate <= endDate) {
+    dates.push(currentDate.toISOString().split('T')[0]);
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  fastify.log.info({
+    where: 'restoreMetricsForDateRange',
+    totalDates: dates.length,
+    dates: dates
+  });
+
+  // Загружаем креативы один раз
+  const { getActiveCreatives, saveCreativeMetricsToHistory } = await import('./scoring.js');
+  const readyCreatives = await getActiveCreatives(supabase, userAccountId, accountId, adAccountId, accessToken);
+
+  if (!readyCreatives || readyCreatives.length === 0) {
+    fastify.log.warn({
+      where: 'restoreMetricsForDateRange',
+      message: 'No active creatives found'
+    });
+    return { success: false, error: 'no_creatives', datesProcessed: 0, totalCreatives: 0 };
+  }
+
+  fastify.log.info({
+    where: 'restoreMetricsForDateRange',
+    creativesCount: readyCreatives.length
+  });
+
+  // Обрабатываем каждую дату
+  for (const date of dates) {
+    try {
+      fastify.log.info({
+        where: 'restoreMetricsForDateRange',
+        date,
+        status: 'processing'
+      });
+
+      // Проверяем, есть ли уже метрики за эту дату
+      const { data: existing } = await supabase
+        .from('creative_metrics_history')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('date', date)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        fastify.log.info({
+          where: 'restoreMetricsForDateRange',
+          date,
+          status: 'skipped_already_exists'
+        });
+        results.push({ date, status: 'skipped', reason: 'already_exists' });
+        continue;
+      }
+
+      // Сохраняем метрики за эту дату
+      await saveCreativeMetricsToHistory(
+        supabase,
+        userAccountId,
+        readyCreatives,
+        adAccountId,
+        accessToken,
+        accountId,
+        date  // Передаём конкретную дату
+      );
+
+      fastify.log.info({
+        where: 'restoreMetricsForDateRange',
+        date,
+        status: 'saved'
+      });
+
+      results.push({ date, status: 'saved' });
+
+      // Небольшая пауза между датами чтобы не перегружать FB API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+    } catch (err) {
+      fastify.log.error({
+        where: 'restoreMetricsForDateRange',
+        date,
+        error: String(err)
+      });
+      errors.push({ date, error: String(err) });
+      results.push({ date, status: 'error', error: String(err) });
+    }
+  }
+
+  const duration = Date.now() - startTime;
+
+  fastify.log.info({
+    where: 'restoreMetricsForDateRange',
+    status: 'completed',
+    datesProcessed: results.filter(r => r.status === 'saved').length,
+    skipped: results.filter(r => r.status === 'skipped').length,
+    errorsCount: errors.length,
+    totalCreatives: readyCreatives.length,
+    duration
+  });
+
+  return {
+    success: errors.length === 0,
+    datesProcessed: results.filter(r => r.status === 'saved').length,
+    skipped: results.filter(r => r.status === 'skipped').length,
+    totalCreatives: readyCreatives.length,
+    totalDates: dates.length,
+    results,
+    errors,
+    duration
+  };
 }
 
 /**
