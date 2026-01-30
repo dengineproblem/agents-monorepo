@@ -367,26 +367,24 @@ services:
         git config --global --add url."https://github.com/".insteadOf "git@github.com:"
         echo "Git config:" && cat ~/.gitconfig
         npm install -g moltbot@beta
-        # Setup Anthropic + OpenAI auth profiles for Moltbot
-        mkdir -p /root/.clawdbot/agents/main/agent
-        # GPT-5.2 для основных ответов, GPT-4o только для Whisper транскрибации
-        echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
+
+        # Copy moltbot.json config to Moltbot config directory
+        mkdir -p /root/.moltbot
+        cp /root/clawd/moltbot-workspace-router/moltbot.json /root/.moltbot/config.json
+        echo "Moltbot config copied from moltbot-workspace-router/moltbot.json"
+
+        # Setup auth profiles for ALL agents (router + specialists)
+        echo "Setting up auth profiles for all agents..."
+        for agent in router facebook-ads creatives crm tiktok onboarding; do
+          mkdir -p /root/.moltbot/agents/$agent/agent
+          echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > /root/.moltbot/agents/$agent/agent/auth-profiles.json
+          echo "  ✓ Auth profile created for agent: $agent"
+        done
         echo "Auth profiles configured: GPT-5.2 (default), Anthropic (fallback), Whisper (gpt-4o)"
 
-        # Настройка gateway mode
-        moltbot config set gateway.mode local
-        moltbot config set gateway.auth.token "moltbot-dev-token-2026"
-
-        # Включаем Telegram плагин и добавляем канал
-        if [ -n "$MOLTBOT_TELEGRAM_BOT_TOKEN" ]; then
-          echo "Enabling Telegram plugin..."
-          moltbot plugins enable telegram
-          echo "Adding Telegram channel..."
-          moltbot channels add --channel telegram --token "$MOLTBOT_TELEGRAM_BOT_TOKEN" || echo "Telegram channel may already exist"
-          echo "Telegram configured"
-        fi
-
-        moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose
+        # Start Moltbot Gateway with multi-agent config
+        echo "Starting Moltbot Gateway with multi-agent routing..."
+        moltbot gateway --bind lan --token "moltbot-dev-token-2026" --config /root/.moltbot/config.json --verbose
     ports:
       - "18789:18789"
     environment:
@@ -395,7 +393,12 @@ services:
       - MOLTBOT_TOKEN=moltbot-dev-token-2026
       # API Keys и MOLTBOT_TELEGRAM_BOT_TOKEN приходят из env_file (.env.brain)
     volumes:
-      - ./moltbot-workspace:/root/clawd
+      - ./moltbot-workspace-router:/root/clawd/moltbot-workspace-router
+      - ./moltbot-workspace-facebook:/root/clawd/moltbot-workspace-facebook
+      - ./moltbot-workspace-creatives:/root/clawd/moltbot-workspace-creatives
+      - ./moltbot-workspace-crm:/root/clawd/moltbot-workspace-crm
+      - ./moltbot-workspace-tiktok:/root/clawd/moltbot-workspace-tiktok
+      - ./moltbot-workspace-onboarding:/root/clawd/moltbot-workspace-onboarding
       - moltbot-config:/root/.moltbot
     restart: unless-stopped
     networks:

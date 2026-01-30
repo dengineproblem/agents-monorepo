@@ -14,6 +14,7 @@ import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 import { startMoltbotUsageTracking } from './moltbot/usageTracker.js';
+import { routeToSpecialist } from './moltbot/router.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
 import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
@@ -8434,6 +8435,25 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Onboarding error');
     return reply.code(500).send({ error: 'Internal server error' });
+  }
+});
+
+// Moltbot Routing Endpoint
+fastify.post('/api/moltbot/route', async (request, reply) => {
+  const { specialist, message, telegramChatId } = request.body;
+
+  if (!specialist || !message || !telegramChatId) {
+    return reply.code(400).send({
+      error: 'Missing required fields: specialist, message, telegramChatId'
+    });
+  }
+
+  try {
+    const result = await routeToSpecialist(specialist, message, telegramChatId);
+    return reply.send(result);
+  } catch (error) {
+    request.log.error({ error: error.message, stack: error.stack }, 'Routing error');
+    return reply.code(500).send({ error: error.message });
   }
 });
 
