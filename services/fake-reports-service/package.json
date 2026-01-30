@@ -1,0 +1,27 @@
+{
+  "name": "fake-reports-service",
+  "version": "1.0.0",
+  "description": "Telegram Bot for generating fake Facebook Ads reports",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "keywords": ["telegram", "bot", "facebook-ads", "reports"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.0",
+    "openai": "^4.67.3",
+    "pino": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

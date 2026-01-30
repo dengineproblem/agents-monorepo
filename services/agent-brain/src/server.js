@@ -13,6 +13,7 @@ import { updateCurrencyRates } from './currencyRateCron.js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
+import { startMoltbotUsageTracking } from './moltbot/usageTracker.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
 import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
@@ -7682,6 +7683,13 @@ if (CRON_ENABLED) {
 }
 
 // =============================================================================
+// Moltbot Usage Tracking (независимо от cron)
+// =============================================================================
+
+// Start Moltbot usage tracking (every 15 seconds)
+startMoltbotUsageTracking(15000);
+
+// =============================================================================
 // API Context Endpoint (для Moltbot Skills)
 // =============================================================================
 
@@ -7824,6 +7832,99 @@ function buildFacebookOAuthUrl(userId) {
     `state=${state}`
   );
 }
+
+// =============================================================================
+// AI Usage Limits Endpoints (для Moltbot Telegram)
+// =============================================================================
+
+/**
+ * GET /api/limits/check — проверить лимит затрат пользователя
+ * Используется Moltbot skill для проверки перед обработкой сообщения
+ */
+fastify.get('/api/limits/check', async (request, reply) => {
+  const telegramId = request.headers['x-telegram-id'];
+
+  if (!telegramId) {
+    return reply.code(400).send({ error: 'X-Telegram-Id header required' });
+  }
+
+  try {
+    const { checkUserLimit } = await import('./lib/usageLimits.js');
+    const result = await checkUserLimit(telegramId);
+
+    return reply.send(result);
+  } catch (error) {
+    fastify.log.error({ error: error.message, telegramId }, 'Error checking user limit');
+    // Fail-open: при ошибке разрешаем запрос
+    return reply.send({
+      allowed: true,
+      remaining: 1.00,
+      limit: 1.00,
+      spent: 0,
+      failOpen: true,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/limits/track — записать usage после обработки сообщения
+ * Используется Moltbot skill для отслеживания затрат
+ */
+fastify.post('/api/limits/track', async (request, reply) => {
+  const telegramId = request.headers['x-telegram-id'];
+  const { model, usage } = request.body || {};
+
+  if (!telegramId) {
+    return reply.code(400).send({ error: 'X-Telegram-Id header required' });
+  }
+
+  if (!model || !usage || (!usage.prompt_tokens && !usage.completion_tokens)) {
+    return reply.code(400).send({
+      error: 'Missing required fields: model, usage.prompt_tokens, usage.completion_tokens'
+    });
+  }
+
+  try {
+    const { trackUsage, calculateCost } = await import('./lib/usageLimits.js');
+
+    // Записать usage в БД
+    await trackUsage(telegramId, model, usage);
+
+    // Посчитать стоимость для ответа
+    const cost = calculateCost(model, usage);
+
+    // Получить общий расход за сегодня
+    const today = new Date().toISOString().split('T')[0];
+    const { data: usageRows } = await supabase
+      .from('user_ai_usage')
+      .select('cost_usd')
+      .eq('telegram_id', telegramId)
+      .eq('date', today);
+
+    const totalSpentToday = usageRows?.reduce((sum, row) => sum + parseFloat(row.cost_usd || 0), 0) || 0;
+
+    return reply.send({
+      success: true,
+      cost_usd: parseFloat(cost.toFixed(6)),
+      total_spent_today: parseFloat(totalSpentToday.toFixed(6))
+    });
+  } catch (error) {
+    fastify.log.error({
+      error: error.message,
+      stack: error.stack,
+      telegramId,
+      model,
+      usage
+    }, 'Error tracking usage');
+
+    // Не падаем при ошибке трекинга, просто логируем
+    return reply.code(500).send({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 /**
  * POST /api/onboarding/create-user

@@ -40,6 +40,8 @@ services:
       - MOLTBOT_TOKEN=moltbot-dev-token-2026
     ports:
       - "7080:7080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
     depends_on:
       - moltbot
@@ -400,6 +402,22 @@ services:
       - default
     depends_on:
       - agent-service
+
+  fake-reports-service:
+    build: ./services/fake-reports-service
+    labels:
+      logging: "promtail"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    env_file:
+      - ./services/fake-reports-service/.env
+    environment:
+      - PORT=8086
+      - NODE_ENV=production
+    ports:
+      - "8086:8086"
+    restart: unless-stopped
 
 volumes:
   loki-data:
