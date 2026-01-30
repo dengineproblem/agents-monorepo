@@ -106,7 +106,13 @@ const getCurrentUserTikTokConfig = async () => {
       
       // Убедимся, что у нас есть все необходимые данные
       if (userData && userData.tiktok_business_id && userData.tiktok_access_token) {
-
+        console.log('Используем TikTok учетные данные пользователя:', { 
+          username: userData.username,
+          tiktok_business_id: userData.tiktok_business_id,
+          // Скрываем токен из логов
+          tiktok_access_token_length: userData.tiktok_access_token ? userData.tiktok_access_token.length : 0
+        });
+        
         return {
           access_token: userData.tiktok_access_token,
           advertiser_id: userData.tiktok_business_id,
@@ -117,17 +123,20 @@ const getCurrentUserTikTokConfig = async () => {
         };
       } else {
         // Логируем, каких данных не хватает
-
+        console.error('Недостаточно TikTok данных пользователя:', {
+          hasTikTokIdentityId: !!userData?.tiktok_account_id,
+          hasTikTokAccessToken: !!userData?.tiktok_access_token
+        });
       }
     } catch (error) {
-
+      console.error('Ошибка при чтении TikTok данных пользователя из localStorage:', error);
     }
   } else {
-
+    console.error('Данные пользователя не найдены в localStorage');
   }
   
   // Если не смогли получить данные из localStorage, используем моковые данные
-
+  console.warn('Используются моковые данные TikTok. Пользователь не авторизован или нет нужных данных.');
   return {
     access_token: '',
     advertiser_id: '',
@@ -139,6 +148,7 @@ const getCurrentUserTikTokConfig = async () => {
 
 // URL прокси (n8n/свой сервис)
 const PROXY_URL: string = (import.meta as any)?.env?.VITE_TIKTOK_PROXY_URL || (typeof window !== 'undefined' && (window as any).__VITE_TIKTOK_PROXY_URL) || 'https://agent.performanteaiagency.com/tproxy';
+console.log('[TikTokProxy] Using proxy URL:', PROXY_URL);
 
 // Вспомогательная функция запросов через прокси, method: 'GET' или 'POST'
 const fetchFromTikTokAPI = async (
@@ -149,7 +159,10 @@ const fetchFromTikTokAPI = async (
   const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
 
   if (!TIKTOK_API_CONFIG.access_token || !TIKTOK_API_CONFIG.advertiser_id) {
-
+    console.error('Отсутствуют необходимые данные для запроса к TikTok API через прокси', {
+      hasToken: !!TIKTOK_API_CONFIG.access_token,
+      hasAdvertiserId: !!TIKTOK_API_CONFIG.advertiser_id
+    });
     throw new Error('Нет токена или advertiser_id для TikTok');
   }
 
@@ -162,9 +175,12 @@ const fetchFromTikTokAPI = async (
         access_token: TIKTOK_API_CONFIG.access_token,
         params
       };
-
-
-
+      
+      console.log('[TikTokProxy] ===== ОТПРАВКА POST ЗАПРОСА =====');
+      console.log('[TikTokProxy] URL прокси:', PROXY_URL);
+      console.log('[TikTokProxy] Body запроса:', JSON.stringify(requestBody, null, 2).replace(TIKTOK_API_CONFIG.access_token, '***TOKEN***'));
+      console.log('[TikTokProxy] =====================================');
+      
       const response = await fetch(PROXY_URL, {
         method: 'POST',
         headers: {
@@ -177,10 +193,13 @@ const fetchFromTikTokAPI = async (
       let data: any;
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
       
-
+      console.log('[TikTokProxy] ===== ОТВЕТ ОТ ПРОКСИ (POST) =====');
+      console.log('[TikTokProxy] HTTP Status:', response.status);
+      console.log('[TikTokProxy] Response data:', JSON.stringify(data, null, 2));
+      console.log('[TikTokProxy] ====================================');
 
       if (!response.ok || (typeof data === 'object' && data?.code && data.code !== 0)) {
-
+        console.error('Ошибка ответа TikTok через прокси:', data);
         if (data?.code === 40001) {
           toast.error('Ошибка авторизации TikTok. Пожалуйста, войдите снова.');
           const storedUser = localStorage.getItem('user');
@@ -190,7 +209,7 @@ const fetchFromTikTokAPI = async (
               userData.tiktok_access_token = '';
               localStorage.setItem('user', JSON.stringify(userData));
             } catch (e) {
-
+              console.error('Ошибка при обновлении данных пользователя:', e);
             }
           }
         }
@@ -206,7 +225,12 @@ const fetchFromTikTokAPI = async (
     proxyUrl.searchParams.set('method', method);
     proxyUrl.searchParams.set('access_token', TIKTOK_API_CONFIG.access_token);
     proxyUrl.searchParams.set('params', JSON.stringify(params || {}));
-
+    console.log('[TikTokProxy] Sending GET request:', { 
+      endpoint, 
+      method,
+      proxyUrl: proxyUrl.toString().replace(/access_token=[^&]+/, 'access_token=***'),
+      params 
+    });
     const response = await fetch(proxyUrl.toString(), { method: 'GET' });
 
     const text = await response.text();
@@ -214,7 +238,7 @@ const fetchFromTikTokAPI = async (
     try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     if (!response.ok || (typeof data === 'object' && data?.code && data.code !== 0)) {
-
+      console.error('Ошибка ответа TikTok через прокси:', data);
       if (data?.code === 40001) {
         toast.error('Ошибка авторизации TikTok. Пожалуйста, войдите снова.');
         const storedUser = localStorage.getItem('user');
@@ -224,7 +248,7 @@ const fetchFromTikTokAPI = async (
             userData.tiktok_access_token = '';
             localStorage.setItem('user', JSON.stringify(userData));
           } catch (e) {
-
+            console.error('Ошибка при обновлении данных пользователя:', e);
           }
         }
       }
@@ -233,7 +257,7 @@ const fetchFromTikTokAPI = async (
 
     return data;
   } catch (error) {
-
+    console.error('Ошибка при запросе к TikTok через прокси:', error);
     throw error;
   }
 };
@@ -332,7 +356,7 @@ const hasValidTikTokConfig = async () => {
   const isValid = !!TIKTOK_API_CONFIG.access_token && !!TIKTOK_API_CONFIG.advertiser_id;
   
   if (!isValid) {
-
+    console.log('TikTok конфигурация недоступна - токены отсутствуют');
   }
   
   return isValid;
@@ -342,9 +366,10 @@ const hasValidTikTokConfig = async () => {
 export const tiktokApi = {
   // Получить все кампании TikTok
   getCampaigns: async (): Promise<TikTokCampaign[]> => {
-
+    console.log('Запрос на получение TikTok кампаний');
+    
     if (!await hasValidTikTokConfig()) {
-
+      console.warn('Нет данных для получения TikTok кампаний. Возвращаю пустой массив.');
       // Не показываем уведомление и не возвращаем моковые кампании
       return [];
     }
@@ -352,7 +377,9 @@ export const tiktokApi = {
     try {
       const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
       const advertiserId = TIKTOK_API_CONFIG.advertiser_id;
-
+      
+      console.log(`Запрашиваем TikTok кампании для рекламного кабинета: ${advertiserId}`);
+      
       // Endpoint кампаний TikTok
       const endpoint = `campaign/get/`;
       const params = {
@@ -362,14 +389,18 @@ export const tiktokApi = {
         page_size: 100
       } as any;
       const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
-
+      console.log('Получены данные TikTok кампаний от API:', {
+        code: response.code,
+        count: response.data?.list?.length || 0
+      });
+      
       if (response.code !== 0) {
-
+        console.error('TikTok API вернул ошибку:', response.message);
         throw new Error(`TikTok API Error: ${response.message}`);
       }
       
       if (!response.data?.list || response.data.list.length === 0) {
-
+        console.warn('TikTok API вернул пустой список кампаний, возвращаю пустой массив');
         return [];
       }
       
@@ -389,21 +420,24 @@ export const tiktokApi = {
   
   // Получить статистику TikTok кампаний за период
   getCampaignStats: async (dateRange: DateRange): Promise<TikTokCampaignStat[]> => {
-
+    console.log('Запрос статистики TikTok кампаний за период:', dateRange);
+    
     if (!await hasValidTikTokConfig()) {
-
+      console.warn('Нет данных для получения статистики TikTok. Возвращаю пустой массив.');
       return [];
     }
     
     try {
       const TIKTOK_API_CONFIG = await getCurrentUserTikTokConfig();
       const advertiserId = TIKTOK_API_CONFIG.advertiser_id;
-
+      
+      console.log(`Запрашиваем статистику TikTok для рекламного кабинета: ${advertiserId}`);
+      
       // Сначала получаем список кампаний, чтобы затем создать для них нулевую статистику при необходимости
       const campaigns = await tiktokApi.getCampaigns();
       
       if (!campaigns || campaigns.length === 0) {
-
+        console.warn('Нет TikTok кампаний для запроса статистики, возвращаю пустой массив');
         return [];
       }
       
@@ -435,13 +469,18 @@ export const tiktokApi = {
           page_size: 1000
         } as any;
 
+        console.log('Отправляем запрос к TikTok API для окна:', {
+          since: params.start_date,
+          until: params.end_date
+        });
+
         const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
         if (response.code !== 0) {
-
+          console.error('TikTok API вернул ошибку:', response.message);
           throw new Error(`TikTok API Error: ${response.message}`);
         }
         const items = response.data?.list || [];
-
+        console.log('Получено записей для окна:', items.length);
         allItems.push(...items);
 
         windowStart = addDays(windowStart, MAX_DAYS);
@@ -449,6 +488,7 @@ export const tiktokApi = {
 
       // Если получены данные от API, обрабатываем их и возвращаем
       if (allItems.length > 0) {
+        console.log('Обрабатываем агрегированные данные статистики TikTok (все окна)');
         const result = allItems.map((stat: any) => {
           // Для TikTok считаем «переходы в WhatsApp» по кликам
           const clicks = parseInt(stat.metrics?.clicks || "0", 10);
@@ -473,12 +513,14 @@ export const tiktokApi = {
             _is_real_data: true // Помечаем как реальные данные
           };
         });
-
+        
+        console.log('Обработано реальных данных статистики TikTok:', result.length);
         return result;
       }
       
       // Если API вернул пустые данные, создаем нулевые статистики для каждой кампании на каждую дату
-
+      console.log('TikTok API вернул пустые данные статистики, создаем нулевые записи для реальных кампаний');
+      
       // Получаем все даты в диапазоне для создания ежедневной статистики
       const dates: Date[] = [];
       let currentDate = new Date(dateRange.since);
@@ -509,7 +551,8 @@ export const tiktokApi = {
           });
         });
       });
-
+      
+      console.log(`Создано ${zeroStats.length} записей статистики TikTok с нулевыми значениями`);
       return zeroStats;
     } catch (error) {
       toast.error('Не удалось получить статистику TikTok кампаний. Попробуйте позже.');
@@ -519,9 +562,10 @@ export const tiktokApi = {
   
   // Обновить статус TikTok кампании
   updateCampaignStatus: async (campaignId: string, isActive: boolean): Promise<boolean> => {
-
+    console.log(`Запрос на изменение статуса TikTok кампании ${campaignId} на ${isActive ? 'ENABLE' : 'DISABLE'}`);
+    
     if (!await hasValidTikTokConfig()) {
-
+      console.warn('Используются моковые данные для изменения статуса TikTok. Не удалось получить данные пользователя.');
       toast.warning('Используются тестовые данные TikTok. Изменения не будут сохранены.');
       await new Promise(resolve => setTimeout(resolve, 600)); // Имитация задержки API
       
@@ -539,38 +583,46 @@ export const tiktokApi = {
       // Прокси сам добавит версию API
       const endpoint = `campaign/status/update/`;
       const status = isActive ? 'ENABLE' : 'DISABLE';
-
+      
+      console.log(`Изменяем статус TikTok кампании ${campaignId} на ${status}`);
+      
       // ПРАВИЛЬНЫЙ формат: campaign_ids (массив!) и operation_status
       const params = {
         advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
         campaign_ids: [campaignId],  // Массив campaign_ids!
         operation_status: status
       };
-
-
-
+      
+      console.log('[TikTok] Отправляем запрос на изменение статуса:');
+      console.log('[TikTok] Endpoint:', endpoint);
+      console.log('[TikTok] Method: POST');
+      console.log('[TikTok] Params:', JSON.stringify(params, null, 2));
       
       const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
-
-
-
-
+      
+      console.log('[TikTok] ==========================================');
+      console.log('[TikTok] ПОЛНЫЙ ОТВЕТ от TikTok API:');
+      console.log('[TikTok] ==========================================');
+      console.log(JSON.stringify(response, null, 2));
+      console.log('[TikTok] ==========================================');
+      
       if (response.code !== 0) {
-
+        console.error('Ошибка TikTok API при изменении статуса:', response.message);
         toast.error('Не удалось изменить статус TikTok кампании');
         throw new Error(`TikTok API Error: ${response.message}`);
       }
       
       // Проверяем, есть ли в ответе информация о том, что изменение применено
       if (response.data) {
-
+        console.log('[TikTok] Данные из ответа:', response.data);
       }
-
+      
+      console.log('Результат изменения статуса TikTok кампании - успешно');
       toast.success(`TikTok кампания ${isActive ? 'запущена' : 'приостановлена'}`);
       
       return true;
     } catch (error) {
-
+      console.error('Ошибка при изменении статуса TikTok кампании:', error);
       toast.error('Не удалось обновить статус TikTok кампании');
       return false;
     }
@@ -647,6 +699,7 @@ export const tiktokApi = {
     userAccountId?: string,
     adAccountId?: string
   ): Promise<TikTokInstantPage[]> => {
+    console.log('[tiktokApi] getInstantPages', { userAccountId, adAccountId });
 
     try {
       const params = new URLSearchParams();
@@ -654,19 +707,21 @@ export const tiktokApi = {
       if (adAccountId) params.append('adAccountId', adAccountId);
 
       const url = `${API_BASE_URL}/tiktok/instant-pages?${params.toString()}`;
+      console.log('[tiktokApi] Fetching instant pages from:', url);
 
       const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-
+        console.error('[tiktokApi] Error fetching instant pages:', data.error);
         toast.error(data.error || 'Не удалось получить список Instant Forms');
         return [];
       }
 
+      console.log('[tiktokApi] Got instant pages:', data.data?.length || 0);
       return data.data || [];
     } catch (error) {
-
+      console.error('[tiktokApi] Exception fetching instant pages:', error);
       toast.error('Ошибка при получении списка Instant Forms');
       return [];
     }
@@ -674,9 +729,10 @@ export const tiktokApi = {
 
   // Получить Ad Groups для кампании
   getAdGroupsByCampaign: async (campaignId: string): Promise<TikTokAdGroup[]> => {
+    console.log('[tiktokApi] getAdGroupsByCampaign:', campaignId);
 
     if (!await hasValidTikTokConfig()) {
-
+      console.warn('Нет данных для получения TikTok Ad Groups');
       return [];
     }
 
@@ -694,12 +750,12 @@ export const tiktokApi = {
       const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
 
       if (response.code !== 0) {
-
+        console.error('TikTok API error:', response.message);
         throw new Error(`TikTok API Error: ${response.message}`);
       }
 
       if (!response.data?.list || response.data.list.length === 0) {
-
+        console.log('No ad groups found for campaign:', campaignId);
         return [];
       }
 
@@ -713,7 +769,7 @@ export const tiktokApi = {
         create_time: adgroup.create_time
       }));
     } catch (error) {
-
+      console.error('Error fetching TikTok ad groups:', error);
       toast.error('Не удалось загрузить Ad Groups');
       return [];
     }
@@ -721,6 +777,7 @@ export const tiktokApi = {
 
   // Получить статистику Ad Groups для кампании
   getAdGroupStats: async (campaignId: string, dateRange: DateRange): Promise<TikTokAdGroupStat[]> => {
+    console.log('[tiktokApi] getAdGroupStats:', { campaignId, dateRange });
 
     if (!await hasValidTikTokConfig()) {
       return [];
@@ -811,9 +868,10 @@ export const tiktokApi = {
         cpl: s.leads > 0 ? s.spend / s.leads : 0
       }));
 
+      console.log('[tiktokApi] Ad Group stats result:', result.length);
       return result;
     } catch (error) {
-
+      console.error('Error fetching TikTok ad group stats:', error);
       toast.error('Не удалось загрузить статистику Ad Groups');
       return [];
     }
@@ -821,6 +879,7 @@ export const tiktokApi = {
 
   // Получить Ads для Ad Group
   getAdsByAdGroup: async (adGroupId: string): Promise<TikTokAd[]> => {
+    console.log('[tiktokApi] getAdsByAdGroup:', adGroupId);
 
     if (!await hasValidTikTokConfig()) {
       return [];
@@ -840,12 +899,12 @@ export const tiktokApi = {
       const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
 
       if (response.code !== 0) {
-
+        console.error('TikTok API error:', response.message);
         throw new Error(`TikTok API Error: ${response.message}`);
       }
 
       if (!response.data?.list || response.data.list.length === 0) {
-
+        console.log('No ads found for ad group:', adGroupId);
         return [];
       }
 
@@ -858,7 +917,7 @@ export const tiktokApi = {
         create_time: ad.create_time
       }));
     } catch (error) {
-
+      console.error('Error fetching TikTok ads:', error);
       toast.error('Не удалось загрузить объявления');
       return [];
     }
@@ -866,6 +925,7 @@ export const tiktokApi = {
 
   // Получить статистику Ads для Ad Group
   getAdStatsByAdGroup: async (adGroupId: string, dateRange: DateRange): Promise<TikTokAdStat[]> => {
+    console.log('[tiktokApi] getAdStatsByAdGroup:', { adGroupId, dateRange });
 
     if (!await hasValidTikTokConfig()) {
       return [];
@@ -954,9 +1014,10 @@ export const tiktokApi = {
         cpl: s.leads > 0 ? s.spend / s.leads : 0
       }));
 
+      console.log('[tiktokApi] Ad stats result:', result.length);
       return result;
     } catch (error) {
-
+      console.error('Error fetching TikTok ad stats:', error);
       toast.error('Не удалось загрузить статистику объявлений');
       return [];
     }
@@ -964,6 +1025,7 @@ export const tiktokApi = {
 
   // Обновить статус Ad Group
   updateAdGroupStatus: async (adGroupId: string, isActive: boolean): Promise<boolean> => {
+    console.log(`[tiktokApi] updateAdGroupStatus: ${adGroupId} -> ${isActive ? 'ENABLE' : 'DISABLE'}`);
 
     if (!await hasValidTikTokConfig()) {
       toast.warning('Нет подключения к TikTok');
@@ -984,7 +1046,7 @@ export const tiktokApi = {
       const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
 
       if (response.code !== 0) {
-
+        console.error('TikTok API error:', response.message);
         toast.error('Не удалось изменить статус Ad Group');
         return false;
       }
@@ -992,7 +1054,7 @@ export const tiktokApi = {
       toast.success(`Ad Group ${isActive ? 'запущена' : 'приостановлена'}`);
       return true;
     } catch (error) {
-
+      console.error('Error updating TikTok ad group status:', error);
       toast.error('Не удалось обновить статус Ad Group');
       return false;
     }
@@ -1000,6 +1062,7 @@ export const tiktokApi = {
 
   // Обновить статус Ad
   updateAdStatus: async (adId: string, isActive: boolean): Promise<boolean> => {
+    console.log(`[tiktokApi] updateAdStatus: ${adId} -> ${isActive ? 'ENABLE' : 'DISABLE'}`);
 
     if (!await hasValidTikTokConfig()) {
       toast.warning('Нет подключения к TikTok');
@@ -1020,7 +1083,7 @@ export const tiktokApi = {
       const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
 
       if (response.code !== 0) {
-
+        console.error('TikTok API error:', response.message);
         toast.error('Не удалось изменить статус объявления');
         return false;
       }
@@ -1028,7 +1091,7 @@ export const tiktokApi = {
       toast.success(`Объявление ${isActive ? 'запущено' : 'приостановлено'}`);
       return true;
     } catch (error) {
-
+      console.error('Error updating TikTok ad status:', error);
       toast.error('Не удалось обновить статус объявления');
       return false;
     }

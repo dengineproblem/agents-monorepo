@@ -33,7 +33,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const setLanguage = (lang: Language) => {
     // В App Review mode запрещаем переключение с английского
     if (APP_REVIEW_MODE && lang !== 'en') {
-
+      console.warn('App Review mode: only English is allowed');
       return;
     }
     setLanguageState(lang);

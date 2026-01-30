@@ -152,7 +152,7 @@ class SalesApiService {
       
       return { data: result.directions || [], error: null };
     } catch (error) {
-
+      console.error('Error fetching directions:', error);
       return { data: [], error };
     }
   }
@@ -177,7 +177,7 @@ class SalesApiService {
     try {
       // Validate Ad ID format - must be all digits
       if (!/^\d+$/.test(adId)) {
-
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Facebook Ad ID должен содержать только цифры. Пропускаем запрос к Facebook API.`);
         return 0;
       }
 
@@ -208,7 +208,7 @@ class SalesApiService {
       const response = await fetch(url.toString());
       
       if (!response.ok) {
-
+        console.warn(`⚠️ Не удалось получить затраты для объявления ${adId}: ${response.status}`);
         return 0;
       }
 
@@ -217,7 +217,7 @@ class SalesApiService {
       return parseFloat(spend);
       
     } catch (error) {
-
+      console.error(`❌ Ошибка получения затрат для объявления ${adId}:`, error);
       return 0;
     }
   }
@@ -227,7 +227,7 @@ class SalesApiService {
     try {
       // Validate Ad ID format - must be all digits
       if (!/^\d+$/.test(adId)) {
-
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Пропускаем запрос к Facebook API.`);
         return null;
       }
 
@@ -239,16 +239,16 @@ class SalesApiService {
       const response = await fetch(url.toString());
       
       if (!response.ok) {
-
+        console.log(`⚠️ Не удалось получить campaign_id для объявления ${adId}`);
         return null;
       }
 
       const data = await response.json();
-
+      console.log(`📋 Объявление ${adId} → Кампания ${data.campaign_id}`);
       return data.campaign_id || null;
       
     } catch (error) {
-
+      console.error(`❌ Ошибка получения campaign_id для объявления ${adId}:`, error);
       return null;
     }
   }
@@ -260,7 +260,8 @@ class SalesApiService {
     const baseUrl = 'https://graph.facebook.com/v18.0';
     
     try {
-
+      console.log('🔄 Загружаем данные кампаний из Facebook API...');
+      
       const url = new URL(`${baseUrl}/${accountId}`);
       url.searchParams.append('access_token', accessToken);
       
@@ -273,12 +274,13 @@ class SalesApiService {
       
       if (!response.ok) {
         const errorText = await response.text();
-
+        console.error('❌ Facebook API error:', response.status, errorText);
         return campaignsMap;
       }
 
       const data = await response.json();
-
+      console.log('📊 Facebook API response:', data);
+      
       if (data.campaigns?.data) {
         data.campaigns.data.forEach((campaign: any) => {
           let totalSpend = 0;
@@ -296,14 +298,16 @@ class SalesApiService {
             name: campaign.name,
             spend: totalSpend // в долларах
           });
-
+          
+          console.log(`📊 Кампания ${campaign.id}: ${campaign.name}, затраты: $${totalSpend}`);
         });
       }
 
+      console.log(`✅ Загружено ${campaignsMap.size} кампаний из Facebook`);
       return campaignsMap;
       
     } catch (error) {
-
+      console.error('❌ Ошибка загрузки данных из Facebook:', error);
       return campaignsMap;
     }
   }
@@ -320,7 +324,7 @@ class SalesApiService {
     platform?: 'instagram' | 'tiktok'
   ): Promise<ROIData> {
     try {
-
+      console.log('🔄 Загружаем ROI данные для user_account_id:', userAccountId, 'direction:', directionId || 'все');
       const effectivePlatform = platform || 'instagram';
 
       // Фильтрация по периоду
@@ -369,9 +373,11 @@ class SalesApiService {
       const { data: creatives, error: creativesError } = await creativesQuery;
 
       if (creativesError) {
-
+        console.error('Ошибка загрузки креативов:', creativesError);
         throw creativesError;
       }
+
+      console.log('📊 Загружено креативов:', creatives?.length || 0);
 
       if (!creatives || creatives.length === 0) {
         return {
@@ -425,9 +431,11 @@ class SalesApiService {
       const { data: metricsHistory, error: metricsError } = await metricsQuery;
 
       if (metricsError) {
-
+        console.error('Ошибка загрузки метрик:', metricsError);
         // Продолжаем без метрик
       }
+
+      console.log('📊 Загружено записей метрик:', metricsHistory?.length || 0);
 
       // Агрегируем метрики по креативам
       const metricsMap = new Map<string, { impressions: number; reach: number; clicks: number; leads: number; spend: number }>();
@@ -467,8 +475,10 @@ class SalesApiService {
       const { data: leadsData, error: leadsError } = await leadsQuery;
 
       if (leadsError) {
-
+        console.error('Ошибка загрузки лидов:', leadsError);
       }
+
+      console.log('📊 Загружено лидов для выручки:', leadsData?.length || 0);
 
       // ШАГ 4: Загружаем продажи для расчёта выручки
       const leadPhones = leadsData?.map((l: any) => l.chat_id).filter(Boolean) || [];
@@ -496,8 +506,10 @@ class SalesApiService {
       const { data: purchasesData, error: purchasesError } = await purchasesQuery;
 
       if (purchasesError) {
-
+        console.error('Ошибка загрузки продаж:', purchasesError);
       }
+
+      console.log('📊 Загружено продаж:', purchasesData?.length || 0);
 
       // Группируем продажи по номеру телефона
       const purchasesByPhone = new Map<string, { count: number; amount: number }>();
@@ -542,8 +554,10 @@ class SalesApiService {
       const { data: capiEventsData, error: capiError } = await capiQuery;
 
       if (capiError) {
-
+        console.error('Ошибка загрузки CAPI событий:', capiError);
       }
+
+      console.log('📊 Загружено CAPI событий:', capiEventsData?.length || 0);
 
       // Агрегируем CAPI события по creative_id
       const capiByCreative = new Map<string, { interest: number; qualified: number; scheduled: number }>();
@@ -691,10 +705,11 @@ class SalesApiService {
         campaigns
       };
 
+      console.log('✅ ROI данные загружены:', result);
       return result;
 
     } catch (error) {
-
+      console.error('Ошибка в getROIData:', error);
       throw error;
     }
   }
@@ -702,6 +717,7 @@ class SalesApiService {
   // Получение списка существующих кампаний для выбора
   public async getExistingCampaigns(userAccountId: string): Promise<Array<{id: string, name: string, creative_url?: string}>> {
     try {
+      console.log('🔄 Загружаем существующие кампании для user_account_id:', userAccountId);
 
       // Получаем уникальные source_id из таблицы leads
       const { data: campaignsData, error: campaignsError } = await (supabase as any)
@@ -711,7 +727,7 @@ class SalesApiService {
         .not('source_id', 'is', null);
 
       if (campaignsError) {
-
+        console.error('❌ Ошибка загрузки кампаний:', campaignsError);
         throw campaignsError;
       }
 
@@ -737,7 +753,7 @@ class SalesApiService {
           .single();
 
         if (!userError && userData?.access_token && userData?.ad_account_id) {
-
+          console.log('✅ Загружаем реальные названия кампаний из Facebook API...');
           const facebookCampaigns = await this.getFacebookCampaignsData(userData.access_token, userData.ad_account_id);
 
           // Обновляем названия кампаний
@@ -751,20 +767,20 @@ class SalesApiService {
                 }
               }
             } catch (error) {
-
+              console.warn(`⚠️ Не удалось получить название для кампании ${sourceId}:`, error);
             }
           }
         }
       } catch (fbError) {
-
+        console.warn('⚠️ Не удалось получить данные из Facebook API для названий кампаний:', fbError);
       }
 
       const result = Array.from(uniqueCampaigns.values());
-
+      console.log('✅ Загружено кампаний:', result.length);
       return result;
 
     } catch (error) {
-
+      console.error('❌ Ошибка в getExistingCampaigns:', error);
       throw error;
     }
   }
@@ -782,13 +798,13 @@ class SalesApiService {
 
       // Используем ID пользователя (UUID из user_accounts)
       if (userData.id) {
-
+        console.log('✅ User Account ID:', userData.id);
         return userData.id;
       }
 
       throw new Error('User Account ID не найден');
     } catch (error) {
-
+      console.error('Ошибка получения user_account_id:', error);
       return null;
     }
   }
@@ -801,7 +817,8 @@ class SalesApiService {
   // Обновляем sale_amount в лиде после добавления продажи
   private async updateLeadSaleAmount(clientPhone: string, userAccountId: string) {
     try {
-
+      console.log('🔄 Обновляем sale_amount в лиде...');
+      
       // Считаем общую сумму всех продаж клиента
       const { data: totalSales, error: sumError } = await (supabase as any)
         .from('purchases')
@@ -810,11 +827,12 @@ class SalesApiService {
         .eq('user_account_id', userAccountId);
 
       if (sumError) {
-
+        console.error('❌ Ошибка подсчета суммы продаж:', sumError);
         return;
       }
 
       const totalAmount = totalSales?.reduce((sum, sale) => sum + Number(sale.amount), 0) || 0;
+      console.log('💰 Общая сумма продаж клиента:', totalAmount);
 
       // Обновляем sale_amount в лиде
       const { error: updateError } = await (supabase as any)
@@ -827,13 +845,13 @@ class SalesApiService {
         .eq('user_account_id', userAccountId);
 
       if (updateError) {
-
+        console.error('❌ Ошибка обновления sale_amount в лиде:', updateError);
       } else {
-
+        console.log('✅ sale_amount обновлен в лиде:', totalAmount);
       }
       
     } catch (error) {
-
+      console.error('❌ Ошибка в updateLeadSaleAmount:', error);
     }
   }
 
@@ -848,12 +866,12 @@ class SalesApiService {
         .eq('user_creative_id', creativeId);
 
       if (mappingError) {
-
+        console.error('Ошибка загрузки ad_creative_mapping:', mappingError);
         return { data: [], error: mappingError };
       }
 
       if (!mappings || mappings.length === 0) {
-
+        console.log('Нет ad mappings для креатива:', creativeId);
         return { data: [], error: null };
       }
 
@@ -873,7 +891,7 @@ class SalesApiService {
         .order('date', { ascending: false });
 
       if (error) {
-
+        console.error('Ошибка загрузки метрик из creative_metrics_history:', error);
         return { data: [], error };
       }
 
@@ -882,7 +900,7 @@ class SalesApiService {
       
       return { data: aggregated, error: null };
     } catch (error) {
-
+      console.error('Ошибка загрузки метрик креатива:', error);
       return { data: [], error };
     }
   }
@@ -978,7 +996,7 @@ class SalesApiService {
       
       return { data: data || null, error };
     } catch (error) {
-
+      console.error('Ошибка загрузки анализа креатива:', error);
       return { data: null, error };
     }
   }
@@ -995,10 +1013,11 @@ class SalesApiService {
     direction_id?: string;
   }) {
     try {
-
-
-
-
+      console.log('🔄 Добавляем продажу:', saleData);
+      console.log('📞 Номер телефона:', saleData.client_phone);
+      console.log('💰 Сумма:', saleData.amount);
+      console.log('👤 User Account ID:', saleData.user_account_id);
+      console.log('📋 Source ID:', saleData.manual_source_id);
 
       // Проверяем есть ли лид с таким номером у текущего пользователя
       const { data: existingLead, error: leadCheckError } = await (supabase as any)
@@ -1008,10 +1027,12 @@ class SalesApiService {
         .eq('chat_id', saleData.client_phone)
         .single();
 
-
+      console.log('🔍 Поиск лида по user_account_id:', saleData.user_account_id, 'и chat_id:', saleData.client_phone);
+      console.log('🔍 Результат:', existingLead);
+      console.log('🔍 Ошибка:', leadCheckError);
 
       if (leadCheckError && leadCheckError.code !== 'PGRST116') {
-
+        console.error('❌ Ошибка проверки лида:', leadCheckError);
         throw leadCheckError;
       }
 
@@ -1019,12 +1040,13 @@ class SalesApiService {
       if (!existingLead) {
         // Если НЕТ manual_creative_id - выбрасываем ошибку (первый клик)
         if (!saleData.manual_source_id) {
-
+          console.log('⚠️ Лид не найден в базе, нужно выбрать креатив');
           throw new Error(`Клиент с номером ${saleData.client_phone} не найден в базе лидов`);
         }
         
         // Если ЕСТЬ manual_source_id - создаем лид (второй клик)
-
+        console.log('📝 Создаем новый лид для продажи...');
+        
         const leadInsertData = {
           user_account_id: saleData.user_account_id,
           account_id: saleData.account_id || null, // UUID для мультиаккаунтности
@@ -1034,7 +1056,9 @@ class SalesApiService {
           direction_id: saleData.direction_id || null,
           created_at: new Date().toISOString()
         };
-
+        
+        console.log('🔍 Данные для вставки лида:', leadInsertData);
+        
         const { data: newLead, error: leadError } = await (supabase as any)
           .from('leads')
           .insert(leadInsertData)
@@ -1042,10 +1066,11 @@ class SalesApiService {
           .single();
 
         if (leadError) {
-
+          console.error('❌ Ошибка создания лида:', leadError);
           throw leadError;
         }
 
+        console.log('✅ Лид создан:', newLead);
       }
 
       // Добавляем продажу в таблицу purchases
@@ -1056,6 +1081,8 @@ class SalesApiService {
         amount: saleData.amount
       };
 
+      console.log('🔍 Данные для вставки продажи:', purchaseInsertData);
+
       const { data: purchaseData, error: purchaseError } = await (supabase as any)
         .from('purchases')
         .insert(purchaseInsertData)
@@ -1063,9 +1090,11 @@ class SalesApiService {
         .single();
 
       if (purchaseError) {
-
+        console.error('❌ Ошибка добавления продажи:', purchaseError);
         throw purchaseError;
       }
+
+      console.log('✅ Продажа успешно добавлена:', purchaseData);
 
       // Обновляем sale_amount в соответствующем лиде
       await this.updateLeadSaleAmount(saleData.client_phone, saleData.user_account_id);
@@ -1073,7 +1102,7 @@ class SalesApiService {
       return { success: true, data: purchaseData };
 
     } catch (error) {
-
+      console.error('❌ Ошибка в addSale:', error);
       throw error;
     }
   }
@@ -1090,6 +1119,7 @@ class SalesApiService {
     direction_id?: string;
   }) {
     try {
+      console.log('🔄 Добавляем продажу с креативом:', saleData);
 
       // Создаём новый лид с привязкой к креативу
       const leadInsertData = {
@@ -1103,6 +1133,8 @@ class SalesApiService {
         created_at: new Date().toISOString()
       };
 
+      console.log('📝 Создаём лид:', leadInsertData);
+
       const { data: newLead, error: leadError } = await (supabase as any)
         .from('leads')
         .insert(leadInsertData)
@@ -1110,9 +1142,11 @@ class SalesApiService {
         .single();
 
       if (leadError) {
-
+        console.error('❌ Ошибка создания лида:', leadError);
         throw leadError;
       }
+
+      console.log('✅ Лид создан:', newLead);
 
       // Добавляем продажу
       const purchaseInsertData = {
@@ -1129,9 +1163,11 @@ class SalesApiService {
         .single();
 
       if (purchaseError) {
-
+        console.error('❌ Ошибка добавления продажи:', purchaseError);
         throw purchaseError;
       }
+
+      console.log('✅ Продажа добавлена:', purchaseData);
 
       // Обновляем sale_amount в лиде
       await this.updateLeadSaleAmount(saleData.client_phone, saleData.user_account_id);
@@ -1139,7 +1175,7 @@ class SalesApiService {
       return { success: true, data: purchaseData };
 
     } catch (error) {
-
+      console.error('❌ Ошибка в addSaleWithCreative:', error);
       throw error;
     }
   }
@@ -1180,7 +1216,7 @@ class SalesApiService {
       const { data: leads, error } = await query;
 
       if (error) {
-
+        console.error('Ошибка загрузки лидов:', error);
         return { data: [], error };
       }
 
@@ -1232,7 +1268,7 @@ class SalesApiService {
             }
           }
         } catch (e) {
-
+          console.error('Ошибка загрузки направлений:', e);
         }
       }
 
@@ -1252,7 +1288,7 @@ class SalesApiService {
 
       return { data: transformedData, error: null };
     } catch (error) {
-
+      console.error('Ошибка в getLeadsForROI:', error);
       return { data: [], error };
     }
   }
@@ -1283,7 +1319,7 @@ class SalesApiService {
       const { data, error } = await query;
 
       if (error) {
-
+        console.error('Ошибка загрузки креативов:', error);
         return { data: [], error };
       }
 
@@ -1297,7 +1333,7 @@ class SalesApiService {
 
       return { data: transformedData, error: null };
     } catch (error) {
-
+      console.error('Ошибка в getCreativesForAssignment:', error);
       return { data: [], error };
     }
   }
@@ -1320,13 +1356,14 @@ class SalesApiService {
         .single();
 
       if (error) {
-
+        console.error('Ошибка привязки креатива:', error);
         return { data: null, error };
       }
 
+      console.log('✅ Креатив привязан к лиду:', data);
       return { data, error: null };
     } catch (error) {
-
+      console.error('Ошибка в assignCreativeToLead:', error);
       return { data: null, error };
     }
   }

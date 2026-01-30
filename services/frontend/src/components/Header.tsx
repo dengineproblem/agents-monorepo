@@ -106,11 +106,12 @@ const Header: React.FC<HeaderProps> = ({
       localStorage.removeItem('user');
       // Очищаем флаг посещения Dashboard для корректного редиректа при следующем логине
       sessionStorage.removeItem('hasVisitedDashboard');
+      console.log('User signed out, localStorage and sessionStorage cleared');
 
       toastT.success('loggedOut');
       navigate('/login');
     } catch (error) {
-
+      console.error('Error during sign out:', error);
       toastT.error('logoutError');
     }
   };
@@ -214,7 +215,7 @@ const Header: React.FC<HeaderProps> = ({
       const data = await response.json();
 
       if (!response.ok) {
-
+        console.error('Facebook validation HTTP error:', data);
         setValidationResult({
           success: false,
           error: appReviewText('Connection error', 'Ошибка соединения'),
@@ -225,10 +226,10 @@ const Header: React.FC<HeaderProps> = ({
       }
 
       // Всегда устанавливаем полный ответ от сервера (даже если success: false)
-
+      console.log('Facebook validation result:', data);
       setValidationResult(data);
     } catch (error: any) {
-
+      console.error('Unexpected error during Facebook validation:', error);
       setValidationResult({
         success: false,
         error: appReviewText('Unexpected error', 'Неожиданная ошибка'),

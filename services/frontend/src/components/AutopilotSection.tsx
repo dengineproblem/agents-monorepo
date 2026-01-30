@@ -154,6 +154,11 @@ export function AutopilotSection({
 
     const fetchData = async () => {
       const mode = currentAdAccountId ? 'multi_account' : 'legacy';
+      console.log('[AutopilotSection] fetchData called:', {
+        userAccountId,
+        currentAdAccountId,
+        mode
+      });
 
       setLoading(true);
       try {
@@ -168,20 +173,33 @@ export function AutopilotSection({
           url.searchParams.set('accountId', currentAdAccountId);
         }
 
+        console.log('[AutopilotSection] Fetching executions:', {
+          url: url.toString(),
+          mode,
+          filter: currentAdAccountId ? `accountId=${currentAdAccountId}` : 'all accounts (legacy)'
+        });
+
         const res = await fetch(url.toString());
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
             setExecutions(data.executions || []);
-
+            console.log('[AutopilotSection] Executions loaded:', {
+              count: data.executions?.length || 0,
+              mode,
+              accountId: currentAdAccountId || 'legacy'
+            });
           } else {
-
+            console.warn('[AutopilotSection] API returned success=false:', data);
           }
         } else {
-
+          console.error('[AutopilotSection] Fetch failed:', {
+            status: res.status,
+            statusText: res.statusText
+          });
         }
       } catch (error) {
-
+        console.error('[AutopilotSection] Error fetching autopilot data:', error);
       } finally {
         setLoading(false);
       }

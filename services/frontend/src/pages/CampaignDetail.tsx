@@ -46,7 +46,7 @@ const CampaignDetail: React.FC = () => {
   };
   
   const handleForceRefresh = () => {
-
+    console.log('[CampaignDetail] Принудительное обновление данных');
     // Инвалидируем кэши для текущей кампании
     if (id) {
       invalidateCache(`adsets_${id}`);

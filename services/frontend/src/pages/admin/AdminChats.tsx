@@ -81,7 +81,7 @@ const AdminChats: React.FC = () => {
         }
       }
     } catch (err) {
-
+      console.error('Error fetching users:', err);
     } finally {
       setLoadingUsers(false);
     }
@@ -110,7 +110,7 @@ const AdminChats: React.FC = () => {
         );
       }
     } catch (err) {
-
+      console.error('Error fetching messages:', err);
     } finally {
       setLoadingMessages(false);
     }
@@ -162,7 +162,7 @@ const AdminChats: React.FC = () => {
         setNewMessage('');
       }
     } catch (err) {
-
+      console.error('Error sending message:', err);
     } finally {
       setSending(false);
     }

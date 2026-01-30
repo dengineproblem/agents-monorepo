@@ -81,7 +81,7 @@ const Assistant: React.FC = () => {
         const user = JSON.parse(userData);
         setUserAccountId(user.id);
       } catch (e) {
-
+        console.error('Failed to parse user data:', e);
       }
     }
   }, []);
@@ -95,7 +95,7 @@ const Assistant: React.FC = () => {
       const data = await getConversations(userAccountId, currentAdAccountId || undefined);
       setConversations(data);
     } catch (error) {
-
+      console.error('Failed to load conversations:', error);
       toast.error('Не удалось загрузить чаты');
     } finally {
       setConversationsLoading(false);
@@ -132,7 +132,7 @@ const Assistant: React.FC = () => {
       const data = await getConversationMessages(activeConversationId, userAccountId);
       setMessages(data);
     } catch (error) {
-
+      console.error('Failed to load messages:', error);
       toast.error('Не удалось загрузить сообщения');
     } finally {
       setMessagesLoading(false);
@@ -301,7 +301,7 @@ const Assistant: React.FC = () => {
         // Stream was cancelled, ignore
         return;
       }
-
+      console.error('Failed to send message:', error);
       toast.error('Не удалось отправить сообщение');
       // Remove temp message on error
       setMessages((prev) => prev.filter((m) => !m.id.startsWith('temp-')));
@@ -347,7 +347,7 @@ const Assistant: React.FC = () => {
 
       toast.success('Чат удалён');
     } catch (error) {
-
+      console.error('Failed to delete conversation:', error);
       toast.error('Не удалось удалить чат');
     }
   };
@@ -377,7 +377,7 @@ const Assistant: React.FC = () => {
       setPlanModalOpen(false);
       setPendingPlan(null);
     } catch (error) {
-
+      console.error('Failed to execute plan:', error);
       toast.error('Не удалось выполнить план');
     } finally {
       setIsExecutingPlan(false);

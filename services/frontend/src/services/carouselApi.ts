@@ -31,7 +31,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error generating texts:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to generate carousel texts'
@@ -50,7 +50,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error regenerating card text:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to regenerate card text'
@@ -72,7 +72,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error generating carousel:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to generate carousel'
@@ -94,7 +94,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error regenerating card:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to regenerate card'
@@ -116,7 +116,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error upscaling carousel:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to upscale carousel'
@@ -140,7 +140,7 @@ export const carouselApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Carousel API] Error creating creative:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to create carousel creative',

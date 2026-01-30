@@ -85,13 +85,14 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
       resetForm();
       
     } catch (error) {
-
-
-
-
+      console.error('Ошибка добавления продажи:', error);
+      console.log('🔍 Тип ошибки:', typeof error);
+      console.log('🔍 error instanceof Error:', error instanceof Error);
+      console.log('🔍 error.message:', error instanceof Error ? error.message : 'Нет message');
+      
       // Проверяем нужно ли показать форму выбора кампании
       if (error instanceof Error && error.message.includes('не найден в базе лидов')) {
-
+        console.log('✅ Показываем форму выбора кампании');
         const currentBusinessId = await salesApi.getCurrentUserBusinessId();
         if (currentBusinessId) {
           await loadExistingCampaigns(currentBusinessId);
@@ -125,7 +126,7 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
       const campaigns = await salesApi.getExistingCampaigns(businessId);
       setExistingCampaigns(campaigns);
     } catch (error) {
-
+      console.error('Ошибка загрузки кампаний:', error);
       setExistingCampaigns([]);
     } finally {
       setIsLoadingCampaigns(false);
@@ -134,9 +135,10 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
 
   // Добавление продажи с выбранной кампанией
   const handleAddSaleWithCampaign = async () => {
-
-
-
+    console.log('🎯 handleAddSaleWithCampaign вызван');
+    console.log('🎯 selectedCampaignId:', selectedCampaignId);
+    console.log('🎯 existingCampaigns:', existingCampaigns);
+    
     if (!selectedCampaignId) {
       toast.error('Выберите кампанию');
       return;
@@ -164,7 +166,8 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
 
     // Получаем данные выбранной кампании
     const selectedCampaign = existingCampaigns.find(c => c.id === selectedCampaignId);
-
+    console.log('🎯 selectedCampaign:', selectedCampaign);
+    
     if (!selectedCampaign) {
       toast.error('Выбранная кампания не найдена');
       return;
@@ -193,7 +196,7 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
       resetForm();
       
     } catch (error) {
-
+      console.error('Ошибка добавления продажи с кампанией:', error);
       toast.error('Не удалось добавить продажу. Попробуйте еще раз.');
     } finally {
       setIsSubmitting(false);

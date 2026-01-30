@@ -49,6 +49,7 @@ const MetricsChart: React.FC<MetricsChartProps> = ({ campaignId }) => {
   
   // Диагностика: выводим все campaignStats по кампании
   const debugStats = chartStats.filter(stat => stat.campaign_id === campaignId);
+  console.log('DEBUG campaignStats for campaignId', campaignId, debugStats.map(s => s.date));
 
   if (loading || chartData.length === 0) {
     return (

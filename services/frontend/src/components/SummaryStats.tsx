@@ -55,10 +55,10 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         setAmocrmQualifiedLeads(result.totalQualifiedLeads);
 
         if (result.configured) {
-
+          console.log('[SummaryStats] Using AmoCRM qualified leads:', result.totalQualifiedLeads);
         }
       } catch (err) {
-
+        console.error('[SummaryStats] Failed to load AmoCRM qualified leads:', err);
         // Fall back to Facebook data on error
         setAmocrmConfigured(false);
         setAmocrmQualifiedLeads(null);
@@ -132,7 +132,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
     
     const isZeroData = hasRealData && totalSpend === 0 && totalLeads === 0 && totalImpressions === 0;
     if (isZeroData) {
-
+      console.log('Данные реальные, но все значения нулевые - нет активности за период');
     }
     
     return {

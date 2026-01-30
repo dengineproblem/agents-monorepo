@@ -34,7 +34,7 @@ export function useConversationReports(options: UseConversationReportsOptions) {
       setTotal(result.total);
       setOffset(newOffset);
     } catch (error: any) {
-
+      console.error('Failed to fetch reports:', error);
       toast.error('Не удалось загрузить отчёты');
     } finally {
       setLoading(false);
@@ -49,7 +49,7 @@ export function useConversationReports(options: UseConversationReportsOptions) {
       const report = await conversationReportService.getLatestReport(userAccountId);
       setLatestReport(report);
     } catch (error: any) {
-
+      console.error('Failed to fetch latest report:', error);
     }
   }, [userAccountId]);
 
@@ -61,7 +61,7 @@ export function useConversationReports(options: UseConversationReportsOptions) {
       const statsData = await conversationReportService.getStats(userAccountId, days);
       setStats(statsData);
     } catch (error: any) {
-
+      console.error('Failed to fetch stats:', error);
     }
   }, [userAccountId]);
 
@@ -80,7 +80,7 @@ export function useConversationReports(options: UseConversationReportsOptions) {
 
       return report;
     } catch (error: any) {
-
+      console.error('Failed to generate report:', error);
       toast.error(error.message || 'Не удалось сгенерировать отчёт');
       return null;
     } finally {

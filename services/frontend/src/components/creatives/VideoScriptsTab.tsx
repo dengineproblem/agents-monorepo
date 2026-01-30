@@ -72,6 +72,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
   useEffect(() => {
     if (!accountId) return;
 
+    console.log('[VideoScriptsTab] Смена аккаунта, сбрасываем состояние');
     // Не сбрасываем userPrompt если пришёл initialPrompt из URL (переход со страницы конкурентов)
     if (!initialPrompt) {
       setUserPrompt('');
@@ -111,7 +112,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
         toast.error(response.error || 'Не удалось сгенерировать текст');
       }
     } catch (error: any) {
-
+      console.error('[TextTab] Error generating:', error);
       toast.error('Ошибка при генерации текста');
     } finally {
       setIsGenerating(false);
@@ -150,7 +151,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
         toast.error(response.error || 'Не удалось отредактировать текст');
       }
     } catch (error: any) {
-
+      console.error('[TextTab] Error editing:', error);
       toast.error('Ошибка при редактировании текста');
     } finally {
       setIsEditing(false);

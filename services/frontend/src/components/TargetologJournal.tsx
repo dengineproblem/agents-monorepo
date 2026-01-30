@@ -50,14 +50,14 @@ const TargetologJournal: React.FC = () => {
           .limit(50); // Последние 50 действий
 
         if (fetchError) {
-
+          console.error('Ошибка загрузки действий таргетолога:', fetchError);
           setError('Не удалось загрузить журнал действий');
           return;
         }
 
         setActions(data || []);
       } catch (err) {
-
+        console.error('Ошибка:', err);
         setError('Произошла ошибка при загрузке данных');
       } finally {
         setLoading(false);

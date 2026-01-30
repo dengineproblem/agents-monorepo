@@ -20,7 +20,7 @@ export function getCachedData<T>(key: string): T | null {
   try {
     const cached = safeGetItem(key);
     if (!cached) {
-
+      console.log(`[Cache] Промах: ${key}`);
       return null;
     }
 
@@ -29,10 +29,15 @@ export function getCachedData<T>(key: string): T | null {
 
     // Проверяем, не истек ли TTL
     if (now - entry.timestamp > entry.ttl) {
+      console.log(`[Cache] Истек: ${key} (возраст: ${Math.round((now - entry.timestamp) / 1000)}с)`);
+      safeRemoveItem(key);
+      return null;
+    }
 
+    console.log(`[Cache] Попадание: ${key} (возраст: ${Math.round((now - entry.timestamp) / 1000)}с)`);
     return entry.data;
   } catch (error) {
-
+    console.error(`[Cache] Ошибка при чтении кэша ${key}:`, error);
     return null;
   }
 }
@@ -52,9 +57,9 @@ export function setCachedData<T>(key: string, data: T, ttlMinutes: number = 5): 
 
   const success = safeSetItem(key, JSON.stringify(entry));
   if (success) {
-
+    console.log(`[Cache] Сохранено: ${key} (TTL: ${ttlMinutes} мин)`);
   } else {
-
+    console.error(`[Cache] Не удалось сохранить: ${key}`);
   }
 }
 
@@ -75,10 +80,10 @@ export function invalidateCache(pattern: string): void {
     });
 
     if (removed > 0) {
-
+      console.log(`[Cache] Инвалидировано ${removed} записей по паттерну: ${pattern}`);
     }
   } catch (error) {
-
+    console.error(`[Cache] Ошибка при инвалидации кэша по паттерну ${pattern}:`, error);
   }
 }
 
@@ -112,8 +117,9 @@ export function cleanOldCaches(): void {
       }
     });
 
+    console.log(`[Cache] Очищено ${removed} устаревших записей`);
   } catch (error) {
-
+    console.error('[Cache] Ошибка при очистке старых кэшей:', error);
   }
 }
 
@@ -132,8 +138,9 @@ export function clearAllCaches(): void {
       }
     });
 
+    console.log(`[Cache] Очищено всего ${removed} записей`);
   } catch (error) {
-
+    console.error('[Cache] Ошибка при полной очистке кэшей:', error);
   }
 }
 

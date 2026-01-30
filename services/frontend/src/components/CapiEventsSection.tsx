@@ -61,6 +61,11 @@ const CapiEventsSection: React.FC<CapiEventsSectionProps> = ({ showTitle = false
   useEffect(() => {
     const loadCapiStats = async () => {
       const startTime = Date.now();
+      console.debug('[CapiEventsSection] Loading CAPI stats:', {
+        since: dateRange.since,
+        until: dateRange.until,
+        platform,
+      });
 
       setLoading(true);
       setError(null);
@@ -70,14 +75,24 @@ const CapiEventsSection: React.FC<CapiEventsSectionProps> = ({ showTitle = false
 
         if (stats) {
           setCapiStats(stats);
-
+          console.debug('[CapiEventsSection] CAPI stats loaded:', {
+            capiEnabled: stats.capiEnabled,
+            lead: stats.lead,
+            registration: stats.registration,
+            schedule: stats.schedule,
+            durationMs: Date.now() - startTime,
+          });
         } else {
           // API returned null - could be user has no CAPI or error
           setCapiStats(null);
+          console.debug('[CapiEventsSection] No CAPI stats returned (user may not have CAPI configured)');
         }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err);
-
+        console.error('[CapiEventsSection] Failed to load CAPI stats:', {
+          error: errorMessage,
+          durationMs: Date.now() - startTime,
+        });
         setCapiStats(null);
         setError(errorMessage);
       } finally {
@@ -116,19 +131,19 @@ const CapiEventsSection: React.FC<CapiEventsSectionProps> = ({ showTitle = false
 
   // Don't show for TikTok platform
   if (platform === 'tiktok') {
-
+    console.debug('[CapiEventsSection] Hidden: TikTok platform');
     return null;
   }
 
   // Don't show if CAPI is not enabled for any direction
   if (!loading && capiStats && !capiStats.capiEnabled) {
-
+    console.debug('[CapiEventsSection] Hidden: CAPI not enabled for any direction');
     return null;
   }
 
   // Don't show if there was an error and no cached data
   if (!loading && error && !capiStats) {
-
+    console.debug('[CapiEventsSection] Hidden: Error loading data');
     return null;
   }
 

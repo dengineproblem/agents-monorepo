@@ -113,7 +113,7 @@ export function useImageDraftAutoSave(
         }
       }
     } catch (e) {
-
+      console.error('[useImageDraftAutoSave] Error loading draft:', e);
     }
   }, [userId, accountId, enabled]);
 
@@ -142,9 +142,9 @@ export function useImageDraftAutoSave(
     saveTimeoutRef.current = setTimeout(() => {
       try {
         localStorage.setItem(key, draftJson);
-
+        console.log('[useImageDraftAutoSave] Draft saved');
       } catch (e) {
-
+        console.error('[useImageDraftAutoSave] Error saving draft:', e);
       }
     }, DEBOUNCE_MS);
   }, [userId, accountId, enabled]);
@@ -165,9 +165,9 @@ export function useImageDraftAutoSave(
       localStorage.removeItem(key);
       setSavedDraft(null);
       setHasSavedDraft(false);
-
+      console.log('[useImageDraftAutoSave] Draft discarded');
     } catch (e) {
-
+      console.error('[useImageDraftAutoSave] Error discarding draft:', e);
     }
   }, [userId, accountId]);
 
@@ -179,9 +179,9 @@ export function useImageDraftAutoSave(
     try {
       localStorage.removeItem(key);
       lastSaveRef.current = '';
-
+      console.log('[useImageDraftAutoSave] Draft cleared');
     } catch (e) {
-
+      console.error('[useImageDraftAutoSave] Error clearing draft:', e);
     }
   }, [userId, accountId]);
 
@@ -246,7 +246,7 @@ export function useCarouselDraftAutoSave(
         }
       }
     } catch (e) {
-
+      console.error('[useCarouselDraftAutoSave] Error loading draft:', e);
     }
   }, [userId, accountId, enabled]);
 
@@ -275,9 +275,9 @@ export function useCarouselDraftAutoSave(
     saveTimeoutRef.current = setTimeout(() => {
       try {
         localStorage.setItem(key, draftJson);
-
+        console.log('[useCarouselDraftAutoSave] Draft saved');
       } catch (e) {
-
+        console.error('[useCarouselDraftAutoSave] Error saving draft:', e);
       }
     }, DEBOUNCE_MS);
   }, [userId, accountId, enabled]);
@@ -298,9 +298,9 @@ export function useCarouselDraftAutoSave(
       localStorage.removeItem(key);
       setSavedDraft(null);
       setHasSavedDraft(false);
-
+      console.log('[useCarouselDraftAutoSave] Draft discarded');
     } catch (e) {
-
+      console.error('[useCarouselDraftAutoSave] Error discarding draft:', e);
     }
   }, [userId, accountId]);
 
@@ -312,9 +312,9 @@ export function useCarouselDraftAutoSave(
     try {
       localStorage.removeItem(key);
       lastSaveRef.current = '';
-
+      console.log('[useCarouselDraftAutoSave] Draft cleared');
     } catch (e) {
-
+      console.error('[useCarouselDraftAutoSave] Error clearing draft:', e);
     }
   }, [userId, accountId]);
 

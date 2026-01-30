@@ -127,7 +127,7 @@ const AdminAdInsights: React.FC = () => {
           }
         }
       } catch (err) {
-
+        console.error('Error loading accounts:', err);
       } finally {
         setLoadingAccounts(false);
       }
@@ -171,7 +171,7 @@ const AdminAdInsights: React.FC = () => {
 
       setStats({ criticalAnomalies: critical, highBurnout, recoveryPotential: recovery });
     } catch (err) {
-
+      console.error('Error loading data:', err);
     } finally {
       setLoadingData(false);
     }
@@ -192,7 +192,7 @@ const AdminAdInsights: React.FC = () => {
         await loadData();
       }
     } catch (err) {
-
+      console.error('Sync error:', err);
     } finally {
       setSyncing(false);
     }
@@ -230,7 +230,7 @@ const AdminAdInsights: React.FC = () => {
       setPatternsMetrics(metricsRes);
       setPatternsSummary(summaryRes);
     } catch (err) {
-
+      console.error('Error loading patterns:', err);
     } finally {
       setLoadingPatterns(false);
     }

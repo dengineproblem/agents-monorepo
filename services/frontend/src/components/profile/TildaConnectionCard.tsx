@@ -71,7 +71,7 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
           }
         }
       } catch (err) {
-
+        console.error('Error loading tilda_utm_field:', err);
       } finally {
         setLoading(false);
       }
@@ -108,7 +108,7 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
       toast.success('Настройка сохранена');
       onSettingsSaved?.();
     } catch (err) {
-
+      console.error('Error saving tilda_utm_field:', err);
       toast.error('Не удалось сохранить настройку');
     } finally {
       setSaving(false);

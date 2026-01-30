@@ -79,7 +79,7 @@ export const budgetForecastApi = {
     // Проверяем кэш
     const cached = getCachedData<CampaignForecastResponse>(cacheKey);
     if (cached) {
-
+      console.log('[BudgetForecastApi] Returning cached campaign forecast');
       return cached;
     }
 
@@ -87,9 +87,11 @@ export const budgetForecastApi = {
       const params = effectiveAccountId ? `?accountId=${effectiveAccountId}` : '';
       const url = `${API_BASE_URL}/budget-forecast/campaign/${campaignId}${params}`;
 
+      console.log('[BudgetForecastApi] Fetching campaign forecast:', url);
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
+        console.error('[BudgetForecastApi] Error:', res.status, await res.text());
         return null;
       }
 
@@ -100,7 +102,7 @@ export const budgetForecastApi = {
 
       return data;
     } catch (error) {
-
+      console.error('[BudgetForecastApi.getCampaignForecast] Error:', error);
       return null;
     }
   },
@@ -128,7 +130,7 @@ export const budgetForecastApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) {
-
+        console.error('[BudgetForecastApi] Error:', res.status);
         return null;
       }
 
@@ -139,7 +141,7 @@ export const budgetForecastApi = {
 
       return data;
     } catch (error) {
-
+      console.error('[BudgetForecastApi.getAdForecast] Error:', error);
       return null;
     }
   },

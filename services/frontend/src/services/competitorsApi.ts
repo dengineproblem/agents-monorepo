@@ -21,6 +21,7 @@ export const competitorsApi = {
    */
   async list(userAccountId: string, accountId?: string): Promise<Competitor[]> {
     try {
+      console.log('[competitorsApi.list] Запрос конкурентов для user_account_id:', userAccountId, 'account_id:', accountId);
 
       const params = new URLSearchParams({ userAccountId });
       // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
@@ -33,20 +34,20 @@ export const competitorsApi = {
       );
 
       if (!response.ok) {
-
+        console.error('[competitorsApi.list] Ошибка HTTP:', response.statusText);
         return [];
       }
 
       const data: GetCompetitorsResponse = await response.json();
 
       if (data.success && data.competitors) {
-
+        console.log('[competitorsApi.list] Найдено конкурентов:', data.competitors.length);
         return data.competitors;
       }
 
       return [];
     } catch (error) {
-
+      console.error('[competitorsApi.list] Исключение:', error);
       return [];
     }
   },
@@ -60,6 +61,7 @@ export const competitorsApi = {
     error?: string;
   }> {
     try {
+      console.log('[competitorsApi.add] Добавление конкурента:', payload);
 
       const response = await fetch(`${API_BASE_URL}/competitors`, {
         method: 'POST',
@@ -83,7 +85,7 @@ export const competitorsApi = {
         competitor: data.competitor,
       };
     } catch (error) {
-
+      console.error('[competitorsApi.add] Исключение:', error);
       return {
         success: false,
         error: 'Произошла ошибка при добавлении конкурента',
@@ -117,7 +119,7 @@ export const competitorsApi = {
 
       return { success: true };
     } catch (error) {
-
+      console.error('[competitorsApi.delete] Исключение:', error);
       return {
         success: false,
         error: 'Произошла ошибка при удалении конкурента',
@@ -130,6 +132,7 @@ export const competitorsApi = {
    */
   async refresh(competitorId: string): Promise<RefreshCompetitorResponse> {
     try {
+      console.log('[competitorsApi.refresh] Обновление конкурента:', competitorId);
 
       const response = await fetch(
         `${API_BASE_URL}/competitors/${competitorId}/refresh`,
@@ -153,7 +156,7 @@ export const competitorsApi = {
         result: data.result,
       };
     } catch (error) {
-
+      console.error('[competitorsApi.refresh] Исключение:', error);
       return {
         success: false,
         error: 'Произошла ошибка при обновлении креативов',
@@ -189,7 +192,7 @@ export const competitorsApi = {
       );
 
       if (!response.ok) {
-
+        console.error('[competitorsApi.getCreatives] Ошибка HTTP:', response.statusText);
         return {
           creatives: [],
           pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -203,7 +206,7 @@ export const competitorsApi = {
         pagination: data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 },
       };
     } catch (error) {
-
+      console.error('[competitorsApi.getCreatives] Исключение:', error);
       return {
         creatives: [],
         pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -261,7 +264,7 @@ export const competitorsApi = {
       );
 
       if (!response.ok) {
-
+        console.error('[competitorsApi.getAllCreatives] Ошибка HTTP:', response.statusText);
         return {
           creatives: [],
           pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -275,7 +278,7 @@ export const competitorsApi = {
         pagination: data.pagination || { page: 1, limit: 20, total: 0, totalPages: 0 },
       };
     } catch (error) {
-
+      console.error('[competitorsApi.getAllCreatives] Исключение:', error);
       return {
         creatives: [],
         pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -317,14 +320,14 @@ export const competitorsApi = {
       );
 
       if (!response.ok) {
-
+        console.error('[competitorsApi.getTop10ForReference] Ошибка HTTP:', response.statusText);
         return [];
       }
 
       const data: GetCreativesResponse = await response.json();
       return data.creatives || [];
     } catch (error) {
-
+      console.error('[competitorsApi.getTop10ForReference] Исключение:', error);
       return [];
     }
   },
@@ -348,7 +351,7 @@ export const competitorsApi = {
       const data = await response.json();
       return data;
     } catch (error) {
-
+      console.error('[competitorsApi.extractText] Исключение:', error);
       return { success: false, error: 'Ошибка сети' };
     }
   },

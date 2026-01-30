@@ -64,7 +64,7 @@ export function BotControls({
       onUpdate?.();
     } catch (error) {
       toast.error('Ошибка при взятии лида в работу');
-
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -85,7 +85,7 @@ export function BotControls({
       onUpdate?.();
     } catch (error) {
       toast.error('Ошибка при возврате лида боту');
-
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -106,7 +106,7 @@ export function BotControls({
       onUpdate?.();
     } catch (error) {
       toast.error('Ошибка при остановке бота');
-
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -127,7 +127,7 @@ export function BotControls({
       onUpdate?.();
     } catch (error) {
       toast.error('Ошибка при возобновлении бота');
-
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -148,7 +148,7 @@ export function BotControls({
       onUpdate?.();
     } catch (error) {
       toast.error('Ошибка при отправке сообщения');
-
+      console.error(error);
     } finally {
       setLoading(false);
     }

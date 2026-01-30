@@ -163,7 +163,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error fetching gallery:', error);
       return {
         success: false,
         total: 0,
@@ -191,7 +191,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error fetching history:', error);
       return {
         success: false,
         total: 0,
@@ -221,7 +221,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error fetching text history:', error);
       return {
         success: false,
         total: 0,
@@ -247,7 +247,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error fetching text gallery:', error);
       return {
         success: false,
         total: 0,
@@ -270,7 +270,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error saving draft:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message
@@ -290,7 +290,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error updating draft:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message
@@ -309,7 +309,7 @@ export const galleryApi = {
       );
       return response.data;
     } catch (error: any) {
-
+      console.error('[Gallery API] Error deleting draft:', error);
       return {
         success: false,
         error: error.response?.data?.error || error.message

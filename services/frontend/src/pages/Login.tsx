@@ -35,11 +35,16 @@ const Login = () => {
           const parsedUser = JSON.parse(storedUser);
           // Логин разрешен даже без Facebook токена
           if (parsedUser && parsedUser.username) {
-
+            console.log('Пользователь уже авторизован, перенаправляем на главную', {
+              username: parsedUser.username,
+              hasToken: !!parsedUser.access_token,
+              hasAdAccountId: !!parsedUser.ad_account_id,
+              hasPageId: !!parsedUser.page_id
+            });
             navigate('/', { replace: true });
           }
         } catch (error) {
-
+          console.error('Ошибка при проверке сохраненного пользователя:', error);
           localStorage.removeItem('user');
         }
       }
@@ -59,11 +64,12 @@ const Login = () => {
   const onSubmit = async (data: LoginFormValues) => {
     try {
       setIsLoading(true);
-
-
+      console.log('========== ПОПЫТКА ВХОДА ==========');
+      console.log('Вход с именем пользователя:', data.username);
+      
       // Проверка пустых полей
       if (!data.username.trim() || !data.password.trim()) {
-
+        console.error('Пустой логин или пароль');
         toastT.error('emptyCredentials');
         setIsLoading(false);
         return;
@@ -76,23 +82,30 @@ const Login = () => {
         .eq('username', data.username)
         .eq('password', data.password)
         .maybeSingle();
-
+        
+      console.log('Результат запроса к Supabase:', { 
+        userFound: !!user,
+        error: error 
+      });
+      
       if (error) {
-
+        console.error('Ошибка запроса к базе данных:', error);
         toastT.error('loginError');
         setIsLoading(false);
         return;
       }
       
       if (!user) {
-
+        console.error('Неверные учетные данные');
         toastT.error('invalidCredentials');
         setIsLoading(false);
         return;
       }
       
       // Facebook данные теперь опциональны - подключаются в Profile
-
+      console.log('Аутентификация пользователя успешна!', {
+        username: user.username,
+        hasFacebookData: !!(user.access_token && user.ad_account_id && user.page_id)
       });
       
       // Создаем данные сессии (Facebook данные опциональны)
@@ -107,9 +120,17 @@ const Login = () => {
       };
       
       // Подробно логируем данные, сохраняемые в localStorage
-
+      console.log('Сохраняем данные пользователя в localStorage:', {
+        id: sessionUser.id,
+        username: sessionUser.username,
+        ad_account_id: sessionUser.ad_account_id,
+        page_id: sessionUser.page_id,
+        access_token_length: sessionUser.access_token?.length || 0
+      });
+      
       // Сохраняем данные в localStorage
       localStorage.setItem('user', JSON.stringify(sessionUser));
+      console.log('Данные пользователя сохранены в localStorage');
 
       toastT.success('loggedIn');
 
@@ -117,11 +138,11 @@ const Login = () => {
       window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
 
       // Перенаправляем на главную страницу
-
+      console.log('Перенаправляем на главную страницу...');
       setTimeout(() => navigate('/', { replace: true }), 100);
       
     } catch (error) {
-
+      console.error('Ошибка при входе:', error);
       toastT.error('loginError');
     } finally {
       setIsLoading(false);

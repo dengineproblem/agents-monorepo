@@ -58,7 +58,7 @@ export const CarouselGalleryTab: React.FC<CarouselGalleryTabProps> = ({ onUseAsR
         toast.error('Не удалось загрузить галерею');
       }
     } catch (error) {
-
+      console.error('Error loading gallery:', error);
       toast.error('Ошибка загрузки галереи');
     } finally {
       setLoading(false);

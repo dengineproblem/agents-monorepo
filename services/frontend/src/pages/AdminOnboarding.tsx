@@ -344,7 +344,7 @@ const AdminOnboarding: React.FC = () => {
         setKanbanData(data);
       }
     } catch (error) {
-
+      console.error('Failed to fetch kanban data:', error);
       toast({
         title: 'Ошибка',
         description: 'Не удалось загрузить данные',
@@ -365,7 +365,7 @@ const AdminOnboarding: React.FC = () => {
         setUserDetail(data);
       }
     } catch (error) {
-
+      console.error('Failed to fetch user details:', error);
     } finally {
       setLoadingDetail(false);
     }

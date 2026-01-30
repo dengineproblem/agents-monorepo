@@ -16,19 +16,19 @@ export const useReports = () => {
   
   const fetchReports = async () => {
     if (!user?.id) {
-
+      console.warn('Нет идентификатора пользователя Telegram для получения отчетов');
       return;
     }
 
     if (multiAccountEnabled && !currentAdAccountId) {
-
+      console.warn('Мультиаккаунт: отчет не запрошен, аккаунт не выбран');
       setReports([]);
       return;
     }
     
     setLoading(true);
     try {
-
+      console.log('Загрузка отчетов для пользователя с Telegram ID:', user.id);
       let query = supabase
         .from('campaign_reports')
         .select('*')
@@ -46,14 +46,15 @@ export const useReports = () => {
         .order('created_at', { ascending: false });
       
       if (error) {
-
+        console.error('Ошибка при загрузке отчетов:', error);
         toastT.error('failedToLoadReports');
         return;
       }
-
+      
+      console.log(`Получено ${data.length} отчетов:`, data);
       setReports(data);
     } catch (error) {
-
+      console.error('Ошибка при обработке запроса отчетов:', error);
       toastT.error('reportsLoadError');
     } finally {
       setLoading(false);

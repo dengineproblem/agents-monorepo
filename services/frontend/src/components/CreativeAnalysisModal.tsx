@@ -214,7 +214,7 @@ export const CreativeAnalysisModal: React.FC<CreativeAnalysisModalProps> = ({
       const data = await directionsApi.list(userId, accountId, 'facebook');
       setDirections(data);
     } catch (err) {
-
+      console.error('Ошибка загрузки направлений:', err);
       setError('Не удалось загрузить направления');
       setState('error');
     } finally {
@@ -274,6 +274,7 @@ export const CreativeAnalysisModal: React.FC<CreativeAnalysisModalProps> = ({
         creativesMappings.push({ ad_id: primaryId, direction_id: directionId });
       });
 
+      console.log('[handleImport] Импортируем', creativesMappings.length, 'групп (primary ad_ids)');
 
       const response = await creativesApi.importSelectedCreatives(
         creativesMappings.map(m => m.ad_id),

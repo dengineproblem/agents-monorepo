@@ -57,7 +57,7 @@ export const ImageHistoryTab: React.FC<ImageHistoryTabProps> = ({ userId, onUseA
         toast.error('Не удалось загрузить историю');
       }
     } catch (error) {
-
+      console.error('Error loading history:', error);
       toast.error('Ошибка загрузки истории');
     } finally {
       setLoading(false);

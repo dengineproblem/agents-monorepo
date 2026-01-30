@@ -15,23 +15,24 @@ export const defaultSettingsApi = {
    */
   async get(directionId: string): Promise<DefaultAdSettings | null> {
     try {
-
+      console.log('[defaultSettingsApi.get] Загрузка настроек для direction:', directionId);
       const response = await fetch(`${API_BASE_URL}/default-settings?directionId=${directionId}`);
       
       if (!response.ok) {
-
+        console.error('[defaultSettingsApi.get] HTTP ошибка:', response.status);
         return null;
       }
 
       const data: ApiResponse<DefaultAdSettings> = await response.json();
-
+      console.log('[defaultSettingsApi.get] Ответ:', data);
+      
       if (data.success) {
         return data.settings || null;
       }
       
       return null;
     } catch (error) {
-
+      console.error('[defaultSettingsApi.get] Исключение:', error);
       return null;
     }
   },
@@ -41,7 +42,7 @@ export const defaultSettingsApi = {
    */
   async save(input: CreateDefaultSettingsInput): Promise<{ success: boolean; settings?: DefaultAdSettings; error?: string }> {
     try {
-
+      console.log('[defaultSettingsApi.save] Сохранение настроек:', input);
       const response = await fetch(`${API_BASE_URL}/default-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -49,6 +50,7 @@ export const defaultSettingsApi = {
       });
 
       const data: ApiResponse<DefaultAdSettings> = await response.json();
+      console.log('[defaultSettingsApi.save] Ответ:', data);
 
       if (!response.ok) {
         return { success: false, error: data.error || 'Не удалось сохранить настройки' };
@@ -56,7 +58,7 @@ export const defaultSettingsApi = {
 
       return { success: true, settings: data.settings };
     } catch (error) {
-
+      console.error('[defaultSettingsApi.save] Исключение:', error);
       return { success: false, error: 'Произошла ошибка при сохранении настроек' };
     }
   },
@@ -66,7 +68,7 @@ export const defaultSettingsApi = {
    */
   async update(id: string, updates: UpdateDefaultSettingsInput): Promise<{ success: boolean; settings?: DefaultAdSettings; error?: string }> {
     try {
-
+      console.log('[defaultSettingsApi.update] Обновление настроек:', id, updates);
       const response = await fetch(`${API_BASE_URL}/default-settings/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -74,6 +76,7 @@ export const defaultSettingsApi = {
       });
 
       const data: ApiResponse<DefaultAdSettings> = await response.json();
+      console.log('[defaultSettingsApi.update] Ответ:', data);
 
       if (!response.ok) {
         return { success: false, error: data.error || 'Не удалось обновить настройки' };
@@ -81,7 +84,7 @@ export const defaultSettingsApi = {
 
       return { success: true, settings: data.settings };
     } catch (error) {
-
+      console.error('[defaultSettingsApi.update] Исключение:', error);
       return { success: false, error: 'Произошла ошибка при обновлении настроек' };
     }
   },
@@ -91,12 +94,13 @@ export const defaultSettingsApi = {
    */
   async delete(id: string): Promise<{ success: boolean; error?: string }> {
     try {
-
+      console.log('[defaultSettingsApi.delete] Удаление настроек:', id);
       const response = await fetch(`${API_BASE_URL}/default-settings/${id}`, {
         method: 'DELETE',
       });
 
       const data: ApiResponse<any> = await response.json();
+      console.log('[defaultSettingsApi.delete] Ответ:', data);
 
       if (!response.ok) {
         return { success: false, error: data.error || 'Не удалось удалить настройки' };
@@ -104,7 +108,7 @@ export const defaultSettingsApi = {
 
       return { success: true };
     } catch (error) {
-
+      console.error('[defaultSettingsApi.delete] Исключение:', error);
       return { success: false, error: 'Произошла ошибка при удалении настроек' };
     }
   },

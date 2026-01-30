@@ -27,8 +27,8 @@ export const BRAIN_API_BASE_URL =
 
 // Для отладки
 if (import.meta.env.DEV) {
-
-
-
+  console.log('[API Config] Base URL:', API_BASE_URL);
+  console.log('[API Config] Analytics API URL:', ANALYTICS_API_BASE_URL);
+  console.log('[API Config] Brain API URL:', BRAIN_API_BASE_URL);
 }
 

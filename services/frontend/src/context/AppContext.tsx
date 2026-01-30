@@ -113,7 +113,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
 
     if (removed > 0) {
-
+      console.log('[AppContext Cache] Очищено записей:', removed, 'Осталось:', cache.size);
     }
   }, []);
 
@@ -219,26 +219,27 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           .single();
           
         if (error) {
-
+          console.error('Ошибка при загрузке состояния AI автопилота:', error);
           return;
         }
         
         if (data) {
           if (data.autopilot !== undefined) {
             setAiAutopilot(!!data.autopilot);
-
+            console.log('Загружено состояние AI автопилота:', !!data.autopilot);
           }
 
           if (data.current_campaign_goal) {
             setCurrentCampaignGoal(data.current_campaign_goal as any);
-
+            console.log('Загружена текущая цель кампании:', data.current_campaign_goal);
           }
           if (data.tarif) {
             setUserTarif(data.tarif);
-
+            console.log('Загружен тариф пользователя:', data.tarif);
           }
           if ((data as any).optimization) {
             setOptimization((data as any).optimization);
+            console.log('Загружен параметр optimization:', (data as any).optimization);
           }
           // Синхронизация полей из Supabase в localStorage.user
           // (TikTok, prompt1 и др.), чтобы они были актуальны
@@ -276,10 +277,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             const needSave = JSON.stringify(storedJson) !== JSON.stringify(merged);
             if (needSave) {
               localStorage.setItem('user', JSON.stringify(merged));
+              console.log('[AppContext] Синхронизированы поля из Supabase в localStorage (Facebook, TikTok, prompt1)');
             }
             setTiktokConnected(!!merged.tiktok_business_id && !!merged.tiktok_access_token);
           } catch (e) {
-
+            console.warn('Не удалось синхронизировать поля в localStorage:', e);
             setTiktokConnected(!!(data as any).tiktok_business_id && !!(data as any).tiktok_access_token);
           }
         }
@@ -287,7 +289,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         // Отдельно загружаем business_id
         await checkBusinessId();
       } catch (err) {
-
+        console.error('Ошибка при инициализации состояния AI автопилота:', err);
       }
     };
     
@@ -305,6 +307,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // При смене currentAdAccountId загружаем статус автопилота для этого аккаунта
   useEffect(() => {
     const loadAutopilotStatus = async () => {
+      console.log('[AppContext] loadAutopilotStatus called:', {
+        multiAccountEnabled,
+        currentAdAccountId,
+        mode: multiAccountEnabled ? 'multi_account' : 'legacy'
+      });
 
       try {
         if (multiAccountEnabled && currentAdAccountId) {
@@ -316,7 +323,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             .single();
 
           if (error) {
-
+            console.error('[AppContext] Ошибка загрузки autopilot из ad_accounts:', {
+              accountId: currentAdAccountId,
+              error: error.message
+            });
             setAiAutopilot(false);
             setAiAutopilotTiktok(false);
             return;
@@ -326,7 +336,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           const autopilotTiktokStatus = data?.autopilot_tiktok ?? false;
           setAiAutopilot(autopilotStatus);
           setAiAutopilotTiktok(autopilotTiktokStatus);
-
+          console.log('[AppContext] Загружен статус autopilot (multi-account):', {
+            accountId: currentAdAccountId,
+            autopilot: autopilotStatus,
+            autopilot_tiktok: autopilotTiktokStatus,
+            source: 'ad_accounts'
+          });
         } else if (!multiAccountEnabled) {
           // Legacy режим — берём из user_accounts
           const storedUser = localStorage.getItem('user');
@@ -339,7 +354,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               .single();
 
             if (error) {
-
+              console.error('[AppContext] Ошибка загрузки autopilot из user_accounts:', {
+                userId: userData.id,
+                error: error.message
+              });
               setAiAutopilot(false);
               setAiAutopilotTiktok(false);
               return;
@@ -349,11 +367,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             const autopilotTiktokStatus = (data as any)?.autopilot_tiktok ?? false;
             setAiAutopilot(autopilotStatus);
             setAiAutopilotTiktok(autopilotTiktokStatus);
-
+            console.log('[AppContext] Загружен статус autopilot (legacy):', {
+              userId: userData.id,
+              autopilot: autopilotStatus,
+              autopilot_tiktok: autopilotTiktokStatus,
+              source: 'user_accounts'
+            });
           }
         }
       } catch (err) {
-
+        console.error('[AppContext] Критическая ошибка в loadAutopilotStatus:', err);
         setAiAutopilot(false);
         setAiAutopilotTiktok(false);
       }
@@ -386,11 +409,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           .eq('id', currentAdAccountId);
 
         if (error) {
-
+          console.error('Ошибка при обновлении autopilot в ad_accounts:', error);
           toast.error('Не удалось обновить состояние AI автопилота');
           return;
         }
-
+        console.log('Обновлено состояние AI автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
       } else {
         // Legacy режим - обновляем user_accounts.autopilot
         const { error } = await supabase
@@ -399,17 +422,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           .eq('id', userData.id);
 
         if (error) {
-
+          console.error('Ошибка при обновлении состояния AI автопилота:', error);
           toast.error('Не удалось обновить состояние AI автопилота');
           return;
         }
-
+        console.log('Обновлено состояние AI автопилота в user_accounts:', enabled);
       }
 
       setAiAutopilot(enabled);
       toast.success(`AI автопилот ${enabled ? 'включен' : 'выключен'}`);
     } catch (err) {
-
+      console.error('Ошибка при переключении AI автопилота:', err);
       toast.error('Произошла ошибка при обновлении настроек');
     } finally {
       setAiAutopilotLoading(false);
@@ -440,11 +463,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           .eq('id', currentAdAccountId);
 
         if (error) {
-
+          console.error('Ошибка при обновлении autopilot_tiktok в ad_accounts:', error);
           toast.error('Не удалось обновить состояние TikTok автопилота');
           return;
         }
-
+        console.log('Обновлено состояние TikTok автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
       } else {
         // Legacy режим - обновляем user_accounts.autopilot_tiktok
         const { error } = await supabase
@@ -453,17 +476,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           .eq('id', userData.id);
 
         if (error) {
-
+          console.error('Ошибка при обновлении состояния TikTok автопилота:', error);
           toast.error('Не удалось обновить состояние TikTok автопилота');
           return;
         }
-
+        console.log('Обновлено состояние TikTok автопилота в user_accounts:', enabled);
       }
 
       setAiAutopilotTiktok(enabled);
       toast.success(`TikTok автопилот ${enabled ? 'включен' : 'выключен'}`);
     } catch (err) {
-
+      console.error('Ошибка при переключении TikTok автопилота:', err);
       toast.error('Произошла ошибка при обновлении настроек');
     } finally {
       setAiAutopilotTiktokLoading(false);
@@ -474,7 +497,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const checkUserAuth = () => {
     const storedUser = localStorage.getItem('user');
     if (!storedUser) {
-
+      console.warn('Пользователь не авторизован. Необходима авторизация.');
       return false;
     }
 
@@ -482,14 +505,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const userData = JSON.parse(storedUser);
       // Проверяем только наличие username - Facebook данные опциональны
       if (!userData || !userData.username) {
-
+        console.warn('Недостаточно данных пользователя:', {
+          hasUsername: !!userData?.username
+        });
         return false;
       }
 
+      console.log('Пользователь авторизован:', {
+        username: userData.username,
+        hasFacebookData: !!(userData.access_token && userData.ad_account_id)
       });
       return true;
     } catch (e) {
-
+      console.error('Ошибка при проверке данных пользователя:', e);
       return false;
     }
   };
@@ -502,10 +530,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     setError(null);
 
     try {
+      console.log('Обновление данных приложения...', { requestId: currentRequestId });
 
       // Проверяем авторизацию пользователя (только username)
       if (!checkUserAuth()) {
-
+        console.warn('Невозможно обновить данные: пользователь не авторизован');
         setLoading(false);
         return;
       }
@@ -526,14 +555,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         const currentAcc = parsedAccounts.find((a: any) => a.id === storedCurrentAdAccountId) || parsedAccounts[0];
         // Для manual-connect достаточно ad_account_id (access_token получается позже)
         hasFacebookData = !!currentAcc?.ad_account_id;
-
+        console.log('[AppContext] Мультиаккаунт: hasFacebookData =', hasFacebookData, { ad_account_id: currentAcc?.ad_account_id, currentAdAccountId: storedCurrentAdAccountId });
       } else {
         // Legacy режим — проверяем в user_accounts
         hasFacebookData = !!(userData?.access_token && userData?.ad_account_id);
       }
 
       if (!hasFacebookData) {
-
+        console.log('Facebook данные отсутствуют. Пропускаем загрузку данных Facebook.');
         setCampaigns([]);
         setCampaignStats([]);
         setLoading(false);
@@ -546,7 +575,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const cached = campaignsCacheRef.current.get(cacheKey);
 
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-
+        console.log('[AppContext Cache] HIT - используем кэшированные данные', {
+          cacheKey,
+          age: Math.round((Date.now() - cached.timestamp) / 1000) + 's',
+          campaignsCount: cached.campaigns.length,
+          statsCount: cached.campaignStats.length
+        });
         setCampaigns(cached.campaigns);
         setCampaignStats(cached.campaignStats);
         setLoading(false);
@@ -564,20 +598,28 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       }
 
       // Cache MISS - загружаем данные с API
+      console.log('[AppContext Cache] MISS - загружаем данные с API', {
+        cacheKey,
+        reason: cached ? 'expired' : 'not_found',
+        cacheSize: campaignsCacheRef.current.size
+      });
 
       if (platform === 'instagram') {
         // Загружаем список кампаний (Instagram/Facebook)
+        console.log('[AppContext] Запрашиваем список кампаний (Instagram/Facebook)...');
         const campaignsData = await facebookApi.getCampaigns();
 
         // Проверяем актуальность запроса перед обновлением state
         if (currentRequestId !== refreshRequestIdRef.current) {
-
+          console.log('Запрос устарел, пропускаем обновление кампаний', { currentRequestId, latestId: refreshRequestIdRef.current });
           return;
         }
 
         setCampaigns(campaignsData);
+        console.log(`Получено ${campaignsData.length} кампаний`);
 
         // Загружаем статистику кампаний
+        console.log('Запрашиваем статистику кампаний (Instagram/Facebook)...');
         // Для тарифа Target включаем лидформы в подсчет лидов
         const includeLeadForms = userTarif === 'target';
         // Передаём campaignsData чтобы избежать повторного запроса getCampaigns() внутри getCampaignStats()
@@ -585,7 +627,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
         // Проверяем актуальность запроса перед обновлением state
         if (currentRequestId !== refreshRequestIdRef.current) {
-
+          console.log('Запрос устарел, пропускаем обновление статистики', { currentRequestId, latestId: refreshRequestIdRef.current });
           return;
         }
 
@@ -598,14 +640,20 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           campaignStats: statsData,
           timestamp: Date.now()
         });
-
+        console.log('[AppContext Cache] Сохранено в кэш', {
+          cacheKey,
+          campaignsCount: campaignsData.length,
+          statsCount: statsData.length,
+          cacheSize: campaignsCacheRef.current.size
+        });
       } else {
         // TikTok: загружаем кампании и статистику и маппим к общему формату
+        console.log('Запрашиваем список кампаний (TikTok)...');
         const ttCampaigns = await tiktokApi.getCampaigns();
 
         // Проверяем актуальность запроса
         if (currentRequestId !== refreshRequestIdRef.current) {
-
+          console.log('Запрос устарел, пропускаем обновление TikTok кампаний', { currentRequestId, latestId: refreshRequestIdRef.current });
           return;
         }
 
@@ -618,12 +666,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           start_time: c.start_time || new Date().toISOString(),
         }));
         setCampaigns(mappedCampaigns);
+        console.log(`Получено ${mappedCampaigns.length} TikTok кампаний`);
 
+        console.log('Запрашиваем статистику кампаний (TikTok)...');
         const ttStats = await tiktokApi.getCampaignStats(dateRange);
 
         // Проверяем актуальность запроса
         if (currentRequestId !== refreshRequestIdRef.current) {
-
+          console.log('Запрос устарел, пропускаем обновление TikTok статистики', { currentRequestId, latestId: refreshRequestIdRef.current });
           return;
         }
 
@@ -648,17 +698,22 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           campaignStats: mappedStats,
           timestamp: Date.now()
         });
-
+        console.log('[AppContext Cache] TikTok сохранено в кэш', {
+          cacheKey,
+          campaignsCount: mappedCampaigns.length,
+          statsCount: mappedStats.length,
+          cacheSize: campaignsCacheRef.current.size
+        });
       }
 
       // Загружаем статус рекламного кабинета
       try {
         const accStatus = await facebookApi.getAccountStatus();
-
+        console.log('DEBUG: accStatus из facebookApi.getAccountStatus:', accStatus);
         setAccountStatus(accStatus);
         setAccountStatusError(null);
       } catch (e: any) {
-
+        console.error('DEBUG: Ошибка при получении accStatus', e);
         setAccountStatus(null);
         setAccountStatusError(e?.message || String(e));
       }
@@ -666,7 +721,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       // Проверяем реальные это данные или моковые
       const statsToCheck = platform === 'instagram' ? campaignStats : campaignStats;
       const hasRealData = statsToCheck.some(stat => stat._is_real_data === true);
-
+      console.log(`Получена статистика: ${statsToCheck.length} записей, содержит реальные данные: ${hasRealData}`);
+      
       if (!hasRealData && statsToCheck.length > 0) {
         toast.warning('За выбранный период нет данных статистики. Пожалуйста, измените диапазон дат.', {
           id: 'no-real-data-warning',
@@ -677,7 +733,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     } catch (err: any) {
       // Проверяем актуальность запроса перед обработкой ошибки
       if (currentRequestId !== refreshRequestIdRef.current) {
-
+        console.log('Ошибка устаревшего запроса, игнорируем', { currentRequestId, latestId: refreshRequestIdRef.current });
         return;
       }
 
@@ -689,7 +745,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         setError('Не удалось загрузить данные. Пожалуйста, попробуйте позже.');
         toast.error('Ошибка при загрузке данных');
       }
-
+      console.error('Ошибка при загрузке данных:', err);
     } finally {
       // Сбрасываем loading только для актуального запроса
       if (currentRequestId === refreshRequestIdRef.current) {
@@ -714,7 +770,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const toggleCampaignStatus = async (campaignId: string, isActive: boolean) => {
     setLoading(true);
     try {
-
+      console.log(`Изменение статуса кампании ${campaignId} на ${isActive ? 'активный' : 'приостановленный'}`);
       let success = false;
       if (platform === 'instagram') {
         success = await facebookApi.updateCampaignStatus(campaignId, isActive);
@@ -731,22 +787,24 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               : campaign
           )
         );
-
+        
+        console.log(`Статус кампании ${campaignId} успешно изменен`);
+        
         // Для TikTok добавляем небольшую задержку и перезагружаем данные
         if (platform === 'tiktok') {
-
+          console.log('TikTok: Ждем 1 секунду перед обновлением данных...');
           setTimeout(async () => {
-
+            console.log('TikTok: Перезагружаем данные для проверки статуса...');
             await refreshData();
           }, 1000);
         }
       } else {
-
+        console.error(`Не удалось изменить статус кампании ${campaignId}`);
       }
     } catch (err) {
       setError('Не удалось обновить статус кампании.');
       toast.error('Ошибка при обновлении статуса');
-
+      console.error('Ошибка при изменении статуса кампании:', err);
     } finally {
       setLoading(false);
     }
@@ -763,7 +821,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     // Debounce: ждём 150ms перед вызовом refreshData
     // Это позволяет объединить множественные изменения state при инициализации в один запрос
     pendingRefreshRef.current = setTimeout(() => {
-
+      console.log('Изменение параметров (даты/платформа/currentAdAccountId), обновляем данные:', {
+        dateRange,
+        platform,
+        currentAdAccountId,
+        isInitialized: isInitializedRef.current
+      });
       refreshData();
       isInitializedRef.current = true;
     }, isInitializedRef.current ? 0 : 150); // После инициализации - без задержки
@@ -796,7 +859,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         .single();
         
       if (error) {
-
+        console.error('Ошибка при проверке business_id:', error);
         return false;
       }
       
@@ -807,7 +870,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setTiktokConnected(!!tiktokBizId);
       return hasBusinessId;
     } catch (err) {
-
+      console.error('Ошибка при проверке business_id:', err);
       return false;
     }
   };
@@ -841,12 +904,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const userData = JSON.parse(storedUser);
       if (!userData.id) return;
 
+      console.log('[AppContext] Загружаем свежие данные adAccounts...');
+
       const response = await adAccountsApi.list(userData.id);
 
       // DEBUG: что пришло с API (RAW данные)
-
+      console.log('[AppContext] === RAW API RESPONSE ===');
       response.ad_accounts.forEach((acc, i) => {
-
+        console.log(`[AppContext] RAW[${i}]:`, {
+          id: acc.id?.slice(0, 8),
+          name: acc.name,
+          fb_ad_account_id: acc.fb_ad_account_id,
+          fb_page_id: acc.fb_page_id,
+        });
       });
 
       const mappedAccounts = response.ad_accounts.map(acc => {
@@ -911,9 +981,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               }
 
               localStorage.setItem('user', JSON.stringify(userData));
-
+              console.log('[AppContext] Обновлены данные userData для legacy режима:', {
+                ad_account_id: legacyAccount.ad_account_id?.slice(0, 20),
+                has_access_token: !!legacyAccount.access_token,
+                page_id: legacyAccount.page_id
+              });
             } catch (e) {
-
+              console.error('[AppContext] Ошибка при обновлении userData для legacy:', e);
             }
           }
         }
@@ -949,13 +1023,23 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       // но API слой (creativesApi) проверяет флаг multi_account_enabled
       // и ИГНОРИРУЕТ accountId в legacy режиме (см. MULTI_ACCOUNT_GUIDE.md)
 
+      console.log('[AppContext] Загружены рекламные аккаунты:', {
+        multiAccountEnabled: response.multi_account_enabled,
+        count: response.ad_accounts.length,
+      });
+
       // DEBUG: детальный лог для диагностики проблемы с перепутанными аккаунтами
-
+      console.log('[AppContext] === ДЕТАЛИ АККАУНТОВ ===');
       mappedAccounts.forEach((acc, i) => {
-
+        console.log(`[AppContext] Аккаунт ${i}:`, {
+          id: acc.id.slice(0, 8),
+          name: acc.name,
+          ad_account_id: acc.ad_account_id,
+          fb_page_id: acc.fb_page_id,
+        });
       });
     } catch (error) {
-
+      console.error('[AppContext] Ошибка загрузки рекламных аккаунтов:', error);
     }
   };
 
@@ -1004,16 +1088,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         .eq('id', userData.id);
         
       if (error) {
-
+        console.error('Ошибка при обновлении параметров оптимизации:', error);
         toast.error('Не удалось обновить параметры оптимизации');
         return;
       }
       
       setOptimization(optimizationType);
       toast.success('Параметры оптимизации обновлены');
-
+      console.log('Обновлен параметр optimization:', optimizationType);
     } catch (err) {
-
+      console.error('Ошибка при обновлении параметров оптимизации:', err);
       toast.error('Произошла ошибка при обновлении настроек');
     }
   };

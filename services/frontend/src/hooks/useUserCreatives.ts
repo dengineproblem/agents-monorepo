@@ -36,7 +36,7 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
     // Получаем user_id из localStorage
     const storedUser = localStorage.getItem('user');
     if (!storedUser) {
-
+      console.warn('[useUserCreatives] User not found in localStorage, skipping realtime subscription');
       return;
     }
 
@@ -44,9 +44,11 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
     const userId = userData.id;
 
     if (!userId) {
-
+      console.warn('[useUserCreatives] User ID not found, skipping realtime subscription');
       return;
     }
+
+    console.log('[useUserCreatives] Setting up Realtime subscription for user:', userId);
 
     // Создаём подписку на таблицу creative_tests
     const channel = supabase
@@ -60,6 +62,7 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
           filter: `user_id=eq.${userId}`, // Только тесты текущего пользователя
         },
         (payload) => {
+          console.log('[useUserCreatives] Received realtime update:', payload);
 
           const { eventType, new: newRecord, old: oldRecord } = payload;
 
@@ -78,6 +81,7 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
               },
             }));
 
+            console.log('[useUserCreatives] Updated test status for creative:', creativeId, test.status);
           } else if (eventType === 'DELETE') {
             // Удаляем статус теста
             const test = oldRecord as any;
@@ -89,16 +93,17 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
               return newStatuses;
             });
 
+            console.log('[useUserCreatives] Deleted test status for creative:', creativeId);
           }
         }
       )
       .subscribe((status) => {
-
+        console.log('[useUserCreatives] Subscription status:', status);
       });
 
     // Cleanup при размонтировании
     return () => {
-
+      console.log('[useUserCreatives] Cleaning up Realtime subscription');
       supabase.removeChannel(channel);
     };
   }, []); // Пустой массив зависимостей - подписка создаётся один раз

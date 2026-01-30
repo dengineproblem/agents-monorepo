@@ -113,9 +113,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
+        console.log('Загружены пиксели (Edit):', list);
         setPixels(Array.isArray(list) ? list : []);
       } catch (e) {
-
+        console.error('Ошибка загрузки пикселей:', e);
         setPixels([]);
       } finally {
         setIsLoadingPixels(false);
@@ -166,11 +167,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const loadAdSettings = async (directionId: string) => {
     setIsLoadingSettings(true);
     try {
-
+      console.log('[EditDirectionDialog] Загрузка настроек для направления:', directionId);
       const settings = await defaultSettingsApi.get(directionId);
       
       if (settings) {
-
+        console.log('[EditDirectionDialog] Настройки загружены:', settings);
         setSettingsId(settings.id);
         setSelectedCities(settings.cities || []);
         setAgeMin(settings.age_min);
@@ -188,12 +189,12 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         }
         if (settings.utm_tag) setUtmTag(settings.utm_tag);
       } else {
-
+        console.log('[EditDirectionDialog] Настройки не найдены, используем дефолты');
         // Сбрасываем к дефолтам
         resetAdSettings();
       }
     } catch (error) {
-
+      console.error('[EditDirectionDialog] Ошибка загрузки настроек:', error);
       resetAdSettings();
     } finally {
       setIsLoadingSettings(false);
@@ -373,16 +374,16 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
       if (settingsId) {
         // Обновляем существующие настройки
-
+        console.log('[EditDirectionDialog] Обновление настроек:', settingsId, adSettingsInput);
         const result = await defaultSettingsApi.update(settingsId, adSettingsInput);
         
         if (!result.success) {
-
+          console.error('[EditDirectionDialog] Ошибка обновления настроек:', result.error);
           toast.warning('Направление обновлено, но не удалось сохранить настройки рекламы');
         }
       } else {
         // Создаём новые настройки
-
+        console.log('[EditDirectionDialog] Создание новых настроек для направления:', direction.id);
         const result = await defaultSettingsApi.save({
           direction_id: direction.id,
           campaign_goal: direction.objective,
@@ -390,7 +391,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         });
         
         if (!result.success) {
-
+          console.error('[EditDirectionDialog] Ошибка создания настроек:', result.error);
           toast.warning('Направление обновлено, но не удалось сохранить настройки рекламы');
         }
       }

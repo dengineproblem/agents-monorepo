@@ -43,7 +43,7 @@ export const TextHistoryTab: React.FC<TextHistoryTabProps> = ({ userId, onUseAsR
         toast.error('Не удалось загрузить историю');
       }
     } catch (error) {
-
+      console.error('Error loading history:', error);
       toast.error('Ошибка загрузки истории');
     } finally {
       setLoading(false);

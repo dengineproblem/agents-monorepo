@@ -146,7 +146,7 @@ export function ReferenceSelector({
       const data = await competitorsApi.list(userAccountId, accountId);
       setCompetitors(data.map(c => ({ id: c.id, name: c.name })));
     } catch (error) {
-
+      console.error('Ошибка загрузки конкурентов:', error);
     }
   };
 
@@ -163,7 +163,7 @@ export function ReferenceSelector({
       data.sort((a, b) => (b.score || 0) - (a.score || 0));
       setCompetitorCreatives(data);
     } catch (error) {
-
+      console.error('Ошибка загрузки креативов конкурентов:', error);
     } finally {
       setCompetitorLoading(false);
     }
@@ -182,7 +182,7 @@ export function ReferenceSelector({
       // Загружаем тексты для всех креативов
       await loadOwnTexts(filtered);
     } catch (error) {
-
+      console.error('Ошибка загрузки своих креативов:', error);
     } finally {
       setOwnLoading(false);
     }
@@ -295,7 +295,7 @@ export function ReferenceSelector({
         });
       }
     } catch (error) {
-
+      console.error('Transcription error:', error);
       toast.error('Ошибка транскрибации', {
         description: 'Проверьте подключение и попробуйте снова',
       });
@@ -341,7 +341,7 @@ export function ReferenceSelector({
         });
       }
     } catch (error) {
-
+      console.error('Transcription error:', error);
       toast.error('Ошибка транскрибации', {
         description: 'Проверьте подключение и попробуйте снова',
       });

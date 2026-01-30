@@ -43,7 +43,7 @@ export const Step5Completion: React.FC<Step9Props> = ({ data, onComplete, onBack
     } catch (error) {
       setStatus('error');
       setErrorMessage('Не удалось подключиться к серверу. Проверьте интернет-соединение.');
-
+      console.error('Ошибка при генерации промпта:', error);
     }
   };
 

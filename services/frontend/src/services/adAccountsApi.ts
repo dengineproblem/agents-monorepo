@@ -12,19 +12,21 @@ export const adAccountsApi = {
    */
   async list(userAccountId: string): Promise<AdAccountsResponse> {
     try {
+      console.log('[adAccountsApi.list] Запрос аккаунтов для:', userAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}`);
 
       if (!response.ok) {
-
+        console.error('[adAccountsApi.list] Ошибка HTTP:', response.status);
         return { multi_account_enabled: false, ad_accounts: [] };
       }
 
       const data = await response.json();
+      console.log('[adAccountsApi.list] Результат:', data);
 
       return data;
     } catch (error) {
-
+      console.error('[adAccountsApi.list] Исключение:', error);
       return { multi_account_enabled: false, ad_accounts: [] };
     }
   },
@@ -34,18 +36,19 @@ export const adAccountsApi = {
    */
   async get(userAccountId: string, adAccountId: string): Promise<AdAccount | null> {
     try {
+      console.log('[adAccountsApi.get] Запрос аккаунта:', adAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${adAccountId}`);
 
       if (!response.ok) {
-
+        console.error('[adAccountsApi.get] Ошибка HTTP:', response.status);
         return null;
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-
+      console.error('[adAccountsApi.get] Исключение:', error);
       return null;
     }
   },
@@ -59,6 +62,7 @@ export const adAccountsApi = {
     error?: string;
   }> {
     try {
+      console.log('[adAccountsApi.create] Создание аккаунта:', payload.name);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts`, {
         method: 'POST',
@@ -68,7 +72,7 @@ export const adAccountsApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error('[adAccountsApi.create] Ошибка:', errorData);
         return {
           success: false,
           error: errorData.error || `HTTP ${response.status}`,
@@ -76,10 +80,11 @@ export const adAccountsApi = {
       }
 
       const adAccount = await response.json();
+      console.log('[adAccountsApi.create] Создан:', adAccount.id);
 
       return { success: true, adAccount };
     } catch (error) {
-
+      console.error('[adAccountsApi.create] Исключение:', error);
       return { success: false, error: 'Network error' };
     }
   },
@@ -96,6 +101,7 @@ export const adAccountsApi = {
     error?: string;
   }> {
     try {
+      console.log('[adAccountsApi.update] Обновление аккаунта:', adAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'PATCH',
@@ -105,7 +111,7 @@ export const adAccountsApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error('[adAccountsApi.update] Ошибка:', errorData);
         return {
           success: false,
           error: errorData.error || `HTTP ${response.status}`,
@@ -113,10 +119,11 @@ export const adAccountsApi = {
       }
 
       const adAccount = await response.json();
+      console.log('[adAccountsApi.update] Обновлён:', adAccount.id);
 
       return { success: true, adAccount };
     } catch (error) {
-
+      console.error('[adAccountsApi.update] Исключение:', error);
       return { success: false, error: 'Network error' };
     }
   },
@@ -126,6 +133,7 @@ export const adAccountsApi = {
    */
   async delete(adAccountId: string): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log('[adAccountsApi.delete] Удаление аккаунта:', adAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'DELETE',
@@ -133,13 +141,14 @@ export const adAccountsApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error('[adAccountsApi.delete] Ошибка:', errorData);
         return { success: false, error: errorData.error || `HTTP ${response.status}` };
       }
 
+      console.log('[adAccountsApi.delete] Удалён:', adAccountId);
       return { success: true };
     } catch (error) {
-
+      console.error('[adAccountsApi.delete] Исключение:', error);
       return { success: false, error: 'Network error' };
     }
   },
@@ -149,6 +158,7 @@ export const adAccountsApi = {
    */
   async refreshPicture(adAccountId: string): Promise<{ success: boolean; page_picture_url?: string; error?: string }> {
     try {
+      console.log('[adAccountsApi.refreshPicture] Обновление аватара:', adAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}/refresh-picture`, {
         method: 'POST',
@@ -156,15 +166,15 @@ export const adAccountsApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error('[adAccountsApi.refreshPicture] Ошибка:', errorData);
         return { success: false, error: errorData.error || `HTTP ${response.status}` };
       }
 
       const data = await response.json();
-
+      console.log('[adAccountsApi.refreshPicture] Результат:', data);
       return { success: true, page_picture_url: data.page_picture_url };
     } catch (error) {
-
+      console.error('[adAccountsApi.refreshPicture] Исключение:', error);
       return { success: false, error: 'Network error' };
     }
   },
@@ -174,6 +184,7 @@ export const adAccountsApi = {
    */
   async refreshAllPictures(userAccountId: string): Promise<{ success: boolean; results?: Array<{ id: string; success: boolean; page_picture_url?: string }> }> {
     try {
+      console.log('[adAccountsApi.refreshAllPictures] Обновление всех аватаров для:', userAccountId);
 
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/refresh-all-pictures`, {
         method: 'POST',
@@ -181,15 +192,15 @@ export const adAccountsApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-
+        console.error('[adAccountsApi.refreshAllPictures] Ошибка:', errorData);
         return { success: false };
       }
 
       const data = await response.json();
-
+      console.log('[adAccountsApi.refreshAllPictures] Результат:', data);
       return { success: true, results: data.results };
     } catch (error) {
-
+      console.error('[adAccountsApi.refreshAllPictures] Исключение:', error);
       return { success: false };
     }
   },

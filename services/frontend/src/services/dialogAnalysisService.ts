@@ -39,7 +39,7 @@ export const dialogAnalysisService = {
     const { data, error, count } = await query;
 
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to fetch dialog analysis');
     }
 
@@ -67,7 +67,7 @@ export const dialogAnalysisService = {
     const { data, error } = await query;
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to fetch dialog stats');
     }
     
@@ -138,7 +138,7 @@ export const dialogAnalysisService = {
     const { data, error } = await query;
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to export CSV');
     }
     
@@ -199,7 +199,7 @@ export const dialogAnalysisService = {
       .eq('user_account_id', userAccountId);
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to delete analysis');
     }
   },
@@ -242,7 +242,7 @@ export const dialogAnalysisService = {
       .single();
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to create lead');
     }
     
@@ -304,7 +304,7 @@ export const dialogAnalysisService = {
       .single();
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to update lead');
     }
     
@@ -334,7 +334,7 @@ export const dialogAnalysisService = {
     const { data, error } = await query;
     
     if (error) {
-
+      console.error('Supabase error:', error);
       throw new Error('Failed to fetch instances');
     }
     

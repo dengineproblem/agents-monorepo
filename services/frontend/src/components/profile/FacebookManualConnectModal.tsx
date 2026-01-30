@@ -118,7 +118,11 @@ export function FacebookManualConnectModal({
     setLoading(true);
 
     if (demoMode) {
-
+      console.log('[FacebookManualConnectModal] DEMO MODE - Data would be sent:', {
+        page_id: formData.page_id.trim(),
+        instagram_id: formData.instagram_id.trim() || null,
+        ad_account_id: formData.ad_account_id.trim(),
+      });
       await new Promise(resolve => setTimeout(resolve, 1000));
       setPart('success');
       setLoading(false);

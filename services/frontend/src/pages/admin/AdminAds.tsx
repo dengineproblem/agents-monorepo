@@ -115,7 +115,7 @@ const AdminAds: React.FC = () => {
         setCplAnalysis(data.analysis || []);
       }
     } catch (err) {
-
+      console.error('Error fetching ads data:', err);
     } finally {
       setLoading(false);
     }

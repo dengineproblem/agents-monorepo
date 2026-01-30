@@ -261,12 +261,12 @@ class AnalyticsService {
       if (!response.ok) {
         // Put events back in queue on error
         this.queue = [...events, ...this.queue];
-
+        console.warn('[Analytics] Failed to send events:', response.status);
       }
     } catch (error) {
       // Put events back in queue on network error
       this.queue = [...events, ...this.queue];
-
+      console.warn('[Analytics] Network error:', error);
     }
   }
 

@@ -200,8 +200,10 @@ export async function getPipelines(
   }
 
   const url = `${API_BASE_URL}/amocrm/pipelines?${queryParams.toString()}`;
+  console.log('[amocrmApi] Fetching pipelines from:', url);
 
   const response = await fetch(url);
+  console.log('[amocrmApi] Pipelines response status:', response.status, response.statusText);
 
   if (!response.ok) {
     let errorMessage = 'Failed to fetch pipelines';
@@ -209,15 +211,20 @@ export async function getPipelines(
       const error = await response.json();
       errorMessage = error.message || errorMessage;
     } catch (parseErr) {
-
+      console.error('[amocrmApi] Failed to parse error response:', parseErr);
       errorMessage = `HTTP ${response.status}: ${response.statusText}`;
     }
-
+    console.error('[amocrmApi] Failed to fetch pipelines:', {
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      errorMessage
+    });
     throw new Error(errorMessage);
   }
 
   const data = await response.json();
-
+  console.log('[amocrmApi] Fetched pipelines:', data);
   return data;
 }
 

@@ -305,7 +305,7 @@ const DirectionsTable: React.FC = () => {
           const finalOrder = [...validOrder, ...newDirections];
           setDirectionOrder(finalOrder);
         } catch (error) {
-
+          console.error('Ошибка при загрузке порядка направлений:', error);
           setDirectionOrder(directions);
         }
       } else {

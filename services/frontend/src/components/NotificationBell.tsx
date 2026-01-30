@@ -89,7 +89,7 @@ const NotificationBell: React.FC = () => {
         setUnreadCount(data.unreadCount || 0);
       }
     } catch (error) {
-
+      console.error('Failed to fetch unread count:', error);
     }
   }, [getUserId]);
 
@@ -108,7 +108,7 @@ const NotificationBell: React.FC = () => {
         setNotifications(data.notifications || []);
       }
     } catch (error) {
-
+      console.error('Failed to fetch notifications:', error);
     } finally {
       setLoading(false);
     }
@@ -130,7 +130,7 @@ const NotificationBell: React.FC = () => {
       );
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
-
+      console.error('Failed to mark as read:', error);
     }
   };
 
@@ -148,7 +148,7 @@ const NotificationBell: React.FC = () => {
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch (error) {
-
+      console.error('Failed to mark all as read:', error);
     }
   };
 
@@ -169,7 +169,7 @@ const NotificationBell: React.FC = () => {
         setUnreadCount((prev) => Math.max(0, prev - 1));
       }
     } catch (error) {
-
+      console.error('Failed to delete notification:', error);
     }
   };
 

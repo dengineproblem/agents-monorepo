@@ -117,7 +117,7 @@ export function CompetitorReferenceSelector({
       const data = await competitorsApi.list(userAccountId, accountId);
       setCompetitors(data.map(c => ({ id: c.id, name: c.name })));
     } catch (error) {
-
+      console.error('Ошибка загрузки конкурентов:', error);
     }
   };
 
@@ -137,7 +137,7 @@ export function CompetitorReferenceSelector({
       data.sort((a, b) => (b.score || 0) - (a.score || 0));
       setCreatives(data);
     } catch (error) {
-
+      console.error('Ошибка загрузки креативов:', error);
     } finally {
       setLoading(false);
     }

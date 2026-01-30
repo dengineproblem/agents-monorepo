@@ -17,8 +17,8 @@ import type { OptimizationScope } from '@/hooks/useOptimization';
 
 // Logger placeholder
 const logger = {
-  error: (msg: string, err: any, meta?: any) => {},
-  debug: (msg: string, meta?: any) => {},
+  error: (msg: string, err: any, meta?: any) => console.error(msg, err, meta),
+  debug: (msg: string, meta?: any) => console.log(msg, meta),
 };
 
 // Helper functions

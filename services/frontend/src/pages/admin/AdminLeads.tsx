@@ -102,7 +102,7 @@ const AdminLeads: React.FC = () => {
         setUsers(data.users || []);
       }
     } catch (err) {
-
+      console.error('Error fetching leads:', err);
     } finally {
       setLoading(false);
     }

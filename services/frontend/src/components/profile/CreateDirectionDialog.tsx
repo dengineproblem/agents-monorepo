@@ -427,10 +427,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
-
+        console.log('Загружены пиксели:', list);
         setPixels(Array.isArray(list) ? list : []);
       } catch (e) {
-
+        console.error('Ошибка загрузки пикселей:', e);
         setPixels([]);
       } finally {
         setIsLoadingPixels(false);
@@ -458,10 +458,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       setIsLoadingLeadForms(true);
       try {
         const list = await facebookApi.getLeadForms();
-
+        console.log('Загружены лидформы:', list);
         setLeadForms(Array.isArray(list) ? list : []);
       } catch (e) {
-
+        console.error('Ошибка загрузки лидформ:', e);
         setLeadForms([]);
       } finally {
         setIsLoadingLeadForms(false);
@@ -543,7 +543,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           setCrmFields(response.fields || []);
         }
       } catch (err) {
-
+        console.error('Failed to load CRM fields:', err);
         setCrmFields([]);
       } finally {
         setIsLoadingCrmFields(false);

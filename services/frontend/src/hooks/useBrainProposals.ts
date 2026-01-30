@@ -102,24 +102,26 @@ export function useBrainProposals(accountId?: string) {
       }
 
       const url = `${API_BASE_URL}/brain-proposals/pending${params.toString() ? `?${params}` : ''}`;
+      console.log('[useBrainProposals] Fetching pending:', url);
 
       const response = await fetch(url, {
         headers: { 'x-user-id': userAccountId }
       });
 
       if (!response.ok) {
-
+        console.error('[useBrainProposals] Fetch pending failed:', response.status);
         setPendingProposals([]);
         setPendingCount(0);
         return;
       }
 
       const data = await response.json();
+      console.log('[useBrainProposals] Pending loaded:', data.count);
 
       setPendingProposals(data.proposals || []);
       setPendingCount(data.count || 0);
     } catch (error) {
-
+      console.error('[useBrainProposals] Fetch error:', error);
       setPendingProposals([]);
       setPendingCount(0);
     } finally {
@@ -140,14 +142,14 @@ export function useBrainProposals(accountId?: string) {
       });
 
       if (!response.ok) {
-
+        console.error('[useBrainProposals] Count fetch failed:', response.status);
         return;
       }
 
       const data = await response.json();
       setPendingCount(data.count || 0);
     } catch (error) {
-
+      console.error('[useBrainProposals] Count fetch error:', error);
     }
   }, [getUserAccountId]);
 
@@ -158,22 +160,23 @@ export function useBrainProposals(accountId?: string) {
     const userAccountId = getUserAccountId();
     if (!userAccountId) return null;
 
+    console.log('[useBrainProposals] Fetching proposal:', proposalId);
     try {
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}`, {
         headers: { 'x-user-id': userAccountId }
       });
 
       if (!response.ok) {
-
+        console.error('[useBrainProposals] Fetch proposal failed:', response.status);
         return null;
       }
 
       // API возвращает объект напрямую (не в обёртке)
       const data = await response.json();
-
+      console.log('[useBrainProposals] Proposal loaded:', data?.id);
       return data || null;
     } catch (error) {
-
+      console.error('[useBrainProposals] Fetch proposal error:', error);
       return null;
     }
   }, [getUserAccountId]);
@@ -249,6 +252,7 @@ export function useBrainProposals(accountId?: string) {
     setModalState(prev => ({ ...prev, isExecuting: true }));
 
     try {
+      console.log('[useBrainProposals] Approving:', proposalId, 'steps:', stepIndices);
 
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}/approve`, {
         method: 'POST',
@@ -262,7 +266,7 @@ export function useBrainProposals(accountId?: string) {
       const data = await response.json();
 
       if (!response.ok) {
-
+        console.error('[useBrainProposals] Approve failed:', data);
         toast.error(data.error || 'Ошибка при выполнении');
         return false;
       }
@@ -280,7 +284,7 @@ export function useBrainProposals(accountId?: string) {
         return false;
       }
     } catch (error) {
-
+      console.error('[useBrainProposals] Approve error:', error);
       toast.error('Не удалось выполнить действия');
       return false;
     } finally {
@@ -299,6 +303,7 @@ export function useBrainProposals(accountId?: string) {
     }
 
     try {
+      console.log('[useBrainProposals] Rejecting:', proposalId);
 
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}/reject`, {
         method: 'POST',
@@ -321,7 +326,7 @@ export function useBrainProposals(accountId?: string) {
       closeModal();
       return true;
     } catch (error) {
-
+      console.error('[useBrainProposals] Reject error:', error);
       toast.error('Не удалось отклонить предложения');
       return false;
     }

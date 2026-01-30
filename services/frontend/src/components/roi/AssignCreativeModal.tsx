@@ -72,7 +72,7 @@ export const AssignCreativeModal: React.FC<AssignCreativeModalProps> = ({
         setCreatives(data);
       }
     } catch (e) {
-
+      console.error('Error loading creatives:', e);
     } finally {
       setLoading(false);
     }
@@ -87,10 +87,10 @@ export const AssignCreativeModal: React.FC<AssignCreativeModalProps> = ({
       if (!error) {
         onAssigned();
       } else {
-
+        console.error('Error assigning creative:', error);
       }
     } catch (e) {
-
+      console.error('Error assigning creative:', e);
     } finally {
       setSaving(false);
     }

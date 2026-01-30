@@ -19,7 +19,7 @@ export const useWhatsAppNumbers = (userAccountId: string | null, accountId?: str
       setNumbers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load numbers');
-
+      console.error('Error loading WhatsApp numbers:', err);
     } finally {
       setLoading(false);
     }

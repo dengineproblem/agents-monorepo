@@ -105,14 +105,14 @@ export const briefingApi = {
             if (result.prompt4) user.prompt4 = result.prompt4;
             localStorage.setItem('user', JSON.stringify(user));
           } catch (e) {
-
+            console.error('Ошибка при обновлении промптов в localStorage:', e);
           }
         }
       }
 
       return result;
     } catch (error) {
-
+      console.error('Ошибка при генерации промпта:', error);
       return {
         success: false,
         error: 'Не удалось подключиться к серверу',
@@ -162,7 +162,7 @@ export const briefingApi = {
       const result = await response.json();
       return result;
     } catch (error) {
-
+      console.error('Ошибка при получении брифа:', error);
       return {
         success: false,
         briefing: null,

@@ -67,9 +67,89 @@ const getCurrentUserConfig = async () => {
         const currentAdAccountId = localStorage.getItem('currentAdAccountId');
 
         // DEBUG: детальный лог localStorage
-
+        console.log('[facebookApi] === READING LOCALSTORAGE ===');
+        console.log('[facebookApi] currentAdAccountId:', currentAdAccountId?.slice(0, 8));
         adAccounts.forEach((a: any, i: number) => {
+          console.log(`[facebookApi] LS[${i}]:`, a.id?.slice(0, 8), a.name, a.ad_account_id, a.fb_page_id);
+        });
 
+        // ВАЖНО: ищем только по точному совпадению id
+        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId);
+
+        if (!currentAcc) {
+          console.error('[facebookApi] !!! НЕ НАЙДЕН по id:', currentAdAccountId);
+          console.error('[facebookApi] !!! Доступные аккаунты:', adAccounts.map((a: any) => a.id?.slice(0, 8)));
+          console.warn('[facebookApi] !!! Fallback на legacy режим - может быть неправильный ad_account_id!');
+        } else {
+          console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, currentAcc.fb_page_id);
+        }
+
+        if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {
+          console.log('[facebookApi] >>> ИСПОЛЬЗУЕМ:', currentAcc.name, currentAcc.ad_account_id);
+
+          return {
+            access_token: currentAcc.access_token,
+            ad_account_id: currentAcc.ad_account_id,
+            api_version: 'v18.0',
+            base_url: 'https://graph.facebook.com'
+          };
+        }
+      }
+
+      // Legacy режим — берём данные из user_accounts
+      if (userData && userData.ad_account_id && userData.access_token) {
+        console.log('Используем учетные данные пользователя:', {
+          username: userData.username,
+          ad_account_id: userData.ad_account_id,
+          // Скрываем токен из логов
+          access_token_length: userData.access_token ? userData.access_token.length : 0
+        });
+
+        return {
+          access_token: userData.access_token,
+          ad_account_id: userData.ad_account_id,
+          api_version: 'v18.0',
+          base_url: 'https://graph.facebook.com'
+        };
+      } else {
+        // Логируем, каких данных не хватает
+        console.error('Недостаточно данных пользователя:', {
+          hasAdAccountId: !!userData?.ad_account_id,
+          hasAccessToken: !!userData?.access_token
+        });
+      }
+    } catch (error) {
+      console.error('Ошибка при чтении данных пользователя из localStorage:', error);
+    }
+  } else {
+    console.error('Данные пользователя не найдены в localStorage');
+  }
+
+  // Если не смогли получить данные из localStorage, используем моковые данные
+  console.warn('Используются моковые данные. Пользователь не авторизован или нет нужных данных.');
+  return {
+    access_token: '',
+    ad_account_id: '',
+    api_version: 'v18.0',
+    base_url: 'https://graph.facebook.com'
+  };
+};
+
+// Вспомогательная функция для запросов к Facebook API
+const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, string> = {}) => {
+  const FB_API_CONFIG = await getCurrentUserConfig();
+  
+  // Проверяем, есть ли необходимые данные для запроса
+  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+    console.error('Отсутствуют необходимые данные для запроса к Facebook API:', {
+      hasToken: !!FB_API_CONFIG.access_token,
+      hasAdAccountId: !!FB_API_CONFIG.ad_account_id
+    });
+    throw new Error('Не удалось выполнить запрос: отсутствует токен или ID рекламного кабинета');
+  }
+  
+  const url = new URL(`${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${endpoint}`);
+  
   // Добавляем обязательный параметр access_token
   url.searchParams.append('access_token', FB_API_CONFIG.access_token);
   
@@ -77,16 +157,19 @@ const getCurrentUserConfig = async () => {
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.append(key, value);
   });
-
+  
+  console.log(`Выполняем запрос к Facebook API: ${endpoint}`);
+  
   try {
     const response = await fetch(url.toString());
     
     if (!response.ok) {
       const errorData = await response.json();
-
+      console.error('Ошибка Facebook API:', errorData);
+      
       // Проверка на истекший или недействительный токен
       if (errorData?.error?.code === 190) {
-
+        console.error('Токен доступа недействителен или истек срок его действия');
         toastT.error('facebookAuthError');
         // Очистка токена, чтобы пользователь мог повторно авторизоваться
         const storedUser = localStorage.getItem('user');
@@ -96,7 +179,7 @@ const getCurrentUserConfig = async () => {
             userData.access_token = ''; // Сбрасываем токен
             localStorage.setItem('user', JSON.stringify(userData));
           } catch (e) {
-
+            console.error('Ошибка при обновлении данных пользователя:', e);
           }
         }
       }
@@ -105,10 +188,14 @@ const getCurrentUserConfig = async () => {
     }
     
     const data = await response.json();
-
+    console.log(`Успешный ответ от Facebook API для ${endpoint}:`, {
+      status: response.status,
+      dataSize: data ? 'Данные получены' : 'Нет данных'
+    });
+    
     return data;
   } catch (error) {
-
+    console.error('Ошибка при запросе к Facebook API:', error);
     throw error;
   }
 };
@@ -227,7 +314,13 @@ const generateMockStats = (dateRange: DateRange): CampaignStat[] => {
 const hasValidConfig = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
   const isValid = !!FB_API_CONFIG.access_token && !!FB_API_CONFIG.ad_account_id;
-
+  
+  console.log('Проверка конфигурации Facebook API:', {
+    hasToken: !!FB_API_CONFIG.access_token,
+    hasAdAccountId: !!FB_API_CONFIG.ad_account_id,
+    isValid: isValid
+  });
+  
   return isValid;
 };
 
@@ -255,9 +348,20 @@ const getAdsetsByCampaign = async (campaignId: string) => {
     fields: 'id,name,daily_budget,campaign_id,status',
     limit: '200',
   };
-
+  
+  console.log(`[facebookApi] Запрос ad sets для кампании ${campaignId}:`, {
+    endpoint,
+    method: 'direct campaign endpoint (без filtering)'
+  });
+  
   const data = await fetchFromFacebookAPI(endpoint, params);
-
+  
+  console.log(`[facebookApi] Получен ответ:`, {
+    totalAdsets: data.data?.length || 0,
+    campaignId,
+    adsets: data.data?.map((a: any) => ({ id: a.id, name: a.name, campaign_id: a.campaign_id }))
+  });
+  
   return data.data || [];
 };
 
@@ -340,12 +444,13 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
         };
       });
 
+      console.log(`[API] getAdsetStats returning ${result.length} mapped adsets`);
       return result;
     }
 
     return [];
   } catch (error) {
-
+    console.error('Ошибка получения статистики ad sets:', error);
     return [];
   }
 };
@@ -519,7 +624,7 @@ const getCurrentPageId = async (): Promise<string | null> => {
         return userData.page_id;
       }
     } catch (error) {
-
+      console.error('Ошибка при чтении page_id из localStorage:', error);
     }
   }
 
@@ -536,7 +641,7 @@ export const facebookApi = {
 
     const pageId = await getCurrentPageId();
     if (!pageId) {
-
+      console.warn('Page ID не найден для загрузки лидформ');
       return [];
     }
 
@@ -544,6 +649,7 @@ export const facebookApi = {
       const FB_API_CONFIG = await getCurrentUserConfig();
 
       // Получаем все страницы через /me/accounts с пагинацией
+      console.log('Запрашиваем Page Access Token для страницы:', pageId);
 
       let allPages: any[] = [];
       let nextUrl: string | null = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/me/accounts?access_token=${encodeURIComponent(FB_API_CONFIG.access_token)}&fields=id,name,access_token&limit=100`;
@@ -553,7 +659,7 @@ export const facebookApi = {
         const data = await response.json();
 
         if (data.error) {
-
+          console.error('Ошибка получения списка страниц:', data.error);
           break;
         }
 
@@ -565,18 +671,20 @@ export const facebookApi = {
         nextUrl = data.paging?.next || null;
       }
 
+      console.log(`Всего страниц получено: ${allPages.length}`);
+
       let accessTokenToUse = FB_API_CONFIG.access_token; // По умолчанию используем User Token
 
       if (allPages.length > 0) {
         const page = allPages.find((p: any) => p.id === pageId);
         if (page?.access_token) {
           accessTokenToUse = page.access_token;
-
+          console.log('Используем Page Access Token для:', page.name);
         } else {
-
+          console.log('Page не найден в /me/accounts, пробуем с User Access Token напрямую');
         }
       } else {
-
+        console.log('Нет доступных страниц, пробуем с User Access Token напрямую');
       }
 
       // Запрашиваем лидформы
@@ -589,7 +697,7 @@ export const facebookApi = {
       const formsData = await formsResponse.json();
 
       if (formsData.error) {
-
+        console.error('Ошибка получения лидформ:', formsData.error);
         throw new Error(formsData.error.message);
       }
 
@@ -599,13 +707,15 @@ export const facebookApi = {
         status: f.status || 'ACTIVE'
       }));
 
-      if (forms.length === 0) {
+      console.log(`Получено лидформ: ${forms.length}`);
 
+      if (forms.length === 0) {
+        console.info('На странице не найдено лидформ');
       }
 
       return forms;
     } catch (e) {
-
+      console.error('Не удалось получить список лидформ:', e);
       const errorMessage = e instanceof Error ? e.message : String(e);
       if (!errorMessage.includes('Empty response') && !errorMessage.includes('data')) {
         toastT.error('failedToLoadLeadForms');
@@ -631,14 +741,16 @@ export const facebookApi = {
       const response = await fetchFromFacebookAPI(endpoint, params);
       const pixels = (response.data || []).map((p: any) => ({ id: String(p.id), name: p.name || p.id }));
 
+      console.log(`Получено пикселей: ${pixels.length}`);
+
       // Не показываем ошибку если просто нет пикселей - это нормально
       if (pixels.length === 0) {
-
+        console.info('В рекламном кабинете не найдено пикселей');
       }
 
       return pixels;
     } catch (e) {
-
+      console.error('Не удалось получить список пикселей:', e);
       // Показываем ошибку только если это реальная ошибка API, а не просто пустой результат
       const errorMessage = e instanceof Error ? e.message : String(e);
       if (!errorMessage.includes('Empty response') && !errorMessage.includes('data')) {
@@ -649,9 +761,10 @@ export const facebookApi = {
   },
   // Получить все кампании
   getCampaigns: async (): Promise<Campaign[]> => {
-
+    console.log('Запрос на получение кампаний');
+    
     if (!await hasValidConfig()) {
-
+      console.warn('Нет данных для получения кампаний. Возвращаю пустой массив.');
       // Не показываем уведомление и не возвращаем моковые кампании
       return [];
     }
@@ -659,7 +772,9 @@ export const facebookApi = {
     try {
       const FB_API_CONFIG = await getCurrentUserConfig();
       const accountId = FB_API_CONFIG.ad_account_id;
-
+      
+      console.log(`Запрашиваем кампании для рекламного кабинета: ${accountId}`);
+      
       const endpoint = `${accountId}/campaigns`;
       const params = {
         fields: 'id,name,status,objective,budget_remaining,start_time',
@@ -667,9 +782,12 @@ export const facebookApi = {
       };
       
       const response = await fetchFromFacebookAPI(endpoint, params);
-
+      console.log('Получены данные кампаний от API:', {
+        count: response.data?.length || 0
+      });
+      
       if (!response.data || response.data.length === 0) {
-
+        console.warn('API вернул пустой список кампаний, возвращаю пустой массив');
         return [];
       }
       
@@ -690,15 +808,18 @@ export const facebookApi = {
   // Получить статистику кампаний за период
   // campaigns - опциональный параметр, если передан - используем его, иначе загружаем (для избежания дублирования запросов)
   getCampaignStats: async (dateRange: DateRange, includeLeadForms: boolean = false, campaigns?: Campaign[]): Promise<CampaignStat[]> => {
+    console.log('Запрос статистики кампаний за период:', dateRange);
 
     if (!await hasValidConfig()) {
-
+      console.warn('Нет данных для получения статистики. Возвращаю пустой массив.');
       return [];
     }
 
     try {
       const FB_API_CONFIG = await getCurrentUserConfig();
       const accountId = FB_API_CONFIG.ad_account_id;
+
+      console.log(`Запрашиваем статистику для рекламного кабинета: ${accountId}`);
 
       // Используем переданные кампании или загружаем (если не переданы)
       // Это позволяет избежать дублирования запросов при вызове из AppContext
@@ -710,7 +831,7 @@ export const facebookApi = {
       }
       
       if (!campaignsToUse || campaignsToUse.length === 0) {
-
+        console.warn('Нет кампаний для запроса статистики, возвращаю пустой массив');
         return [];
       }
       
@@ -724,12 +845,17 @@ export const facebookApi = {
         // Нужна детализация по типу действия, чтобы корректно считать события сайта/пикселя
         action_breakdowns: 'action_type'
       };
-
+      
+      console.log('Отправляем запрос к Facebook API для получения статистики');
       const response = await fetchFromFacebookAPI(endpoint, params);
-
+      console.log('Получены данные статистики от API:', {
+        count: response.data?.length || 0,
+        data: response.data
+      });
+      
       // Если получены данные от API, обрабатываем их и возвращаем
       if (response.data && response.data.length > 0) {
-
+        console.log('Обрабатываем полученные данные статистики');
         const result = (response.data || []).map((stat: any) => {
           // Подсчитываем лиды - берем максимальное значение из всех типов лидов
           // чтобы избежать дублирования одних и тех же лидов
@@ -799,11 +925,13 @@ export const facebookApi = {
             _is_real_data: true // Помечаем как реальные данные
           };
         });
-
+        
+        console.log('Обработано реальных данных статистики:', result.length);
         return result;
       }
       // Если API вернул пустые данные, создаем нулевые статистики для каждой кампании на каждую дату
-
+      console.log('API вернул пустые данные статистики, создаем нулевые записи для реальных кампаний');
+      
       // Получаем все даты в диапазоне для создания ежедневной статистики
       const dates: Date[] = [];
       let currentDate = new Date(dateRange.since);
@@ -838,7 +966,8 @@ export const facebookApi = {
           });
         });
       });
-
+      
+      console.log(`Создано ${zeroStats.length} записей статистики с нулевыми значениями`);
       return zeroStats;
     } catch (error) {
       toastT.error('failedToLoadStats');
@@ -848,9 +977,10 @@ export const facebookApi = {
   
   // Обновить статус кампании
   updateCampaignStatus: async (campaignId: string, isActive: boolean): Promise<boolean> => {
-
+    console.log(`Запрос на изменение статуса кампании ${campaignId} на ${isActive ? 'ACTIVE' : 'PAUSED'}`);
+    
     if (!await hasValidConfig()) {
-
+      console.warn('Используются моковые данные для изменения статуса. Не удалось получить данные пользователя.');
       toastT.warning('testDataWarning');
       await new Promise(resolve => setTimeout(resolve, 600)); // Имитация задержки API
       
@@ -869,7 +999,9 @@ export const facebookApi = {
       
       // Для POST запросов нужно использовать fetch напрямую
       const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${endpoint}`;
-
+      
+      console.log(`Изменяем статус кампании ${campaignId} на ${status}`);
+      
       const formData = new URLSearchParams();
       formData.append('access_token', FB_API_CONFIG.access_token);
       formData.append('status', status);
@@ -884,7 +1016,8 @@ export const facebookApi = {
       
       if (!response.ok) {
         const errorData = await response.json();
-
+        console.error('Ошибка Facebook API при изменении статуса:', errorData);
+        
         // Проверка на истекший токен
         if (errorData?.error?.code === 190) {
           toastT.error('statusAuthError');
@@ -896,6 +1029,7 @@ export const facebookApi = {
       }
       
       const result = await response.json();
+      console.log('Результат изменения статуса кампании:', result);
 
       if (result.success === true) {
         toastT.success(isActive ? 'campaignResumed' : 'campaignPaused');
@@ -903,7 +1037,7 @@ export const facebookApi = {
       
       return result.success === true;
     } catch (error) {
-
+      console.error('Ошибка при изменении статуса кампании:', error);
       toastT.error('statusUpdateError');
       return false;
     }
@@ -931,7 +1065,7 @@ export const facebookApi = {
         status: a.status,
       }));
     } catch (error) {
-
+      console.error('Ошибка при получении бюджетов адсетов:', error);
       return [];
     }
   },
@@ -973,7 +1107,7 @@ export const facebookApi = {
 
       return { totalBudget, activeAdsetsCount: activeAdsets.length };
     } catch (error) {
-
+      console.error(`Ошибка при получении бюджетов адсетов для ${adAccountId}:`, error);
       return { totalBudget: 0, activeAdsetsCount: 0 };
     }
   },
@@ -1005,7 +1139,7 @@ export const facebookApi = {
         thumbnail_url: ad.creative?.thumbnail_url || ad.creative?.image_url || null,
       }));
     } catch (e) {
-
+      console.error('getAdsByAdset error', e);
       return [];
     }
   },
@@ -1093,7 +1227,7 @@ export const facebookApi = {
       }
       return [];
     } catch (e) {
-
+      console.error('getAdStatsByAdset error', e);
       return [];
     }
   },
@@ -1122,10 +1256,10 @@ export const facebookApi = {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       if (message.includes('creative') && message.includes('not supported')) {
-
+        console.warn('getAdsByCreative: фильтрация по creative_id недоступна, возвращаем пустой список');
         return [];
       }
-
+      console.error('getAdsByCreative error', e);
       return [];
     }
   },
@@ -1186,7 +1320,7 @@ export const facebookApi = {
         }
       }
     } catch (e) {
-
+      console.error('getAggregatedInsightsByAds error', e);
     }
     return { spend: totalSpend, leads: totalLeads, impressions: totalImpr, clicks: totalClicks };
   },
@@ -1213,7 +1347,7 @@ export const facebookApi = {
         allClicks += agg.clicks;
       }
     } catch (e) {
-
+      console.error('getCreativeAggregatedStats error', e);
     }
     const cpl = allLeads > 0 ? allSpend / allLeads : 0;
     return { spend: allSpend, leads: allLeads, cpl, impressions: allImpr, clicks: allClicks };
@@ -1306,7 +1440,7 @@ export const facebookApi = {
     try {
       const config = await getCurrentUserConfig();
       if (!config) {
-
+        console.log('Нет конфигурации пользователя');
         return [];
       }
 
@@ -1372,7 +1506,7 @@ export const facebookApi = {
         .slice(0, 10); // Показываем только последние 10 действий
         
     } catch (error) {
-
+      console.error('Ошибка при получении действий таргетолога:', error);
       // Возвращаем фолбэк данные если API недоступен
       return [
         {
@@ -1412,6 +1546,14 @@ export const facebookApi = {
       // Для мультиаккаунтного режима: получаем текущий account_id
       const multiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
       const currentAdAccountId = data.account_id || localStorage.getItem('currentAdAccountId');
+
+      console.log('[facebookApi] Submitting manual connection:', {
+        user_id: userData.id,
+        account_id: multiAccountEnabled ? currentAdAccountId : null,
+        page_id: data.page_id,
+        instagram_id: data.instagram_id,
+        ad_account_id: data.ad_account_id
+      });
 
       const response = await fetch(`${API_BASE_URL}/facebook/manual-connect`, {
         method: 'POST',
@@ -1457,11 +1599,12 @@ export const facebookApi = {
           }
         }
 
+        console.log('[facebookApi] Manual connection submitted successfully');
       }
 
       return result;
     } catch (error) {
-
+      console.error('[facebookApi] Error submitting manual connection:', error);
       return { success: false, error: 'Не удалось подключиться к серверу' };
     }
   }
