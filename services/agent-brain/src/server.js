@@ -6058,7 +6058,7 @@ async function restoreMetricsForDateRange(userAccountId, accountId, adAccountId,
 
   // Загружаем креативы один раз
   const { getActiveCreatives, saveCreativeMetricsToHistory } = await import('./scoring.js');
-  const readyCreatives = await getActiveCreatives(supabase, userAccountId, accountId, adAccountId, accessToken);
+  const readyCreatives = await getActiveCreatives(supabase, userAccountId, accountId);
 
   if (!readyCreatives || readyCreatives.length === 0) {
     fastify.log.warn({
