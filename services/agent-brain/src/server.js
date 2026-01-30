@@ -5914,12 +5914,19 @@ async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId,
     const yesterdayStr = yesterday.toISOString().split('T')[0];
 
     // Проверяем, есть ли уже записи за вчера для этого аккаунта
-    const { data: existingMetrics, error: checkError } = await supabase
+    // Для legacy аккаунтов accountId = null, используем .is() вместо .eq()
+    let checkQuery = supabase
       .from('creative_metrics_history')
       .select('id')
-      .eq('account_id', accountId)
-      .eq('date', yesterdayStr)
-      .limit(1);
+      .eq('date', yesterdayStr);
+
+    if (accountId) {
+      checkQuery = checkQuery.eq('account_id', accountId);
+    } else {
+      checkQuery = checkQuery.is('account_id', null);
+    }
+
+    const { data: existingMetrics, error: checkError } = await checkQuery.limit(1);
 
     if (checkError) {
       fastify.log.warn({
@@ -6076,12 +6083,19 @@ async function restoreMetricsForDateRange(userAccountId, accountId, adAccountId,
       });
 
       // Проверяем, есть ли уже метрики за эту дату
-      const { data: existing } = await supabase
+      // Для legacy аккаунтов accountId = null, используем .is() вместо .eq()
+      let existingQuery = supabase
         .from('creative_metrics_history')
         .select('id')
-        .eq('account_id', accountId)
-        .eq('date', date)
-        .limit(1);
+        .eq('date', date);
+
+      if (accountId) {
+        existingQuery = existingQuery.eq('account_id', accountId);
+      } else {
+        existingQuery = existingQuery.is('account_id', null);
+      }
+
+      const { data: existing } = await existingQuery.limit(1);
 
       if (existing && existing.length > 0) {
         fastify.log.info({
