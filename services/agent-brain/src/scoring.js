@@ -2151,7 +2151,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
       const { error } = await supabase
         .from('creative_metrics_history')
         .upsert(records, {
-          onConflict: 'user_account_id,ad_id,date',
+          onConflict: 'user_account_id,ad_id,date,platform',
           ignoreDuplicates: false  // Обновляем если уже есть (на случай повторного запуска)
         });
 
