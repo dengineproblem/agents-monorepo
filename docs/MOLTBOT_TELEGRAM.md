@@ -8,17 +8,18 @@
 2. [Компоненты системы](#компоненты-системы)
 3. [Конфигурация](#конфигурация)
 4. [Skills (Навыки)](#skills-навыки)
-5. [Аутентификация и Auth Profiles](#аутентификация-и-auth-profiles)
-6. [Prompt Caching](#prompt-caching)
-7. [Контекст пользователя](#контекст-пользователя)
-8. [User Onboarding](#user-onboarding)
-9. [Работа с инструментами (Tools)](#работа-с-инструментами-tools)
-10. [Голосовые сообщения](#голосовые-сообщения)
-11. [Лимиты затрат на AI](#лимиты-затрат-на-ai)
-12. [Docker конфигурация](#docker-конфигурация)
-13. [Мониторинг и логи](#мониторинг-и-логи)
-14. [Troubleshooting](#troubleshooting)
-15. [Команды управления](#команды-управления)
+5. [Multi-Agent Routing](#multi-agent-routing)
+6. [Аутентификация и Auth Profiles](#аутентификация-и-auth-profiles)
+7. [Prompt Caching](#prompt-caching)
+8. [Контекст пользователя](#контекст-пользователя)
+9. [User Onboarding](#user-onboarding)
+10. [Работа с инструментами (Tools)](#работа-с-инструментами-tools)
+11. [Голосовые сообщения](#голосовые-сообщения)
+12. [Лимиты затрат на AI](#лимиты-затрат-на-ai)
+13. [Docker конфигурация](#docker-конфигурация)
+14. [Мониторинг и логи](#мониторинг-и-логи)
+15. [Troubleshooting](#troubleshooting)
+16. [Команды управления](#команды-управления)
 
 ---
 
@@ -317,6 +318,306 @@ curl -s -X POST http://agent-brain:7080/brain/tools/getCampaigns \
    - Смотрит в skills как вызвать этот tool
    - Выполняет curl команду
    - Форматирует ответ
+
+---
+
+## Multi-Agent Routing
+
+### Обзор
+
+**Multi-Agent Routing** — архитектура для динамической загрузки skills, которая экономит **35-40% токенов** на каждом запросе.
+
+**Проблема:** Загрузка всех skills (~20K токенов) в каждый запрос дорого и медленно.
+
+**Решение:** Двухэтапная обработка через Router Agent + Specialist Agents.
+
+### Архитектура
+
+```
+Telegram User → Router Agent (легкий, ~3K tokens)
+                     ↓
+           Определяет нужный specialist
+                     ↓
+           Specialist Agent (тяжелый, ~8-12K tokens)
+                     ↓
+           Выполняет задачу с полными skills
+                     ↓
+           Возвращает результат пользователю
+
+Total: ~11-15K tokens вместо ~20K (экономия 35-40%)
+```
+
+### Router Agent
+
+**Workspace:** `moltbot-workspace-router/`
+
+**Задачи:**
+1. Проверить лимиты затрат (usage-limits skill)
+2. Получить контекст пользователя (context skill)
+3. Определить намерение запроса (анализ ключевых слов)
+4. Вернуть `ROUTE: specialist-name`
+
+**Prompt size:** ~3,000 токенов
+
+**Skills:**
+- `context` — получение credentials
+- `usage-limits` — проверка лимитов (priority: 1000)
+- `router` — маршрутизация к specialists
+
+**Примеры маршрутизации:**
+
+| Запрос | Specialist | Причина |
+|--------|-----------|---------|
+| "Покажи статистику" | facebook-ads | Ключевое слово "статистика" |
+| "Сгенерируй креатив" | creatives | Ключевое слово "сгенерируй" |
+| "Новые лиды" | crm | Ключевое слово "лиды" |
+| "TikTok кампании" | tiktok | Ключевое слово "TikTok" |
+| "/onboarding" | onboarding | Команда регистрации |
+
+### Specialist Agents
+
+#### Facebook Ads Agent
+**Workspace:** `moltbot-workspace-facebook/`
+- **Skills:** facebook-ads (24 tools), context
+- **Prompt size:** ~8,000 токенов
+- **Назначение:** Управление Facebook/Instagram рекламой
+
+#### Creatives Agent
+**Workspace:** `moltbot-workspace-creatives/`
+- **Skills:** creatives (23 tools), context
+- **Prompt size:** ~9,000 токенов
+- **Назначение:** Генерация и анализ креативов
+
+#### CRM Agent
+**Workspace:** `moltbot-workspace-crm/`
+- **Skills:** crm (18 tools), context
+- **Prompt size:** ~7,000 токенов
+- **Назначение:** Работа с лидами, WhatsApp, воронка
+
+#### TikTok Agent
+**Workspace:** `moltbot-workspace-tiktok/`
+- **Skills:** tiktok (18 tools), context
+- **Prompt size:** ~8,000 токенов
+- **Назначение:** Управление TikTok рекламой
+
+#### Onboarding Agent
+**Workspace:** `moltbot-workspace-onboarding/`
+- **Skills:** onboarding (15 вопросов), context
+- **Prompt size:** ~14,000 токенов
+- **Назначение:** Регистрация новых пользователей
+
+### Конфигурация moltbot.json
+
+**Расположение:** `moltbot-workspace-router/moltbot.json`
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-5.2"
+      },
+      "bootstrapMaxChars": 5000
+    },
+    "main": {
+      "id": "router",
+      "workspace": "./moltbot-workspace-router",
+      "agentDir": "~/.moltbot/agents/router",
+      "bootstrapMaxChars": 3000
+    },
+    "facebook-ads": {
+      "id": "facebook-ads",
+      "workspace": "./moltbot-workspace-facebook",
+      "agentDir": "~/.moltbot/agents/facebook-ads",
+      "bootstrapMaxChars": 10000
+    },
+    "creatives": {
+      "id": "creatives",
+      "workspace": "./moltbot-workspace-creatives",
+      "agentDir": "~/.moltbot/agents/creatives",
+      "bootstrapMaxChars": 12000
+    },
+    "crm": {
+      "id": "crm",
+      "workspace": "./moltbot-workspace-crm",
+      "agentDir": "~/.moltbot/agents/crm",
+      "bootstrapMaxChars": 10000
+    },
+    "tiktok": {
+      "id": "tiktok",
+      "workspace": "./moltbot-workspace-tiktok",
+      "agentDir": "~/.moltbot/agents/tiktok",
+      "bootstrapMaxChars": 10000
+    },
+    "onboarding": {
+      "id": "onboarding",
+      "workspace": "./moltbot-workspace-onboarding",
+      "agentDir": "~/.moltbot/agents/onboarding",
+      "bootstrapMaxChars": 15000
+    }
+  }
+}
+```
+
+### Структура Workspaces
+
+```
+moltbot-workspace-router/          # Router Agent
+├── AGENTS.md                      # Инструкции по маршрутизации
+├── IDENTITY.md, SOUL.md, USER.md
+├── moltbot.json                   # Multi-agent конфигурация
+└── skills/
+    ├── context/                   # Получение контекста
+    ├── usage-limits/              # Проверка лимитов
+    └── router/                    # Маршрутизация
+
+moltbot-workspace-facebook/        # Facebook Ads Specialist
+├── AGENTS.md                      # Инструкции по Facebook Ads
+├── IDENTITY.md, SOUL.md, USER.md
+└── skills/
+    ├── context/
+    └── facebook-ads/
+
+moltbot-workspace-creatives/       # Creatives Specialist
+moltbot-workspace-crm/             # CRM Specialist
+moltbot-workspace-tiktok/          # TikTok Specialist
+moltbot-workspace-onboarding/      # Onboarding Specialist
+```
+
+### Routing Endpoint
+
+**Endpoint:** `POST /api/moltbot/route`
+
+**Назначение:** Прямой вызов specialist агента (используется Router Agent).
+
+**Request:**
+```bash
+curl -X POST http://agent-brain:7080/api/moltbot/route \
+  -H "Content-Type: application/json" \
+  -d '{
+    "specialist": "facebook-ads",
+    "message": "Покажи статистику за неделю",
+    "telegramChatId": "313145981"
+  }'
+```
+
+**Response:**
+```json
+{
+  "response": "📊 Статистика за последние 7 дней:\n\nКампания \"Yoga Classes\":\n- Показы: 10,234\n- Клики: 456\n- CTR: 4.45%\n- Потрачено: $123.45"
+}
+```
+
+### Flow обработки запроса
+
+```
+1. Пользователь → Telegram: "Покажи статистику"
+         ↓
+2. Moltbot Gateway → Router Agent
+         ↓
+3. Router Agent:
+   - Проверяет лимиты (usage-limits skill)
+   - Получает контекст (context skill)
+   - Анализирует: "статистика" → facebook-ads
+   - Вызывает: POST /api/moltbot/route
+         ↓
+4. Agent-Brain → Moltbot Gateway (specialist=facebook-ads)
+         ↓
+5. Facebook Ads Agent:
+   - Использует facebook-ads skill
+   - Вызывает getCampaigns tool
+   - Форматирует ответ
+         ↓
+6. Результат → Пользователь через Telegram
+```
+
+### Метрики экономии
+
+**До внедрения:**
+- Prompt size: ~20,000 токенов
+- Все skills загружены: 7 skills + AGENTS.md (9000 строк)
+- Стоимость (GPT-5.2): ~$0.040 за запрос
+
+**После внедрения:**
+- Router prompt: ~3,000 токенов
+- Specialist prompt: ~8,000-12,000 токенов
+- **Total:** ~11,000-15,000 токенов (2 запроса)
+- **Стоимость:** ~$0.025 за запрос
+- **Экономия:** 35-40% на prompt tokens ✅
+
+**Дополнительные выгоды:**
+- ✅ Более точные ответы (specialist видит только нужный контекст)
+- ✅ Легче дебажить (изолированные агенты)
+- ✅ Можно отключать specialists по отдельности
+- ✅ Можно использовать разные модели для router vs specialists
+
+### Проверка работы
+
+**1. Проверить загрузку агентов:**
+```bash
+docker logs moltbot 2>&1 | grep "agent model"
+
+# Должно быть 6 агентов:
+# [router] agent model: openai/gpt-5.2
+# [facebook-ads] agent model: openai/gpt-5.2
+# [creatives] agent model: openai/gpt-5.2
+# [crm] agent model: openai/gpt-5.2
+# [tiktok] agent model: openai/gpt-5.2
+# [onboarding] agent model: openai/gpt-5.2
+```
+
+**2. Проверить routing:**
+```bash
+# Логи routing
+docker logs agent-brain 2>&1 | grep "Routing to specialist"
+
+# Логи specialist агентов
+docker logs moltbot 2>&1 | grep "embedded run" | grep "facebook-ads"
+```
+
+**3. Тест E2E:**
+Отправь в Telegram бот: "Покажи статистику за неделю"
+
+Ожидаемый flow:
+1. Router определяет: `facebook-ads` specialist
+2. Вызывается специализированный агент
+3. Получаешь статистику
+
+### Troubleshooting Multi-Agent
+
+**Проблема: Агенты не загружаются**
+
+```bash
+# Проверить что конфиг скопирован
+docker exec moltbot cat /root/.moltbot/config.json
+
+# Проверить что auth profiles созданы для всех агентов
+docker exec moltbot ls -la /root/.moltbot/agents/
+
+# Должно быть: router/, facebook-ads/, creatives/, crm/, tiktok/, onboarding/
+```
+
+**Проблема: Routing не работает**
+
+```bash
+# Проверить что endpoint доступен
+curl -X POST http://localhost:7080/api/moltbot/route \
+  -H "Content-Type: application/json" \
+  -d '{"specialist":"facebook-ads","message":"test","telegramChatId":"123"}'
+
+# Проверить логи
+docker logs agent-brain 2>&1 | grep "router.js"
+```
+
+**Проблема: Specialist не отвечает**
+
+```bash
+# Проверить что workspace существует
+docker exec moltbot ls -la /root/clawd/ | grep moltbot-workspace
+
+# Проверить логи specialist агента
+docker logs moltbot 2>&1 | grep "\[facebook-ads\]"
+```
 
 ---
 
@@ -1985,4 +2286,5 @@ docker restart moltbot
 
 | Дата | Версия | Изменения |
 |------|--------|-----------|
+| 2026-01-30 | 1.1 | Добавлен Multi-Agent Routing (экономия 35-40% токенов) |
 | 2026-01-29 | 1.0 | Начальная документация |
