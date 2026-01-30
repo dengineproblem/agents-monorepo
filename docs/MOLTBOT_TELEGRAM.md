@@ -14,10 +14,11 @@
 8. [User Onboarding](#user-onboarding)
 9. [Работа с инструментами (Tools)](#работа-с-инструментами-tools)
 10. [Голосовые сообщения](#голосовые-сообщения)
-11. [Docker конфигурация](#docker-конфигурация)
-12. [Мониторинг и логи](#мониторинг-и-логи)
-13. [Troubleshooting](#troubleshooting)
-14. [Команды управления](#команды-управления)
+11. [Лимиты затрат на AI](#лимиты-затрат-на-ai)
+12. [Docker конфигурация](#docker-конфигурация)
+13. [Мониторинг и логи](#мониторинг-и-логи)
+14. [Troubleshooting](#troubleshooting)
+15. [Команды управления](#команды-управления)
 
 ---
 
@@ -1017,6 +1018,413 @@ docker exec moltbot cat /root/.clawdbot/agents/main/agent/auth-profiles.json | j
 
 # Проверить логи
 docker logs moltbot 2>&1 | grep -i "audio\|whisper\|transcri"
+```
+
+---
+
+## Лимиты затрат на AI
+
+### Обзор
+
+Для защиты от перерасхода на AI API реализована система лимитов затрат с детальным трекингом usage на уровне каждого пользователя Telegram.
+
+**Основные функции:**
+- ✅ Дневной лимит затрат на пользователя (по умолчанию $1/день)
+- ✅ Отслеживание usage по моделям (GPT-5.2, Claude Sonnet, GPT-4o)
+- ✅ Предупреждения когда использовано >=80% лимита
+- ✅ Детальное логирование всех проверок и затрат
+- ✅ Валидация Telegram ID
+- ✅ Atomic updates для безопасности при параллельных запросах
+
+### Архитектура
+
+**Поток данных:**
+
+```
+Telegram User → telegramHandler.js (добавляет telegramChatId)
+               ↓
+            orchestrator/index.js (передаёт в Moltbot context)
+               ↓
+            moltbot/orchestrator.js
+               ↓
+         [1] checkUserLimit() ← БД: user_ai_limits + user_ai_usage
+               ↓
+         [allowed=true] → Отправка к Moltbot Gateway
+               ↓
+         [result + usage] → trackUsage()
+               ↓
+         [2] БД: user_ai_usage (increment_usage)
+```
+
+**Точки перехвата:**
+1. **До запроса** (`moltbot/orchestrator.js:119`) - проверка лимита
+2. **После ответа** (`moltbot/orchestrator.js:223`) - запись usage
+
+### База данных
+
+**Таблица: `user_ai_usage`**
+
+```sql
+CREATE TABLE user_ai_usage (
+  id UUID PRIMARY KEY,
+  telegram_id TEXT NOT NULL,
+  date DATE NOT NULL,
+  model TEXT NOT NULL,                   -- 'gpt-5.2', 'claude-sonnet-4-20250514', 'gpt-4o'
+
+  -- Метрики
+  prompt_tokens INT DEFAULT 0,
+  completion_tokens INT DEFAULT 0,
+  total_tokens INT DEFAULT 0,
+  cost_usd DECIMAL(10,6) DEFAULT 0,      -- Стоимость в USD
+  request_count INT DEFAULT 0,
+
+  UNIQUE(telegram_id, date, model)       -- Одна запись на модель/день
+);
+```
+
+**Таблица: `user_ai_limits`**
+
+```sql
+CREATE TABLE user_ai_limits (
+  telegram_id TEXT PRIMARY KEY,
+  daily_limit_usd DECIMAL(10,2) DEFAULT 1.00,    -- Дневной лимит ($1 по умолчанию)
+  monthly_limit_usd DECIMAL(10,2) DEFAULT 20.00, -- Месячный лимит (не используется пока)
+  is_unlimited BOOLEAN DEFAULT FALSE             -- VIP пользователи
+);
+```
+
+**SQL функция: `increment_usage()`**
+
+Атомарное обновление для безопасности при параллельных запросах:
+
+```sql
+CREATE OR REPLACE FUNCTION increment_usage(
+  p_telegram_id TEXT,
+  p_date DATE,
+  p_model TEXT,
+  p_prompt_tokens INT,
+  p_completion_tokens INT,
+  p_cost_usd DECIMAL,
+  p_request_count INT
+) RETURNS VOID AS $$
+BEGIN
+  INSERT INTO user_ai_usage (telegram_id, date, model, prompt_tokens, ...)
+  VALUES (p_telegram_id, p_date, p_model, p_prompt_tokens, ...)
+  ON CONFLICT (telegram_id, date, model) DO UPDATE SET
+    prompt_tokens = user_ai_usage.prompt_tokens + EXCLUDED.prompt_tokens,
+    cost_usd = user_ai_usage.cost_usd + EXCLUDED.cost_usd,
+    ...
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Калькуляция стоимости
+
+**Pricing констант (`usageLimits.js`):**
+
+```javascript
+export const MODEL_PRICING = {
+  'gpt-5.2': {
+    input: 1.75 / 1_000_000,   // $1.75 per 1M input tokens
+    output: 14.00 / 1_000_000  // $14.00 per 1M output tokens
+  },
+  'claude-sonnet-4-20250514': {
+    input: 3.00 / 1_000_000,
+    output: 15.00 / 1_000_000
+  },
+  'gpt-4o': {
+    input: 2.50 / 1_000_000,
+    output: 10.00 / 1_000_000
+  }
+};
+```
+
+**Расчёт:**
+
+```javascript
+inputCost = prompt_tokens * pricing.input
+outputCost = completion_tokens * pricing.output
+totalCost = inputCost + outputCost
+```
+
+**Примеры затрат:**
+
+| Модель | Prompt | Completion | Стоимость |
+|--------|--------|------------|-----------|
+| GPT-5.2 | 1000 | 500 | $0.0087 |
+| GPT-5.2 | 5000 | 2000 | $0.0368 |
+| Claude Sonnet | 1000 | 500 | $0.0105 |
+| GPT-4o (Whisper) | 500 | 100 | $0.0023 |
+
+### API
+
+**Проверка лимита:**
+
+```javascript
+import { checkUserLimit } from './lib/usageLimits.js';
+
+const limitCheck = await checkUserLimit(telegramId);
+
+// Результат:
+{
+  allowed: true,          // false если лимит превышен
+  remaining: 0.73,        // Сколько осталось в USD
+  limit: 1.00,            // Дневной лимит
+  spent: 0.27,            // Уже потрачено сегодня
+  nearLimit: false,       // true если >=80% использовано
+  failOpen: false,        // true если произошла ошибка БД (разрешено по fail-open)
+  unlimited: false        // true если пользователь VIP (is_unlimited=true)
+}
+```
+
+**Запись usage:**
+
+```javascript
+import { trackUsage } from './lib/usageLimits.js';
+
+await trackUsage(telegramId, model, usage);
+
+// usage должен содержать:
+{
+  prompt_tokens: 1234,
+  completion_tokens: 567
+}
+```
+
+**Калькуляция стоимости:**
+
+```javascript
+import { calculateCost } from './lib/usageLimits.js';
+
+const cost = calculateCost('gpt-5.2', { prompt_tokens: 1000, completion_tokens: 500 });
+// Вернёт: 0.00875 (в USD)
+```
+
+### Логирование
+
+**Детальное логирование всех операций:**
+
+```javascript
+// При проверке лимита:
+log.info({
+  telegramId,
+  limit: 1.00,
+  spent: 0.27,
+  remaining: 0.73,
+  usagePercent: 27.0,
+  checkDuration: 45
+}, 'Limit check passed');
+
+// Предупреждение при близости к лимиту:
+log.warn({
+  telegramId,
+  usagePercent: 85.2
+}, 'User is near daily limit (>=80% used)');
+
+// При калькуляции стоимости:
+log.info({
+  model: 'gpt-5.2',
+  prompt_tokens: 1234,
+  completion_tokens: 567,
+  total_tokens: 1801,
+  input_cost_usd: '0.002160',
+  output_cost_usd: '0.007938',
+  total_cost_usd: '0.010098'
+}, 'Cost calculated');
+
+// При отслеживании usage:
+log.info({
+  telegramId,
+  model: 'gpt-5.2',
+  cost_usd: '0.010098',
+  trackDuration: 28
+}, 'Usage tracked successfully');
+
+// FAIL-OPEN случаи:
+log.warn({
+  telegramId
+}, 'FAIL-OPEN: Allowing request due to DB error');
+```
+
+### Валидация
+
+**Telegram ID валидируется перед всеми операциями:**
+
+```javascript
+function isValidTelegramId(telegramId) {
+  if (!telegramId) return false;
+  const str = String(telegramId);
+  // Numeric, length 5-15
+  return /^\d+$/.test(str) && str.length >= 5 && str.length <= 15;
+}
+```
+
+### Поведение при превышении лимита
+
+Когда пользователь превышает дневной лимит:
+
+```javascript
+// 1. checkUserLimit() вернёт allowed: false
+// 2. В orchestrator.js запрос отклоняется:
+safeSendEvent({
+  type: 'error',
+  error: 'daily_limit_exceeded',
+  message: formatLimitExceededMessage(limitCheck)
+});
+
+// 3. Пользователь получает сообщение:
+⚠️ Превышен дневной лимит затрат
+
+Ваш лимит: $1.00
+Потрачено сегодня: $1.05
+
+Попробуйте завтра или обратитесь в поддержку для увеличения лимита.
+```
+
+### Настройка лимитов для пользователей
+
+**Изменить дневной лимит:**
+
+```sql
+-- Установить $5/день для пользователя
+UPDATE user_ai_limits
+SET daily_limit_usd = 5.00
+WHERE telegram_id = '123456789';
+```
+
+**Сделать пользователя VIP (unlimited):**
+
+```sql
+UPDATE user_ai_limits
+SET is_unlimited = TRUE
+WHERE telegram_id = '123456789';
+```
+
+**Создать лимит для нового пользователя:**
+
+```sql
+INSERT INTO user_ai_limits (telegram_id, daily_limit_usd)
+VALUES ('123456789', 10.00);
+```
+
+### Мониторинг затрат
+
+**Посмотреть топ пользователей по затратам за сегодня:**
+
+```sql
+SELECT
+  telegram_id,
+  SUM(cost_usd) as total_cost,
+  SUM(request_count) as total_requests,
+  SUM(total_tokens) as total_tokens
+FROM user_ai_usage
+WHERE date = CURRENT_DATE
+GROUP BY telegram_id
+ORDER BY total_cost DESC
+LIMIT 10;
+```
+
+**Посмотреть затраты по моделям за неделю:**
+
+```sql
+SELECT
+  model,
+  SUM(cost_usd) as total_cost,
+  SUM(request_count) as requests,
+  AVG(cost_usd) as avg_cost_per_request
+FROM user_ai_usage
+WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY model
+ORDER BY total_cost DESC;
+```
+
+**Найти пользователей близких к лимиту:**
+
+```sql
+SELECT
+  u.telegram_id,
+  l.daily_limit_usd,
+  COALESCE(SUM(u.cost_usd), 0) as spent_today,
+  l.daily_limit_usd - COALESCE(SUM(u.cost_usd), 0) as remaining,
+  (COALESCE(SUM(u.cost_usd), 0) / l.daily_limit_usd * 100) as usage_percent
+FROM user_ai_limits l
+LEFT JOIN user_ai_usage u ON l.telegram_id = u.telegram_id AND u.date = CURRENT_DATE
+WHERE l.is_unlimited = FALSE
+GROUP BY l.telegram_id, l.daily_limit_usd
+HAVING (COALESCE(SUM(u.cost_usd), 0) / l.daily_limit_usd * 100) >= 80
+ORDER BY usage_percent DESC;
+```
+
+### Fail-Open стратегия
+
+При ошибках БД система работает в режиме **fail-open** - разрешает запросы чтобы не блокировать пользователей:
+
+**Когда происходит fail-open:**
+- Ошибка подключения к Supabase
+- Timeout запроса к БД
+- Неожиданные исключения в `checkUserLimit()`
+
+**Поведение:**
+```javascript
+// В случае ошибки БД:
+return {
+  allowed: true,           // Разрешаем запрос
+  remaining: 1.00,
+  limit: 1.00,
+  spent: 0,
+  failOpen: true          // Флаг что это fail-open
+};
+
+// Логируется как critical:
+log.error('Database error fetching user limit');
+log.warn('FAIL-OPEN: Allowing request due to DB error');
+```
+
+**Мониторинг fail-open случаев:**
+
+```bash
+# Найти fail-open в логах
+docker logs agent-brain 2>&1 | grep "FAIL-OPEN"
+```
+
+### Troubleshooting
+
+**Проблема: Лимит не работает, пользователь может делать много запросов**
+
+```bash
+# 1. Проверить передаётся ли telegramChatId
+docker logs agent-brain 2>&1 | grep "telegramChatId" | tail -5
+
+# 2. Проверить что миграция применена
+# В Supabase Dashboard → SQL Editor
+SELECT EXISTS (
+  SELECT FROM information_schema.tables
+  WHERE table_name = 'user_ai_limits'
+);
+
+# 3. Проверить записывается ли usage
+SELECT * FROM user_ai_usage
+WHERE telegram_id = 'YOUR_TELEGRAM_ID'
+AND date = CURRENT_DATE;
+```
+
+**Проблема: Usage не отслеживается**
+
+```bash
+# Проверить что result.usage возвращается из Moltbot
+docker logs agent-brain 2>&1 | grep "Usage tracked successfully" | tail -5
+
+# Если нет - проверить что usage есть в result:
+docker logs agent-brain 2>&1 | grep "No usage data in result"
+```
+
+**Проблема: Cost_usd всегда 0**
+
+```bash
+# Проверить pricing для модели
+docker logs agent-brain 2>&1 | grep "Unknown model in pricing table"
+
+# Если модель неизвестна - добавить в MODEL_PRICING (usageLimits.js)
 ```
 
 ---
