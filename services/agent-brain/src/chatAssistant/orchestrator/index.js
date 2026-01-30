@@ -482,7 +482,8 @@ export class Orchestrator {
               adAccountId: toolContext.adAccountId,      // Facebook act_xxx for API calls
               accountId: toolContext.adAccountDbId,       // UUID from ad_accounts.id for DB queries
               userAccountId: toolContext.userAccountId,
-              accessToken: toolContext.accessToken
+              accessToken: toolContext.accessToken,
+              telegramChatId: toolContext.telegramChatId // For usage limits tracking
             },
             history: conversationHistory
           });

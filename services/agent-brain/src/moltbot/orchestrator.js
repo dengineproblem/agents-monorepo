@@ -22,6 +22,7 @@
 import { MoltbotGateway, getGateway } from './gateway.js';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
+import { checkUserLimit, trackUsage, formatLimitExceededMessage } from '../lib/usageLimits.js';
 
 const log = logger.child({ module: 'moltbot-orchestrator' });
 
@@ -115,6 +116,51 @@ export async function processStreamRequest({
     log.info({ requestId, connectionId: gateway.connectionId }, 'Connecting to Moltbot Gateway...');
     await gateway.connect();
 
+    // ========== CHECK USER SPENDING LIMIT ==========
+    if (context.telegramChatId) {
+      const limitCheck = await checkUserLimit(context.telegramChatId);
+
+      if (!limitCheck.allowed) {
+        log.warn({
+          requestId,
+          telegramChatId: context.telegramChatId,
+          limit: limitCheck.limit,
+          spent: limitCheck.spent
+        }, 'User daily limit exceeded');
+
+        // Send error event
+        safeSendEvent({
+          type: 'error',
+          error: 'daily_limit_exceeded',
+          message: formatLimitExceededMessage(limitCheck),
+          requestId
+        });
+
+        // Send done event
+        safeSendEvent({
+          type: 'done',
+          content: formatLimitExceededMessage(limitCheck),
+          duration: Date.now() - startTime,
+          provider: 'moltbot',
+          requestId
+        });
+
+        return {
+          content: formatLimitExceededMessage(limitCheck),
+          error: 'daily_limit_exceeded',
+          limitExceeded: true
+        };
+      }
+
+      log.debug({
+        requestId,
+        telegramChatId: context.telegramChatId,
+        remaining: limitCheck.remaining.toFixed(4),
+        limit: limitCheck.limit
+      }, 'User limit check passed');
+    }
+    // ================================================
+
     // Send init event
     safeSendEvent({
       type: 'init',
@@ -173,6 +219,36 @@ export async function processStreamRequest({
 
     isCompleted = true;
     const duration = Date.now() - startTime;
+
+    // ========== TRACK USAGE ==========
+    // Track AI usage if telegram user and usage data is available
+    if (context.telegramChatId && result?.usage) {
+      const modelName = result.model || 'gpt-5.2'; // Default to gpt-5.2 if not specified
+
+      try {
+        await trackUsage(
+          context.telegramChatId,
+          modelName,
+          result.usage
+        );
+
+        log.debug({
+          requestId,
+          telegramChatId: context.telegramChatId,
+          model: modelName,
+          prompt_tokens: result.usage.prompt_tokens,
+          completion_tokens: result.usage.completion_tokens
+        }, 'Usage tracked successfully');
+      } catch (error) {
+        // Don't fail the request if tracking fails
+        log.error({
+          requestId,
+          error: error.message,
+          telegramChatId: context.telegramChatId
+        }, 'Failed to track usage');
+      }
+    }
+    // =================================
 
     // Final content from completion or accumulated
     const finalContent = accumulatedText || result?.content || '';

@@ -78,7 +78,9 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
         accessToken,
         userAccountId: userAccount.id,
         adAccountId: fbId,       // Facebook ID for API calls
-        adAccountDbId: dbId      // UUID for database queries
+        adAccountDbId: dbId,     // UUID for database queries
+        telegramChatId: String(telegramChatId), // For usage tracking
+        conversationId: conversation.id  // For usage tracking
       };
 
       // 8. Get business context (uses dbId for database queries)
