@@ -639,8 +639,8 @@ const Consultations: React.FC = () => {
         {/* Календарная сетка - с горизонтальной прокруткой на мобильных */}
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <div className="min-w-[800px] md:min-w-full">
+            <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+              <div className="min-w-[600px]">
                 {/* Заголовки с консультантами - адаптивно */}
                 <div className="grid grid-cols-[60px_repeat(auto-fit,minmax(120px,1fr))] md:grid-cols-[80px_repeat(auto-fit,minmax(160px,1fr))] border-b bg-gray-50">
                   <div className="p-1 md:p-2 font-medium text-gray-600 border-r text-xs">Время</div>

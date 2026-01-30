@@ -97,7 +97,7 @@ export function StreamingMessage({ state }: StreamingMessageProps) {
       </div>
 
       {/* Content */}
-      <div className="max-w-[80%] rounded-lg p-3 bg-muted min-w-[200px]">
+      <div className="max-w-[85%] sm:max-w-[80%] rounded-lg p-3 bg-muted min-w-0">
         {/* Thinking/Classification Status */}
         {isThinking && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">

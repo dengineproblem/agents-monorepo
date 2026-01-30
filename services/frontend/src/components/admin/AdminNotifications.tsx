@@ -238,7 +238,7 @@ const AdminNotifications: React.FC<AdminNotificationsProps> = ({ unreadCount = 0
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[380px] p-0">
+      <DropdownMenuContent align="end" className="w-[calc(100vw-2rem)] sm:w-[380px] p-0">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="font-semibold">Уведомления</h3>
           {notifications.some((n) => !n.is_read) && (

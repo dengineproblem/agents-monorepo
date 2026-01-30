@@ -194,9 +194,9 @@ export const CarouselGalleryTab: React.FC<CarouselGalleryTabProps> = ({ onUseAsR
     <div className="space-y-4">
       {/* Фильтр */}
       <div className="flex items-center gap-3">
-        <Filter className="h-4 w-4 text-muted-foreground" />
+        <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         <Select value={selectedStyle} onValueChange={setSelectedStyle}>
-          <SelectTrigger className="w-[250px]">
+          <SelectTrigger className="w-full sm:w-[250px]">
             <SelectValue placeholder="Все стили" />
           </SelectTrigger>
           <SelectContent>

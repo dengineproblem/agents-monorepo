@@ -89,9 +89,9 @@ export const TextHistoryTab: React.FC<TextHistoryTabProps> = ({ userId, onUseAsR
     <div className="space-y-4">
       {/* Фильтр по типам */}
       <div className="flex items-center gap-3">
-        <Filter className="h-4 w-4 text-muted-foreground" />
+        <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         <Select value={selectedType} onValueChange={setSelectedType}>
-          <SelectTrigger className="w-[250px]">
+          <SelectTrigger className="w-full sm:w-[250px]">
             <SelectValue placeholder="Все типы" />
           </SelectTrigger>
           <SelectContent>
