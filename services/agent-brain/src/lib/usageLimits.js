@@ -6,7 +6,7 @@
  * - Калькуляция стоимости запросов
  */
 
-import { supabase } from './supabase.js';
+import { supabase } from './supabaseClient.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger({ module: 'usageLimits' });
