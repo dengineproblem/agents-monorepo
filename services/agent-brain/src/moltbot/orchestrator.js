@@ -118,15 +118,26 @@ export async function processStreamRequest({
 
     // ========== CHECK USER SPENDING LIMIT ==========
     if (context.telegramChatId) {
+      log.debug({ requestId, telegramChatId: context.telegramChatId }, 'Checking user spending limit...');
       const limitCheck = await checkUserLimit(context.telegramChatId);
 
+      // Логируем fail-open случаи
+      if (limitCheck.failOpen) {
+        log.error({
+          requestId,
+          telegramChatId: context.telegramChatId
+        }, 'CRITICAL: Limit check failed open due to DB error - allowing request');
+      }
+
+      // Лимит превышен - отклоняем запрос
       if (!limitCheck.allowed) {
         log.warn({
           requestId,
           telegramChatId: context.telegramChatId,
           limit: limitCheck.limit,
-          spent: limitCheck.spent
-        }, 'User daily limit exceeded');
+          spent: limitCheck.spent,
+          remaining: 0
+        }, 'Daily limit EXCEEDED - request rejected');
 
         // Send error event
         safeSendEvent({
@@ -152,12 +163,27 @@ export async function processStreamRequest({
         };
       }
 
-      log.debug({
-        requestId,
-        telegramChatId: context.telegramChatId,
-        remaining: limitCheck.remaining.toFixed(4),
-        limit: limitCheck.limit
-      }, 'User limit check passed');
+      // Предупреждение если близок к лимиту
+      if (limitCheck.nearLimit) {
+        log.warn({
+          requestId,
+          telegramChatId: context.telegramChatId,
+          remaining: limitCheck.remaining.toFixed(4),
+          limit: limitCheck.limit,
+          spent: limitCheck.spent.toFixed(4),
+          usagePercent: ((limitCheck.spent / limitCheck.limit) * 100).toFixed(1)
+        }, 'User is NEAR daily limit (>=80% used) - allowing but monitoring');
+      } else {
+        log.info({
+          requestId,
+          telegramChatId: context.telegramChatId,
+          remaining: limitCheck.remaining.toFixed(4),
+          limit: limitCheck.limit,
+          spent: limitCheck.spent.toFixed(4)
+        }, 'Limit check passed');
+      }
+    } else {
+      log.debug({ requestId }, 'No telegramChatId in context - skipping limit check');
     }
     // ================================================
 
@@ -222,15 +248,23 @@ export async function processStreamRequest({
 
     // ========== TRACK USAGE ==========
     // Track AI usage if telegram user and usage data is available
-    if (context.telegramChatId && result?.usage) {
-      const modelName = result.model || 'gpt-5.2'; // Default to gpt-5.2 if not specified
+    if (context.telegramChatId) {
+      if (!result?.usage) {
+        log.warn({
+          requestId,
+          telegramChatId: context.telegramChatId,
+          hasResult: !!result,
+          hasUsage: !!result?.usage
+        }, 'No usage data in result - cannot track costs');
+      } else {
+        const modelName = result.model || 'gpt-5.2'; // Default to gpt-5.2 if not specified
 
-      try {
-        await trackUsage(
-          context.telegramChatId,
-          modelName,
-          result.usage
-        );
+        if (!result.model) {
+          log.warn({
+            requestId,
+            telegramChatId: context.telegramChatId
+          }, 'Model name missing from result - defaulting to gpt-5.2');
+        }
 
         log.debug({
           requestId,
@@ -238,15 +272,34 @@ export async function processStreamRequest({
           model: modelName,
           prompt_tokens: result.usage.prompt_tokens,
           completion_tokens: result.usage.completion_tokens
-        }, 'Usage tracked successfully');
-      } catch (error) {
-        // Don't fail the request if tracking fails
-        log.error({
-          requestId,
-          error: error.message,
-          telegramChatId: context.telegramChatId
-        }, 'Failed to track usage');
+        }, 'Tracking usage for request');
+
+        try {
+          await trackUsage(
+            context.telegramChatId,
+            modelName,
+            result.usage
+          );
+
+          log.info({
+            requestId,
+            telegramChatId: context.telegramChatId,
+            model: modelName
+          }, 'Usage tracked successfully');
+        } catch (error) {
+          // Don't fail the request if tracking fails
+          log.error({
+            requestId,
+            error: error.message,
+            stack: error.stack,
+            telegramChatId: context.telegramChatId,
+            model: modelName
+          }, 'CRITICAL: Failed to track usage - cost data may be lost');
+        }
       }
+    } else {
+      log.debug({ requestId }, 'No telegramChatId in context - skipping usage tracking');
+    }
     }
     // =================================
 

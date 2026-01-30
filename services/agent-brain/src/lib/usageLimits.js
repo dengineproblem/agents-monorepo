@@ -30,21 +30,38 @@ export const MODEL_PRICING = {
 };
 
 /**
+ * Валидация Telegram ID
+ * @param {any} telegramId - Telegram ID для проверки
+ * @returns {boolean} true если валидный
+ */
+function isValidTelegramId(telegramId) {
+  if (!telegramId) return false;
+  const str = String(telegramId);
+  // Telegram ID - число или строка с числами, длина обычно 8-12 символов
+  return str.length > 0 && /^\d+$/.test(str) && str.length >= 5 && str.length <= 15;
+}
+
+/**
  * Нормализация имени модели
  * Убирает префиксы openai/ anthropic/ и приводит к стандартному виду
  */
 export function normalizeModelName(model) {
-  if (!model) return 'unknown';
+  if (!model) {
+    log.warn('normalizeModelName called with empty model');
+    return 'unknown';
+  }
 
   // Убираем провайдера
   const normalized = model.replace(/^(openai|anthropic)\//, '');
 
   // Проверяем есть ли в pricing
   if (MODEL_PRICING[normalized]) {
+    log.debug({ original: model, normalized }, 'Model name normalized');
     return normalized;
   }
 
-  // Возвращаем как есть
+  // Неизвестная модель - логируем warning
+  log.warn({ model, normalized }, 'Unknown model in pricing table');
   return normalized;
 }
 
@@ -57,7 +74,7 @@ export function normalizeModelName(model) {
  */
 export function calculateCost(model, usage) {
   if (!usage || (!usage.prompt_tokens && !usage.completion_tokens)) {
-    log.warn({ model }, 'No usage data provided for cost calculation');
+    log.warn({ model, usage }, 'No usage data provided for cost calculation');
     return 0;
   }
 
@@ -69,16 +86,21 @@ export function calculateCost(model, usage) {
     return 0;
   }
 
-  const inputCost = (usage.prompt_tokens || 0) * pricing.input;
-  const outputCost = (usage.completion_tokens || 0) * pricing.output;
+  const promptTokens = usage.prompt_tokens || 0;
+  const completionTokens = usage.completion_tokens || 0;
+  const inputCost = promptTokens * pricing.input;
+  const outputCost = completionTokens * pricing.output;
   const totalCost = inputCost + outputCost;
 
-  log.debug({
+  log.info({
     model: normalizedModel,
-    prompt_tokens: usage.prompt_tokens,
-    completion_tokens: usage.completion_tokens,
-    cost_usd: totalCost.toFixed(6)
-  }, 'Calculated request cost');
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    input_cost_usd: inputCost.toFixed(6),
+    output_cost_usd: outputCost.toFixed(6),
+    total_cost_usd: totalCost.toFixed(6)
+  }, 'Cost calculated');
 
   return totalCost;
 }
@@ -87,15 +109,24 @@ export function calculateCost(model, usage) {
  * Проверка дневного лимита пользователя
  *
  * @param {string} telegramId - Telegram ID пользователя
- * @returns {Promise<{allowed: boolean, remaining: number, limit: number, spent: number}>}
+ * @returns {Promise<{allowed: boolean, remaining: number, limit: number, spent: number, nearLimit?: boolean}>}
  */
 export async function checkUserLimit(telegramId) {
+  const checkStartTime = Date.now();
+
+  // Валидация telegramId
   if (!telegramId) {
-    log.error('No telegramId provided for limit check');
+    log.error('checkUserLimit: No telegramId provided');
     return { allowed: false, remaining: 0, limit: 0, spent: 0, error: 'No telegram ID' };
   }
 
+  if (!isValidTelegramId(telegramId)) {
+    log.error({ telegramId }, 'checkUserLimit: Invalid telegram ID format');
+    return { allowed: false, remaining: 0, limit: 0, spent: 0, error: 'Invalid telegram ID' };
+  }
+
   const today = new Date().toISOString().split('T')[0];
+  log.debug({ telegramId, date: today }, 'Starting limit check');
 
   try {
     // 1. Получаем лимит пользователя
@@ -106,13 +137,16 @@ export async function checkUserLimit(telegramId) {
       .single();
 
     if (limitError && limitError.code !== 'PGRST116') { // PGRST116 = not found
-      log.error({ error: limitError, telegramId }, 'Error fetching user limit');
-      // При ошибке БД - разрешаем (fail open)
-      return { allowed: true, remaining: 1.00, limit: 1.00, spent: 0 };
+      log.error({ error: limitError, telegramId, code: limitError.code }, 'Database error fetching user limit');
+      // При ошибке БД - разрешаем (fail open) но логируем критическую ошибку
+      log.warn({ telegramId }, 'FAIL-OPEN: Allowing request due to DB error');
+      return { allowed: true, remaining: 1.00, limit: 1.00, spent: 0, failOpen: true };
     }
 
     // 2. Если лимита нет - создаём с дефолтным значением
     if (!limit) {
+      log.info({ telegramId }, 'New user detected, creating default limit ($1/day)');
+
       const { error: insertError } = await supabase
         .from('user_ai_limits')
         .insert({
@@ -121,7 +155,9 @@ export async function checkUserLimit(telegramId) {
         });
 
       if (insertError) {
-        log.error({ error: insertError, telegramId }, 'Error creating default limit');
+        log.error({ error: insertError, telegramId }, 'Failed to create default limit');
+      } else {
+        log.info({ telegramId }, 'Default limit created successfully');
       }
 
       return { allowed: true, remaining: 1.00, limit: 1.00, spent: 0 };
@@ -129,8 +165,8 @@ export async function checkUserLimit(telegramId) {
 
     // 3. Unlimited пользователи
     if (limit.is_unlimited) {
-      log.debug({ telegramId }, 'User has unlimited access');
-      return { allowed: true, remaining: Infinity, limit: Infinity, spent: 0 };
+      log.info({ telegramId }, 'User has UNLIMITED access');
+      return { allowed: true, remaining: Infinity, limit: Infinity, spent: 0, unlimited: true };
     }
 
     // 4. Получаем текущий расход за сегодня
@@ -141,33 +177,57 @@ export async function checkUserLimit(telegramId) {
       .eq('date', today);
 
     if (usageError) {
-      log.error({ error: usageError, telegramId }, 'Error fetching usage');
+      log.error({ error: usageError, telegramId }, 'Database error fetching usage');
       // При ошибке БД - разрешаем
-      return { allowed: true, remaining: limit.daily_limit_usd, limit: limit.daily_limit_usd, spent: 0 };
+      log.warn({ telegramId }, 'FAIL-OPEN: Allowing request due to usage fetch error');
+      return { allowed: true, remaining: limit.daily_limit_usd, limit: limit.daily_limit_usd, spent: 0, failOpen: true };
     }
 
     // 5. Суммируем затраты
     const totalSpent = usageRows?.reduce((sum, row) => sum + parseFloat(row.cost_usd || 0), 0) || 0;
     const remaining = limit.daily_limit_usd - totalSpent;
+    const checkDuration = Date.now() - checkStartTime;
 
-    log.debug({
-      telegramId,
-      limit: limit.daily_limit_usd,
-      spent: totalSpent.toFixed(4),
-      remaining: remaining.toFixed(4)
-    }, 'Checked user limit');
+    // Вычисляем % использования
+    const usagePercent = (totalSpent / limit.daily_limit_usd) * 100;
+    const nearLimit = remaining > 0 && usagePercent >= 80; // Близко к лимиту если использовано >=80%
+
+    if (nearLimit) {
+      log.warn({
+        telegramId,
+        limit: limit.daily_limit_usd,
+        spent: totalSpent.toFixed(4),
+        remaining: remaining.toFixed(4),
+        usagePercent: usagePercent.toFixed(1)
+      }, 'User is near daily limit (>=80% used)');
+    } else {
+      log.info({
+        telegramId,
+        limit: limit.daily_limit_usd,
+        spent: totalSpent.toFixed(4),
+        remaining: remaining.toFixed(4),
+        usagePercent: usagePercent.toFixed(1),
+        checkDuration
+      }, 'Limit check passed');
+    }
 
     return {
       allowed: remaining > 0,
       remaining: Math.max(0, remaining),
       limit: limit.daily_limit_usd,
-      spent: totalSpent
+      spent: totalSpent,
+      nearLimit
     };
 
   } catch (error) {
-    log.error({ error: String(error), telegramId }, 'Unexpected error in checkUserLimit');
+    log.error({
+      error: error.message,
+      stack: error.stack,
+      telegramId
+    }, 'Unexpected error in checkUserLimit');
     // При неожиданной ошибке - разрешаем (fail open)
-    return { allowed: true, remaining: 1.00, limit: 1.00, spent: 0 };
+    log.warn({ telegramId }, 'FAIL-OPEN: Allowing request due to unexpected error');
+    return { allowed: true, remaining: 1.00, limit: 1.00, spent: 0, failOpen: true };
   }
 }
 
@@ -179,14 +239,36 @@ export async function checkUserLimit(telegramId) {
  * @param {object} usage - Объект с prompt_tokens и completion_tokens
  */
 export async function trackUsage(telegramId, model, usage) {
+  const trackStartTime = Date.now();
+
+  // Валидация параметров
   if (!telegramId || !model || !usage) {
-    log.warn({ telegramId, model, usage }, 'Missing parameters for trackUsage');
+    log.error({ telegramId, model, usage }, 'trackUsage: Missing required parameters');
+    return;
+  }
+
+  if (!isValidTelegramId(telegramId)) {
+    log.error({ telegramId }, 'trackUsage: Invalid telegram ID format');
+    return;
+  }
+
+  if (!usage.prompt_tokens && !usage.completion_tokens) {
+    log.warn({ telegramId, model, usage }, 'trackUsage: No tokens in usage data');
     return;
   }
 
   const today = new Date().toISOString().split('T')[0];
   const cost = calculateCost(model, usage);
   const normalizedModel = normalizeModelName(model);
+
+  log.debug({
+    telegramId,
+    model: normalizedModel,
+    date: today,
+    prompt_tokens: usage.prompt_tokens || 0,
+    completion_tokens: usage.completion_tokens || 0,
+    cost_usd: cost.toFixed(6)
+  }, 'Attempting to track usage');
 
   try {
     const { error } = await supabase.rpc('increment_usage', {
@@ -199,24 +281,37 @@ export async function trackUsage(telegramId, model, usage) {
       p_request_count: 1
     });
 
+    const trackDuration = Date.now() - trackStartTime;
+
     if (error) {
       log.error({
-        error,
+        error: error.message,
+        code: error.code,
         telegramId,
         model: normalizedModel,
-        cost: cost.toFixed(6)
-      }, 'Error tracking usage');
+        cost: cost.toFixed(6),
+        trackDuration
+      }, 'Database error tracking usage');
     } else {
       log.info({
         telegramId,
         model: normalizedModel,
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        cost_usd: cost.toFixed(6)
-      }, 'Tracked AI usage');
+        date: today,
+        prompt_tokens: usage.prompt_tokens || 0,
+        completion_tokens: usage.completion_tokens || 0,
+        total_tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+        cost_usd: cost.toFixed(6),
+        trackDuration
+      }, 'Usage tracked successfully');
     }
   } catch (error) {
-    log.error({ error: String(error), telegramId, model }, 'Unexpected error in trackUsage');
+    log.error({
+      error: error.message,
+      stack: error.stack,
+      telegramId,
+      model: normalizedModel,
+      cost: cost.toFixed(6)
+    }, 'Unexpected error in trackUsage');
   }
 }
 
