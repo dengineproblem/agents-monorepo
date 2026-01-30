@@ -300,7 +300,6 @@ export async function processStreamRequest({
     } else {
       log.debug({ requestId }, 'No telegramChatId in context - skipping usage tracking');
     }
-    }
     // =================================
 
     // Final content from completion or accumulated
