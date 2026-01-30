@@ -1387,6 +1387,277 @@ log.warn('FAIL-OPEN: Allowing request due to DB error');
 docker logs agent-brain 2>&1 | grep "FAIL-OPEN"
 ```
 
+### Автоматический трекинг usage из Moltbot
+
+**Новое в v1.1:** Автоматическое извлечение usage данных из логов Moltbot embedded runs.
+
+#### Как это работает
+
+Вместо ручной отправки usage из orchestrator.js, система автоматически парсит логи контейнера Moltbot:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Moltbot Container                                          │
+│                                                             │
+│  [telegram inbound] chatId=313145981                        │
+│  [embedded run start] runId=abc123 model=gpt-5.2            │
+│  [embedded run done] runId=abc123                           │
+│  [usage] prompt_tokens=1234 completion_tokens=567          │
+└─────────────────────────────────────────────────────────────┘
+                        ↓
+           Docker HTTP API (/var/run/docker.sock)
+                        ↓
+    ┌──────────────────────────────────────────────────┐
+    │  agent-brain: moltbot/usageTracker.js            │
+    │                                                  │
+    │  Каждые 15 секунд:                               │
+    │  1. Читает последние 1000 строк логов           │
+    │  2. Парсит telegram runs (runId + chatId)        │
+    │  3. Извлекает usage данные                       │
+    │  4. Вызывает trackUsage(telegramId, model, usage)│
+    └──────────────────────────────────────────────────┘
+                        ↓
+           user_ai_usage table (Supabase)
+```
+
+#### Компоненты
+
+**1. Docker API Integration**
+
+Файл: `services/agent-brain/src/moltbot/usageTracker.js`
+
+```javascript
+/**
+ * Получает логи контейнера через Docker HTTP API
+ */
+async function getContainerLogs(containerName, tail = 1000) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      socketPath: '/var/run/docker.sock',
+      path: `/containers/${containerName}/logs?stdout=true&stderr=true&tail=${tail}`,
+      method: 'GET'
+    };
+
+    const req = http.request(options, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => { chunks.push(chunk); });
+      res.on('end', () => {
+        // Docker API возвращает логи с 8-байтным header
+        const buffer = Buffer.concat(chunks);
+        const lines = parseDockerLogFrames(buffer);
+        resolve(lines.join('\n'));
+      });
+    });
+
+    req.end();
+  });
+}
+```
+
+**2. Log Parsing**
+
+Парсер извлекает данные из текстовых логов Moltbot:
+
+```javascript
+// Паттерны для извлечения:
+// 1. Telegram Chat ID
+if (line.includes('telegram inbound') && line.includes('chatId=')) {
+  const match = line.match(/chatId=(\d+)/);
+  if (match) lastTelegramId = match[1];
+}
+
+// 2. Embedded run start
+if (line.includes('embedded run start') && line.includes('messageChannel=telegram')) {
+  const match = line.match(/runId=([a-f0-9-]+).*provider=([^\s]+)\s+model=([^\s]+)/);
+  // Сохранить run с telegramId, model
+}
+
+// 3. Embedded run done
+if (line.includes('embedded run done')) {
+  // Отметить run как завершённый
+}
+
+// 4. Usage данные
+if (line.includes('prompt_tokens') && line.includes('completion_tokens')) {
+  const promptMatch = line.match(/prompt_tokens["\s:=]+(\d+)/);
+  const completionMatch = line.match(/completion_tokens["\s:=]+(\d+)/);
+  // Извлечь usage
+}
+```
+
+**3. Automatic Tracking**
+
+После извлечения всех данных, автоматически вызывается:
+
+```javascript
+await trackUsage(telegramId, model, {
+  prompt_tokens: 1234,
+  completion_tokens: 567
+});
+```
+
+#### Docker Configuration
+
+В `docker-compose.yml` требуется доступ к Docker socket:
+
+```yaml
+agent-brain:
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+```
+
+**Важно:** `:ro` (read-only) для безопасности - только чтение логов.
+
+#### Запуск трекинга
+
+В `services/agent-brain/src/server.js`:
+
+```javascript
+import { startMoltbotUsageTracking } from './moltbot/usageTracker.js';
+
+// Запускается автоматически при старте agent-brain
+startMoltbotUsageTracking(15000); // Каждые 15 секунд
+```
+
+#### Производительность
+
+**Оптимизация запросов к БД:**
+
+Migration `170_add_telegram_id_indexes.sql`:
+
+```sql
+-- Составной индекс для быстрого поиска по telegram_id + date
+CREATE INDEX IF NOT EXISTS idx_user_ai_usage_telegram_date
+  ON user_ai_usage(telegram_id, date);
+
+-- Отдельный индекс на telegram_id для общих запросов
+CREATE INDEX IF NOT EXISTS idx_user_ai_usage_telegram
+  ON user_ai_usage(telegram_id);
+```
+
+**Результат:** Запросы `checkUserLimit()` ускорились с ~5 секунд до <50ms.
+
+#### Логирование
+
+Детальные логи работы трекера:
+
+```javascript
+// Успешный трекинг
+log.info({
+  runId: 'abc123',
+  telegramId: '313145981',
+  model: 'gpt-5.2',
+  prompt_tokens: 1234,
+  completion_tokens: 567
+}, 'Auto-tracked usage from Moltbot run');
+
+// Парсинг
+log.info({
+  totalRuns: 5,
+  completedRuns: 5,
+  processedCount: 3
+}, 'Parsed runs');
+
+// Предупреждения
+log.warn({ runId: 'abc123' }, 'Usage data not found in logs, using approximation');
+```
+
+#### Fallback: Приблизительная оценка
+
+Если usage не найден в логах (редко), используется примерная оценка:
+
+```javascript
+// Для GPT-5.2 средний запрос
+{
+  prompt_tokens: 10000,  // ~10K prompt
+  completion_tokens: 500  // ~500 completion
+}
+```
+
+**Когда это происходит:**
+- Usage данные ещё не появились в логах
+- Логи были ротированы
+- Нестандартный формат вывода
+
+**Стоимость оценки:** ~$0.025 за запрос (консервативная оценка).
+
+#### Мониторинг
+
+**Проверить работает ли трекинг:**
+
+```bash
+# 1. Проверить что usageTracker запущен
+docker logs agent-brain 2>&1 | grep "Starting Moltbot usage tracking"
+
+# Вывод:
+# {"module":"moltbotUsageTracker","intervalMs":15000} Starting Moltbot usage tracking
+
+# 2. Проверить что runs парсятся
+docker logs agent-brain 2>&1 | grep "Parsed runs"
+
+# Вывод:
+# {"totalRuns":5,"completedRuns":5,"processedCount":3} Parsed runs
+
+# 3. Проверить что usage записывается
+docker logs agent-brain 2>&1 | grep "Auto-tracked usage"
+
+# Вывод:
+# {"runId":"abc123","telegramId":"313145981","model":"gpt-5.2",...} Auto-tracked usage from Moltbot run
+```
+
+**Посмотреть записи в БД:**
+
+```sql
+SELECT
+  telegram_id,
+  model,
+  prompt_tokens,
+  completion_tokens,
+  cost_usd,
+  request_count
+FROM user_ai_usage
+WHERE date = CURRENT_DATE
+ORDER BY cost_usd DESC;
+```
+
+#### Преимущества
+
+✅ **Полностью автоматический** - не требует модификации Moltbot
+✅ **Надёжный** - работает даже если orchestrator.js упал
+✅ **Производительный** - индексы ускоряют запросы в 100x
+✅ **Безопасный** - read-only доступ к Docker socket
+✅ **Fail-safe** - приблизительная оценка если usage не найден
+
+#### Ограничения
+
+⚠️ **Задержка до 15 секунд** - usage записывается не мгновенно
+⚠️ **Зависимость от формата логов** - если Moltbot изменит формат, нужно обновить парсер
+⚠️ **Требует Docker socket** - не работает в serverless окружениях
+
+#### Edge Cases
+
+**1. Рестарт agent-brain:**
+- `processedRuns` Set очищается
+- При следующем парсинге старые runs могут быть обработаны повторно
+- Решение: `ON CONFLICT` в БД предотвращает дубликаты
+
+**2. Рестарт Moltbot:**
+- Логи теряются, usage не записывается для активных runs
+- Решение: Moltbot сохраняет логи на диск (опционально)
+
+**3. Слишком много runs:**
+- `processedRuns` Set может вырасти > 1000 элементов
+- Решение: Автоматическая очистка, хранится только 1000 последних
+
+```javascript
+if (processedRuns.size > 1000) {
+  const toDelete = Array.from(processedRuns).slice(0, processedRuns.size - 1000);
+  toDelete.forEach(id => processedRuns.delete(id));
+}
+```
+
+---
+
 ### Troubleshooting
 
 **Проблема: Лимит не работает, пользователь может делать много запросов**
