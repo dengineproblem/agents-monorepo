@@ -7,9 +7,9 @@
  */
 
 import { supabase } from './supabaseClient.js';
-import { createLogger } from './logger.js';
+import { logger } from './logger.js';
 
-const log = createLogger({ module: 'usageLimits' });
+const log = logger.child({ module: 'usageLimits' });
 
 /**
  * Pricing для разных моделей ($/1M токенов)
