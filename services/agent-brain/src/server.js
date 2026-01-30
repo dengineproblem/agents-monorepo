@@ -5961,6 +5961,15 @@ async function processAccountBrain(account) {
           ...details
         });
 
+        // Сохраняем метрики после успешного autopilot
+        const metricsResult = await saveMetricsIfNotSavedToday(
+          user_account_id,
+          accountId,
+          account.ad_account_id,
+          account.access_token || userAccount.access_token
+        );
+        details.metricsSaved = metricsResult?.saved || false;
+
       } catch (apiErr) {
         // FALLBACK: если /api/brain/run упал — переключаемся на Brain Mini
         fastify.log.error({
@@ -6062,6 +6071,15 @@ async function processAccountBrain(account) {
           accountName,
           ...details
         });
+
+        // Сохраняем метрики после успешного report
+        const metricsResult = await saveMetricsIfNotSavedToday(
+          user_account_id,
+          accountId,
+          account.ad_account_id,
+          account.access_token || userAccount.access_token
+        );
+        details.metricsSaved = metricsResult?.saved || false;
 
       } catch (apiErr) {
         // FALLBACK: если /api/brain/run упал — используем Brain Mini для отчёта
