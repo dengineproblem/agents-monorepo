@@ -367,8 +367,9 @@ services:
         npm install -g moltbot@beta
         # Setup Anthropic + OpenAI auth profiles for Moltbot
         mkdir -p /root/.clawdbot/agents/main/agent
-        echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}]}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
-        echo "Auth profiles configured for OpenAI gpt-5.2 (default) + Anthropic (fallback)"
+        # GPT-5.2 для основных ответов, GPT-4o только для Whisper транскрибации
+        echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > /root/.clawdbot/agents/main/agent/auth-profiles.json
+        echo "Auth profiles configured: GPT-5.2 (default), Anthropic (fallback), Whisper (gpt-4o)"
 
         # Настройка gateway mode
         moltbot config set gateway.mode local
