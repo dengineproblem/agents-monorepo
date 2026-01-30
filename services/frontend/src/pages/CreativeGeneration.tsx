@@ -1054,12 +1054,12 @@ const CreativeGeneration = () => {
           {hasSavedDraft && savedDraft && (
             <Card className="mb-6 shadow-sm border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
               <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/50">
+                    <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/50 shrink-0">
                       <RotateCcw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="font-medium text-blue-900 dark:text-blue-100">
                         Найден незавершённый черновик
                       </div>
@@ -1068,7 +1068,7 @@ const CreativeGeneration = () => {
                       </p>
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <Button
                       variant="outline"
                       size="sm"
@@ -1220,13 +1220,13 @@ const CreativeGeneration = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {/* Селект стиля + кнопки референсов в одну строку */}
-                <div className="flex gap-2 items-center">
+                {/* Селект стиля + кнопки референсов */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                   <Select
                     value={selectedStyle}
                     onValueChange={(value: any) => setSelectedStyle(value)}
                   >
-                    <SelectTrigger className="flex-1">
+                    <SelectTrigger className="w-full sm:flex-1">
                       <SelectValue placeholder="Выберите стиль" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1239,36 +1239,38 @@ const CreativeGeneration = () => {
                     </SelectContent>
                   </Select>
 
-                  {/* Кнопка референса конкурента */}
-                  {userId && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant={competitorReference ? "secondary" : "outline"}
-                        size="sm"
-                        onClick={() => setShowCompetitorRef(!showCompetitorRef)}
-                      >
-                        <Users className="h-4 w-4 mr-1" />
-                        {competitorReference ? "Референс ✓" : "Конкурент"}
-                      </Button>
-                      <HelpTooltip tooltipKey={TooltipKeys.GEN_COMPETITOR_REFERENCE} iconSize="sm" />
-                    </div>
-                  )}
+                  <div className="flex gap-2 items-center flex-wrap">
+                    {/* Кнопка референса конкурента */}
+                    {userId && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant={competitorReference ? "secondary" : "outline"}
+                          size="sm"
+                          onClick={() => setShowCompetitorRef(!showCompetitorRef)}
+                        >
+                          <Users className="h-4 w-4 mr-1" />
+                          {competitorReference ? "Референс ✓" : "Конкурент"}
+                        </Button>
+                        <HelpTooltip tooltipKey={TooltipKeys.GEN_COMPETITOR_REFERENCE} iconSize="sm" />
+                      </div>
+                    )}
 
-                  {/* Кнопка загрузки референсных изображений */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    {referenceImages.length < 2 && (
-                      <Label htmlFor="reference-upload-inline" className="cursor-pointer">
-                        <div className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 h-9 px-3 ${referenceImages.length > 0 ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : 'border border-input bg-background hover:bg-accent hover:text-accent-foreground'}`}>
-                          <ImagePlus className="h-4 w-4 mr-1" />
-                          {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
-                        </div>
-                        <Input id="reference-upload-inline" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
-                      </Label>
-                    )}
-                    {referenceImages.length >= 2 && (
-                      <Badge variant="secondary">Фото ({referenceImages.length})</Badge>
-                    )}
-                    <HelpTooltip tooltipKey={TooltipKeys.GEN_REFERENCE_LIMIT} iconSize="sm" />
+                    {/* Кнопка загрузки референсных изображений */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {referenceImages.length < 2 && (
+                        <Label htmlFor="reference-upload-inline" className="cursor-pointer">
+                          <div className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 h-9 px-3 ${referenceImages.length > 0 ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : 'border border-input bg-background hover:bg-accent hover:text-accent-foreground'}`}>
+                            <ImagePlus className="h-4 w-4 mr-1" />
+                            {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
+                          </div>
+                          <Input id="reference-upload-inline" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
+                        </Label>
+                      )}
+                      {referenceImages.length >= 2 && (
+                        <Badge variant="secondary">Фото ({referenceImages.length})</Badge>
+                      )}
+                      <HelpTooltip tooltipKey={TooltipKeys.GEN_REFERENCE_LIMIT} iconSize="sm" />
+                    </div>
                   </div>
                 </div>
 
@@ -1412,8 +1414,8 @@ const CreativeGeneration = () => {
                   {generatedImage && (
                     <Card className="shadow-sm">
                       <CardHeader>
-                        <CardTitle className="text-lg flex items-center justify-between">
-                          Сгенерированный креатив
+                        <CardTitle className="text-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <span>Сгенерированный креатив</span>
                           {!isEditMode && (
                             <div className="flex gap-2">
                               <Button
@@ -1422,8 +1424,8 @@ const CreativeGeneration = () => {
                                 onClick={downloadImage}
                                 disabled={loading.image}
                               >
-                                <Download className="h-4 w-4 mr-2" />
-                                Скачать
+                                <Download className="h-4 w-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Скачать</span>
                               </Button>
                               <Button
                                 variant="outline"
@@ -1431,8 +1433,8 @@ const CreativeGeneration = () => {
                                 onClick={startEditMode}
                                 disabled={loading.image}
                               >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Редактировать
+                                <Edit className="h-4 w-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Редактировать</span>
                               </Button>
                             </div>
                           )}

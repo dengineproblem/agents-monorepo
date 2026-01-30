@@ -2006,14 +2006,14 @@ const Creatives: React.FC = () => {
               <CardTitle>Загруженные креативы</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between mb-3 gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <div className="text-sm text-muted-foreground whitespace-nowrap">
+                  <div className="text-sm text-muted-foreground whitespace-nowrap hidden sm:block">
                     {items.length}{mediaTypeFilter !== 'all' && ` / ${filteredItems.length}`}
                   </div>
                   {/* Фильтр по типу */}
                   <Select value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
-                    <SelectTrigger className="w-[110px] h-7 text-xs">
+                    <SelectTrigger className="w-full sm:w-[110px] h-7 text-xs">
                       <SelectValue placeholder="Тип" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2122,7 +2122,7 @@ const Creatives: React.FC = () => {
                     
                     return (
                     <AccordionItem key={it.id} value={it.id}>
-                      <div className="flex items-center justify-between w-full py-2 gap-4">
+                      <div className="flex items-center justify-between w-full py-2 gap-2 sm:gap-4">
                         {/* Checkbox в начале строки */}
                         <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
