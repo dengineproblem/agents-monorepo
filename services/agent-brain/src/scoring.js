@@ -2000,7 +2000,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
       let mappingsQuery = supabase
         .from('ad_creative_mapping')
         .select('ad_id, adset_id, campaign_id, fb_creative_id')
-        .eq('user_creative_id', creative.user_creative_id);
+        .eq('user_creative_id', creative.id);
 
       if (accountUUID) {
         mappingsQuery = mappingsQuery.eq('account_id', accountUUID);
@@ -2010,7 +2010,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
 
       logger.debug({
         where: 'saveCreativeMetricsToHistory',
-        creative_id: creative.user_creative_id,
+        creative_id: creative.id,
         accountUUID,
         filterMode
       }, `Загрузка ad_creative_mapping в режиме ${filterMode}`);
@@ -2020,7 +2020,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
       if (error) {
         logger.warn({ 
           where: 'saveCreativeMetricsToHistory',
-          creative_id: creative.user_creative_id,
+          creative_id: creative.id,
           error: error.message 
         }, 'Failed to fetch ad mappings');
         continue;
@@ -2029,14 +2029,14 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
       if (!mappings || mappings.length === 0) {
         logger.debug({ 
           where: 'saveCreativeMetricsToHistory',
-          creative_id: creative.user_creative_id 
+          creative_id: creative.id 
         }, 'No ad mappings found for creative');
         continue;
       }
 
       logger.debug({ 
         where: 'saveCreativeMetricsToHistory',
-        creative_id: creative.user_creative_id,
+        creative_id: creative.id,
         ads_count: mappings.length 
       }, 'Found ad mappings');
 
@@ -2139,7 +2139,7 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
     } catch (err) {
       logger.warn({ 
         where: 'saveCreativeMetricsToHistory',
-        creative_id: creative.user_creative_id,
+        creative_id: creative.id,
         error: err.message 
       }, 'Failed to process creative');
     }
