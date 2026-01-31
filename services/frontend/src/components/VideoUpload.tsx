@@ -1610,20 +1610,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 Добавить продажу
               </Button>
               {/* Brain Mini - оптимизация на уровне аккаунта */}
-              {multiAccountEnabled && currentAdAccountId && currentAccount && (
-                <Button
-                  variant="outline"
-                  onClick={() => optimization.startOptimization({
-                    accountId: currentAdAccountId,
-                    accountName: currentAccount.name || 'Аккаунт',
-                  })}
-                  disabled={isUploading || optimization.state.isLoading}
-                  className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
-                >
-                  <Brain className="mr-2 h-4 w-4" />
-                  AI-оптимизация
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (multiAccountEnabled && currentAdAccountId && currentAccount) {
+                    optimization.startOptimization({
+                      accountId: currentAdAccountId,
+                      accountName: currentAccount.name || 'Аккаунт',
+                    });
+                  } else {
+                    // Legacy аккаунт - оптимизация без accountId
+                    optimization.startOptimization({
+                      accountId: '',
+                      accountName: 'Все кампании',
+                    });
+                  }
+                }}
+                disabled={isUploading || optimization.state.isLoading}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Brain className="mr-2 h-4 w-4" />
+                AI-оптимизация
+              </Button>
             </div>
           ) : (
             /* Полный набор кнопок для Instagram */
@@ -1702,20 +1710,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 Добавить продажу
               </Button>
               {/* Brain Mini - оптимизация на уровне аккаунта */}
-              {multiAccountEnabled && currentAdAccountId && currentAccount && (
-                <Button
-                  variant="outline"
-                  onClick={() => optimization.startOptimization({
-                    accountId: currentAdAccountId,
-                    accountName: currentAccount.name || 'Аккаунт',
-                  })}
-                  disabled={isUploading || optimization.state.isLoading}
-                  className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
-                >
-                  <Brain className="mr-2 h-4 w-4" />
-                  AI-оптимизация
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (multiAccountEnabled && currentAdAccountId && currentAccount) {
+                    optimization.startOptimization({
+                      accountId: currentAdAccountId,
+                      accountName: currentAccount.name || 'Аккаунт',
+                    });
+                  } else {
+                    // Legacy аккаунт - оптимизация без accountId
+                    optimization.startOptimization({
+                      accountId: '',
+                      accountName: 'Все кампании',
+                    });
+                  }
+                }}
+                disabled={isUploading || optimization.state.isLoading}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Brain className="mr-2 h-4 w-4" />
+                AI-оптимизация
+              </Button>
             </div>
           )
         )}

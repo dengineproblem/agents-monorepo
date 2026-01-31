@@ -10,7 +10,6 @@ import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
 import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
 import { AutopilotSection } from '../components/AutopilotSection';
-import { AllAccountsExecutionsSection } from '../components/AllAccountsExecutionsSection';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
@@ -538,17 +537,6 @@ const Dashboard: React.FC = () => {
             <div className="mb-6">
           <VideoUpload platform={platform} />
         </div>
-
-            {/* Отчёты и действия */}
-            {userAccountId && (
-              <div className="mb-6">
-                <AllAccountsExecutionsSection
-                  userAccountId={userAccountId}
-                  adAccounts={contextAdAccounts || []}
-                  onOptimize={optimization.startOptimization}
-                />
-              </div>
-            )}
 
             <div className="mb-6">
               <h2 className="text-xl font-semibold mb-4">{t('campaign.adCampaigns')}</h2>

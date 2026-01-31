@@ -18,7 +18,8 @@ import {
   XCircle,
   Activity,
   FileText,
-  Eye
+  Eye,
+  Brain
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -48,6 +49,7 @@ interface AutopilotSectionProps {
   userAccountId: string;
   currentAdAccountId?: string | null;  // Для фильтрации данных
   isMultiAccountMode?: boolean;  // true = мультиаккаунт (без toggle), false = legacy (с toggle)
+  onOptimize?: () => void;  // Callback для запуска AI Optimization
 }
 
 // Карта типов действий на понятные названия
@@ -139,7 +141,8 @@ export function AutopilotSection({
   aiAutopilotLoading,
   userAccountId,
   currentAdAccountId,
-  isMultiAccountMode = false
+  isMultiAccountMode = false,
+  onOptimize
 }: AutopilotSectionProps) {
   const { platform } = useAppContext();
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
@@ -251,24 +254,37 @@ export function AutopilotSection({
                 </p>
               </div>
             </div>
-            {/* Тогл автопилота только для legacy аккаунтов */}
+            {/* Тогл автопилота и кнопка оптимизации для legacy аккаунтов */}
             {!isMultiAccountMode && (
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "inline-block w-2.5 h-2.5 rounded-full transition-all",
-                    aiAutopilot
-                      ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm animate-pulse'
-                      : 'bg-gray-300 dark:bg-gray-600'
-                  )}
-                  title={aiAutopilot ? 'Автопилот включен' : 'Автопилот выключен'}
-                />
-                <Switch
-                  checked={aiAutopilot}
-                  onCheckedChange={toggleAiAutopilot}
-                  disabled={aiAutopilotLoading}
-                />
-                <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_TOGGLE} iconSize="sm" />
+              <div className="flex items-center gap-3">
+                {onOptimize && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={onOptimize}
+                  >
+                    <Brain className="h-4 w-4" />
+                    AI Optimization
+                  </Button>
+                )}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-block w-2.5 h-2.5 rounded-full transition-all",
+                      aiAutopilot
+                        ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm animate-pulse'
+                        : 'bg-gray-300 dark:bg-gray-600'
+                    )}
+                    title={aiAutopilot ? 'Автопилот включен' : 'Автопилот выключен'}
+                  />
+                  <Switch
+                    checked={aiAutopilot}
+                    onCheckedChange={toggleAiAutopilot}
+                    disabled={aiAutopilotLoading}
+                  />
+                  <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_TOGGLE} iconSize="sm" />
+                </div>
               </div>
             )}
           </div>
