@@ -107,26 +107,26 @@
 
 ### Volumes и файлы
 
+**Оптимизированная структура workspace (после v1.3):**
+
 ```
-moltbot-workspace/                 # Volume монтируется в /root/clawd
-├── AGENTS.md                     # Главные инструкции для Claude
-├── TOOLS.md                      # Описание формата вызова tools
-├── IDENTITY.md                   # Идентичность бота
-├── SOUL.md                       # "Душа" бота (стиль общения)
-├── USER.md                       # Информация о пользователе
-├── HEARTBEAT.md                  # Периодические задачи
-└── skills/                       # Навыки (skills)
-    ├── context/
-    │   └── SKILL.md              # Получение контекста
-    ├── facebook-ads/
-    │   └── SKILL.md              # Facebook Ads tools
-    ├── creatives/
-    │   └── SKILL.md              # Креативы
-    ├── crm/
-    │   └── SKILL.md              # CRM и лиды
-    └── tiktok/
-        └── SKILL.md              # TikTok Ads
+moltbot-workspace-{specialist}/    # Специализированный workspace
+├── AGENTS.md                      # Главные инструкции + ВСЕ tools
+├── IDENTITY.md                    # Идентичность бота
+├── SOUL.md                        # "Душа" бота (стиль общения)
+├── USER.md                        # Информация о пользователе
+├── HEARTBEAT.md                   # Периодические задачи
+└── skills/
+    └── context/
+        └── SKILL.md               # Получение контекста (единственный skill)
 ```
+
+**Изменения в v1.3:**
+- ❌ Удалён `TOOLS.md` (избыточный, был идентичен во всех workspace)
+- ❌ Удалены `skills/{specialist}/SKILL.md` (объединены в AGENTS.md)
+- ✅ Все tools теперь в `AGENTS.md` (300-500 строк в зависимости от агента)
+- ✅ Оставлен только `skills/context/SKILL.md` (для получения credentials)
+- ✅ **Экономия:** -44% дублирования (~1700 строк избыточного кода)
 
 ---
 

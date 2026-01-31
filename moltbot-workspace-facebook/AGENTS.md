@@ -106,25 +106,100 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAds \
   }'
 ```
 
-#### getInsights
-Детальная статистика за период.
+#### getCampaignDetails
+Детали конкретной кампании.
 
 ```bash
-curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getInsights \
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCampaignDetails \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
     "accountId": "UUID",
-    "level": "campaign",
-    "objectIds": ["23860..."],
+    "campaignId": "23860...",
+    "period": "last_7d"
+  }'
+```
+
+#### getSpendReport
+Отчёт по расходам с детализацией.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getSpendReport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
     "period": "last_7d",
-    "breakdown": "age,gender"
+    "breakdown": "day"
   }'
 ```
 
 **Параметры:**
-- `level`: `campaign`, `adset`, `ad`
-- `breakdown` (optional): `age`, `gender`, `age,gender`, `country`, `placement`
+- `breakdown`: `day`, `week`, `campaign`, `adset`
+
+#### getDirections
+Получить направления (группы кампаний).
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getDirections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID"
+  }'
+```
+
+#### getDirectionMetrics
+Метрики конкретного направления.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getDirectionMetrics \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "directionId": "123",
+    "period": "last_7d"
+  }'
+```
+
+#### getROIReport
+ROI отчёт по направлениям.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getROIReport \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "period": "last_30d"
+  }'
+```
+
+#### getAdAccountStatus
+Статус рекламного аккаунта.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAdAccountStatus \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID"
+  }'
+```
+
+#### getAgentBrainActions
+История действий агента (для анализа прошлых оптимизаций).
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAgentBrainActions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "limit": 20
+  }'
+```
 
 ### WRITE Tools (изменение данных)
 
@@ -204,6 +279,122 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/scaleBudget \
     "scalePercent": 20
   }'
 ```
+
+#### pauseAd
+Поставить объявление на паузу.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseAd \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "adId": "23860...",
+    "reason": "Low CTR"
+  }'
+```
+
+**Подтверждение:**
+```
+⚠️ Хотите поставить на паузу объявление "Ad Creative v2" (ID: 23860...)?
+
+Текущий CTR: 0.8%
+Потрачено: $5.23
+
+Подтвердите: Да/Нет
+```
+
+#### resumeAd
+Возобновить объявление.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeAd \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "adId": "23860..."
+  }'
+```
+
+#### updateDirectionBudget
+Изменить бюджет направления (группы кампаний).
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/updateDirectionBudget \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "directionId": "123",
+    "dailyBudget": 10000
+  }'
+```
+
+**Параметры:**
+- `dailyBudget` — дневной бюджет в копейках (10000 = 100.00)
+
+#### pauseDirection
+Поставить направление на паузу.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseDirection \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "directionId": "123",
+    "reason": "Budget optimization"
+  }'
+```
+
+#### resumeDirection
+Возобновить направление.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeDirection \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "directionId": "123"
+  }'
+```
+
+#### triggerBrainOptimizationRun
+Запустить автоматическую оптимизацию через Brain.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/triggerBrainOptimizationRun \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID"
+  }'
+```
+
+**Важно:** Это запускает полный цикл автоматической оптимизации (анализ метрик, пауза неэффективных адсетов, масштабирование успешных).
+
+#### customFbQuery
+Выполнить произвольный запрос к Facebook Marketing API.
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/customFbQuery \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "accountId": "UUID",
+    "endpoint": "insights",
+    "params": {
+      "level": "campaign",
+      "fields": "impressions,clicks,ctr"
+    }
+  }'
+```
+
+**Параметры:**
+- `endpoint` — endpoint Facebook API (insights, campaigns, adsets, ads)
+- `params` — объект с параметрами запроса
 
 ## Сценарии использования
 

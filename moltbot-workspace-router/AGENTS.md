@@ -135,8 +135,40 @@ ROUTE: specialist-name
 Router Agent имеет доступ к базовым skills:
 - **context** — получение credentials пользователя (userAccountId, accountId)
 - **usage-limits** — проверка лимитов затрат (автоматически)
+- **router** — вызов specialist agent через API (опционально, если нужен явный вызов)
 
 **НЕ используй** эти skills для маршрутизации. Они используются автоматически в фоне.
+
+## Инструмент routeToSpecialist (опционально)
+
+Если требуется явный вызов specialist agent через API (вместо простого возврата `ROUTE:`), используй этот инструмент:
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/moltbot/route \
+  -H "Content-Type: application/json" \
+  -d '{
+    "specialist": "facebook-ads",
+    "message": "Покажи статистику за неделю",
+    "telegramChatId": "313145981"
+  }'
+```
+
+**Параметры:**
+- `specialist` (required): `facebook-ads`, `creatives`, `crm`, `tiktok`, `onboarding`
+- `message` (required): оригинальное сообщение пользователя БЕЗ изменений
+- `telegramChatId` (required): Telegram ID из контекста
+
+**Важно:** Передавай оригинальное сообщение пользователя без своих комментариев:
+
+✅ **Правильно:**
+```json
+{"message": "Покажи статистику за неделю"}
+```
+
+❌ **Неправильно:**
+```json
+{"message": "Пользователь просит статистику за неделю"}
+```
 
 ## Финальная инструкция
 
