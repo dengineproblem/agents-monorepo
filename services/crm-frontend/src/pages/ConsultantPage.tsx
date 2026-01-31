@@ -10,7 +10,7 @@ import { LeadsTab } from '@/components/consultant/LeadsTab';
 import { CalendarTab } from '@/components/consultant/CalendarTab';
 import { ProfileTab } from '@/components/consultant/ProfileTab';
 import { ScheduleTab } from '@/components/consultant/ScheduleTab';
-import { ServicesTab } from '@/components/consultant/ServicesTab';
+import { SalesTab } from '@/components/consultant/SalesTab';
 import {
   Users,
   Calendar,
@@ -167,9 +167,9 @@ export function ConsultantPage() {
               <Clock className="h-4 w-4 mr-2" />
               Расписание
             </TabsTrigger>
-            <TabsTrigger value="services">
-              <Briefcase className="h-4 w-4 mr-2" />
-              Услуги
+            <TabsTrigger value="sales">
+              <DollarSign className="h-4 w-4 mr-2" />
+              Продажи
             </TabsTrigger>
             <TabsTrigger value="profile">
               <Settings className="h-4 w-4 mr-2" />
@@ -189,8 +189,8 @@ export function ConsultantPage() {
             <ScheduleTab />
           </TabsContent>
 
-          <TabsContent value="services" className="space-y-4">
-            <ServicesTab />
+          <TabsContent value="sales" className="space-y-4">
+            <SalesTab consultantId={consultantId} />
           </TabsContent>
 
           <TabsContent value="profile" className="space-y-4">

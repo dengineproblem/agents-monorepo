@@ -15,6 +15,11 @@ import { consultationServicesRoutes } from './routes/consultationServices.js';
 import { publicBookingRoutes } from './routes/publicBooking.js';
 import { aiBotConfigurationsRoutes } from './routes/aiBotConfigurations.js';
 import { chatsRoutes } from './routes/chats.js';
+import { consultantsRoutes } from './routes/consultants.js';
+import { consultantDashboardRoutes } from './routes/consultantDashboard.js';
+import { consultantMessagesRoutes } from './routes/consultantMessages.js';
+import { adminConsultantManagementRoutes } from './routes/adminConsultantManagement.js';
+import { consultantSalesRoutes } from './routes/consultantSales.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
@@ -33,7 +38,7 @@ app.register(cors, {
   origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
 });
 
 // Register multipart for file uploads (audio transcription)
@@ -57,6 +62,11 @@ app.register(consultationServicesRoutes);
 app.register(publicBookingRoutes);
 app.register(aiBotConfigurationsRoutes);
 app.register(chatsRoutes);
+app.register(consultantsRoutes);
+app.register(consultantDashboardRoutes);
+app.register(consultantMessagesRoutes);
+app.register(adminConsultantManagementRoutes);
+app.register(consultantSalesRoutes);
 
 // Start notification cron job
 startNotificationCron();
