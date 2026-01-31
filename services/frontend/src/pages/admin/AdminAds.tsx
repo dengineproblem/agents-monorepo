@@ -148,7 +148,7 @@ const AdminAds: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Реклама</h1>
           <p className="text-muted-foreground">Кампании, креативы и CPL анализ</p>
@@ -156,7 +156,7 @@ const AdminAds: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="w-full sm:w-[150px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -175,7 +175,7 @@ const AdminAds: React.FC = () => {
       </div>
 
       <Tabs defaultValue="cpl" className="space-y-4">
-        <TabsList>
+        <TabsList className="w-full sm:w-auto flex-wrap h-auto">
           <TabsTrigger value="cpl" className="gap-2">
             <TrendingUp className="h-4 w-4" />
             CPL Анализ
@@ -194,7 +194,7 @@ const AdminAds: React.FC = () => {
         <TabsContent value="cpl" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <CardTitle>CPL Анализ по направлениям</CardTitle>
                   <CardDescription>
@@ -202,7 +202,7 @@ const AdminAds: React.FC = () => {
                   </CardDescription>
                 </div>
                 <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full sm:w-[180px]">
                     <ArrowUpDown className="h-4 w-4 mr-2" />
                     <SelectValue />
                   </SelectTrigger>

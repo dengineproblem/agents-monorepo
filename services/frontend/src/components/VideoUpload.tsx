@@ -1806,7 +1806,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <ChevronDown className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[200px] p-3">
+                      <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[200px] p-3">
                         <div className="space-y-2">
                           {[
                             { value: 'instagram', label: 'Instagram' },
@@ -1847,7 +1847,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <ChevronDown className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-[280px] p-3">
+                      <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[280px] p-3">
                         <div className="space-y-2">
                           {[
                             { value: 'whatsapp', label: 'Сообщение WhatsApp' },
@@ -2102,7 +2102,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         <ChevronDown className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-3">
+                    <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[200px] p-3">
                       <div className="space-y-2">
                         {[
                           { value: 'all', label: 'Любой' },
@@ -2304,7 +2304,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         <ChevronDown className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-3">
+                    <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[200px] p-3">
                       <div className="space-y-2">
                         {[
                           { value: 'midnight', label: t('video.startFromMidnight') },
@@ -2510,7 +2510,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[280px] p-3">
+                <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[280px] p-3">
                   <div className="space-y-2">
                     {[
                       { value: 'whatsapp', label: 'Сообщение WhatsApp' },
@@ -2670,7 +2670,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[200px] p-3">
+                <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[200px] p-3">
                   <div className="space-y-2">
                     {[
                       { value: 'all', label: 'Любой' },
@@ -2833,7 +2833,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     <ChevronDown className="h-4 w-4 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[200px] p-3">
+                <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[200px] p-3">
                   <div className="space-y-2">
                     {[
                       { value: 'midnight', label: 'С полуночи' },

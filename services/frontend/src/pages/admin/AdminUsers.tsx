@@ -181,8 +181,8 @@ const AdminUsers: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
+        <div className="relative flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Поиск по имени или telegram..."
@@ -193,7 +193,7 @@ const AdminUsers: React.FC = () => {
         </div>
 
         <Select value={stageFilter} onValueChange={setStageFilter}>
-          <SelectTrigger className="w-[200px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <Filter className="h-4 w-4 mr-2" />
             <SelectValue placeholder="Этап онбординга" />
           </SelectTrigger>
@@ -206,14 +206,14 @@ const AdminUsers: React.FC = () => {
           </SelectContent>
         </Select>
 
-        <Button variant="outline" onClick={fetchUsers}>
+        <Button variant="outline" onClick={fetchUsers} className="w-full sm:w-auto">
           <RefreshCw className="h-4 w-4 mr-2" />
           Обновить
         </Button>
       </div>
 
       {/* Table */}
-      <div className="border rounded-lg">
+      <div className="border rounded-lg overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>

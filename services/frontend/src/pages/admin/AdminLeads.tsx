@@ -172,9 +172,9 @@ const AdminLeads: React.FC = () => {
       )}
 
       {/* Filters */}
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 flex-wrap">
         <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-[150px]">
+          <SelectTrigger className="w-full sm:w-[150px]">
             <Calendar className="h-4 w-4 mr-2" />
             <SelectValue />
           </SelectTrigger>
@@ -188,7 +188,7 @@ const AdminLeads: React.FC = () => {
         </Select>
 
         <Select value={userFilter} onValueChange={setUserFilter}>
-          <SelectTrigger className="w-[200px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <Filter className="h-4 w-4 mr-2" />
             <SelectValue placeholder="Все пользователи" />
           </SelectTrigger>
@@ -202,18 +202,18 @@ const AdminLeads: React.FC = () => {
           </SelectContent>
         </Select>
 
-        <Button variant="outline" onClick={fetchLeads}>
+        <Button variant="outline" onClick={fetchLeads} className="w-full sm:w-auto">
           <RefreshCw className="h-4 w-4 mr-2" />
           Обновить
         </Button>
 
-        <div className="ml-auto text-sm text-muted-foreground">
+        <div className="sm:ml-auto text-sm text-muted-foreground text-center sm:text-left">
           Всего: {total} лидов
         </div>
       </div>
 
       {/* Table */}
-      <div className="border rounded-lg">
+      <div className="border rounded-lg overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>

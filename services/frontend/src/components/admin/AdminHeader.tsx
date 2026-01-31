@@ -19,6 +19,7 @@ import {
   User,
   ExternalLink,
   Command,
+  Menu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,7 @@ interface AdminHeaderProps {
   unresolvedErrors?: number;
   unreadNotifications?: number;
   onOpenCommandPalette?: () => void;
+  onOpenMobileSidebar?: () => void;
 }
 
 const AdminHeader: React.FC<AdminHeaderProps> = ({
@@ -47,6 +49,7 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({
   unresolvedErrors = 0,
   unreadNotifications = 0,
   onOpenCommandPalette,
+  onOpenMobileSidebar,
 }) => {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
@@ -92,8 +95,18 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-[60px] border-b bg-background">
       <div className="flex items-center justify-between h-full px-4">
-        {/* Left: Logo */}
-        <div className="flex items-center gap-3">
+        {/* Left: Menu button (mobile) + Logo */}
+        <div className="flex items-center gap-2">
+          {/* Mobile menu button */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={onOpenMobileSidebar}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
               <span className="text-primary-foreground font-bold text-sm">A</span>
