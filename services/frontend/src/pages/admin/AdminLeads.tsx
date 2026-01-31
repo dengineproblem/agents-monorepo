@@ -44,12 +44,12 @@ import { ru } from 'date-fns/locale';
 interface Lead {
   id: string;
   user_username: string;
-  lead_name?: string;
-  phone?: string;
-  campaign_name?: string;
-  creative_name?: string;
-  direction_name?: string;
-  cost: number;
+  lead_name?: string | null;
+  phone?: string | null;
+  source?: string | null; // whatsapp/website/lead_form
+  creative_name?: string | null;
+  direction_name?: string | null;
+  cost: number | null;
   created_at: string;
 }
 
@@ -92,7 +92,10 @@ const AdminLeads: React.FC = () => {
         params.append('userId', userFilter);
       }
 
-      const res = await fetch(`${API_BASE_URL}/admin/leads?${params}`);
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const res = await fetch(`${API_BASE_URL}/admin/leads?${params}`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
       if (res.ok) {
         const data = await res.json();
         setLeads(data.leads || []);
@@ -218,6 +221,7 @@ const AdminLeads: React.FC = () => {
               <TableHead>Лид</TableHead>
               <TableHead>Телефон</TableHead>
               <TableHead>Источник</TableHead>
+              <TableHead>Направление / Креатив</TableHead>
               <TableHead className="text-right">Стоимость</TableHead>
               <TableHead>Дата</TableHead>
             </TableRow>
@@ -225,13 +229,13 @@ const AdminLeads: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   <RefreshCw className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : leads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   Нет лидов за выбранный период
                 </TableCell>
               </TableRow>
@@ -239,12 +243,29 @@ const AdminLeads: React.FC = () => {
               leads.map((lead) => (
                 <TableRow key={lead.id}>
                   <TableCell className="font-medium">{lead.user_username}</TableCell>
-                  <TableCell>{lead.lead_name || '—'}</TableCell>
+                  <TableCell>
+                    {lead.lead_name || (
+                      <span className="text-xs text-muted-foreground italic">
+                        {lead.source === 'whatsapp' ? 'WhatsApp лид' : 'Нет имени'}
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {lead.phone ? (
                       <code className="text-sm bg-muted px-1 rounded">{lead.phone}</code>
                     ) : (
-                      '—'
+                      <span className="text-xs text-muted-foreground italic">Нет телефона</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {lead.source ? (
+                      <Badge variant="secondary" className="text-xs capitalize">
+                        {lead.source === 'whatsapp' ? 'WhatsApp' :
+                         lead.source === 'lead_form' ? 'Лидформа' :
+                         lead.source === 'website' ? 'Сайт' : lead.source}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">—</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -254,18 +275,21 @@ const AdminLeads: React.FC = () => {
                           {lead.direction_name}
                         </Badge>
                       )}
-                      {lead.campaign_name && (
-                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">
-                          {lead.campaign_name}
+                      {lead.creative_name && (
+                        <p className="text-xs text-muted-foreground truncate max-w-[200px]"
+                           title={lead.creative_name}>
+                          {lead.creative_name}
                         </p>
                       )}
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    {lead.cost > 0 ? (
-                      <Badge variant="secondary">{formatCurrency(lead.cost)}</Badge>
+                    {lead.cost !== null ? (
+                      <Badge variant={lead.cost === 0 ? "outline" : "secondary"}>
+                        {formatCurrency(lead.cost)}
+                      </Badge>
                     ) : (
-                      '—'
+                      <span className="text-xs text-muted-foreground italic">Нет метрик</span>
                     )}
                   </TableCell>
                   <TableCell>

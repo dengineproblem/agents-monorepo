@@ -94,22 +94,25 @@ const AdminAds: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const headers = { 'x-user-id': currentUser.id || '' };
+
       // Fetch users ROI summary
-      const usersRes = await fetch(`${API_BASE_URL}/admin/ads/users-summary?period=${period}`);
+      const usersRes = await fetch(`${API_BASE_URL}/admin/ads/users-summary?period=${period}`, { headers });
       if (usersRes.ok) {
         const data = await usersRes.json();
         setUsersSummary(data.users || []);
       }
 
       // Fetch creatives
-      const creativesRes = await fetch(`${API_BASE_URL}/admin/ads/creatives?period=${period}`);
+      const creativesRes = await fetch(`${API_BASE_URL}/admin/ads/creatives?period=${period}`, { headers });
       if (creativesRes.ok) {
         const data = await creativesRes.json();
         setCreatives(data.creatives || []);
       }
 
       // Fetch CPL analysis
-      const cplRes = await fetch(`${API_BASE_URL}/admin/ads/cpl-analysis?period=${period}`);
+      const cplRes = await fetch(`${API_BASE_URL}/admin/ads/cpl-analysis?period=${period}`, { headers });
       if (cplRes.ok) {
         const data = await cplRes.json();
         setCplAnalysis(data.analysis || []);

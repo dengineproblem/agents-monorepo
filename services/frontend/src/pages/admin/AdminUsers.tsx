@@ -94,6 +94,7 @@ const AdminUsers: React.FC = () => {
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const params = new URLSearchParams({
         page: String(page),
         limit: '20',
@@ -106,7 +107,9 @@ const AdminUsers: React.FC = () => {
         params.append('stage', stageFilter);
       }
 
-      const res = await fetch(`${API_BASE_URL}/admin/users?${params}`);
+      const res = await fetch(`${API_BASE_URL}/admin/users?${params}`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
