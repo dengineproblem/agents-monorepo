@@ -197,8 +197,8 @@ const AdminChats: React.FC = () => {
   return (
     <Tabs defaultValue="user-chats" className="w-full">
       <TabsList className="mb-4">
-        <TabsTrigger value="user-chats">Чаты с пользователями</TabsTrigger>
-        <TabsTrigger value="moltbot">Молтбот</TabsTrigger>
+        <TabsTrigger value="user-chats">AI-чат</TabsTrigger>
+        <TabsTrigger value="moltbot">Support</TabsTrigger>
       </TabsList>
 
       <TabsContent value="user-chats" className="mt-0">
