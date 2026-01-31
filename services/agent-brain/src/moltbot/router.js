@@ -1,4 +1,4 @@
-import log from '../lib/logger.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * Маршрутизация запросов к specialist агентам через Moltbot Gateway API
@@ -6,7 +6,7 @@ import log from '../lib/logger.js';
 export async function routeToSpecialist(specialist, message, telegramChatId) {
   const startTime = Date.now();
 
-  log.info({
+  logger.info({
     specialist,
     telegramChatId,
     messageLength: message.length
@@ -15,13 +15,13 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
   // Validate specialist
   const validSpecialists = ['facebook-ads', 'creatives', 'crm', 'tiktok', 'onboarding'];
   if (!validSpecialists.includes(specialist)) {
-    log.error({ specialist, validSpecialists }, 'Invalid specialist name');
+    logger.error({ specialist, validSpecialists }, 'Invalid specialist name');
     throw new Error(`Invalid specialist: ${specialist}. Must be one of: ${validSpecialists.join(', ')}`);
   }
 
   // Validate telegramChatId
   if (!telegramChatId || typeof telegramChatId !== 'string') {
-    log.error({ telegramChatId }, 'Invalid telegramChatId');
+    logger.error({ telegramChatId }, 'Invalid telegramChatId');
     throw new Error('telegramChatId is required and must be a string');
   }
 
@@ -45,7 +45,7 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      log.error({
+      logger.error({
         specialist,
         status: response.status,
         statusText: response.statusText,
@@ -57,7 +57,7 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
     const result = await response.json();
 
     const duration = Date.now() - startTime;
-    log.info({
+    logger.info({
       specialist,
       telegramChatId,
       routeDuration: duration,
@@ -68,7 +68,7 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
 
   } catch (error) {
     const duration = Date.now() - startTime;
-    log.error({
+    logger.error({
       specialist,
       telegramChatId,
       routeDuration: duration,

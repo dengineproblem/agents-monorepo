@@ -8457,6 +8457,480 @@ fastify.post('/api/moltbot/route', async (request, reply) => {
   }
 });
 
+// Creative Upload endpoint for Moltbot (with chunked download)
+fastify.post('/api/moltbot/creative/upload', async (request, reply) => {
+  const {
+    userAccountId,
+    accountId,
+    telegramFileId,
+    fileName,
+    directionName,
+    directionId
+  } = request.body;
+
+  if (!userAccountId || !accountId || !telegramFileId) {
+    return reply.code(400).send({
+      error: 'Missing required fields: userAccountId, accountId, telegramFileId'
+    });
+  }
+
+  // P1.4: Temp file cleanup - declare tempPath outside try block
+  let tempPath = null;
+  const uploadStartTime = Date.now();
+
+  try {
+    // P3: Structured logging - upload start
+    request.log.info({
+      event: 'creative_upload_start',
+      userAccountId,
+      accountId,
+      telegramFileId: telegramFileId.slice(0, 20) + '...',
+      hasFileName: !!fileName,
+      fileName: fileName || null,
+      directionName: directionName || null,
+      directionId: directionId || null,
+      requestIp: request.ip
+    }, 'Creative upload request initiated');
+
+    const BOT_TOKEN = process.env.MOLTBOT_TELEGRAM_BOT_TOKEN;
+
+    if (!BOT_TOKEN) {
+      return reply.code(500).send({ error: 'MOLTBOT_TELEGRAM_BOT_TOKEN not configured' });
+    }
+
+    // 1. Получить file_path от Telegram Bot API
+    request.log.info({ telegramFileId }, 'Fetching file info from Telegram');
+
+    const fileInfoResponse = await fetch(
+      `https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${telegramFileId}`
+    );
+    const fileInfo = await fileInfoResponse.json();
+
+    if (!fileInfo.ok) {
+      request.log.error({ fileInfo }, 'Invalid file_id from Telegram');
+      return reply.code(400).send({ error: 'Invalid file_id', details: fileInfo });
+    }
+
+    const filePath = fileInfo.result.file_path;
+    const fileSize = fileInfo.result.file_size;
+    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`;
+
+    // P1.2: File size validation (prevent OOM)
+    const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+    if (fileSize > MAX_FILE_SIZE) {
+      request.log.warn({
+        fileSize,
+        limit: MAX_FILE_SIZE,
+        telegramFileId,
+        fileSize_mb: Math.round(fileSize / 1024 / 1024)
+      }, 'File size exceeds limit');
+      return reply.code(400).send({
+        error: 'File too large',
+        max_size_mb: 500,
+        file_size_mb: Math.round(fileSize / 1024 / 1024)
+      });
+    }
+
+    // P2.4: Redact bot token from logs
+    // P3: Structured logging - file fetched
+    request.log.info({
+      event: 'telegram_file_fetched',
+      filePath,
+      fileSize,
+      fileSize_mb: Math.round(fileSize / 1024 / 1024),
+      fileUrl: fileUrl.replace(/bot[^/]+/, 'bot[REDACTED]')
+    }, 'File info retrieved and validated');
+
+    // 2. Определить direction
+    let targetDirectionId = directionId;
+
+    if (!targetDirectionId && directionName) {
+      const { data: directions, error: dirError } = await supabase
+        .from('account_directions')
+        .select('id, name')
+        .eq('user_account_id', userAccountId)
+        .eq('account_id', accountId)
+        .eq('is_active', true);
+
+      if (!dirError && directions) {
+        const found = directions.find(d =>
+          d.name.toLowerCase().includes(directionName.toLowerCase())
+        );
+
+        if (found) {
+          targetDirectionId = found.id;
+        }
+      }
+    }
+
+    if (!targetDirectionId) {
+      // Нужен выбор direction
+      const { data: directions, error: dirError } = await supabase
+        .from('account_directions')
+        .select('id, name')
+        .eq('user_account_id', userAccountId)
+        .eq('account_id', accountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (dirError || !directions) {
+        request.log.error({ error: dirError }, 'Failed to fetch directions');
+        return reply.code(500).send({ error: 'Failed to fetch directions' });
+      }
+
+      if (directions.length === 0) {
+        return reply.code(400).send({
+          error: 'No active directions found',
+          message: 'Создайте direction перед загрузкой креатива'
+        });
+      }
+
+      if (directions.length === 1) {
+        targetDirectionId = directions[0].id;
+      } else {
+        return reply.send({
+          needsSelection: true,
+          directions: directions.map(d => ({ id: d.id, name: d.name })),
+          message: 'Выберите direction для привязки креатива'
+        });
+      }
+    }
+
+    // 3. Chunked download
+    request.log.info({ fileUrl, fileSize }, 'Starting chunked download');
+
+    const chunks = [];
+    const chunkSize = 10 * 1024 * 1024; // 10 MB chunks
+    let offset = 0;
+
+    while (offset < fileSize) {
+      const end = Math.min(offset + chunkSize - 1, fileSize - 1);
+
+      const response = await fetch(fileUrl, {
+        headers: {
+          'Range': `bytes=${offset}-${end}`
+        }
+      });
+
+      if (!response.ok) {
+        request.log.error({ status: response.status, offset, end }, 'Chunk download failed');
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const chunk = await response.arrayBuffer();
+      chunks.push(Buffer.from(chunk));
+
+      const progress = Math.round(((offset + chunk.byteLength) / fileSize) * 100);
+      request.log.info({ progress, offset, fileSize }, `Downloaded ${progress}%`);
+
+      offset = end + 1;
+    }
+
+    const buffer = Buffer.concat(chunks);
+    request.log.info({ totalBytes: buffer.length }, 'Download completed');
+
+    // 4. Сохранить temporary файл
+    // P1.3: Path traversal protection - sanitize fileName
+    const path = require('path');
+    const sanitizedFileName = path.basename(fileName || 'video.mp4').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const tempFileName = `telegram_${Date.now()}_${sanitizedFileName}`;
+    tempPath = `/tmp/${tempFileName}`; // assigned to outer scope variable for cleanup in finally
+
+    request.log.info({
+      originalFileName: fileName,
+      sanitizedFileName,
+      tempPath
+    }, 'Temp file path created');
+
+    await require('fs').promises.writeFile(tempPath, buffer);
+    // P3: Structured logging - temp file written
+    request.log.info({
+      event: 'temp_file_written',
+      tempPath,
+      size_bytes: buffer.length,
+      size_mb: Math.round(buffer.length / 1024 / 1024)
+    }, 'Temporary file saved to disk');
+
+    // 5. Создать запись в user_creatives
+    const { data: creative, error: createError } = await supabase
+      .from('user_creatives')
+      .insert({
+        user_id: userAccountId,
+        account_id: accountId,
+        title: fileName || tempFileName,
+        status: 'processing',
+        media_type: 'video',
+        direction_id: targetDirectionId,
+        source: 'telegram_upload'
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      request.log.error({ error: createError }, 'Failed to create creative record');
+      return reply.code(500).send({ error: 'Failed to create creative record' });
+    }
+
+    // P3: Structured logging - creative record created
+    request.log.info({
+      event: 'creative_record_created',
+      creativeId: creative.id,
+      status: 'processing',
+      directionId: targetDirectionId,
+      title: fileName || tempFileName
+    }, 'Database creative record created');
+
+    // TODO: Implement full processing pipeline:
+    // - Transcription via Whisper
+    // - Thumbnail generation
+    // - Upload to Facebook
+    // - Update creative status to 'ready'
+
+    // Для MVP просто возвращаем успех
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select('name')
+      .eq('id', targetDirectionId)
+      .single();
+
+    // Обновляем статус на ready (временно, пока нет полной обработки)
+    await supabase
+      .from('user_creatives')
+      .update({ status: 'ready' })
+      .eq('id', creative.id);
+
+    // P3: Structured logging - upload complete
+    request.log.info({
+      event: 'creative_upload_complete',
+      creativeId: creative.id,
+      directionName: direction?.name,
+      fileName: fileName || tempFileName,
+      duration_ms: Date.now() - uploadStartTime
+    }, 'Creative upload completed successfully');
+
+    return reply.send({
+      success: true,
+      creative_id: creative.id,
+      // fb_video_id: result.fbVideoId, // TODO
+      // thumbnail_url: result.thumbnailUrl, // TODO
+      direction_name: direction?.name || 'Unknown'
+    });
+
+  } catch (error) {
+    request.log.error({
+      error: error.message,
+      stack: error.stack,
+      userAccountId,
+      accountId,
+      tempPath,
+      phase: 'creative_upload'
+    }, 'Creative upload error');
+
+    // P1.4: Log to admin for monitoring
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      error_code: error.code || 'UPLOAD_ERROR',
+      raw_error: error.message,
+      stack_trace: error.stack,
+      action: 'moltbot_creative_upload',
+      endpoint: '/api/moltbot/creative/upload',
+      request_data: { accountId, telegramFileId, fileName, directionName },
+      severity: 'critical'
+    }).catch(() => {});
+
+    return reply.code(500).send({ error: error.message });
+  } finally {
+    // P1.4: Always cleanup temp file
+    if (tempPath) {
+      await require('fs').promises.unlink(tempPath)
+        .then(() => {
+          request.log.info({ tempPath }, 'Temp file cleaned up');
+        })
+        .catch(err => {
+          request.log.warn({ tempPath, error: err.message }, 'Failed to cleanup temp file');
+        });
+    }
+  }
+});
+
+// Brain Mini approval endpoint for Moltbot
+fastify.post('/api/moltbot/brain/approve', async (request, reply) => {
+  const { userAccountId, accountId, stepIndices } = request.body;
+
+  if (!userAccountId || !accountId) {
+    return reply.code(400).send({
+      error: 'Missing required fields: userAccountId, accountId'
+    });
+  }
+
+  if (!Array.isArray(stepIndices)) {
+    return reply.code(400).send({
+      error: 'stepIndices must be an array'
+    });
+  }
+
+  try {
+    // P2.1: Authorization - verify user owns this account
+    const { data: ownership, error: ownershipError } = await supabase
+      .from('user_ad_accounts')
+      .select('id')
+      .eq('user_account_id', userAccountId)
+      .eq('account_id', accountId)
+      .single();
+
+    if (ownershipError || !ownership) {
+      request.log.warn({
+        userAccountId,
+        accountId,
+        error: ownershipError?.message,
+        ip: request.ip
+      }, 'Unauthorized access attempt to brain approval');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        error_code: 'UNAUTHORIZED_ACCESS',
+        raw_error: 'Attempted to approve proposals for unowned account',
+        action: 'moltbot_brain_approve',
+        endpoint: '/api/moltbot/brain/approve',
+        request_data: { accountId },
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(403).send({ error: 'Access denied' });
+    }
+
+    request.log.info({ userAccountId, accountId }, 'Account ownership verified');
+
+    // P2.2: Validate stepIndices are non-negative integers
+    if (!stepIndices.every(idx => Number.isInteger(idx) && idx >= 0)) {
+      request.log.warn({ stepIndices }, 'Invalid stepIndices: must be non-negative integers');
+      return reply.code(400).send({
+        error: 'stepIndices must be non-negative integers',
+        received: stepIndices
+      });
+    }
+
+    // Remove duplicates
+    const uniqueSteps = [...new Set(stepIndices)];
+    if (uniqueSteps.length !== stepIndices.length) {
+      request.log.info({
+        original: stepIndices,
+        deduplicated: uniqueSteps
+      }, 'Removed duplicate stepIndices');
+    }
+
+    request.log.info({ stepIndices: uniqueSteps, count: uniqueSteps.length }, 'stepIndices validated');
+
+    // 1. Найти последний pending proposal для этого user/account
+    const { data: proposal, error: fetchError } = await supabase
+      .from('pending_brain_proposals')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .eq('ad_account_id', accountId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (fetchError || !proposal) {
+      request.log.warn({ userAccountId, accountId, error: fetchError }, 'No pending proposals found');
+      return reply.code(404).send({ error: 'No pending proposals found' });
+    }
+
+    request.log.info({
+      proposalId: proposal.id,
+      userAccountId,
+      accountId,
+      stepIndices: uniqueSteps,
+      totalProposals: proposal.proposals?.length || 0,
+      selectedCount: uniqueSteps.length,
+      proposalCreatedAt: proposal.created_at,
+      proposalStatus: proposal.status,
+      requestIp: request.ip,
+      userAgent: request.headers['user-agent']
+    }, 'Starting Brain Mini approval process');
+
+    // 2. Вызвать approve через внутренний fetch к /brain-proposals/:id/approve
+    // P1.5: Use AGENT_SERVICE_URL instead of hardcoded localhost (works in Docker)
+    const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
+
+    // P2.3: Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    try {
+      request.log.info({
+        proposalId: proposal.id,
+        url: `${AGENT_SERVICE_URL}/brain-proposals/${proposal.id}/approve`,
+        stepIndices: uniqueSteps
+      }, 'Sending approval request');
+
+      const approveResponse = await fetch(
+        `${AGENT_SERVICE_URL}/brain-proposals/${proposal.id}/approve`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': userAccountId
+          },
+          body: JSON.stringify({ stepIndices: uniqueSteps }),
+          signal: controller.signal
+        }
+      );
+
+      clearTimeout(timeoutId);
+
+      request.log.info({
+        proposalId: proposal.id,
+        status: approveResponse.status,
+        ok: approveResponse.ok
+      }, 'Approval response received');
+
+      if (!approveResponse.ok) {
+        const errorText = await approveResponse.text();
+        request.log.error({
+          proposalId: proposal.id,
+          status: approveResponse.status,
+          errorText
+        }, 'Approval endpoint error');
+        return reply.code(approveResponse.status).send({ error: errorText });
+      }
+
+      const result = await approveResponse.json();
+
+      request.log.info({
+        proposalId: proposal.id,
+        executed: result.execution_results?.length || 0
+      }, 'Brain Mini proposal approved successfully');
+
+      return reply.send(result);
+
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+
+      if (fetchError.name === 'AbortError') {
+        request.log.error({
+          proposalId: proposal.id,
+          timeout: 30000
+        }, 'Approval request timeout');
+
+        return reply.code(504).send({
+          error: 'Approval request timeout',
+          timeout_ms: 30000
+        });
+      }
+
+      throw fetchError; // Re-throw to outer catch
+    }
+
+  } catch (error) {
+    request.log.error({ error: error.message, stack: error.stack }, 'Brain approval error');
+    return reply.code(500).send({ error: error.message });
+  }
+});
+
 // Register Chat Assistant routes
 registerChatRoutes(fastify);
 
