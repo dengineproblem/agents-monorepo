@@ -16,7 +16,6 @@ import { summarizeDialog, getClientInfo } from '../lib/dialogSummarizer.js';
 // Validation schemas
 const CreateConsultantSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email(),
   phone: z.string().optional(),
   specialization: z.string().optional(),
   user_account_id: z.string().uuid().optional()
@@ -24,7 +23,6 @@ const CreateConsultantSchema = z.object({
 
 const UpdateConsultantSchema = z.object({
   name: z.string().min(1).optional(),
-  email: z.string().email().optional(),
   phone: z.string().optional(),
   specialization: z.string().optional(),
   is_active: z.boolean().optional(),

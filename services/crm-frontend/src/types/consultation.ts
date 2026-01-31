@@ -1,7 +1,7 @@
 export interface Consultant {
   id: string;
   name: string;
-  email: string;
+  email?: string;
   phone?: string;
   specialization?: string;
   is_active: boolean;
@@ -141,7 +141,6 @@ export interface DaySchedule {
 // Типы для создания/обновления
 export interface CreateConsultantData {
   name: string;
-  email: string;
   phone?: string;
   specialization?: string;
   user_account_id?: string;

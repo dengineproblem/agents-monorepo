@@ -41,14 +41,12 @@ export function ConsultantsPage() {
 
   const [newConsultant, setNewConsultant] = useState<CreateConsultantData>({
     name: '',
-    email: '',
     phone: '',
     specialization: ''
   });
 
   const [editingConsultantData, setEditingConsultantData] = useState<CreateConsultantData>({
     name: '',
-    email: '',
     phone: '',
     specialization: ''
   });
@@ -113,7 +111,7 @@ export function ConsultantsPage() {
       await consultationService.createConsultant(userAccountId, newConsultant);
       toast({ title: 'Консультант добавлен' });
       setIsNewConsultantOpen(false);
-      setNewConsultant({ name: '', email: '', phone: '', specialization: '' });
+      setNewConsultant({ name: '', phone: '', specialization: '' });
       loadData();
     } catch {
       toast({
@@ -139,7 +137,7 @@ export function ConsultantsPage() {
       toast({ title: 'Консультант обновлён' });
       setIsEditConsultantOpen(false);
       setEditingConsultantId(null);
-      setEditingConsultantData({ name: '', email: '', phone: '', specialization: '' });
+      setEditingConsultantData({ name: '', phone: '', specialization: '' });
       loadData();
     } catch {
       toast({
@@ -242,7 +240,6 @@ export function ConsultantsPage() {
     setEditingConsultantId(consultant.id);
     setEditingConsultantData({
       name: consultant.name,
-      email: consultant.email || '',
       phone: consultant.phone || '',
       specialization: consultant.specialization || ''
     });
@@ -279,15 +276,6 @@ export function ConsultantsPage() {
                   value={newConsultant.name}
                   onChange={e => setNewConsultant({ ...newConsultant, name: e.target.value })}
                   placeholder="Иван Иванов"
-                />
-              </div>
-              <div>
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={newConsultant.email}
-                  onChange={e => setNewConsultant({ ...newConsultant, email: e.target.value })}
-                  placeholder="ivan@example.com"
                 />
               </div>
               <div>
@@ -350,9 +338,6 @@ export function ConsultantsPage() {
                 )}
                 {consultant.phone && (
                   <p className="text-sm">{consultant.phone}</p>
-                )}
-                {consultant.email && (
-                  <p className="text-sm text-muted-foreground">{consultant.email}</p>
                 )}
                 {schedules.length > 0 && (
                   <div className="mt-3 text-xs text-muted-foreground">
@@ -421,14 +406,6 @@ export function ConsultantsPage() {
               <Input
                 value={editingConsultantData.name}
                 onChange={e => setEditingConsultantData({ ...editingConsultantData, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={editingConsultantData.email}
-                onChange={e => setEditingConsultantData({ ...editingConsultantData, email: e.target.value })}
               />
             </div>
             <div>
