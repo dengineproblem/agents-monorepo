@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
@@ -12,14 +11,12 @@ import { BotEditor } from './pages/BotEditor';
 import { ChatsPage } from './pages/ChatsPage';
 import { PublicBooking } from './pages/PublicBooking';
 import Login from './pages/Login';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from '@/components/ui/toaster';
+import { ConsultantPage } from './pages/ConsultantPage';
+import { useAuth } from './contexts/AuthContext';
 import { initTheme } from './hooks/useTheme';
 
 // Инициализация темы до рендера
 initTheme();
-
-const queryClient = new QueryClient();
 
 // Layout with sidebar for authenticated pages
 function MainLayout({ children }: { children: React.ReactNode }) {
@@ -37,42 +34,7 @@ const PUBLIC_PATHS = ['/login'];
 
 function AppRoutes() {
   const location = useLocation();
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const checkAuth = () => {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const parsedUser = JSON.parse(storedUser);
-          if (parsedUser && parsedUser.username) {
-            setUser(parsedUser);
-          } else {
-            localStorage.removeItem('user');
-            setUser(null);
-          }
-        } catch (error) {
-          localStorage.removeItem('user');
-          setUser(null);
-        }
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
-    };
-
-    checkAuth();
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'user') {
-        checkAuth();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [location.pathname]);
+  const { user, loading, isAuthenticated, isConsultant } = useAuth();
 
   if (loading) {
     return (
@@ -94,17 +56,25 @@ function AppRoutes() {
   const isPublicRoute = PUBLIC_PATHS.includes(location.pathname);
 
   // Not authenticated - show login
-  if (!user && !isPublicRoute) {
+  if (!isAuthenticated && !isPublicRoute) {
     return <Navigate to="/login" replace />;
   }
 
-  // Authenticated user on login page - redirect to home
-  if (user && isPublicRoute) {
+  // Authenticated consultant on non-consultant page - redirect to consultant page
+  if (isConsultant && user?.consultantId && !location.pathname.startsWith('/c/') && !isPublicRoute) {
+    return <Navigate to={`/c/${user.consultantId}`} replace />;
+  }
+
+  // Authenticated user on login page - redirect to appropriate home
+  if (isAuthenticated && isPublicRoute) {
+    if (isConsultant && user?.consultantId) {
+      return <Navigate to={`/c/${user.consultantId}`} replace />;
+    }
     return <Navigate to="/" replace />;
   }
 
   // Public routes
-  if (!user) {
+  if (!isAuthenticated) {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -112,7 +82,25 @@ function AppRoutes() {
     );
   }
 
-  // Main app with sidebar (authenticated)
+  // Consultant page - no sidebar for both consultants and admins viewing consultant page
+  if (location.pathname.startsWith('/c/')) {
+    return (
+      <Routes>
+        <Route path="/c/:consultantId" element={<ConsultantPage />} />
+      </Routes>
+    );
+  }
+
+  // Consultant routes - simplified layout without full sidebar
+  if (isConsultant) {
+    return (
+      <Routes>
+        <Route path="/c/:consultantId" element={<ConsultantPage />} />
+      </Routes>
+    );
+  }
+
+  // Main app with sidebar (authenticated admin/manager)
   return (
     <MainLayout>
       <Routes>
@@ -132,12 +120,9 @@ function AppRoutes() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-        <Toaster />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
   );
 }
 

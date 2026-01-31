@@ -1,0 +1,741 @@
+import { FastifyInstance } from 'fastify';
+import { supabase } from '../lib/supabase.js';
+import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
+import { notifyConsultantAboutNewConsultation } from '../lib/consultantNotifications.js';
+
+/**
+ * Routes для dashboard консультанта
+ */
+export async function consultantDashboardRoutes(app: FastifyInstance) {
+  // Применяем middleware ко всем роутам
+  app.addHook('preHandler', consultantAuthMiddleware);
+
+  /**
+   * GET /consultant/dashboard
+   * Получить статистику для dashboard консультанта
+   */
+  app.get('/consultant/dashboard', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      // Для админа нужно передать consultant_id в query
+      const targetConsultantId = isAdmin
+        ? (request.query as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      // Используем view из миграции
+      const { data, error } = await supabase
+        .from('consultant_dashboard_stats')
+        .select('*')
+        .eq('consultant_id', targetConsultantId)
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch dashboard stats');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || {
+        consultant_id: targetConsultantId,
+        total_leads: 0,
+        hot_leads: 0,
+        warm_leads: 0,
+        cold_leads: 0,
+        booked_leads: 0,
+        total_consultations: 0,
+        scheduled: 0,
+        confirmed: 0,
+        completed: 0,
+        cancelled: 0,
+        no_show: 0,
+        total_revenue: 0,
+        completion_rate: 0
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching dashboard');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/leads
+   * Получить лидов консультанта
+   */
+  app.get('/consultant/leads', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const {
+        status,
+        interest_level,
+        is_booked,
+        limit = 50,
+        offset = 0
+      } = request.query as {
+        status?: string;
+        interest_level?: string;
+        is_booked?: string;
+        limit?: number;
+        offset?: number;
+      };
+
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      let query = supabase
+        .from('dialog_analysis')
+        .select('*', { count: 'exact' })
+        .order('last_message', { ascending: false });
+
+      // Консультант видит только своих лидов
+      if (!isAdmin && consultantId) {
+        query = query.eq('assigned_consultant_id', consultantId);
+      }
+
+      if (status) {
+        query = query.eq('funnel_stage', status);
+      }
+
+      if (interest_level) {
+        query = query.eq('interest_level', interest_level);
+      }
+
+      // Фильтр "не записан" - лиды без консультации
+      if (is_booked === 'false') {
+        // Получаем ID лидов которые записаны
+        const { data: bookedLeads } = await supabase
+          .from('consultations')
+          .select('dialog_analysis_id')
+          .in('status', ['scheduled', 'confirmed']);
+
+        const bookedLeadIds = (bookedLeads || [])
+          .map(c => c.dialog_analysis_id)
+          .filter(Boolean);
+
+        if (bookedLeadIds.length > 0) {
+          query = query.not('id', 'in', `(${bookedLeadIds.join(',')})`);
+        }
+      }
+
+      query = query.range(offset, offset + limit - 1);
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch leads');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send({
+        leads: data || [],
+        total: count || 0,
+        limit,
+        offset
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching leads');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/consultations
+   * Получить консультации консультанта
+   */
+  app.get('/consultant/consultations', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { date, status, from_date, to_date } = request.query as {
+        date?: string;
+        status?: string;
+        from_date?: string;
+        to_date?: string;
+      };
+
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      let query = supabase
+        .from('consultations')
+        .select(`
+          *,
+          consultant:consultants(name, phone)
+        `)
+        .order('date', { ascending: true })
+        .order('start_time', { ascending: true });
+
+      // Консультант видит только свои консультации
+      if (!isAdmin && consultantId) {
+        query = query.eq('consultant_id', consultantId);
+      }
+
+      if (date) {
+        query = query.eq('date', date);
+      }
+
+      if (from_date && to_date) {
+        query = query.gte('date', from_date).lte('date', to_date);
+      }
+
+      if (status) {
+        query = query.eq('status', status);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch consultations');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching consultations');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/schedule
+   * Получить расписание консультанта
+   */
+  app.get('/consultant/schedule', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      // Для админа нужно передать consultantId в query
+      const targetConsultantId = isAdmin
+        ? (request.query as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      const { data, error } = await supabase
+        .from('working_schedules')
+        .select('*')
+        .eq('consultant_id', targetConsultantId)
+        .order('day_of_week');
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch schedule');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching schedule');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultant/schedule
+   * Обновить расписание консультанта
+   */
+  app.put('/consultant/schedule', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const { schedules } = request.body as { schedules: any[] };
+
+      // Удаляем старое расписание
+      await supabase
+        .from('working_schedules')
+        .delete()
+        .eq('consultant_id', consultantId);
+
+      // Вставляем новое
+      if (schedules && schedules.length > 0) {
+        const schedulesWithConsultant = schedules.map(s => ({
+          ...s,
+          consultant_id: consultantId
+        }));
+
+        const { data, error } = await supabase
+          .from('working_schedules')
+          .insert(schedulesWithConsultant)
+          .select();
+
+        if (error) {
+          app.log.error({ error }, 'Failed to update schedule');
+          return reply.status(500).send({ error: error.message });
+        }
+
+        return reply.send(data);
+      }
+
+      return reply.send([]);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating schedule');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/services
+   * Получить услуги консультанта
+   */
+  app.get('/consultant/services', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      // Для админа нужно передать consultantId в query
+      const targetConsultantId = isAdmin
+        ? (request.query as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      // Получаем все услуги аккаунта
+      const { data: allServices, error: servicesError } = await supabase
+        .from('consultation_services')
+        .select('*')
+        .eq('user_account_id', request.userAccountId!)
+        .eq('is_active', true)
+        .order('sort_order');
+
+      if (servicesError) {
+        app.log.error({ error: servicesError }, 'Failed to fetch services');
+        return reply.status(500).send({ error: servicesError.message });
+      }
+
+      // Получаем услуги консультанта
+      const { data: consultantServices } = await supabase
+        .from('consultant_services')
+        .select('*')
+        .eq('consultant_id', targetConsultantId)
+        .eq('is_active', true);
+
+      const consultantServiceMap = new Map(
+        (consultantServices || []).map(cs => [cs.service_id, cs])
+      );
+
+      // Объединяем данные
+      const services = (allServices || []).map(service => ({
+        ...service,
+        consultant_service: consultantServiceMap.get(service.id) || null,
+        is_provided: consultantServiceMap.has(service.id)
+      }));
+
+      return reply.send(services);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching services');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultant/services
+   * Обновить список услуг консультанта
+   */
+  app.put('/consultant/services', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      // Для админа нужно передать consultantId в body
+      const targetConsultantId = isAdmin
+        ? (request.body as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      const { services } = request.body as {
+        services: Array<{
+          service_id: string;
+          custom_price?: number;
+          custom_duration?: number;
+          is_active: boolean;
+        }>;
+      };
+
+      // Удаляем старые связи
+      await supabase
+        .from('consultant_services')
+        .delete()
+        .eq('consultant_id', targetConsultantId);
+
+      // Создаем новые (только активные)
+      const activeServices = services
+        .filter(s => s.is_active)
+        .map(s => ({
+          consultant_id: targetConsultantId,
+          service_id: s.service_id,
+          custom_price: s.custom_price,
+          custom_duration: s.custom_duration,
+          is_active: true
+        }));
+
+      if (activeServices.length > 0) {
+        const { data, error } = await supabase
+          .from('consultant_services')
+          .insert(activeServices)
+          .select();
+
+        if (error) {
+          app.log.error({ error }, 'Failed to update services');
+          return reply.status(500).send({ error: error.message });
+        }
+
+        return reply.send(data);
+      }
+
+      return reply.send([]);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating services');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /consultant/call-log
+   * Отметить прозвон лида
+   */
+  app.post('/consultant/call-log', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const { lead_id, result, notes, next_follow_up } = request.body as {
+        lead_id: string;
+        result: string;
+        notes?: string;
+        next_follow_up?: string;
+      };
+
+      const { data, error } = await supabase
+        .from('consultant_call_logs')
+        .insert({
+          consultant_id: consultantId,
+          lead_id,
+          result,
+          notes,
+          next_follow_up
+        })
+        .select()
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to create call log');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.status(201).send(data);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error creating call log');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/call-logs/:leadId
+   * Получить историю прозвонов лида
+   */
+  app.get('/consultant/call-logs/:leadId', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { leadId } = request.params as { leadId: string };
+      const consultantId = request.consultant?.id;
+
+      let query = supabase
+        .from('consultant_call_logs')
+        .select('*')
+        .eq('lead_id', leadId)
+        .order('called_at', { ascending: false });
+
+      // Консультант видит только свои звонки
+      if (consultantId && request.userRole !== 'admin') {
+        query = query.eq('consultant_id', consultantId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch call logs');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching call logs');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/profile
+   * Получить профиль консультанта
+   */
+  app.get('/consultant/profile', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+      const targetConsultantId = isAdmin
+        ? (request.query as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      const { data, error } = await supabase
+        .from('consultants')
+        .select('id, name, phone, email, specialization, user_account_id')
+        .eq('id', targetConsultantId)
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch profile');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching profile');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultant/profile
+   * Обновить профиль консультанта
+   */
+  app.put('/consultant/profile', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const { name, phone, email, specialization } = request.body as {
+        name?: string;
+        phone?: string;
+        email?: string;
+        specialization?: string;
+      };
+
+      const { data, error } = await supabase
+        .from('consultants')
+        .update({
+          name,
+          phone,
+          email,
+          specialization
+        })
+        .eq('id', consultantId)
+        .select()
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to update profile');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating profile');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /consultant/consultation/create
+   * Создать консультацию вручную
+   */
+  app.post('/consultant/consultation/create', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const {
+        service_id,
+        date,
+        start_time,
+        end_time,
+        lead_id,
+        client_name,
+        client_phone,
+        notes
+      } = request.body as {
+        service_id: string;
+        date: string;
+        start_time: string;
+        end_time: string;
+        lead_id?: string;
+        client_name?: string;
+        client_phone?: string;
+        notes?: string;
+      };
+
+      // Создаем консультацию
+      const { data: consultation, error } = await supabase
+        .from('consultations')
+        .insert({
+          consultant_id: consultantId,
+          service_id,
+          date,
+          start_time,
+          end_time,
+          dialog_analysis_id: lead_id,
+          client_name: client_name || null,
+          client_phone: client_phone || null,
+          notes,
+          status: 'scheduled',
+          user_account_id: request.userAccountId
+        })
+        .select()
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to create consultation');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      // Если лид выбран - обновить funnel_stage
+      if (lead_id) {
+        await supabase
+          .from('dialog_analysis')
+          .update({ funnel_stage: 'consultation_booked' })
+          .eq('id', lead_id);
+      }
+
+      // Отправить WhatsApp уведомление консультанту
+      await notifyConsultantAboutNewConsultation(consultation.id);
+
+      return reply.status(201).send(consultation);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error creating consultation');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultant/consultation/:id
+   * Обновить консультацию
+   */
+  app.put('/consultant/consultation/:id', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const { status, notes, start_time, end_time, date } = request.body as {
+        status?: string;
+        notes?: string;
+        start_time?: string;
+        end_time?: string;
+        date?: string;
+      };
+
+      // Проверяем что консультация принадлежит консультанту
+      const { data: existing, error: existingError } = await supabase
+        .from('consultations')
+        .select('consultant_id')
+        .eq('id', id)
+        .single();
+
+      if (existingError || !existing) {
+        return reply.status(404).send({ error: 'Consultation not found' });
+      }
+
+      if (existing.consultant_id !== consultantId && request.userRole !== 'admin') {
+        return reply.status(403).send({ error: 'Not your consultation' });
+      }
+
+      const { data, error } = await supabase
+        .from('consultations')
+        .update({
+          status,
+          notes,
+          start_time,
+          end_time,
+          date
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) {
+        app.log.error({ error }, 'Failed to update consultation');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating consultation');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultant/change-password
+   * Сменить пароль консультанта
+   */
+  app.put('/consultant/change-password', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const userAccountId = request.userAccountId;
+      const { current_password, new_password } = request.body as {
+        current_password: string;
+        new_password: string;
+      };
+
+      if (!current_password || !new_password) {
+        return reply.status(400).send({ error: 'Current and new password required' });
+      }
+
+      // Проверяем текущий пароль
+      const { data: user, error: userError } = await supabase
+        .from('user_accounts')
+        .select('password')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || !user) {
+        return reply.status(404).send({ error: 'User not found' });
+      }
+
+      if (user.password !== current_password) {
+        return reply.status(400).send({ error: 'Current password incorrect' });
+      }
+
+      // Обновляем пароль
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ password: new_password })
+        .eq('id', userAccountId);
+
+      if (error) {
+        app.log.error({ error }, 'Failed to change password');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send({ success: true, message: 'Password changed successfully' });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error changing password');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+}

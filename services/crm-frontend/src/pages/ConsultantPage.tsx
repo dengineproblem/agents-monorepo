@@ -1,0 +1,203 @@
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { consultantApi, DashboardStats } from '@/services/consultantApi';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useToast } from '@/hooks/use-toast';
+import { LeadsTab } from '@/components/consultant/LeadsTab';
+import { CalendarTab } from '@/components/consultant/CalendarTab';
+import { ProfileTab } from '@/components/consultant/ProfileTab';
+import { ScheduleTab } from '@/components/consultant/ScheduleTab';
+import { ServicesTab } from '@/components/consultant/ServicesTab';
+import {
+  Users,
+  Calendar,
+  TrendingUp,
+  DollarSign,
+  Clock,
+  LogOut,
+  UserCircle,
+  Settings,
+  MessageSquare,
+  Briefcase,
+} from 'lucide-react';
+
+export function ConsultantPage() {
+  const { consultantId } = useParams<{ consultantId: string }>();
+  const { user, logout, isConsultant } = useAuth();
+  const { toast } = useToast();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('calendar');
+
+  // Проверка доступа
+  useEffect(() => {
+    if (isConsultant && user?.consultantId && user.consultantId !== consultantId) {
+      // Консультант пытается зайти на страницу другого консультанта
+      window.location.href = `/c/${user.consultantId}`;
+    }
+  }, [isConsultant, user, consultantId]);
+
+  // Загрузка статистики
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        setLoading(true);
+        const data = await consultantApi.getDashboard(consultantId);
+        setStats(data);
+      } catch (error: any) {
+        console.error('Failed to load dashboard:', error);
+        toast({
+          title: 'Ошибка',
+          description: 'Не удалось загрузить статистику',
+          variant: 'destructive',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadStats();
+  }, [consultantId, toast]);
+
+  const handleLogout = () => {
+    logout();
+    window.location.href = '/login';
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <UserCircle className="h-10 w-10 text-primary" />
+              <div>
+                <h1 className="text-2xl font-bold">{user?.consultantName || 'Консультант'}</h1>
+                <p className="text-sm text-muted-foreground">Личный кабинет</p>
+              </div>
+            </div>
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Выйти
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-6">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Всего лидов</CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.total_leads || 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Горячих: {stats?.hot_leads || 0} | Теплых: {stats?.warm_leads || 0}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Консультации</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.total_consultations || 0}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Запланировано: {stats?.scheduled || 0} | Завершено: {stats?.completed || 0}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Конверсия</CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.completion_rate?.toFixed(1) || 0}%</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Процент завершенных консультаций
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Доход</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.total_revenue?.toLocaleString() || 0} ₽</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Общий доход за все время
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="calendar">
+              <Calendar className="h-4 w-4 mr-2" />
+              Календарь
+            </TabsTrigger>
+            <TabsTrigger value="leads">
+              <Users className="h-4 w-4 mr-2" />
+              Лиды
+            </TabsTrigger>
+            <TabsTrigger value="schedule">
+              <Clock className="h-4 w-4 mr-2" />
+              Расписание
+            </TabsTrigger>
+            <TabsTrigger value="services">
+              <Briefcase className="h-4 w-4 mr-2" />
+              Услуги
+            </TabsTrigger>
+            <TabsTrigger value="profile">
+              <Settings className="h-4 w-4 mr-2" />
+              Профиль
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="calendar" className="space-y-4">
+            <CalendarTab />
+          </TabsContent>
+
+          <TabsContent value="leads" className="space-y-4">
+            <LeadsTab />
+          </TabsContent>
+
+          <TabsContent value="schedule" className="space-y-4">
+            <ScheduleTab />
+          </TabsContent>
+
+          <TabsContent value="services" className="space-y-4">
+            <ServicesTab />
+          </TabsContent>
+
+          <TabsContent value="profile" className="space-y-4">
+            <ProfileTab />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  );
+}
