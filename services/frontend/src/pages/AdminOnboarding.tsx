@@ -410,7 +410,6 @@ const AdminOnboarding: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/impersonate/${userId}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           'x-user-id': currentUser.id,
         },
       });

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -194,9 +195,16 @@ const AdminChats: React.FC = () => {
   });
 
   return (
-    <div className="flex h-[calc(100vh-120px)] border rounded-lg overflow-hidden">
-      {/* Users List */}
-      <div className="w-80 border-r flex flex-col">
+    <Tabs defaultValue="user-chats" className="w-full">
+      <TabsList className="mb-4">
+        <TabsTrigger value="user-chats">Чаты с пользователями</TabsTrigger>
+        <TabsTrigger value="moltbot">Молтбот</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="user-chats" className="mt-0">
+        <div className="flex h-[calc(100vh-180px)] border rounded-lg overflow-hidden">
+          {/* Users List */}
+          <div className="w-80 border-r flex flex-col">
         <div className="p-3 border-b">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -384,6 +392,187 @@ const AdminChats: React.FC = () => {
             <p className="text-sm">Выберите пользователя из списка слева</p>
           </div>
         )}
+      </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="moltbot" className="mt-0">
+        <MoltbotChat />
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+// Moltbot Chat Component
+const MoltbotChat: React.FC = () => {
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [specialist, setSpecialist] = useState('facebook-ads');
+  const [specialists, setSpecialists] = useState<Array<{ id: string; name: string; description: string }>>([]);
+
+  useEffect(() => {
+    // Load specialists list
+    const loadSpecialists = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/admin/moltbot/specialists`, {
+          headers: {
+            'x-user-id': JSON.parse(localStorage.getItem('user') || '{}').id || '',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSpecialists(data.specialists || []);
+        }
+      } catch (err) {
+        console.error('Error loading specialists:', err);
+      }
+    };
+    loadSpecialists();
+  }, []);
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || sending) return;
+
+    const userMessage = newMessage.trim();
+    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
+    setNewMessage('');
+    setSending(true);
+
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': currentUser.id || '',
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          specialist,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: data.response || 'Ошибка: пустой ответ',
+          timestamp: new Date()
+        }]);
+      } else {
+        const error = await res.text();
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Ошибка: ${error}`,
+          timestamp: new Date()
+        }]);
+      }
+    } catch (err) {
+      console.error('Error sending message to Moltbot:', err);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Ошибка: ${err}`,
+        timestamp: new Date()
+      }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  return (
+    <div className="flex h-[calc(100vh-180px)] border rounded-lg overflow-hidden">
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold">Чат с Молтбот</h2>
+            <p className="text-sm text-muted-foreground">AI-агент для управления рекламой</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground">Specialist:</label>
+            <select
+              value={specialist}
+              onChange={(e) => setSpecialist(e.target.value)}
+              className="border rounded px-2 py-1 text-sm"
+            >
+              {specialists.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <ScrollArea className="flex-1 p-4">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <MessageSquare className="h-16 w-16 mb-4 opacity-50" />
+              <p className="text-lg">Начните диалог с Молтбот</p>
+              <p className="text-sm">Задайте вопрос о рекламе или попросите помощь</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    'flex',
+                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'max-w-[70%] rounded-lg px-4 py-2',
+                      msg.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted'
+                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    <p className="text-xs opacity-70 mt-1">
+                      {format(msg.timestamp, 'HH:mm', { locale: ru })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* Input */}
+        <div className="p-4 border-t">
+          <div className="flex gap-2">
+            <Textarea
+              placeholder="Напишите сообщение..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={sending}
+              className="resize-none"
+              rows={2}
+            />
+            <Button
+              onClick={handleSendMessage}
+              disabled={!newMessage.trim() || sending}
+              size="icon"
+              className="h-auto"
+            >
+              {sending ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

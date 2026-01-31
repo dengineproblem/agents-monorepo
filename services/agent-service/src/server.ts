@@ -46,6 +46,7 @@ import brainProposalsRoutes from './routes/brainProposals.js';
 import impersonationRoutes from './routes/impersonation.js';
 import telegramWebhook from './routes/telegramWebhook.js';
 import adminChatRoutes from './routes/adminChat.js';
+import adminMoltbotRoutes from './routes/adminMoltbot.js';
 import adminStatsRoutes from './routes/adminStats.js';
 import adminUsersRoutes from './routes/adminUsers.js';
 import adminAdsRoutes from './routes/adminAds.js';
@@ -80,6 +81,13 @@ const app = fastify({
 app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
   // Store raw body for signature verification
   (req as any).rawBody = body;
+
+  // Handle empty body
+  if (body.length === 0) {
+    done(null, {});
+    return;
+  }
+
   try {
     const json = JSON.parse(body.toString());
     done(null, json);
@@ -201,6 +209,7 @@ app.register(async (adminApp) => {
   adminApp.addHook('preHandler', requireTechAdmin);
 
   adminApp.register(adminChatRoutes);
+  adminApp.register(adminMoltbotRoutes);
   adminApp.register(adminStatsRoutes);
   adminApp.register(adminUsersRoutes);
   adminApp.register(adminAdsRoutes);

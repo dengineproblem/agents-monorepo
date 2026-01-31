@@ -178,23 +178,13 @@ export default async function impersonationRoutes(app: FastifyInstance) {
           username,
           onboarding_stage,
           is_active,
-          access_token,
-          ad_account_id,
-          page_id,
-          instagram_id,
-          telegram_id,
-          site_url,
-          facebook_pixel_id,
-          city_id,
-          tarif,
-          optimization,
-          autopilot,
-          creative_generations_available
+          telegram_id
         `)
         .eq('id', targetUserId)
         .single();
 
       if (error || !targetUser) {
+        logger.warn({ targetUserId, error: error?.message, data: targetUser }, 'User not found for impersonation');
         return reply.code(404).send({ error: 'User not found' });
       }
 
