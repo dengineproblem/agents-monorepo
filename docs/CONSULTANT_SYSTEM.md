@@ -1832,6 +1832,105 @@ const [filters, setFilters] = useState({
 
 **Дата исправления**: 2026-02-01
 
+### Проблема: Legacy консультанты не могут редактировать расписание и профиль (403 ошибка)
+
+**Симптомы**:
+- Консультант успешно логинится, но не может редактировать расписание
+- При попытке сохранить расписание возвращается ошибка 403 "Consultant only"
+- Аналогичная ошибка при редактировании профиля, услуг и других данных
+- Проблема возникает только у консультантов, которые логинятся через `user_accounts` (legacy flow)
+
+**Причина**:
+Middleware `consultantAuthMiddleware` не поддерживал legacy консультантов (авторизация через `user_accounts` с role='consultant'). В системе существует 2 способа авторизации консультантов:
+
+1. **Новый flow** (через `consultant_accounts`):
+   - `user.id` = `consultant_accounts.id`
+   - Middleware находит в `consultant_accounts` → устанавливает `request.consultant`
+   - ✅ Работает
+
+2. **Legacy flow** (через `user_accounts` с role='consultant'):
+   - `user.id` = `user_accounts.id`
+   - Middleware находит в `user_accounts` → выходит БЕЗ установки `request.consultant`
+   - ❌ НЕ работает
+
+В endpoint'ах (например, `PUT /consultant/schedule`) проверка `if (!consultantId)` возвращает 403, так как `request.consultant` не установлен.
+
+**Решение**:
+Обновлён middleware для поддержки legacy flow:
+
+```typescript
+// services/crm-backend/src/middleware/consultantAuth.ts (строки 33-60)
+
+// Сначала проверяем user_accounts (для админов И legacy консультантов)
+const { data: userAccount, error: userError } = await supabase
+  .from('user_accounts')
+  .select('id, username, role, is_tech_admin')
+  .eq('id', userAccountId)
+  .maybeSingle();
+
+if (userAccount) {
+  // Если это legacy консультант (role='consultant' в user_accounts)
+  if (userAccount.role === 'consultant') {
+    request.userRole = 'consultant';
+
+    // Получаем данные консультанта через parent_user_account_id
+    const { data: consultant, error: fetchConsultantError } = await supabase
+      .from('consultants')
+      .select('id, name, parent_user_account_id')
+      .eq('parent_user_account_id', userAccount.id)
+      .eq('is_active', true)
+      .single();
+
+    if (fetchConsultantError || !consultant) {
+      return reply.status(403).send({
+        error: 'Consultant profile not found or inactive',
+        details: 'Профиль консультанта не найден или неактивен'
+      });
+    }
+
+    request.consultant = consultant;
+    return;
+  }
+
+  // Если это админ или manager
+  request.userRole = userAccount.is_tech_admin
+    ? 'admin'
+    : (userAccount.role as 'admin' | 'manager' || 'admin');
+  return;
+}
+```
+
+**Обратная совместимость**:
+- ✅ Новый flow (consultant_accounts) - работает как раньше
+- ✅ Legacy flow (user_accounts с role='consultant') - теперь поддерживается
+- ✅ Админы и менеджеры - без изменений
+
+**Проверка**:
+```sql
+-- Найти legacy консультантов
+SELECT ua.id, ua.username, ua.role, c.id as consultant_id, c.name
+FROM user_accounts ua
+JOIN consultants c ON c.parent_user_account_id = ua.id
+WHERE ua.role = 'consultant';
+```
+
+**Тест**:
+1. Залогиниться как legacy консультант
+2. Открыть вкладку "Расписание"
+3. Изменить рабочие часы и сохранить
+4. ✅ Расписание должно сохраниться без ошибки 403
+
+**Результат**:
+- ✅ Legacy консультанты могут редактировать своё расписание
+- ✅ Legacy консультанты могут редактировать профиль, услуги, пароль
+- ✅ Legacy консультанты могут создавать консультации, отправлять сообщения, управлять продажами
+- ✅ Оба flow авторизации работают параллельно
+
+**Файлы**:
+- `services/crm-backend/src/middleware/consultantAuth.ts` - добавлена поддержка legacy flow
+
+**Дата исправления**: 2026-02-01
+
 ---
 
 ## Конфигурация

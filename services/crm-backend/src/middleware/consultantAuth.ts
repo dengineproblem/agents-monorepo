@@ -30,7 +30,7 @@ export async function consultantAuthMiddleware(
   request.userAccountId = userAccountId;
 
   try {
-    // Сначала проверяем user_accounts (для админов)
+    // Сначала проверяем user_accounts (для админов И legacy консультантов)
     const { data: userAccount, error: userError } = await supabase
       .from('user_accounts')
       .select('id, username, role, is_tech_admin')
@@ -38,10 +38,33 @@ export async function consultantAuthMiddleware(
       .maybeSingle();
 
     if (userAccount) {
-      // Это админ или manager
+      // Если это legacy консультант (role='consultant' в user_accounts)
+      if (userAccount.role === 'consultant') {
+        request.userRole = 'consultant';
+
+        // Получаем данные консультанта через parent_user_account_id
+        const { data: consultant, error: fetchConsultantError } = await supabase
+          .from('consultants')
+          .select('id, name, parent_user_account_id')
+          .eq('parent_user_account_id', userAccount.id)
+          .eq('is_active', true)
+          .single();
+
+        if (fetchConsultantError || !consultant) {
+          return reply.status(403).send({
+            error: 'Consultant profile not found or inactive',
+            details: 'Профиль консультанта не найден или неактивен'
+          });
+        }
+
+        request.consultant = consultant;
+        return;
+      }
+
+      // Если это админ или manager
       request.userRole = userAccount.is_tech_admin
         ? 'admin'
-        : (userAccount.role || 'admin');
+        : (userAccount.role as 'admin' | 'manager' || 'admin');
       return;
     }
 
