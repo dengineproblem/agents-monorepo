@@ -64,8 +64,9 @@ export async function consultantsRoutes(app: FastifyInstance) {
   /**
    * GET /consultants
    * Получить список консультантов
+   * ВРЕМЕННО ЗАКОММЕНТИРОВАНО - DEBUGGING DUPLICATE ROUTE
    */
-  app.get('/consultants', async (request: ConsultantAuthRequest, reply) => {
+  /* app.get('/consultants', async (request: ConsultantAuthRequest, reply) => {
     try {
       const userAccountId = request.userAccountId;
 
@@ -92,7 +93,7 @@ export async function consultantsRoutes(app: FastifyInstance) {
       app.log.error({ error }, 'Error fetching consultants');
       return reply.status(500).send({ error: error.message });
     }
-  });
+  }); */
 
   /**
    * POST /consultants
