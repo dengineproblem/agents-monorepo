@@ -72,12 +72,14 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         status,
         interest_level,
         is_booked,
+        consultantId: queryConsultantId,
         limit = 50,
         offset = 0
       } = request.query as {
         status?: string;
         interest_level?: string;
         is_booked?: string;
+        consultantId?: string;
         limit?: number;
         offset?: number;
       };
@@ -85,14 +87,20 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const consultantId = request.consultant?.id;
       const isAdmin = request.userRole === 'admin';
 
+      // Определяем ID консультанта для фильтрации
+      // Приоритет: query параметр (для админов) > авторизованный консультант
+      const targetConsultantId = isAdmin && queryConsultantId
+        ? queryConsultantId
+        : consultantId;
+
       let query = supabase
         .from('dialog_analysis')
         .select('*', { count: 'exact' })
         .order('last_message', { ascending: false });
 
-      // Консультант видит только своих лидов
-      if (!isAdmin && consultantId) {
-        query = query.eq('assigned_consultant_id', consultantId);
+      // Фильтруем по консультанту (если указан)
+      if (targetConsultantId) {
+        query = query.eq('assigned_consultant_id', targetConsultantId);
       }
 
       if (status) {
@@ -256,8 +264,11 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       // Вставляем новое
       if (schedules && schedules.length > 0) {
         const schedulesWithConsultant = schedules.map(s => ({
-          ...s,
-          consultant_id: consultantId
+          consultant_id: consultantId,
+          day_of_week: s.day_of_week,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          is_active: s.is_active !== undefined ? s.is_active : true
         }));
 
         const { data, error } = await supabase

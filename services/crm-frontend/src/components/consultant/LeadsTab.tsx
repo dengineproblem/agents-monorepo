@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { consultantApi, Lead } from '@/services/consultantApi';
 import { salesApi } from '@/services/salesApi';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
 export function LeadsTab() {
+  const { consultantId } = useParams<{ consultantId: string }>();
   const { toast } = useToast();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,7 @@ export function LeadsTab() {
       const params: any = {};
       if (filters.is_booked && filters.is_booked !== 'all') params.is_booked = filters.is_booked;
       if (filters.interest_level && filters.interest_level !== 'all') params.interest_level = filters.interest_level;
+      if (consultantId) params.consultantId = consultantId;
 
       const data = await consultantApi.getLeads(params);
       setLeads(data.leads);
@@ -66,7 +69,7 @@ export function LeadsTab() {
 
   useEffect(() => {
     loadLeads();
-  }, [filters]);
+  }, [filters, consultantId]);
 
   // Загрузка сообщений для лида
   const loadMessages = async (leadId: string) => {

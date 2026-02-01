@@ -145,6 +145,7 @@ Response:
 Получить список лидов консультанта.
 
 Query параметры:
+- `consultantId` - ID консультанта (опционально, только для админов)
 - `status` - статус лида
 - `interest_level` - hot/warm/cold
 - `is_booked` - true/false
@@ -1672,6 +1673,44 @@ const [filters, setFilters] = useState({
 });
 ```
 
+### Проблема: Админ видит всех лидов при просмотре страницы консультанта
+
+**Симптомы**: При открытии `/c/:consultantId` админ видит всех лидов из БД, а не только лидов конкретного консультанта
+
+**Причина**: Backend endpoint `GET /consultant/leads` не фильтровал лидов по `consultantId` для админов
+
+**Решение**:
+1. **Frontend**: Передавать `consultantId` из URL в запрос `getLeads()`
+   ```typescript
+   // LeadsTab.tsx
+   const { consultantId } = useParams<{ consultantId: string }>();
+
+   const loadLeads = async () => {
+     const params: any = {};
+     if (consultantId) params.consultantId = consultantId;
+
+     const data = await consultantApi.getLeads(params);
+   };
+   ```
+
+2. **Backend**: Использовать `consultantId` из query параметров для фильтрации
+   ```typescript
+   // consultantDashboard.ts
+   const { consultantId: queryConsultantId } = request.query;
+   const targetConsultantId = isAdmin && queryConsultantId
+     ? queryConsultantId
+     : request.consultant?.id;
+
+   if (targetConsultantId) {
+     query = query.eq('assigned_consultant_id', targetConsultantId);
+   }
+   ```
+
+**Файлы**:
+- `services/crm-frontend/src/components/consultant/LeadsTab.tsx`
+- `services/crm-frontend/src/services/consultantApi.ts`
+- `services/crm-backend/src/routes/consultantDashboard.ts`
+
 ---
 
 ## Конфигурация
@@ -1899,10 +1938,11 @@ await consultationService.updateConsultantAcceptsNewLeads(consultantId, true);
 
 ---
 
-**Версия документа**: 1.1.0
+**Версия документа**: 1.1.1
 **Дата обновления**: 2026-02-01
 **Автор**: AI Assistant (Claude Sonnet 4.5)
 
 **История изменений**:
+- v1.1.1 (2026-02-01) - Исправлена фильтрация лидов при просмотре админом страницы консультанта
 - v1.1.0 (2026-02-01) - Добавлена система продаж консультантов
 - v1.0.0 (2026-01-31) - Первая версия документации

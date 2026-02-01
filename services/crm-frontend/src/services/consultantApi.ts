@@ -130,6 +130,7 @@ export const consultantApi = {
     status?: string;
     interest_level?: string;
     is_booked?: string;
+    consultantId?: string;
     limit?: number;
     offset?: number;
   }): Promise<{ leads: Lead[]; total: number; limit: number; offset: number }> => {
