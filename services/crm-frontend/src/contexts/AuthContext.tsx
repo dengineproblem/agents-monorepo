@@ -51,7 +51,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Получаем user_account
+      // 1. СНАЧАЛА проверяем consultant_accounts (для консультантов)
+      const { data: consultantAccount } = await supabase
+        .from('consultant_accounts')
+        .select('id, consultant_id, username, role')
+        .eq('username', username)
+        .eq('password', password)
+        .maybeSingle();
+
+      if (consultantAccount) {
+        // Получить данные консультанта
+        const { data: consultant, error: consultantError } = await supabase
+          .from('consultants')
+          .select('id, name, is_active')
+          .eq('id', consultantAccount.consultant_id)
+          .single();
+
+        if (consultantError || !consultant || !consultant.is_active) {
+          return {
+            success: false,
+            error: 'Профиль консультанта не найден или неактивен'
+          };
+        }
+
+        // Сохраняем в session
+        const sessionUser: User = {
+          id: consultantAccount.id,  // ID из consultant_accounts
+          username: consultantAccount.username,
+          role: 'consultant',
+          is_tech_admin: false,
+          consultantId: consultant.id,
+          consultantName: consultant.name,
+        };
+
+        localStorage.setItem('user', JSON.stringify(sessionUser));
+        setUser(sessionUser);
+        return { success: true };
+      }
+
+      // 2. Если не найдено в consultant_accounts - проверяем user_accounts (админы/менеджеры)
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
         .select('id, username, role, is_tech_admin')
@@ -71,7 +109,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       let consultantId: string | undefined;
       let consultantName: string | undefined;
 
-      // Если роль consultant - получаем consultantId
+      // Если роль consultant в user_accounts - получаем consultantId (legacy)
       if (role === 'consultant') {
         const { data: consultant, error: consultantError } = await supabase
           .from('consultants')

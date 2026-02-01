@@ -24,8 +24,15 @@ const Login = () => {
 
   useEffect(() => {
     if (isAuthenticated) {
-      // Перенаправляем консультантов на их персональную страницу
-      if (isConsultant && user?.consultantId) {
+      // Проверить сохраненный returnUrl
+      const returnUrl = localStorage.getItem('returnUrl');
+      localStorage.removeItem('returnUrl');
+
+      if (returnUrl) {
+        // Если был сохранен URL - перенаправляем туда
+        navigate(returnUrl, { replace: true });
+      } else if (isConsultant && user?.consultantId) {
+        // Перенаправляем консультантов на их персональную страницу
         navigate(`/c/${user.consultantId}`, { replace: true });
       } else {
         navigate('/', { replace: true });

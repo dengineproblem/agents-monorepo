@@ -57,6 +57,10 @@ function AppRoutes() {
 
   // Not authenticated - show login
   if (!isAuthenticated && !isPublicRoute) {
+    // Сохранить original URL для редиректа после логина
+    const returnUrl = location.pathname + location.search;
+    localStorage.setItem('returnUrl', returnUrl);
+
     return <Navigate to="/login" replace />;
   }
 
