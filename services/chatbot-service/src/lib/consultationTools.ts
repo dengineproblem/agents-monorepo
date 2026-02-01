@@ -135,6 +135,7 @@ interface LeadInfo {
   id: string;
   contact_phone: string;
   contact_name?: string;
+  assigned_consultant_id?: string;
 }
 
 /**
@@ -514,8 +515,14 @@ export async function handleGetNearestSlots(
 ): Promise<string> {
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
+  // Определяем консультанта: если лид закреплен за консультантом - показываем только его слоты
+  const consultantIds = lead.assigned_consultant_id
+    ? [lead.assigned_consultant_id]
+    : (settings.consultant_ids || []);
+
   log.info({
-    consultantIds: settings.consultant_ids?.length || 'all'
+    consultantIds: consultantIds.length || 'all',
+    assignedConsultant: lead.assigned_consultant_id ? maskUuid(lead.assigned_consultant_id) : null
   }, '[handleGetNearestSlots] Fetching nearest slots', ['consultation']);
 
   try {
@@ -527,8 +534,8 @@ export async function handleGetNearestSlots(
       days_ahead: '7'
     });
 
-    if (settings.consultant_ids?.length) {
-      params.append('consultant_ids', settings.consultant_ids.join(','));
+    if (consultantIds.length) {
+      params.append('consultant_ids', consultantIds.join(','));
     }
 
     if (settings.timezone) {
@@ -649,9 +656,15 @@ export async function handleGetSlotsForDate(
     return `Дата ${args.date} уже прошла. Выбери сегодняшний день или будущую дату.`;
   }
 
+  // Определяем консультанта: если лид закреплен за консультантом - показываем только его слоты
+  const consultantIds = lead.assigned_consultant_id
+    ? [lead.assigned_consultant_id]
+    : (settings.consultant_ids || []);
+
   log.info({
     date: args.date,
-    consultantIds: settings.consultant_ids?.length || 'all',
+    consultantIds: consultantIds.length || 'all',
+    assignedConsultant: lead.assigned_consultant_id ? maskUuid(lead.assigned_consultant_id) : null,
     timezone
   }, '[handleGetSlotsForDate] Fetching slots for date', ['consultation']);
 
@@ -664,8 +677,8 @@ export async function handleGetSlotsForDate(
       limit: '100' // Большой лимит — вернутся ВСЕ слоты на этот день
     });
 
-    if (settings.consultant_ids?.length) {
-      params.append('consultant_ids', settings.consultant_ids.join(','));
+    if (consultantIds.length) {
+      params.append('consultant_ids', consultantIds.join(','));
     }
 
     if (settings.timezone) {

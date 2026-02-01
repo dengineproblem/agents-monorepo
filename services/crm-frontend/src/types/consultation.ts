@@ -4,7 +4,9 @@ export interface Consultant {
   email?: string;
   phone?: string;
   specialization?: string;
+  user_account_id?: string; // ID аккаунта консультанта для входа
   is_active: boolean;
+  accepts_new_leads: boolean; // Принимает ли консультант новых лидов (участие в автоматическом распределении)
   created_at: string;
   updated_at: string;
 }
@@ -144,6 +146,16 @@ export interface CreateConsultantData {
   phone?: string;
   specialization?: string;
   user_account_id?: string;
+  createAccount?: boolean; // флаг автосоздания аккаунта для консультанта
+}
+
+export interface CreateConsultantResponse {
+  consultant: Consultant;
+  credentials?: {
+    username: string;
+    password: string;
+  };
+  message: string;
 }
 
 export interface CreateConsultationData {

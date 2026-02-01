@@ -3,6 +3,7 @@ import {
   Consultation,
   ConsultationWithDetails,
   CreateConsultantData,
+  CreateConsultantResponse,
   CreateConsultationData,
   UpdateConsultationData,
   ConsultationStats,
@@ -26,27 +27,42 @@ const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 export const consultationService = {
   // Получение списка консультантов
   async getConsultants(): Promise<Consultant[]> {
-    const response = await fetch(`${API_BASE_URL}/consultants`);
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const response = await fetch(`${API_BASE_URL}/consultants`, {
+      headers: {
+        'x-user-id': user.id || ''
+      }
+    });
     if (!response.ok) throw new Error('Failed to fetch consultants');
     return response.json();
   },
 
   // Создание консультанта
-  async createConsultant(userAccountId: string, data: CreateConsultantData): Promise<Consultant> {
+  async createConsultant(userAccountId: string, data: CreateConsultantData): Promise<CreateConsultantResponse> {
     const response = await fetch(`${API_BASE_URL}/consultants`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...data, user_account_id: userAccountId })
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userAccountId
+      },
+      body: JSON.stringify(data)
     });
-    if (!response.ok) throw new Error('Failed to create consultant');
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to create consultant' }));
+      throw new Error(error.error || error.message || 'Failed to create consultant');
+    }
     return response.json();
   },
 
   // Обновление консультанта
   async updateConsultant(id: string, data: Partial<CreateConsultantData>): Promise<Consultant> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
     const response = await fetch(`${API_BASE_URL}/consultants/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': user.id || ''
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) throw new Error('Failed to update consultant');
@@ -55,10 +71,32 @@ export const consultationService = {
 
   // Удаление консультанта
   async deleteConsultant(id: string): Promise<void> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
     const response = await fetch(`${API_BASE_URL}/consultants/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-user-id': user.id || ''
+      }
     });
     if (!response.ok) throw new Error('Failed to delete consultant');
+  },
+
+  // Обновление флага accepts_new_leads (только для админов)
+  async updateConsultantAcceptsNewLeads(consultantId: string, acceptsNewLeads: boolean): Promise<{ success: boolean; consultant: Consultant; message: string }> {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const response = await fetch(`${API_BASE_URL}/admin/consultants/${consultantId}/accepts-new-leads`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': user.id || ''
+      },
+      body: JSON.stringify({ acceptsNewLeads })
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update consultant' }));
+      throw new Error(error.error || 'Failed to update consultant');
+    }
+    return response.json();
   },
 
   // Получение консультаций

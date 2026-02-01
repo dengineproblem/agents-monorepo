@@ -15,6 +15,13 @@
         "primary": "openai/gpt-5.2"
       },
       "models": {
+        "openai/gpt-4o": {
+          "params": {
+            "temperature": 0.3,
+            "maxTokens": 2048
+          },
+          "alias": "gpt4o"
+        },
         "openai/gpt-5.2": {
           "params": {
             "temperature": 0.7,
@@ -52,7 +59,13 @@
       "bootstrapMaxChars": 3000,
       "minimizePrompt": false,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "openai/gpt-4o"
+      },
+      "tools": {
+        "sessions_spawn": {
+          "enabled": true,
+          "allowedAgents": ["facebook-ads", "creatives", "crm", "tiktok", "onboarding"]
+        }
       }
     },
     "facebook-ads": {

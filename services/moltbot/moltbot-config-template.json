@@ -9,60 +9,47 @@
     "defaults": {
       "model": {
         "primary": "openai/gpt-5.2"
-      }
+      },
+      "models": {
+        "openai/gpt-4o": {
+          "params": {
+            "temperature": 0.3,
+            "maxTokens": 2048
+          },
+          "alias": "gpt4o"
+        },
+        "openai/gpt-5.2": {
+          "params": {
+            "maxTokens": 140000
+          },
+          "alias": "gpt"
+        },
+        "anthropic/claude-sonnet-4-20250514": {
+          "params": {
+            "cacheControlTtl": "1h"
+          },
+          "alias": "claude"
+        }
+      },
+      "contextPruning": {
+        "mode": "cache-ttl",
+        "ttl": "1h"
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "heartbeat": {
+        "every": "30m"
+      },
+      "maxConcurrent": 4
     },
     "list": [
       {
         "id": "router",
         "default": true,
-        "name": "Router Agent",
-        "workspace": "./moltbot-workspace-router",
+        "name": "Multi-Domain Specialist Agent",
+        "workspace": "/root/clawd/moltbot-workspace-router",
         "agentDir": "~/.moltbot/agents/router",
-        "model": {
-          "primary": "openai/gpt-5.2"
-        }
-      },
-      {
-        "id": "facebook-ads",
-        "name": "Facebook Ads Specialist",
-        "workspace": "./moltbot-workspace-facebook",
-        "agentDir": "~/.moltbot/agents/facebook-ads",
-        "model": {
-          "primary": "openai/gpt-5.2"
-        }
-      },
-      {
-        "id": "creatives",
-        "name": "Creative Generation Specialist",
-        "workspace": "./moltbot-workspace-creatives",
-        "agentDir": "~/.moltbot/agents/creatives",
-        "model": {
-          "primary": "openai/gpt-5.2"
-        }
-      },
-      {
-        "id": "crm",
-        "name": "CRM & Leads Specialist",
-        "workspace": "./moltbot-workspace-crm",
-        "agentDir": "~/.moltbot/agents/crm",
-        "model": {
-          "primary": "openai/gpt-5.2"
-        }
-      },
-      {
-        "id": "tiktok",
-        "name": "TikTok Ads Specialist",
-        "workspace": "./moltbot-workspace-tiktok",
-        "agentDir": "~/.moltbot/agents/tiktok",
-        "model": {
-          "primary": "openai/gpt-5.2"
-        }
-      },
-      {
-        "id": "onboarding",
-        "name": "Onboarding Specialist",
-        "workspace": "./moltbot-workspace-onboarding",
-        "agentDir": "~/.moltbot/agents/onboarding",
         "model": {
           "primary": "openai/gpt-5.2"
         }
@@ -85,6 +72,34 @@
       "allowFrom": ["*"],
       "groupPolicy": "allowlist",
       "streamMode": "partial"
+    }
+  },
+  "tools": {
+    "media": {
+      "audio": {
+        "enabled": true,
+        "models": [
+          {
+            "provider": "openai",
+            "model": "whisper-1",
+            "baseUrl": "https://api.openai.com/v1"
+          }
+        ]
+      }
+    }
+  },
+  "messages": {
+    "ackReactionScope": "group-mentions"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "plugins": {
+    "entries": {
+      "telegram": {
+        "enabled": true
+      }
     }
   }
 }

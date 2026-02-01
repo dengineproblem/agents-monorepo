@@ -391,13 +391,14 @@ const Dashboard: React.FC = () => {
             <Card className="mb-6 shadow-sm">
               <CardContent className="p-4">
                 <div className="flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-muted-foreground">{t('dashboard.platform')}</span>
+                  <div className="flex items-center justify-center md:justify-start gap-3">
+                    <span className="text-sm font-medium text-muted-foreground hidden md:inline">{t('dashboard.platform')}</span>
                     <Tabs
                       value={platform}
                       onValueChange={(value) => setPlatform(value as 'instagram' | 'tiktok')}
+                      className="w-full md:w-auto"
                     >
-                      <TabsList className="h-auto bg-transparent p-0 gap-2">
+                      <TabsList className="h-auto bg-transparent p-0 gap-2 w-full md:w-auto justify-center md:justify-start">
                         <div className="flex items-center gap-1">
                           <TabsTrigger
                             value="instagram"
@@ -410,7 +411,7 @@ const Dashboard: React.FC = () => {
                             <Instagram className="h-4 w-4" />
                             Instagram
                           </TabsTrigger>
-                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" />
+                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" className="hidden md:flex" />
                         </div>
                         {FEATURES.SHOW_TIKTOK && (
                           <div className="flex items-center gap-1">
@@ -425,7 +426,7 @@ const Dashboard: React.FC = () => {
                               <TikTokIcon />
                               TikTok
                             </TabsTrigger>
-                            <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" />
+                            <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" className="hidden md:flex" />
                           </div>
                         )}
                       </TabsList>

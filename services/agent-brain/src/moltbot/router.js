@@ -26,19 +26,24 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
   }
 
   try {
-    // Call Moltbot Gateway API для specialist агента
-    const response = await fetch('http://moltbot:18789/api/v1/chat', {
+    // Call Moltbot Gateway API (OpenAI-compatible endpoint) для specialist агента
+    const response = await fetch('http://moltbot:18789/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.MOLTBOT_TOKEN || 'moltbot-dev-token-2026'}`
+        'Authorization': `Bearer ${process.env.MOLTBOT_TOKEN || 'moltbot-dev-token-2026'}`,
+        'x-moltbot-agent-id': specialist,
+        'x-moltbot-session-id': `telegram-${telegramChatId}-${specialist}`
       },
       body: JSON.stringify({
-        agentId: specialist,
-        message: `[Telegram Chat ID: ${telegramChatId}]\n\n${message}`,
-        channelId: 'telegram',
-        userId: telegramChatId,
-        sessionId: `telegram-${telegramChatId}-${specialist}`
+        model: 'openai/gpt-5.2', // Specialist agents используют GPT-5.2
+        messages: [
+          {
+            role: 'user',
+            content: `[Telegram Chat ID: ${telegramChatId}]\n\n${message}`
+          }
+        ],
+        stream: false
       }),
       signal: AbortSignal.timeout(120000) // 2 минуты timeout
     });
@@ -56,15 +61,22 @@ export async function routeToSpecialist(specialist, message, telegramChatId) {
 
     const result = await response.json();
 
+    // Извлечь ответ из OpenAI-совместимого формата
+    const assistantMessage = result.choices?.[0]?.message?.content || '';
+
     const duration = Date.now() - startTime;
     logger.info({
       specialist,
       telegramChatId,
       routeDuration: duration,
-      responseLength: result.response?.length || 0
+      responseLength: assistantMessage.length,
+      totalTokens: result.usage?.total_tokens || 0
     }, 'Specialist routing completed');
 
-    return result;
+    return {
+      response: assistantMessage,
+      usage: result.usage
+    };
 
   } catch (error) {
     const duration = Date.now() - startTime;

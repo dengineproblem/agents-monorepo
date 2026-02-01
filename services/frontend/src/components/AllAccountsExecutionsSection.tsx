@@ -230,43 +230,45 @@ export function AllAccountsExecutionsSection({
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               {exec.status === 'success' ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400" />
+                                <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400 flex-shrink-0" />
                               ) : (
-                                <XCircle className="h-4 w-4 text-red-500 dark:text-red-400" />
+                                <XCircle className="h-4 w-4 text-red-500 dark:text-red-400 flex-shrink-0" />
                               )}
+                              {/* Дата: на мобильных без времени, на десктопе с временем */}
                               <span className="text-sm font-medium">
-                                {format(new Date(exec.created_at), 'd MMM, HH:mm', { locale: ru })}
+                                <span className="md:hidden">{format(new Date(exec.created_at), 'd MMM', { locale: ru })}</span>
+                                <span className="hidden md:inline">{format(new Date(exec.created_at), 'd MMM, HH:mm', { locale: ru })}</span>
                               </span>
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-xs text-muted-foreground hidden sm:inline">
                                 ({formatDistanceToNow(new Date(exec.created_at), { addSuffix: true, locale: ru })})
                               </span>
                               {exec.execution_mode === 'manual_trigger' && (
-                                <Badge variant="outline" className="text-xs px-1.5 py-0 h-5">
+                                <Badge variant="outline" className="text-xs px-1.5 py-0 h-5 hidden sm:inline-flex">
                                   Brain Mini
                                 </Badge>
                               )}
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 flex-shrink-0">
                               {exec.report_text && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-7 px-2 text-xs"
+                                  className="h-7 px-1 md:px-2 text-xs"
                                   onClick={() => openReport(exec)}
                                 >
-                                  <FileText className="h-3.5 w-3.5 mr-1" />
-                                  Отчёт
+                                  <FileText className="h-3.5 w-3.5 md:mr-1" />
+                                  <span className="hidden md:inline">Отчёт</span>
                                 </Button>
                               )}
                               {exec.actions_json && exec.actions_json.length > 0 && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-7 px-2 text-xs"
+                                  className="h-7 px-1 md:px-2 text-xs"
                                   onClick={() => openActions(exec)}
                                 >
-                                  <Eye className="h-3.5 w-3.5 mr-1" />
-                                  Действия ({exec.actions_json.length})
+                                  <Eye className="h-3.5 w-3.5 md:mr-1" />
+                                  <span className="hidden md:inline">Действия ({exec.actions_json.length})</span>
                                 </Button>
                               )}
                             </div>

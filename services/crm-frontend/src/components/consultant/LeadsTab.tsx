@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { consultantApi, Lead } from '@/services/consultantApi';
+import { salesApi } from '@/services/salesApi';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, MessageSquare, Calendar, Search } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Phone, MessageSquare, Calendar, Search, DollarSign } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -29,6 +31,16 @@ export function LeadsTab() {
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+
+  // Модальное окно добавления продажи
+  const [addSaleDialogOpen, setAddSaleDialogOpen] = useState(false);
+  const [leadForSale, setLeadForSale] = useState<Lead | null>(null);
+  const [saleFormData, setSaleFormData] = useState({
+    amount: '',
+    product_name: '',
+    sale_date: new Date().toISOString().split('T')[0],
+    comment: ''
+  });
 
   // Загрузка лидов
   const loadLeads = async () => {
@@ -103,6 +115,55 @@ export function LeadsTab() {
       });
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  // Открыть модальное окно добавления продажи
+  const handleOpenAddSale = (lead: Lead, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setLeadForSale(lead);
+    setSaleFormData({
+      amount: '',
+      product_name: '',
+      sale_date: new Date().toISOString().split('T')[0],
+      comment: ''
+    });
+    setAddSaleDialogOpen(true);
+  };
+
+  // Создать продажу
+  const handleCreateSale = async () => {
+    if (!leadForSale || !saleFormData.amount || !saleFormData.product_name) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните обязательные поля',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await salesApi.createSale({
+        lead_id: leadForSale.id,
+        amount: parseFloat(saleFormData.amount),
+        product_name: saleFormData.product_name,
+        sale_date: saleFormData.sale_date,
+        comment: saleFormData.comment || undefined
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Продажа успешно добавлена',
+      });
+
+      setAddSaleDialogOpen(false);
+      setLeadForSale(null);
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось добавить продажу',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -225,6 +286,14 @@ export function LeadsTab() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={(e) => handleOpenAddSale(lead, e)}
+                    >
+                      <DollarSign className="h-4 w-4 mr-1" />
+                      Продажа
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleOpenLead(lead);
@@ -302,6 +371,66 @@ export function LeadsTab() {
             >
               {sendingMessage ? 'Отправка...' : 'Отправить'}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно добавления продажи */}
+      <Dialog open={addSaleDialogOpen} onOpenChange={setAddSaleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Добавить продажу</DialogTitle>
+            <DialogDescription>
+              Клиент: {leadForSale?.contact_name || 'Без имени'} ({leadForSale?.contact_phone})
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="sale_amount">Сумма (KZT) *</Label>
+              <Input
+                id="sale_amount"
+                type="number"
+                value={saleFormData.amount}
+                onChange={(e) => setSaleFormData({ ...saleFormData, amount: e.target.value })}
+                placeholder="100000"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="sale_product_name">Название продукта/услуги *</Label>
+              <Input
+                id="sale_product_name"
+                value={saleFormData.product_name}
+                onChange={(e) => setSaleFormData({ ...saleFormData, product_name: e.target.value })}
+                placeholder="Консультация Premium"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="sale_date">Дата продажи</Label>
+              <Input
+                id="sale_date"
+                type="date"
+                value={saleFormData.sale_date}
+                onChange={(e) => setSaleFormData({ ...saleFormData, sale_date: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="sale_comment">Комментарий (опционально)</Label>
+              <Textarea
+                id="sale_comment"
+                value={saleFormData.comment}
+                onChange={(e) => setSaleFormData({ ...saleFormData, comment: e.target.value })}
+                placeholder="Дополнительная информация..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setAddSaleDialogOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleCreateSale}>Добавить</Button>
           </div>
         </DialogContent>
       </Dialog>

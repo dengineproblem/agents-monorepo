@@ -2537,6 +2537,44 @@ export async function processIncomingMessage(
 
       lead = newLead;
       ctxLog.info({ leadId: maskUuid(newLead.id) }, '[processIncomingMessage] New lead created', ['db']);
+
+      // Автоматически назначаем консультанта новому лиду (round-robin)
+      try {
+        const { data: consultantId, error: assignError } = await supabase
+          .rpc('assign_lead_to_consultant', {
+            p_user_account_id: botConfig.user_account_id
+          });
+
+        if (!assignError && consultantId) {
+          // Обновляем assigned_consultant_id в созданном лиде
+          await supabase
+            .from('dialog_analysis')
+            .update({ assigned_consultant_id: consultantId })
+            .eq('id', newLead.id);
+
+          ctxLog.info({
+            leadId: maskUuid(newLead.id),
+            consultantId: maskUuid(consultantId)
+          }, '[processIncomingMessage] Lead assigned to consultant (round-robin)', ['db']);
+
+          // Обновляем lead объект с назначенным консультантом
+          lead.assigned_consultant_id = consultantId;
+        } else if (assignError) {
+          ctxLog.warn({
+            leadId: maskUuid(newLead.id),
+            error: assignError.message
+          }, '[processIncomingMessage] Failed to assign consultant (non-fatal)', ['db']);
+        } else {
+          ctxLog.debug({
+            leadId: maskUuid(newLead.id)
+          }, '[processIncomingMessage] No consultants available for assignment', ['db']);
+        }
+      } catch (assignErr: any) {
+        ctxLog.warn({
+          leadId: maskUuid(newLead.id),
+          error: assignErr.message
+        }, '[processIncomingMessage] Error assigning consultant (non-fatal)', ['db']);
+      }
     }
 
     // Обновляем контекст с данными лида

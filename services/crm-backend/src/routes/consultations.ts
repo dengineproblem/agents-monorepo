@@ -6,6 +6,7 @@ import {
   scheduleReminderNotifications,
   cancelPendingNotifications
 } from '../lib/consultationNotifications.js';
+import { notifyConsultantAboutNewConsultation } from '../lib/consultantNotifications.js';
 import {
   getAvailableSlots,
   isSlotAvailable,
@@ -127,187 +128,6 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
   // ==================== CONSULTANTS ====================
 
-  /**
-   * GET /consultants
-   * Get all active consultants
-   */
-  app.get('/consultants', async (request, reply) => {
-    try {
-      const { data, error } = await supabase
-        .from('consultants')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-
-      if (error) {
-        app.log.error({ error }, 'Failed to fetch consultants');
-        return reply.status(500).send({ error: error.message });
-      }
-
-      return reply.send(data || []);
-    } catch (error: any) {
-      app.log.error({ error }, 'Error fetching consultants');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
-
-  /**
-   * POST /consultants
-   * Create a new consultant
-   */
-  app.post('/consultants', async (request, reply) => {
-    try {
-      const body = CreateConsultantSchema.parse(request.body);
-
-      const { data, error } = await supabase
-        .from('consultants')
-        .insert([body])
-        .select()
-        .single();
-
-      if (error) {
-        app.log.error({ error }, 'Failed to create consultant');
-        return reply.status(500).send({ error: error.message });
-      }
-
-      return reply.status(201).send(data);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return reply.status(400).send({ error: 'Validation error', details: error.errors });
-      }
-      app.log.error({ error }, 'Error creating consultant');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
-
-  /**
-   * PATCH /consultants/:id
-   * Update consultant
-   */
-  app.patch('/consultants/:id', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const body = UpdateConsultantSchema.parse(request.body);
-
-      const { data, error } = await supabase
-        .from('consultants')
-        .update(body)
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) {
-        app.log.error({ error }, 'Failed to update consultant');
-        return reply.status(500).send({ error: error.message });
-      }
-
-      return reply.send(data);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return reply.status(400).send({ error: 'Validation error', details: error.errors });
-      }
-      app.log.error({ error }, 'Error updating consultant');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
-
-  /**
-   * DELETE /consultants/:id
-   * Soft delete consultant (set is_active = false)
-   */
-  app.delete('/consultants/:id', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-
-      const { error } = await supabase
-        .from('consultants')
-        .update({ is_active: false })
-        .eq('id', id);
-
-      if (error) {
-        app.log.error({ error }, 'Failed to delete consultant');
-        return reply.status(500).send({ error: error.message });
-      }
-
-      return reply.status(204).send();
-    } catch (error: any) {
-      app.log.error({ error }, 'Error deleting consultant');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
-
-  // ==================== WORKING SCHEDULES ====================
-
-  /**
-   * GET /consultants/:id/schedules
-   * Get working schedules for a consultant
-   */
-  app.get('/consultants/:id/schedules', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-
-      const { data, error } = await supabase
-        .from('working_schedules')
-        .select('*')
-        .eq('consultant_id', id)
-        .order('day_of_week');
-
-      if (error) {
-        app.log.error({ error }, 'Failed to fetch working schedules');
-        return reply.status(500).send({ error: error.message });
-      }
-
-      return reply.send(data || []);
-    } catch (error: any) {
-      app.log.error({ error }, 'Error fetching working schedules');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
-
-  /**
-   * PUT /consultants/:id/schedules
-   * Update all working schedules for a consultant (replace)
-   */
-  app.put('/consultants/:id/schedules', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const body = UpdateWorkingSchedulesSchema.parse(request.body);
-
-      // Delete existing schedules
-      await supabase
-        .from('working_schedules')
-        .delete()
-        .eq('consultant_id', id);
-
-      // Insert new schedules
-      if (body.schedules.length > 0) {
-        const schedulesWithConsultant = body.schedules.map(s => ({
-          ...s,
-          consultant_id: id
-        }));
-
-        const { data, error } = await supabase
-          .from('working_schedules')
-          .insert(schedulesWithConsultant)
-          .select();
-
-        if (error) {
-          app.log.error({ error }, 'Failed to update working schedules');
-          return reply.status(500).send({ error: error.message });
-        }
-
-        return reply.send(data);
-      }
-
-      return reply.send([]);
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return reply.status(400).send({ error: 'Validation error', details: error.errors });
-      }
-      app.log.error({ error }, 'Error updating working schedules');
-      return reply.status(500).send({ error: error.message });
-    }
-  });
 
   /**
    * GET /schedules/all
@@ -913,6 +733,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
         scheduleReminderNotifications(consultationForNotification).catch(err => {
           app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
         });
+
+        // Отправить уведомление консультанту
+        notifyConsultantAboutNewConsultation(consultation.id).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to send consultant notification');
+        });
       }
 
       return reply.status(201).send(consultation);
@@ -1112,6 +937,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
         scheduleReminderNotifications(consultationForNotification).catch(err => {
           app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
+        });
+
+        // Отправить уведомление консультанту
+        notifyConsultantAboutNewConsultation(consultation.id).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to send consultant notification');
         });
       }
 
@@ -1323,6 +1153,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
         scheduleReminderNotifications(consultationForNotification).catch(err => {
           app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
+        });
+
+        // Отправить уведомление консультанту
+        notifyConsultantAboutNewConsultation(consultation.id).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to send consultant notification');
         });
       }
 
