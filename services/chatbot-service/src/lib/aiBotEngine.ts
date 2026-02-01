@@ -204,6 +204,7 @@ export interface LeadInfo {
   interest_level?: string;
   business_type?: string;
   assigned_to_human?: boolean;
+  assigned_consultant_id?: string;
   bot_paused?: boolean;
   bot_paused_until?: string;
   messages?: any[];
@@ -1394,14 +1395,24 @@ async function generateAIResponse(
 
         // Обработать consultation tools
         if (isConsultationTool(functionName) && config.consultation_settings) {
+          const leadInfo = {
+            id: lead.id,
+            contact_phone: lead.contact_phone,
+            contact_name: lead.contact_name,
+            assigned_consultant_id: lead.assigned_consultant_id ?? undefined
+          };
+
+          log.debug({
+            leadId: maskUuid(lead.id),
+            hasAssignedConsultant: !!lead.assigned_consultant_id,
+            assignedConsultantId: lead.assigned_consultant_id ? maskUuid(lead.assigned_consultant_id) : null,
+            functionName
+          }, '[generateAIResponse] Processing consultation tool with lead assignment', ['consultation']);
+
           toolResult = await handleConsultationTool(
             functionName,
             args,
-            {
-              id: lead.id,
-              contact_phone: lead.contact_phone,
-              contact_name: lead.contact_name
-            },
+            leadInfo,
             config.consultation_settings,
             log
           );
@@ -1705,18 +1716,23 @@ async function handleFunctionCall(
         return;
       }
 
+      const leadInfo = {
+        id: lead.id,
+        contact_phone: lead.contact_phone,
+        contact_name: lead.contact_name,
+        assigned_consultant_id: lead.assigned_consultant_id ?? undefined
+      };
+
       log.info({
-        funcName: functionCall.name
-      }, '[handleFunctionCall] Processing consultation tool', ['consultation']);
+        funcName: functionCall.name,
+        hasAssignedConsultant: !!lead.assigned_consultant_id,
+        assignedConsultantId: lead.assigned_consultant_id ? maskUuid(lead.assigned_consultant_id) : null
+      }, '[handleFunctionCall] Processing consultation tool with lead assignment', ['consultation']);
 
       const result = await handleConsultationTool(
         functionCall.name,
         functionCall.arguments,
-        {
-          id: lead.id,
-          contact_phone: lead.contact_phone,
-          contact_name: lead.contact_name
-        },
+        leadInfo,
         botConfig.consultation_settings,
         log
       );
@@ -2197,7 +2213,8 @@ export async function testBotResponse(
           const testLead = {
             id: '00000000-0000-0000-0000-000000000000', // Тестовый UUID
             contact_phone: '+79990000000',
-            contact_name: 'Тестовый клиент'
+            contact_name: 'Тестовый клиент',
+            assigned_consultant_id: undefined  // В тестовом режиме нет назначенного консультанта
           };
 
           toolResult = await handleConsultationTool(

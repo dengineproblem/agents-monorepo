@@ -63,6 +63,7 @@ interface LeadInfo {
   business_name?: string;
   funnel_stage?: string;
   interest_level?: string;
+  assigned_consultant_id?: string;
 }
 
 /**

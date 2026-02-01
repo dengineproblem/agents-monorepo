@@ -1711,6 +1711,127 @@ const [filters, setFilters] = useState({
 - `services/crm-frontend/src/services/consultantApi.ts`
 - `services/crm-backend/src/routes/consultantDashboard.ts`
 
+### Проблема: Чатбот не учитывает assigned_consultant_id при показе слотов
+
+**Симптомы**:
+- Чатбот показывает слоты ВСЕХ консультантов вместо только назначенного
+- Лид может записаться к любому консультанту, даже если назначен другому
+- В логах отсутствует информация о назначенном консультанте
+
+**Причина**:
+1. **Баг №1**: В `aiBotEngine.ts` при вызове `handleConsultationTool()` не передавалось поле `assigned_consultant_id`
+2. **Баг №2**: В `consultations.ts` endpoint `book-from-bot` не проверял соответствие консультанта
+
+**Решение**:
+
+1. **Передача assigned_consultant_id в consultation tools** (3 места в aiBotEngine.ts):
+   ```typescript
+   // services/chatbot-service/src/lib/aiBotEngine.ts
+
+   // generateAIResponse (строки 1400-1410)
+   const leadInfo = {
+     id: lead.id,
+     contact_phone: lead.contact_phone,
+     contact_name: lead.contact_name,
+     assigned_consultant_id: lead.assigned_consultant_id ?? undefined
+   };
+
+   log.debug({
+     leadId: maskUuid(lead.id),
+     hasAssignedConsultant: !!lead.assigned_consultant_id,
+     assignedConsultantId: lead.assigned_consultant_id ? maskUuid(lead.assigned_consultant_id) : null,
+     functionName
+   }, '[generateAIResponse] Processing consultation tool with lead assignment');
+   ```
+
+2. **Валидация в book-from-bot** (consultations.ts):
+   ```typescript
+   // services/crm-backend/src/routes/consultations.ts (после строки 845)
+
+   if (clientInfo.assignedConsultantId) {
+     if (clientInfo.assignedConsultantId !== consultantId) {
+       app.log.warn({
+         dialog_analysis_id: body.dialog_analysis_id,
+         assigned_consultant_id: clientInfo.assignedConsultantId.substring(0, 8) + '...',
+         requested_consultant_id: consultantId.substring(0, 8) + '...',
+         consultant_name: consultant?.name || 'Unknown'
+       }, '[book-from-bot] Consultant mismatch: lead assigned to different consultant');
+
+       return reply.status(403).send({
+         error: 'Consultant mismatch',
+         message: 'Этот клиент закреплён за другим консультантом. Пожалуйста, выберите консультацию заново.',
+         code: 'CONSULTANT_MISMATCH'
+       });
+     }
+
+     app.log.info({
+       dialog_analysis_id: body.dialog_analysis_id,
+       consultant_id: consultantId.substring(0, 8) + '...',
+       consultant_name: consultant?.name || 'Unknown',
+       date: body.date,
+       start_time: body.start_time
+     }, '[book-from-bot] Consultant validation passed - booking consultation');
+   }
+   ```
+
+3. **Обновление интерфейсов TypeScript**:
+   ```typescript
+   // Добавлено поле assigned_consultant_id в интерфейсы LeadInfo:
+   // - services/chatbot-service/src/lib/aiBotEngine.ts:197
+   // - services/chatbot-service/src/lib/botControlTools.ts:33
+   // - services/chatbot-service/src/lib/leadManagementTools.ts:59
+
+   export interface LeadInfo {
+     // ... другие поля
+     assigned_consultant_id?: string;
+   }
+   ```
+
+4. **Расширение getClientInfo**:
+   ```typescript
+   // services/crm-backend/src/lib/dialogSummarizer.ts
+
+   export async function getClientInfo(dialogAnalysisId: string): Promise<{
+     name: string | null;
+     phone: string | null;
+     chatId: string | null;
+     instanceName: string | null;
+     userAccountId: string | null;
+     assignedConsultantId: string | null;  // ← ДОБАВЛЕНО
+   }> {
+     const { data, error } = await supabase
+       .from('dialog_analysis')
+       .select('contact_name, contact_phone, instance_name, user_account_id, assigned_consultant_id')
+       .eq('id', dialogAnalysisId)
+       .single();
+
+     return {
+       // ... другие поля
+       assignedConsultantId: data.assigned_consultant_id || null
+     };
+   }
+   ```
+
+**Результат**:
+- ✅ Лид видит слоты ТОЛЬКО своего назначенного консультанта
+- ✅ Невозможно записать лида к чужому консультанту (403 ошибка)
+- ✅ Подробное логирование с маскированными UUID
+- ✅ Backward compatibility - старые лиды без `assigned_consultant_id` работают (показываются все консультанты)
+
+**Улучшения безопасности**:
+- Используется `??` вместо `||` для корректной обработки пустых строк
+- UUID маскируются в логах (первые 8 символов + '...')
+- Полные UUID не раскрываются в ответах ошибок
+
+**Файлы**:
+- `services/chatbot-service/src/lib/aiBotEngine.ts` - передача assigned_consultant_id + логирование
+- `services/chatbot-service/src/lib/botControlTools.ts` - обновлён интерфейс LeadInfo
+- `services/chatbot-service/src/lib/leadManagementTools.ts` - обновлён интерфейс LeadInfo
+- `services/crm-backend/src/lib/dialogSummarizer.ts` - расширен getClientInfo
+- `services/crm-backend/src/routes/consultations.ts` - валидация + логирование
+
+**Дата исправления**: 2026-02-01
+
 ---
 
 ## Конфигурация
@@ -1938,11 +2059,12 @@ await consultationService.updateConsultantAcceptsNewLeads(consultantId, true);
 
 ---
 
-**Версия документа**: 1.1.1
+**Версия документа**: 1.2.0
 **Дата обновления**: 2026-02-01
 **Автор**: AI Assistant (Claude Sonnet 4.5)
 
 **История изменений**:
+- v1.2.0 (2026-02-01) - Исправлена работа чатбота с распределёнными лидами (assigned_consultant_id)
 - v1.1.1 (2026-02-01) - Исправлена фильтрация лидов при просмотре админом страницы консультанта
 - v1.1.0 (2026-02-01) - Добавлена система продаж консультантов
 - v1.0.0 (2026-01-31) - Первая версия документации

@@ -812,7 +812,8 @@ export async function consultationsRoutes(app: FastifyInstance) {
           name: body.client_name || 'Тестовый клиент',
           chatId: null,
           instanceName: null,
-          userAccountId: null
+          userAccountId: null,
+          assignedConsultantId: null  // В тестовом режиме нет назначенного консультанта
         };
       }
 
@@ -843,6 +844,42 @@ export async function consultationsRoutes(app: FastifyInstance) {
         });
       }
       const consultantId = consultant.id;
+
+      // ============ ВАЛИДАЦИЯ: Проверка соответствия консультанта ============
+      // Если лид закреплён за консультантом - можно записывать только к нему
+      if (clientInfo.assignedConsultantId) {
+        if (clientInfo.assignedConsultantId !== consultantId) {
+          app.log.warn({
+            dialog_analysis_id: body.dialog_analysis_id,
+            assigned_consultant_id: clientInfo.assignedConsultantId.substring(0, 8) + '...',
+            requested_consultant_id: consultantId.substring(0, 8) + '...',
+            consultant_name: consultant?.name || 'Unknown'
+          }, '[book-from-bot] Consultant mismatch: lead assigned to different consultant');
+
+          return reply.status(403).send({
+            error: 'Consultant mismatch',
+            message: 'Этот клиент закреплён за другим консультантом. Пожалуйста, выберите консультацию заново.',
+            code: 'CONSULTANT_MISMATCH'
+          });
+        }
+
+        app.log.info({
+          dialog_analysis_id: body.dialog_analysis_id,
+          consultant_id: consultantId.substring(0, 8) + '...',
+          consultant_name: consultant?.name || 'Unknown',
+          date: body.date,
+          start_time: body.start_time
+        }, '[book-from-bot] Consultant validation passed - booking consultation');
+      } else {
+        // Лид не назначен консультанту - логируем это для мониторинга
+        app.log.info({
+          dialog_analysis_id: body.dialog_analysis_id,
+          consultant_id: consultantId.substring(0, 8) + '...',
+          consultant_name: consultant?.name || 'Unknown',
+          note: 'Lead has no assigned consultant (legacy lead or round-robin not applied)'
+        }, '[book-from-bot] Booking consultation for unassigned lead');
+      }
+      // =======================================================================
 
       // Calculate end time
       const [startHour, startMin] = body.start_time.split(':').map(Number);

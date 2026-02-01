@@ -187,10 +187,11 @@ export async function getClientInfo(dialogAnalysisId: string): Promise<{
   chatId: string | null;
   instanceName: string | null;
   userAccountId: string | null;
+  assignedConsultantId: string | null;
 }> {
   const { data, error } = await supabase
     .from('dialog_analysis')
-    .select('contact_name, contact_phone, instance_name, user_account_id')
+    .select('contact_name, contact_phone, instance_name, user_account_id, assigned_consultant_id')
     .eq('id', dialogAnalysisId)
     .single();
 
@@ -204,7 +205,8 @@ export async function getClientInfo(dialogAnalysisId: string): Promise<{
       phone: null,
       chatId: null,
       instanceName: null,
-      userAccountId: null
+      userAccountId: null,
+      assignedConsultantId: null
     };
   }
 
@@ -213,6 +215,7 @@ export async function getClientInfo(dialogAnalysisId: string): Promise<{
     phone: data.contact_phone || null,
     chatId: null, // chat_id not in dialog_analysis table
     instanceName: data.instance_name || null,
-    userAccountId: data.user_account_id || null
+    userAccountId: data.user_account_id || null,
+    assignedConsultantId: data.assigned_consultant_id || null
   };
 }
