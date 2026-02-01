@@ -126,6 +126,7 @@ export interface ConsultationIntegrationSettings {
   auto_summarize_dialog: boolean;     // саммаризация диалога
   timezone?: string;                  // таймзона для фильтрации слотов (по умолчанию Asia/Yekaterinburg)
   collect_client_name: boolean;       // спрашивать имя
+  user_account_id?: string;           // ID аккаунта для авторизации в CRM backend
 }
 
 /**
@@ -327,7 +328,7 @@ interface ConsultantInfo {
 /**
  * Загрузить информацию о консультантах
  */
-export async function loadConsultantsInfo(consultantIds?: string[]): Promise<ConsultantInfo[]> {
+export async function loadConsultantsInfo(consultantIds?: string[], userAccountId?: string): Promise<ConsultantInfo[]> {
   try {
     const url = new URL(`${CRM_BACKEND_URL}/consultants`);
     if (consultantIds?.length) {
@@ -335,9 +336,14 @@ export async function loadConsultantsInfo(consultantIds?: string[]): Promise<Con
     }
     url.searchParams.set('active_only', 'true');
 
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (userAccountId) {
+      headers['x-user-id'] = userAccountId;
+    }
+
     const response = await fetch(url.toString(), {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
+      headers
     });
 
     if (!response.ok) {
@@ -367,7 +373,7 @@ export async function getConsultationPromptAddition(
   consultants?: ConsultantInfo[]
 ): Promise<string> {
   // Загружаем консультантов если не переданы
-  const consultantsList = consultants || await loadConsultantsInfo(settings.consultant_ids);
+  const consultantsList = consultants || await loadConsultantsInfo(settings.consultant_ids, settings.user_account_id);
 
   // Формируем список консультантов с их ID
   let consultantsSection = '';

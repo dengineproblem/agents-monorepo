@@ -1192,7 +1192,13 @@ async function generateAIResponse(
 
   // Добавить инструкции для консультаций если интеграция включена
   if (config.consultation_integration_enabled && config.consultation_settings) {
-    const consultationPrompt = await getConsultationPromptAddition(config.consultation_settings);
+    // Добавить user_account_id если его нет в настройках
+    const settingsWithUserId = {
+      ...config.consultation_settings,
+      user_account_id: config.consultation_settings.user_account_id || config.user_account_id
+    };
+
+    const consultationPrompt = await getConsultationPromptAddition(settingsWithUserId);
     systemPrompt += consultationPrompt;
     log.debug({
       consultationEnabled: true
@@ -1221,7 +1227,13 @@ async function generateAIResponse(
 
   // Добавить consultation tools если интеграция включена
   if (config.consultation_integration_enabled && config.consultation_settings) {
-    const consultationTools = getConsultationToolDefinitions(config.consultation_settings);
+    // Добавить user_account_id если его нет в настройках
+    const settingsWithUserId = {
+      ...config.consultation_settings,
+      user_account_id: config.consultation_settings.user_account_id || config.user_account_id
+    };
+
+    const consultationTools = getConsultationToolDefinitions(settingsWithUserId);
     tools.push(...consultationTools);
     log.debug({
       consultationToolsCount: consultationTools.length,
@@ -1409,11 +1421,17 @@ async function generateAIResponse(
             functionName
           }, '[generateAIResponse] Processing consultation tool with lead assignment', ['consultation']);
 
+          // Добавить user_account_id если его нет в настройках
+          const settingsWithUserId = {
+            ...config.consultation_settings,
+            user_account_id: config.consultation_settings.user_account_id || config.user_account_id
+          };
+
           toolResult = await handleConsultationTool(
             functionName,
             args,
             leadInfo,
-            config.consultation_settings,
+            settingsWithUserId,
             log
           );
         }
@@ -2094,7 +2112,8 @@ export async function testBotResponse(
         days_ahead_limit: dbSettings.days_ahead_limit || 14,
         auto_summarize_dialog: dbSettings.auto_summarize_dialog ?? true,
         collect_client_name: dbSettings.collect_client_name ?? true,
-        timezone: botConfig.timezone || 'Asia/Yekaterinburg'
+        timezone: botConfig.timezone || 'Asia/Yekaterinburg',
+        user_account_id: botConfig.user_account_id
       };
 
       // Добавить промпт для консультаций
