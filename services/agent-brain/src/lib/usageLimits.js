@@ -322,10 +322,26 @@ export async function trackUsage(telegramId, model, usage) {
  * @returns {string} Сообщение для пользователя
  */
 export function formatLimitExceededMessage(limitCheck) {
-  return `⚠️ Превышен дневной лимит затрат
+  const usagePercent = Math.round((limitCheck.spent / limitCheck.limit) * 100);
 
-Ваш лимит: $${limitCheck.limit.toFixed(2)}
-Потрачено сегодня: $${limitCheck.spent.toFixed(2)}
+  return `⚠️ Превышен дневной лимит использования AI
+
+Использовано: ${usagePercent}% дневного лимита
 
 Попробуйте завтра или обратитесь в поддержку для увеличения лимита.`;
+}
+
+/**
+ * Форматирует предупреждение о приближении к лимиту
+ *
+ * @param {object} limitCheck - Результат checkUserLimit()
+ * @returns {string} Сообщение для пользователя
+ */
+export function formatNearLimitWarning(limitCheck) {
+  const usagePercent = Math.round((limitCheck.spent / limitCheck.limit) * 100);
+  const remainingPercent = 100 - usagePercent;
+
+  return `⚠️ Внимание: Использовано ${usagePercent}% дневного лимита AI.
+
+Осталось: ${remainingPercent}%`;
 }
