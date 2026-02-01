@@ -378,6 +378,16 @@ export function Consultations() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* DEBUG INFO */}
+      <div style={{background: 'yellow', padding: '10px', border: '2px solid red'}}>
+        <div><strong>DEBUG:</strong> Consultations: {consultations.length}</div>
+        {consultations.map(c => (
+          <div key={c.id} style={{fontSize: '12px'}}>
+            {c.date} {c.start_time} - Name: "{c.client_name || 'NULL'}" Phone: "{c.client_phone || 'NULL'}"
+          </div>
+        ))}
+      </div>
+
       {/* Заголовок */}
       <div className="flex items-center justify-between">
         <div>
