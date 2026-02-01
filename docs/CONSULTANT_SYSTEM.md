@@ -2041,6 +2041,149 @@ await consultationService.updateConsultantAcceptsNewLeads(consultantId, false);
 await consultationService.updateConsultantAcceptsNewLeads(consultantId, true);
 ```
 
+### Система уведомлений консультантам
+
+**Миграция**: Функции в `services/crm-backend/src/lib/consultantNotifications.ts`
+
+Система автоматически отправляет WhatsApp уведомления консультантам о важных событиях.
+
+#### Типы уведомлений
+
+**1. Уведомление о новой консультации** (`notifyConsultantAboutNewConsultation`)
+
+Отправляется автоматически при создании консультации через бота (endpoint `book-from-bot`).
+
+**Формат сообщения**:
+```
+🔔 Новая консультация!
+
+Клиент: Иван Иванов
+Телефон: +77058151655
+Дата: 02 февраля 2026 в 10:30
+Услуга: Онлайн-консультация
+
+Подробности в личном кабинете: https://crm.example.com/c/{consultant_id}
+```
+
+**Логика отправки**:
+1. Получение информации о консультации из БД
+2. Проверка наличия телефона консультанта
+3. Получение WhatsApp instance:
+   - Сначала из `dialog_analysis.instance_name` (если есть `dialog_analysis_id`)
+   - Fallback: первый активный `whatsapp_instances` по `user_account_id`
+4. Форматирование и отправка сообщения
+
+**Код**:
+```typescript
+// В consultations.ts после создания консультации
+notifyConsultantAboutNewConsultation(consultation.id).catch(err => {
+  app.log.error({ error: err.message }, 'Failed to send consultant notification');
+});
+```
+
+**2. Напоминание о консультации** (`sendConsultationReminder`)
+
+Отправляется за N минут до начала консультации (планируется через cron).
+
+**Формат сообщения**:
+```
+⏰ Напоминание о консультации через 60 минут!
+
+Клиент: Иван Иванов
+Услуга: Онлайн-консультация
+Начало: 10:30
+
+Подготовьтесь к встрече 😊
+```
+
+**3. Уведомление о новом лиде** (`notifyConsultantAboutNewLead`)
+
+Отправляется при переназначении лида на консультанта.
+
+#### Архитектура получения WhatsApp instance
+
+**Функция**: `getInstanceName(userAccountId, dialogAnalysisId?)`
+
+**Приоритет**:
+1. **Из dialog_analysis** - если есть `dialog_analysis_id`, берем `instance_name` оттуда
+2. **Fallback на whatsapp_instances** - первый connected instance по `user_account_id`
+
+**SQL запросы**:
+```typescript
+// Вариант 1: из dialog_analysis
+SELECT instance_name
+FROM dialog_analysis
+WHERE id = dialog_analysis_id;
+
+// Вариант 2: из whatsapp_instances
+SELECT instance_name
+FROM whatsapp_instances
+WHERE user_account_id = consultant.parent_user_account_id
+  AND status = 'connected'
+LIMIT 1;
+```
+
+#### Обработка ошибок
+
+**Молчаливое игнорирование**: Ошибки уведомлений НЕ блокируют создание консультации.
+
+```typescript
+try {
+  await notifyConsultantAboutNewConsultation(consultationId);
+} catch (error) {
+  // Ошибка логируется но не пробрасывается наверх
+  process.stderr.write(`[CONSULTANT_NOTIFICATION] EXCEPTION: ${error}\n`);
+}
+```
+
+**Причины пропуска уведомления**:
+- Нет телефона у консультанта
+- Нет доступного WhatsApp instance
+- Консультация не найдена в БД
+- Ошибка отправки через Evolution API
+
+#### Логирование
+
+Детальное логирование через `process.stderr.write` с префиксом `[CONSULTANT_NOTIFICATION]`:
+
+```
+[CONSULTANT_NOTIFICATION] START: consultationId=uuid
+[CONSULTANT_NOTIFICATION] Consultation loaded
+[CONSULTANT_NOTIFICATION] Consultant phone: +77071231503
+[CONSULTANT_NOTIFICATION] Instance name: instance_0f559eb0_1761736509038
+[CONSULTANT_NOTIFICATION] Sending WhatsApp message...
+[CONSULTANT_NOTIFICATION] SUCCESS: Notification sent to Арман (+77071231503)
+```
+
+**Команда для просмотра логов**:
+```bash
+docker-compose logs -f crm-backend | grep "CONSULTANT_NOTIFICATION"
+```
+
+#### Исправленные баги
+
+**Проблема 1**: Неправильное поле `user_account_id` вместо `parent_user_account_id`
+- **Симптом**: Ошибка "column user_accounts.user_account_id does not exist"
+- **Исправление**: Изменено на `consultant.parent_user_account_id`
+
+**Проблема 2**: Попытка получить несуществующее поле `instance_name` из `user_accounts`
+- **Симптом**: Ошибка "column user_accounts.instance_name does not exist"
+- **Исправление**: Создана функция `getInstanceName` для получения instance из правильных таблиц
+
+**Проблема 3**: Попытка получить несуществующее поле `evolution_instance` из `user_accounts`
+- **Симптом**: Ошибка "column user_accounts.evolution_instance does not exist"
+- **Исправление**: Использование `getInstanceName` вместо прямого запроса к user_accounts
+
+**Проблема 4**: Неправильный SQL join с `dialog_analysis`
+- **Симптом**: Ошибка "Could not find a relationship between 'consultations' and 'dialog_analysis'"
+- **Исправление**: Использование полей `client_name` и `client_phone` напрямую из таблицы `consultations`
+
+**Файлы**:
+- `services/crm-backend/src/lib/consultantNotifications.ts` - Реализация уведомлений
+- `services/crm-backend/src/routes/consultations.ts` - Вызов функций уведомлений
+
+**Дата исправления**: 2026-02-01
+
 ### Планы развития
 
 1. **Телефония** - Интеграция SIP для звонков из интерфейса
@@ -2059,11 +2202,12 @@ await consultationService.updateConsultantAcceptsNewLeads(consultantId, true);
 
 ---
 
-**Версия документа**: 1.2.0
+**Версия документа**: 1.3.0
 **Дата обновления**: 2026-02-01
 **Автор**: AI Assistant (Claude Sonnet 4.5)
 
 **История изменений**:
+- v1.3.0 (2026-02-01) - Добавлена система WhatsApp уведомлений консультантам о новых консультациях
 - v1.2.0 (2026-02-01) - Исправлена работа чатбота с распределёнными лидами (assigned_consultant_id)
 - v1.1.1 (2026-02-01) - Исправлена фильтрация лидов при просмотре админом страницы консультанта
 - v1.1.0 (2026-02-01) - Добавлена система продаж консультантов
