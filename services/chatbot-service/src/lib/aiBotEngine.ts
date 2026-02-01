@@ -1198,10 +1198,15 @@ async function generateAIResponse(
       user_account_id: config.consultation_settings.user_account_id || config.user_account_id
     };
 
-    const consultationPrompt = await getConsultationPromptAddition(settingsWithUserId);
+    const consultationPrompt = await getConsultationPromptAddition(
+      settingsWithUserId,
+      undefined,
+      lead.assigned_consultant_id
+    );
     systemPrompt += consultationPrompt;
     log.debug({
-      consultationEnabled: true
+      consultationEnabled: true,
+      hasAssignedConsultant: !!lead.assigned_consultant_id
     }, '[generateAIResponse] Added consultation integration prompt');
   }
 
@@ -2117,7 +2122,7 @@ export async function testBotResponse(
       };
 
       // Добавить промпт для консультаций
-      const consultationPrompt = await getConsultationPromptAddition(consultationSettings);
+      const consultationPrompt = await getConsultationPromptAddition(consultationSettings, undefined, undefined);
       systemPrompt += consultationPrompt;
 
       // Добавить tools для консультаций

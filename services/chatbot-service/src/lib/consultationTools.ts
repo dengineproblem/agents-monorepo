@@ -370,7 +370,8 @@ export async function loadConsultantsInfo(consultantIds?: string[], userAccountI
  */
 export async function getConsultationPromptAddition(
   settings: ConsultationIntegrationSettings,
-  consultants?: ConsultantInfo[]
+  consultants?: ConsultantInfo[],
+  assignedConsultantId?: string
 ): Promise<string> {
   // Загружаем консультантов если не переданы
   const consultantsList = consultants || await loadConsultantsInfo(settings.consultant_ids, settings.user_account_id);
@@ -381,7 +382,22 @@ export async function getConsultationPromptAddition(
     const consultantsText = consultantsList.map(c =>
       `- ${c.name}: consultant_id = "${c.short_id}"`
     ).join('\n');
-    consultantsSection = `
+
+    // Если клиент привязан к конкретному консультанту
+    if (assignedConsultantId) {
+      const assignedConsultant = consultantsList.find(c => c.id === assignedConsultantId);
+      if (assignedConsultant) {
+        consultantsSection = `
+
+## ВАЖНО: Закреплённый консультант
+
+Этот клиент закреплён за консультантом "${assignedConsultant.name}".
+
+КРИТИЧНО: При записи на консультацию используй ТОЛЬКО этот consultant_id: "${assignedConsultant.short_id}"
+
+Слоты которые ты показываешь - это слоты ТОЛЬКО этого консультанта. НЕ предлагай записаться к другим консультантам!`;
+      } else {
+        consultantsSection = `
 
 ## Доступные консультанты и их ID
 
@@ -389,6 +405,17 @@ export async function getConsultationPromptAddition(
 ${consultantsText}
 
 Когда клиент выбирает слот, бери consultant_id из этого списка!`;
+      }
+    } else {
+      consultantsSection = `
+
+## Доступные консультанты и их ID
+
+ВАЖНО: При записи на консультацию используй ТОЛЬКО эти consultant_id:
+${consultantsText}
+
+Когда клиент выбирает слот, бери consultant_id из этого списка!`;
+    }
   }
 
   return `
