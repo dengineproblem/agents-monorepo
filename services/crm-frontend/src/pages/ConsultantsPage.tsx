@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Plus, Edit, Trash2, Clock, Calendar, Package, ExternalLink, Key, UserCheck, UserX, Copy, CheckCircle, UserPlus, UserMinus, Target } from 'lucide-react';
+import { User, Plus, Edit, Trash2, Clock, Calendar, Package, ExternalLink, Key, UserCheck, UserX, Copy, CheckCircle, UserPlus, UserMinus, Target, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
@@ -44,6 +44,7 @@ export function ConsultantsPage() {
   const [editingConsultantId, setEditingConsultantId] = useState<string | null>(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [isSavingServices, setIsSavingServices] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Состояние для установки плана продаж
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -184,6 +185,7 @@ export function ConsultantsPage() {
       setIsEditConsultantOpen(false);
       setEditingConsultantId(null);
       setEditingConsultantData({ name: '', phone: '', specialization: '' });
+      setShowPassword(false);
       loadData();
     } catch {
       toast({
@@ -230,10 +232,10 @@ export function ConsultantsPage() {
   };
 
   const handleSaveSchedules = async () => {
-    if (!editingConsultant) return;
+    if (!editingConsultant || !userAccountId) return;
 
     try {
-      await consultationService.updateSchedules(editingConsultant.id, editingSchedules);
+      await consultationService.updateSchedules(userAccountId, editingConsultant.id, editingSchedules);
       toast({ title: 'Расписание сохранено' });
       setIsScheduleModalOpen(false);
       loadData();
@@ -284,6 +286,7 @@ export function ConsultantsPage() {
   };
 
   const openEditConsultant = (consultant: Consultant) => {
+    setEditingConsultant(consultant);
     setEditingConsultantId(consultant.id);
     setEditingConsultantData({
       name: consultant.name,
@@ -502,17 +505,28 @@ export function ConsultantsPage() {
                 )}
 
                 {/* Статус аккаунта */}
-                <div className="flex items-center gap-2 mb-3">
-                  {consultant.user_account_id ? (
-                    <>
-                      <UserCheck className="w-4 h-4 text-green-500" />
-                      <span className="text-xs text-green-700 font-medium">Аккаунт создан</span>
-                    </>
+                <div className="mb-3">
+                  {consultant.consultant_account ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <UserCheck className="w-4 h-4 text-green-500" />
+                        <span className="text-xs text-green-700 font-medium">Аккаунт создан</span>
+                      </div>
+                      <a
+                        href={`/c/${consultant.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 pl-6 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Страница консультанта</span>
+                      </a>
+                    </div>
                   ) : (
-                    <>
+                    <div className="flex items-center gap-2">
                       <UserX className="w-4 h-4 text-orange-500" />
                       <span className="text-xs text-orange-700">Без аккаунта</span>
-                    </>
+                    </div>
                   )}
                 </div>
 
@@ -722,9 +736,61 @@ export function ConsultantsPage() {
                 onChange={e => setEditingConsultantData({ ...editingConsultantData, specialization: e.target.value })}
               />
             </div>
+
+            {/* Данные аккаунта (если создан) */}
+            {editingConsultant?.consultant_account && (
+              <div className="pt-4 border-t space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Key className="w-4 h-4 text-green-600" />
+                  <span>Данные для входа</span>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Логин</Label>
+                  <Input
+                    readOnly
+                    value={editingConsultant.consultant_account.username}
+                    className="font-mono bg-muted"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Пароль</Label>
+                  <div className="relative">
+                    <Input
+                      readOnly
+                      value={
+                        showPassword
+                          ? editingConsultant.phone?.replace(/\D/g, '').substring(0, 4) || '****'
+                          : '****'
+                      }
+                      className="font-mono bg-muted pr-10"
+                      title="Пароль: первые 4 цифры телефона"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Пароль: первые 4 цифры телефона
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditConsultantOpen(false)}>
+            <Button variant="outline" onClick={() => {
+              setIsEditConsultantOpen(false);
+              setShowPassword(false);
+            }}>
               Отмена
             </Button>
             <Button onClick={handleUpdateConsultant}>Сохранить</Button>

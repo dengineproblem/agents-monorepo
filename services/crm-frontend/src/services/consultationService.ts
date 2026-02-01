@@ -202,10 +202,13 @@ export const consultationService = {
   },
 
   // Обновление расписания консультанта (полная замена)
-  async updateSchedules(consultantId: string, schedules: WorkingScheduleInput[]): Promise<WorkingSchedule[]> {
+  async updateSchedules(userAccountId: string, consultantId: string, schedules: WorkingScheduleInput[]): Promise<WorkingSchedule[]> {
     const response = await fetch(`${API_BASE_URL}/consultants/${consultantId}/schedules`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userAccountId
+      },
       body: JSON.stringify({ schedules })
     });
     if (!response.ok) throw new Error('Failed to update schedules');
