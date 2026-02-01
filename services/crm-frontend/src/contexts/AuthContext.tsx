@@ -76,7 +76,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const { data: consultant, error: consultantError } = await supabase
           .from('consultants')
           .select('id, name')
-          .eq('user_account_id', userAccount.id)
+          .eq('parent_user_account_id', userAccount.id)
           .eq('is_active', true)
           .maybeSingle();
 
