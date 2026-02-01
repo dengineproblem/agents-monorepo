@@ -540,6 +540,13 @@ export function Consultations() {
                           {consultation ? (
                             <button
                               onClick={() => {
+                                console.log('Selected consultation:', {
+                                  id: consultation.id,
+                                  client_name: consultation.client_name,
+                                  client_phone: consultation.client_phone,
+                                  has_name: !!consultation.client_name,
+                                  has_phone: !!consultation.client_phone
+                                });
                                 setSelectedConsultation(consultation);
                                 setIsDetailModalOpen(true);
                               }}
