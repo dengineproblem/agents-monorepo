@@ -18,8 +18,7 @@ export async function notifyConsultantAboutNewConsultation(
       .select(`
         *,
         consultant:consultants!inner(id, name, phone, parent_user_account_id),
-        service:consultation_services(name),
-        lead:dialog_analysis(contact_name, contact_phone)
+        service:consultation_services(name)
       `)
       .eq('id', consultationId)
       .single();
@@ -55,9 +54,9 @@ export async function notifyConsultantAboutNewConsultation(
 
     process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${userAccount.instance_name}\n`);
 
-    // 3. Форматировать сообщение
-    const clientName = consultation.lead?.contact_name || 'Клиент';
-    const clientPhone = consultation.lead?.contact_phone || 'Не указан';
+    // 3. Форматировать сообщение (используем данные из consultations напрямую)
+    const clientName = consultation.client_name || 'Клиент';
+    const clientPhone = consultation.client_phone || 'Не указан';
     const serviceName = consultation.service?.name || 'Консультация';
     const date = format(new Date(consultation.date), 'dd MMMM yyyy', { locale: ru });
     const startTime = consultation.start_time;
@@ -168,8 +167,7 @@ export async function sendConsultationReminder(
       .select(`
         *,
         consultant:consultants!inner(id, name, phone, parent_user_account_id),
-        service:consultation_services(name),
-        lead:dialog_analysis(contact_name, contact_phone)
+        service:consultation_services(name)
       `)
       .eq('id', consultationId)
       .single();
@@ -198,7 +196,7 @@ export async function sendConsultationReminder(
       return;
     }
 
-    const clientName = consultation.lead?.contact_name || 'Клиент';
+    const clientName = consultation.client_name || 'Клиент';
     const serviceName = consultation.service?.name || 'Консультация';
     const startTime = consultation.start_time;
 
