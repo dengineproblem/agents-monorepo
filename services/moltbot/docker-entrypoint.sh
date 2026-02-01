@@ -7,6 +7,13 @@ cat ~/.gitconfig
 # Copy moltbot.json config to working directory
 mkdir -p /root/clawd/.moltbot
 cp /root/clawd/moltbot-workspace-router/moltbot.json /root/clawd/.moltbot/config.json
+
+# Replace environment variables in config
+if [ -n "$MOLTBOT_TELEGRAM_BOT_TOKEN" ]; then
+  sed -i "s/\${MOLTBOT_TELEGRAM_BOT_TOKEN}/$MOLTBOT_TELEGRAM_BOT_TOKEN/g" /root/clawd/.moltbot/config.json
+  echo "  ✓ Telegram bot token injected into config"
+fi
+
 echo "Moltbot config copied to /root/clawd/.moltbot/config.json"
 
 # Setup auth profiles for ALL agents (router + specialists)
