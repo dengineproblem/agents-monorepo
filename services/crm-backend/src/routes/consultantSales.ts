@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
+import { ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 
 // ==================== SCHEMAS ====================
 
@@ -25,19 +26,6 @@ const SetSalesPlanSchema = z.object({
   plan_amount: z.number().positive()
 });
 
-// ==================== TYPES ====================
-
-interface ConsultantAuthRequest {
-  consultant?: {
-    id: string;
-    user_account_id: string;
-    name: string;
-  };
-  headers: {
-    'x-user-id'?: string;
-  };
-}
-
 /**
  * Routes для системы продаж консультантов
  */
@@ -51,13 +39,13 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.get('/consultant/sales', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.query?.consultantId as string;
-      const dateFrom = request.query?.date_from as string | undefined;
-      const dateTo = request.query?.date_to as string | undefined;
-      const search = request.query?.search as string | undefined;
-      const productName = request.query?.product_name as string | undefined;
-      const limit = parseInt(request.query?.limit as string || '50');
-      const offset = parseInt(request.query?.offset as string || '0');
+      const consultantId = (request.query as any)?.consultantId as string;
+      const dateFrom = (request.query as any)?.date_from as string | undefined;
+      const dateTo = (request.query as any)?.date_to as string | undefined;
+      const search = (request.query as any)?.search as string | undefined;
+      const productName = (request.query as any)?.product_name as string | undefined;
+      const limit = parseInt((request.query as any)?.limit as string || '50');
+      const offset = parseInt((request.query as any)?.offset as string || '0');
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -107,7 +95,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.post('/consultant/sales', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.query?.consultantId as string;
+      const consultantId = (request.query as any)?.consultantId as string;
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -171,7 +159,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
   app.put('/consultant/sales/:saleId', async (request: ConsultantAuthRequest, reply) => {
     try {
       const { saleId } = request.params as { saleId: string };
-      const consultantId = request.query?.consultantId as string;
+      const consultantId = (request.query as any)?.consultantId as string;
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -226,7 +214,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
   app.delete('/consultant/sales/:saleId', async (request: ConsultantAuthRequest, reply) => {
     try {
       const { saleId } = request.params as { saleId: string };
-      const consultantId = request.query?.consultantId as string;
+      const consultantId = (request.query as any)?.consultantId as string;
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -267,9 +255,9 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.get('/consultant/sales/stats', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.query?.consultantId as string;
-      const month = parseInt(request.query?.month as string) || new Date().getMonth() + 1;
-      const year = parseInt(request.query?.year as string) || new Date().getFullYear();
+      const consultantId = (request.query as any)?.consultantId as string;
+      const month = parseInt((request.query as any)?.month as string) || new Date().getMonth() + 1;
+      const year = parseInt((request.query as any)?.year as string) || new Date().getFullYear();
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -360,10 +348,10 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.get('/consultant/sales/chart', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.query?.consultantId as string;
-      const period = (request.query?.period as string) || 'month';
-      const dateFrom = request.query?.date_from as string | undefined;
-      const dateTo = request.query?.date_to as string | undefined;
+      const consultantId = (request.query as any)?.consultantId as string;
+      const period = ((request.query as any)?.period as string) || 'month';
+      const dateFrom = (request.query as any)?.date_from as string | undefined;
+      const dateTo = (request.query as any)?.date_to as string | undefined;
 
       if (!consultantId) {
         return reply.status(400).send({ error: 'consultantId is required' });
@@ -509,9 +497,9 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: 'Admin access required' });
       }
 
-      const consultantId = request.query?.consultant_id as string | undefined;
-      const dateFrom = request.query?.date_from as string | undefined;
-      const dateTo = request.query?.date_to as string | undefined;
+      const consultantId = (request.query as any)?.consultant_id as string | undefined;
+      const dateFrom = (request.query as any)?.date_from as string | undefined;
+      const dateTo = (request.query as any)?.date_to as string | undefined;
 
       let query = supabase
         .from('purchases')
