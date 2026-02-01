@@ -40,19 +40,19 @@ export async function notifyConsultantAboutNewConsultation(
 
     process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultant phone: ${consultantPhone}\n`);
 
-    // 2. Получить instance_name для Evolution API
+    // 2. Получить evolution_instance для Evolution API
     const { data: userAccount, error: userAccountError } = await supabase
       .from('user_accounts')
-      .select('instance_name')
+      .select('evolution_instance')
       .eq('id', consultant.parent_user_account_id)
       .single();
 
-    if (userAccountError || !userAccount?.instance_name) {
+    if (userAccountError || !userAccount?.evolution_instance) {
       process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: User account not found: ${JSON.stringify(userAccountError)}\n`);
       return;
     }
 
-    process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${userAccount.instance_name}\n`);
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${userAccount.evolution_instance}\n`);
 
     // 3. Форматировать сообщение (используем данные из consultations напрямую)
     const clientName = consultation.client_name || 'Клиент';
@@ -74,7 +74,7 @@ export async function notifyConsultantAboutNewConsultation(
 
     // 4. Отправить уведомление через Evolution API
     await sendWhatsAppMessage({
-      instanceName: userAccount.instance_name,
+      instanceName: userAccount.evolution_instance,
       phone: consultantPhone,
       message,
     });
@@ -187,11 +187,11 @@ export async function sendConsultationReminder(
 
     const { data: userAccount, error: userAccountError } = await supabase
       .from('user_accounts')
-      .select('instance_name')
+      .select('evolution_instance')
       .eq('id', consultant.parent_user_account_id)
       .single();
 
-    if (userAccountError || !userAccount?.instance_name) {
+    if (userAccountError || !userAccount?.evolution_instance) {
       console.error('User account or instance not found:', userAccountError);
       return;
     }
@@ -209,7 +209,7 @@ export async function sendConsultationReminder(
 Подготовьтесь к встрече 😊`;
 
     await sendWhatsAppMessage({
-      instanceName: userAccount.instance_name,
+      instanceName: userAccount.evolution_instance,
       phone: consultantPhone,
       message,
     });
