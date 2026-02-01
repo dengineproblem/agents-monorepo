@@ -170,7 +170,26 @@ export async function consultationsRoutes(app: FastifyInstance) {
       let query = supabase
         .from('consultations')
         .select(`
-          *,
+          id,
+          consultant_id,
+          slot_id,
+          service_id,
+          client_phone,
+          client_name,
+          client_chat_id,
+          dialog_analysis_id,
+          user_account_id,
+          date,
+          start_time,
+          end_time,
+          status,
+          notes,
+          consultation_type,
+          actual_duration_minutes,
+          is_sale_closed,
+          price,
+          created_at,
+          updated_at,
           consultant:consultants(*)
         `)
         .order('date', { ascending: true })
