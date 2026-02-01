@@ -67,7 +67,8 @@ services/
 │       ├── middleware/
 │       │   └── consultantAuth.ts          # Auth middleware
 │       ├── routes/
-│       │   └── consultantDashboard.ts     # Consultant API endpoints
+│       │   ├── consultantDashboard.ts     # Consultant API endpoints
+│       │   └── consultantSales.ts         # Sales API endpoints
 │       └── lib/
 │           └── supabase.ts                # Supabase клиент с настройками
 │
@@ -77,13 +78,16 @@ services/
         │   ├── CalendarTab.tsx            # Календарь со слотами
         │   ├── LeadsTab.tsx               # Управление лидами
         │   ├── ScheduleTab.tsx            # Настройка расписания
-        │   ├── ServicesTab.tsx            # Выбор услуг
+        │   ├── SalesTab.tsx               # Управление продажами
         │   └── ProfileTab.tsx             # Редактирование профиля
         ├── pages/
         │   └── ConsultantPage.tsx         # Главная страница
         ├── services/
         │   ├── consultantApi.ts           # API методы
-        │   └── consultationService.ts     # Сервисы консультаций
+        │   ├── consultationService.ts     # Сервисы консультаций
+        │   └── salesApi.ts                # API методы продаж
+        ├── types/
+        │   └── sales.ts                   # Типы для продаж
         └── contexts/
             └── AuthContext.tsx            # Контекст авторизации
 ```
@@ -465,6 +469,207 @@ Response:
 }
 ```
 
+#### Продажи
+
+**GET /consultant/sales**
+
+Получить продажи консультанта.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+- `date_from` - начало периода (YYYY-MM-DD)
+- `date_to` - конец периода (YYYY-MM-DD)
+- `search` - поиск по имени/телефону клиента
+- `product_name` - фильтр по названию продукта
+- `limit` - лимит записей (по умолчанию 50)
+- `offset` - смещение
+
+Response:
+```json
+{
+  "sales": [
+    {
+      "id": "uuid",
+      "consultant_id": "uuid",
+      "lead_id": "uuid",
+      "client_name": "Иван Иванов",
+      "client_phone": "+79991234567",
+      "amount": 150000,
+      "currency": "KZT",
+      "product_name": "Консультация",
+      "sale_date": "2026-01-30",
+      "comment": "Оплата наличными",
+      "created_at": "2026-01-30T14:30:00Z",
+      "updated_at": "2026-01-30T14:30:00Z"
+    }
+  ],
+  "total": 25
+}
+```
+
+**POST /consultant/sales**
+
+Создать новую продажу.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+
+Request:
+```json
+{
+  "lead_id": "uuid",
+  "amount": 150000,
+  "product_name": "Консультация",
+  "sale_date": "2026-01-30",
+  "comment": "Оплата наличными"
+}
+```
+
+Response:
+```json
+{
+  "id": "uuid",
+  "consultant_id": "uuid",
+  "lead_id": "uuid",
+  "client_name": "Иван Иванов",
+  "client_phone": "+79991234567",
+  "amount": 150000,
+  "currency": "KZT",
+  "product_name": "Консультация",
+  "sale_date": "2026-01-30",
+  "comment": "Оплата наличными",
+  "created_at": "2026-01-30T14:30:00Z",
+  "updated_at": "2026-01-30T14:30:00Z"
+}
+```
+
+**PUT /consultant/sales/:saleId**
+
+Обновить продажу.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+
+Request:
+```json
+{
+  "amount": 175000,
+  "product_name": "Консультация Премиум",
+  "sale_date": "2026-01-30",
+  "comment": "Доплата за расширенную консультацию"
+}
+```
+
+**DELETE /consultant/sales/:saleId**
+
+Удалить продажу.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+
+**GET /consultant/sales/stats**
+
+Получить статистику продаж и прогресс к плану.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+- `month` - месяц (1-12, опционально)
+- `year` - год (опционально)
+
+Response:
+```json
+{
+  "total_sales": 12,
+  "total_amount": 1500000,
+  "plan_amount": 2000000,
+  "progress_percent": 75.0,
+  "sales_count": 12,
+  "current_month_amount": 1500000
+}
+```
+
+**GET /consultant/sales/chart**
+
+Получить данные для графика продаж.
+
+Query параметры:
+- `consultantId` - ID консультанта (обязательно)
+- `period` - период (week/month, по умолчанию month)
+- `date_from` - начало периода
+- `date_to` - конец периода
+
+Response:
+```json
+[
+  {
+    "date": "2026-01-01",
+    "amount": 450000,
+    "count": 3
+  },
+  {
+    "date": "2026-01-02",
+    "amount": 300000,
+    "count": 2
+  }
+]
+```
+
+**PUT /admin/consultants/:consultantId/sales-plan** (Admin)
+
+Установить месячный план продаж для консультанта.
+
+Request:
+```json
+{
+  "month": 2,
+  "year": 2026,
+  "plan_amount": 2000000
+}
+```
+
+Response:
+```json
+{
+  "id": "uuid",
+  "consultant_id": "uuid",
+  "period_year": 2026,
+  "period_month": 2,
+  "plan_amount": 2000000,
+  "currency": "KZT",
+  "created_at": "2026-02-01T10:00:00Z",
+  "updated_at": "2026-02-01T10:00:00Z"
+}
+```
+
+**GET /admin/sales/all** (Admin)
+
+Получить все продажи всех консультантов.
+
+Query параметры:
+- `consultant_id` - фильтр по консультанту
+- `date_from` - начало периода
+- `date_to` - конец периода
+- `limit` - лимит записей
+- `offset` - смещение
+
+Response:
+```json
+[
+  {
+    "id": "uuid",
+    "consultant_id": "uuid",
+    "client_name": "Иван Иванов",
+    "amount": 150000,
+    "product_name": "Консультация",
+    "sale_date": "2026-01-30",
+    "consultants": {
+      "id": "uuid",
+      "name": "Анатолий"
+    }
+  }
+]
+```
+
 ---
 
 ## Frontend компоненты
@@ -486,7 +691,7 @@ Response:
 1. **calendar** - Календарь (по умолчанию)
 2. **leads** - Лиды
 3. **schedule** - Расписание
-4. **services** - Услуги
+4. **sales** - Продажи
 5. **profile** - Профиль
 
 **Особенности**:
@@ -565,23 +770,35 @@ Response:
 const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 ```
 
-### ServicesTab
+### SalesTab
 
-Выбор и настройка услуг.
+Управление продажами и отслеживание прогресса к плану.
 
-**Файл**: `src/components/consultant/ServicesTab.tsx`
+**Файл**: `src/components/consultant/SalesTab.tsx`
 
 **Функционал**:
-- Список всех доступных услуг
-- Включение/выключение услуг (Switch)
-- Кастомная цена для консультанта
-- Кастомная длительность
-- Показ дефолтных значений
+- Статистические карточки (продажи, сумма, план)
+- График динамики продаж (по дням/неделям)
+- Таблица продаж с фильтрами
+- Добавление продажи из лида
+- Редактирование и удаление продаж
+- Поиск по клиенту и продукту
 
-**Особенности**:
-- Сохраняются только активные услуги
-- Отображение разницы с дефолтными значениями
-- Автообновление после сохранения
+**Фильтры**:
+- Период (неделя/месяц/произвольный)
+- Поиск по имени/телефону клиента
+- Фильтр по названию продукта
+
+**Статистика**:
+- Количество продаж за месяц
+- Сумма продаж за месяц
+- План продаж на месяц
+- Прогресс к плану (%)
+
+**График**:
+- Библиотека: recharts
+- Данные: сумма и количество продаж по дням
+- Периоды: неделя/месяц
 
 ### ProfileTab
 
@@ -829,7 +1046,111 @@ interface WorkingSchedule {
 ]
 ```
 
-### 4. Услуги
+### 4. Продажи
+
+#### Обзор
+
+Система продаж позволяет консультантам отслеживать свои продажи и прогресс к месячному плану. Продажи хранятся в таблице `purchases` с полем `consultant_id` для связи с консультантом.
+
+#### Структура продажи
+
+```typescript
+interface Sale {
+  id: string;
+  consultant_id: string;
+  lead_id: string;
+  client_name: string;
+  client_phone: string;
+  amount: number;
+  currency: string; // "KZT"
+  product_name: string;
+  sale_date: string; // YYYY-MM-DD
+  comment?: string;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+#### План продаж
+
+Админы могут устанавливать месячные планы для консультантов:
+
+```typescript
+interface SalesPlan {
+  id: string;
+  consultant_id: string;
+  period_year: number; // 2020-2100
+  period_month: number; // 1-12
+  plan_amount: number; // в KZT
+  currency: string; // "KZT"
+}
+```
+
+**Таблица**: `sales_plans`
+
+**Unique constraint**: `(consultant_id, period_year, period_month)`
+
+#### Статистика
+
+Система автоматически рассчитывает:
+- Количество продаж за месяц
+- Сумму продаж за месяц
+- Прогресс к плану (%)
+- Данные для графика (по дням)
+
+**View**: `consultant_sales_stats`
+
+#### Добавление продажи
+
+Продажу можно добавить:
+1. Через общую кнопку "Добавить продажу"
+2. Из раздела лидов (кнопка у каждого лида)
+
+**Обязательные поля**:
+- Lead ID (автоматически при создании из лида)
+- Сумма (KZT)
+- Название продукта/услуги
+- Дата продажи
+
+**Автозаполнение**:
+- Имя клиента (из лида)
+- Телефон клиента (из лида)
+- Consultant ID (из сессии)
+
+#### Редактирование и удаление
+
+- Консультант может редактировать только свои продажи
+- Консультант может удалять только свои продажи
+- Админы видят все продажи всех консультантов
+
+#### График продаж
+
+**Периоды**:
+- Неделя - последние 7 дней
+- Месяц - последние 30 дней
+- Произвольный - выбор дат
+
+**Данные**:
+- Сумма продаж по дням
+- Количество продаж по дням
+
+**Библиотека**: recharts
+
+#### Фильтры
+
+- Период (date_from, date_to)
+- Поиск по имени/телефону клиента
+- Фильтр по названию продукта
+- Пагинация (limit, offset)
+
+#### Обратная совместимость
+
+Поле `consultant_id` в таблице `purchases` nullable:
+- Продажи от консультантов: `consultant_id = UUID`
+- Продажи из рекламы/AmoCRM: `consultant_id = NULL`
+- Существующая ROI аналитика продолжает работать
+
+### 5. Услуги
 
 #### Структура
 
@@ -868,7 +1189,7 @@ const finalDuration = service.consultant_service?.custom_duration ||
                       30;
 ```
 
-### 5. Профиль
+### 6. Профиль
 
 #### Редактируемые поля
 
@@ -1006,6 +1327,51 @@ interface CallLog {
   result: 'answered' | 'no_answer' | 'busy' | 'scheduled';
   notes?: string;
   next_follow_up?: string;
+}
+
+// Продажа
+interface Sale {
+  id: string;
+  consultant_id: string;
+  lead_id: string;
+  client_name: string;
+  client_phone: string;
+  amount: number;
+  currency: string;
+  product_name: string;
+  sale_date: string; // YYYY-MM-DD
+  comment?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// План продаж
+interface SalesPlan {
+  id: string;
+  consultant_id: string;
+  period_year: number;
+  period_month: number;
+  plan_amount: number;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Статистика продаж
+interface SalesStats {
+  total_sales: number;
+  total_amount: number;
+  plan_amount: number;
+  progress_percent: number;
+  sales_count: number;
+  current_month_amount: number;
+}
+
+// Точка данных графика продаж
+interface ChartDataPoint {
+  date: string;
+  amount: number;
+  count: number;
 }
 ```
 
@@ -1162,6 +1528,74 @@ const handleChangePassword = async () => {
 
   toast({ title: 'Пароль изменен' });
   setPasswords({ current: '', new: '', confirm: '' });
+};
+```
+
+### 9. Создание продажи
+
+```typescript
+// Frontend: SalesTab.tsx
+const handleCreateSale = async () => {
+  await salesApi.createSale({
+    lead_id: selectedLead.id,
+    amount: 150000,
+    product_name: 'Консультация',
+    sale_date: '2026-01-30',
+    comment: 'Оплата наличными'
+  });
+
+  toast({ title: 'Продажа создана' });
+  await loadSales();
+};
+```
+
+### 10. Получение статистики продаж
+
+```typescript
+// Frontend: SalesTab.tsx
+const loadStats = async () => {
+  const stats = await salesApi.getStats(currentMonth, currentYear);
+
+  setStats({
+    totalSales: stats.total_sales,
+    totalAmount: stats.total_amount,
+    planAmount: stats.plan_amount,
+    progressPercent: stats.progress_percent
+  });
+};
+```
+
+### 11. Установка плана продаж (Admin)
+
+```typescript
+// Frontend: ConsultantsPage.tsx
+const handleSetSalesPlan = async () => {
+  await salesApi.setSalesPlan(consultantId, {
+    month: 2,
+    year: 2026,
+    plan_amount: 2000000
+  });
+
+  toast({ title: 'План установлен' });
+  await loadConsultants();
+};
+```
+
+### 12. Добавление продажи из лида
+
+```typescript
+// Frontend: LeadsTab.tsx
+const handleAddSaleForLead = async (lead: Lead) => {
+  await salesApi.createSale({
+    lead_id: lead.id,
+    amount: servicePrice,
+    product_name: selectedService.name,
+    sale_date: new Date().toISOString().split('T')[0],
+    comment: ''
+  });
+
+  toast({ title: 'Продажа добавлена к лиду' });
+  await loadLeads();
 };
 ```
 
@@ -1358,6 +1792,55 @@ curl -H "x-user-id: <user_id>" \
 - `blocked_slots` - Заблокированные слоты
 - `dialog_analysis` - Лиды/диалоги
 - `consultant_call_logs` - Журнал звонков
+- `purchases` - Продажи (с полем `consultant_id`)
+- `sales_plans` - Планы продаж консультантов
+
+**Views**:
+- `consultant_sales_stats` - Статистика продаж с прогрессом к плану
+
+### Система продаж консультантов
+
+**Миграции**:
+- `174_consultant_sales.sql` - Основная миграция системы продаж
+- `176_revert_to_purchase_date.sql` - Исправление индексов и view
+
+#### Изменения в БД
+
+**1. Таблица purchases**:
+```sql
+ALTER TABLE purchases
+ADD COLUMN consultant_id UUID REFERENCES consultants(id) ON DELETE SET NULL;
+```
+
+- Поле nullable для обратной совместимости
+- Продажи из рекламы: `consultant_id = NULL`
+- Продажи консультантов: `consultant_id = UUID`
+
+**2. Таблица sales_plans**:
+```sql
+CREATE TABLE sales_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  consultant_id UUID NOT NULL REFERENCES consultants(id) ON DELETE CASCADE,
+  period_year INTEGER NOT NULL CHECK (period_year >= 2020 AND period_year <= 2100),
+  period_month INTEGER NOT NULL CHECK (period_month >= 1 AND period_month <= 12),
+  plan_amount NUMERIC(12, 2) NOT NULL CHECK (plan_amount >= 0),
+  currency VARCHAR(3) DEFAULT 'KZT',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(consultant_id, period_year, period_month)
+);
+```
+
+**3. View consultant_sales_stats**:
+- Агрегирует продажи консультанта
+- Рассчитывает прогресс к плану
+- Фильтрует по текущему месяцу
+
+**4. Индексы**:
+- `idx_purchases_consultant` - быстрый поиск по консультанту
+- `idx_purchases_consultant_date` - поиск по дате и консультанту
+- `idx_sales_plans_consultant` - планы консультанта
+- `idx_sales_plans_period` - планы по периоду
 
 ### Управление распределением лидов
 
@@ -1416,6 +1899,10 @@ await consultationService.updateConsultantAcceptsNewLeads(consultantId, true);
 
 ---
 
-**Версия документа**: 1.0.0
-**Дата обновления**: 2026-01-31
+**Версия документа**: 1.1.0
+**Дата обновления**: 2026-02-01
 **Автор**: AI Assistant (Claude Sonnet 4.5)
+
+**История изменений**:
+- v1.1.0 (2026-02-01) - Добавлена система продаж консультантов
+- v1.0.0 (2026-01-31) - Первая версия документации
