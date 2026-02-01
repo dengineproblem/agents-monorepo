@@ -195,7 +195,7 @@ services:
     environment:
       - NODE_ENV=production
     ports:
-      - "3002:80"
+      - "3003:80"
     restart: unless-stopped
     depends_on:
       - crm-backend
