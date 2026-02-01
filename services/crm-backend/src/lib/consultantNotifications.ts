@@ -4,6 +4,18 @@ import { format } from 'date-fns';
 import ru from 'date-fns/locale/ru/index.js';
 
 /**
+ * Очистить телефон от невидимых unicode символов
+ */
+function sanitizePhoneNumber(phone: string): string {
+  // Удаляем все невидимые символы (RTL marks, zero-width spaces, и т.д.)
+  // Оставляем только цифры, +, -, (, ), пробелы
+  return phone
+    .replace(/[\u200B-\u200D\uFEFF\u202A-\u202E]/g, '') // Удаляем невидимые символы
+    .replace(/[^\d+\-() ]/g, '') // Оставляем только допустимые символы
+    .trim();
+}
+
+/**
  * Получить WhatsApp instance для отправки
  */
 async function getInstanceName(
@@ -70,7 +82,10 @@ export async function notifyConsultantAboutNewConsultation(
       return;
     }
 
-    process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultant phone: ${consultantPhone}\n`);
+    // Очищаем телефон от невидимых символов
+    const cleanPhone = sanitizePhoneNumber(consultantPhone);
+
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultant phone: ${consultantPhone} -> cleaned: ${cleanPhone}\n`);
 
     // 2. Получить WhatsApp instance для отправки
     const instanceName = await getInstanceName(
@@ -106,11 +121,11 @@ export async function notifyConsultantAboutNewConsultation(
     // 4. Отправить уведомление через Evolution API
     await sendWhatsAppMessage({
       instanceName,
-      phone: consultantPhone,
+      phone: cleanPhone,
       message,
     });
 
-    process.stderr.write(`[CONSULTANT_NOTIFICATION] SUCCESS: Notification sent to ${consultant.name} (${consultantPhone})\n`);
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] SUCCESS: Notification sent to ${consultant.name} (${cleanPhone})\n`);
   } catch (error) {
     process.stderr.write(`[CONSULTANT_NOTIFICATION] EXCEPTION: ${error}\n`);
     // Не пробрасываем ошибку, чтобы не блокировать создание консультации
@@ -128,7 +143,7 @@ export async function notifyConsultantAboutNewLead(
     // Получить информацию о консультанте и лиде
     const { data: consultant, error: consultantError } = await supabase
       .from('consultants')
-      .select('id, name, phone, user_account_id')
+      .select('id, name, phone, parent_user_account_id')
       .eq('id', consultantId)
       .single();
 
@@ -137,9 +152,12 @@ export async function notifyConsultantAboutNewLead(
       return;
     }
 
+    // Очищаем телефон от невидимых символов
+    const cleanPhone = sanitizePhoneNumber(consultant.phone);
+
     const { data: lead, error: leadError } = await supabase
       .from('dialog_analysis')
-      .select('contact_name, contact_phone, interest_level')
+      .select('contact_name, contact_phone, interest_level, instance_name')
       .eq('id', leadId)
       .single();
 
@@ -148,14 +166,13 @@ export async function notifyConsultantAboutNewLead(
       return;
     }
 
-    const { data: userAccount, error: userAccountError } = await supabase
-      .from('user_accounts')
-      .select('instance_name')
-      .eq('id', consultant.user_account_id)
-      .single();
+    const instanceName = await getInstanceName(
+      consultant.parent_user_account_id,
+      leadId
+    );
 
-    if (userAccountError || !userAccount?.instance_name) {
-      console.error('User account or instance not found:', userAccountError);
+    if (!instanceName) {
+      console.error('No WhatsApp instance found for consultant');
       return;
     }
 
@@ -174,8 +191,8 @@ export async function notifyConsultantAboutNewLead(
 Посмотреть в личном кабинете: https://crm.example.com/c/${consultant.id}`;
 
     await sendWhatsAppMessage({
-      instanceName: userAccount.instance_name,
-      phone: consultant.phone,
+      instanceName,
+      phone: cleanPhone,
       message,
     });
 
@@ -216,6 +233,9 @@ export async function sendConsultationReminder(
       return;
     }
 
+    // Очищаем телефон от невидимых символов
+    const cleanPhone = sanitizePhoneNumber(consultantPhone);
+
     const instanceName = await getInstanceName(
       consultant.parent_user_account_id,
       consultation.dialog_analysis_id
@@ -240,7 +260,7 @@ export async function sendConsultationReminder(
 
     await sendWhatsAppMessage({
       instanceName,
-      phone: consultantPhone,
+      phone: cleanPhone,
       message,
     });
 
