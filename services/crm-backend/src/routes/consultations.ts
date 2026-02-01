@@ -494,16 +494,25 @@ export async function consultationsRoutes(app: FastifyInstance) {
     try {
       const body = CreateConsultationSchema.parse(request.body);
 
-      // Get user_account_id from consultant if not provided
-      let userAccountId = body.user_account_id;
-      if (!userAccountId) {
-        const { data: consultant } = await supabase
-          .from('consultants')
-          .select('user_account_id')
-          .eq('id', body.consultant_id)
-          .single();
-        userAccountId = consultant?.user_account_id;
+      // Get user_account_id from consultant (always fetch from DB to ensure consistency)
+      const { data: consultant, error: consultantError } = await supabase
+        .from('consultants')
+        .select('parent_user_account_id')
+        .eq('id', body.consultant_id)
+        .single();
+
+      if (consultantError) {
+        app.log.error({ error: consultantError, consultant_id: body.consultant_id }, 'Failed to fetch consultant');
       }
+
+      const userAccountId = consultant?.parent_user_account_id || body.user_account_id || null;
+
+      app.log.info({
+        consultant_id: body.consultant_id.substring(0, 8) + '...',
+        user_account_id: userAccountId ? userAccountId.substring(0, 8) + '...' : null,
+        from_consultant: !!consultant?.parent_user_account_id,
+        from_body: !!body.user_account_id
+      }, '[POST /consultations] Resolved user_account_id');
 
       const consultationData: any = {
         consultant_id: body.consultant_id,
@@ -671,14 +680,28 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
       // Get user_account_id from consultant or lead
       let userAccountId = lead.user_account_id;
-      if (!userAccountId) {
-        const { data: consultant } = await supabase
-          .from('consultants')
-          .select('user_account_id')
-          .eq('id', body.consultant_id)
-          .single();
-        userAccountId = consultant?.user_account_id;
+
+      // Always fetch consultant to ensure we have parent_user_account_id as fallback
+      const { data: consultant, error: consultantError } = await supabase
+        .from('consultants')
+        .select('parent_user_account_id')
+        .eq('id', body.consultant_id)
+        .single();
+
+      if (consultantError) {
+        app.log.error({ error: consultantError, consultant_id: body.consultant_id }, 'Failed to fetch consultant in book-from-lead');
       }
+
+      // Prefer lead's user_account_id, fallback to consultant's parent_user_account_id
+      userAccountId = userAccountId || consultant?.parent_user_account_id || null;
+
+      app.log.info({
+        lead_id: body.dialog_analysis_id.substring(0, 8) + '...',
+        consultant_id: body.consultant_id.substring(0, 8) + '...',
+        user_account_id: userAccountId ? userAccountId.substring(0, 8) + '...' : null,
+        from_lead: !!lead.user_account_id,
+        from_consultant: !!consultant?.parent_user_account_id
+      }, '[POST /consultations/book-from-lead] Resolved user_account_id');
 
       // Create consultation
       const consultationData = {
@@ -825,7 +848,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
       // Supabase ilike не работает с UUID типом, поэтому получаем всех активных и фильтруем
       const { data: allConsultants, error: consultantError } = await supabase
         .from('consultants')
-        .select('id, name, user_account_id')
+        .select('id, name, parent_user_account_id')
         .eq('is_active', true);
 
       if (consultantError) {
@@ -910,7 +933,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
       }
 
       const consultantName = consultant?.name || 'консультант';
-      const userAccountId = clientInfo.userAccountId || consultant?.user_account_id;
+      const userAccountId = clientInfo.userAccountId || consultant?.parent_user_account_id;
 
       // Create consultation
       const consultationData = {
