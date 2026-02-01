@@ -39,7 +39,7 @@ export async function notifyConsultantAboutNewConsultation(
     const { data: userAccount, error: userAccountError } = await supabase
       .from('user_accounts')
       .select('instance_name')
-      .eq('id', consultant.user_account_id)
+      .eq('id', consultant.parent_user_account_id)
       .single();
 
     if (userAccountError || !userAccount?.instance_name) {
@@ -180,7 +180,7 @@ export async function sendConsultationReminder(
     const { data: userAccount, error: userAccountError } = await supabase
       .from('user_accounts')
       .select('instance_name')
-      .eq('id', consultant.user_account_id)
+      .eq('id', consultant.parent_user_account_id)
       .single();
 
     if (userAccountError || !userAccount?.instance_name) {
