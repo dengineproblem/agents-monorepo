@@ -98,6 +98,12 @@ export function Consultations() {
       setConsultants(consultantsData);
       setConsultations(consultationsData);
       setStats(statsData);
+
+      // DEBUG: Log consultations data
+      console.log('🔍 Loaded consultations:', consultationsData.length);
+      consultationsData.forEach(c => {
+        console.log(`📅 ${c.date} ${c.start_time} - client_name: "${c.client_name}", client_phone: "${c.client_phone}"`);
+      });
       setAllSchedules(schedulesData);
       setServices(servicesData);
       setBlockedSlots(blockedSlotsData);
