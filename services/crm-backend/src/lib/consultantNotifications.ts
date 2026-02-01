@@ -40,19 +40,18 @@ export async function notifyConsultantAboutNewConsultation(
 
     process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultant phone: ${consultantPhone}\n`);
 
-    // 2. Получить evolution_instance для Evolution API
-    const { data: userAccount, error: userAccountError } = await supabase
-      .from('user_accounts')
-      .select('evolution_instance')
-      .eq('id', consultant.parent_user_account_id)
-      .single();
+    // 2. Получить WhatsApp instance для отправки
+    const instanceName = await getInstanceName(
+      consultant.parent_user_account_id,
+      consultation.dialog_analysis_id
+    );
 
-    if (userAccountError || !userAccount?.evolution_instance) {
-      process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: User account not found: ${JSON.stringify(userAccountError)}\n`);
+    if (!instanceName) {
+      process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: No WhatsApp instance found\n`);
       return;
     }
 
-    process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${userAccount.evolution_instance}\n`);
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${instanceName}\n`);
 
     // 3. Форматировать сообщение (используем данные из consultations напрямую)
     const clientName = consultation.client_name || 'Клиент';
@@ -74,7 +73,7 @@ export async function notifyConsultantAboutNewConsultation(
 
     // 4. Отправить уведомление через Evolution API
     await sendWhatsAppMessage({
-      instanceName: userAccount.evolution_instance,
+      instanceName,
       phone: consultantPhone,
       message,
     });
@@ -185,14 +184,13 @@ export async function sendConsultationReminder(
       return;
     }
 
-    const { data: userAccount, error: userAccountError } = await supabase
-      .from('user_accounts')
-      .select('evolution_instance')
-      .eq('id', consultant.parent_user_account_id)
-      .single();
+    const instanceName = await getInstanceName(
+      consultant.parent_user_account_id,
+      consultation.dialog_analysis_id
+    );
 
-    if (userAccountError || !userAccount?.evolution_instance) {
-      console.error('User account or instance not found:', userAccountError);
+    if (!instanceName) {
+      console.error('No WhatsApp instance found for consultant');
       return;
     }
 
@@ -209,7 +207,7 @@ export async function sendConsultationReminder(
 Подготовьтесь к встрече 😊`;
 
     await sendWhatsAppMessage({
-      instanceName: userAccount.evolution_instance,
+      instanceName,
       phone: consultantPhone,
       message,
     });
