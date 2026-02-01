@@ -98,12 +98,6 @@ export function Consultations() {
       setConsultants(consultantsData);
       setConsultations(consultationsData);
       setStats(statsData);
-
-      // DEBUG: Log consultations data
-      console.log('🔍 Loaded consultations:', consultationsData.length);
-      consultationsData.forEach(c => {
-        console.log(`📅 ${c.date} ${c.start_time} - client_name: "${c.client_name}", client_phone: "${c.client_phone}"`);
-      });
       setAllSchedules(schedulesData);
       setServices(servicesData);
       setBlockedSlots(blockedSlotsData);
@@ -378,16 +372,6 @@ export function Consultations() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* DEBUG INFO */}
-      <div style={{background: 'yellow', padding: '10px', border: '2px solid red'}}>
-        <div><strong>DEBUG:</strong> Consultations: {consultations.length}</div>
-        {consultations.map(c => (
-          <div key={c.id} style={{fontSize: '12px'}}>
-            {c.date} {c.start_time} - Name: "{c.client_name || 'NULL'}" Phone: "{c.client_phone || 'NULL'}"
-          </div>
-        ))}
-      </div>
-
       {/* Заголовок */}
       <div className="flex items-center justify-between">
         <div>
@@ -556,13 +540,6 @@ export function Consultations() {
                           {consultation ? (
                             <button
                               onClick={() => {
-                                console.log('Selected consultation:', {
-                                  id: consultation.id,
-                                  client_name: consultation.client_name,
-                                  client_phone: consultation.client_phone,
-                                  has_name: !!consultation.client_name,
-                                  has_phone: !!consultation.client_phone
-                                });
                                 setSelectedConsultation(consultation);
                                 setIsDetailModalOpen(true);
                               }}

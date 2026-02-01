@@ -448,10 +448,10 @@ export function CalendarTab() {
                           `}
                         >
                           <div className="font-medium truncate">
-                            {consultation.lead?.contact_name || 'Клиент'}
+                            {consultation.client_name || 'Клиент'}
                           </div>
                           <div className="opacity-90 truncate">
-                            {consultation.lead?.contact_phone}
+                            {consultation.client_phone}
                           </div>
                         </button>
                       ) : isBlocked && blockedSlotItem ? (
@@ -632,13 +632,13 @@ export function CalendarTab() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-muted-foreground">Клиент</Label>
-                  <div className="font-medium">{selectedConsultation.lead?.contact_name || 'Не указан'}</div>
+                  <div className="font-medium">{selectedConsultation.client_name || 'Не указан'}</div>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Телефон</Label>
                   <div className="flex items-center gap-1">
                     <Phone className="w-3 h-3" />
-                    {selectedConsultation.lead?.contact_phone}
+                    {selectedConsultation.client_phone}
                   </div>
                 </div>
                 <div>
@@ -664,6 +664,15 @@ export function CalendarTab() {
                   </div>
                 )}
               </div>
+
+              {selectedConsultation.notes && (
+                <div>
+                  <Label className="text-muted-foreground">Примечания</Label>
+                  <div className="text-sm bg-muted p-3 rounded-md whitespace-pre-wrap">
+                    {selectedConsultation.notes}
+                  </div>
+                </div>
+              )}
 
               <div>
                 <Label className="text-muted-foreground">Статус</Label>
