@@ -352,39 +352,10 @@ services:
   # Using Debian-slim for better native module support (vs Alpine/musl)
   # Telegram интеграция через channels add (не отдельный контейнер)
   moltbot:
-    image: node:22
+    build: ./services/moltbot
     container_name: moltbot
-    working_dir: /root/clawd
     env_file:
       - ./.env.brain
-    command:
-      - sh
-      - -c
-      - |
-        apt-get update && apt-get install -y git ca-certificates python3 make g++ curl --no-install-recommends
-        rm -rf /var/lib/apt/lists/*
-        git config --global --replace-all url."https://github.com/".insteadOf "ssh://git@github.com/"
-        git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-        echo "Git config:" && cat ~/.gitconfig
-        npm install -g moltbot@beta
-
-        # Copy moltbot.json config to working directory
-        mkdir -p /root/clawd/.moltbot
-        cp /root/clawd/moltbot-workspace-router/moltbot.json /root/clawd/.moltbot/config.json
-        echo "Moltbot config copied to /root/clawd/.moltbot/config.json"
-
-        # Setup auth profiles for ALL agents (router + specialists)
-        echo "Setting up auth profiles for all agents..."
-        for agent in router facebook-ads creatives crm tiktok onboarding; do
-          mkdir -p "/root/clawd/.moltbot/agents/$$agent/agent"
-          echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > "/root/clawd/.moltbot/agents/$$agent/agent/auth-profiles.json"
-          echo "  ✓ Auth profile created for agent: $$agent"
-        done
-        echo "Auth profiles configured: GPT-5.2 (default), Anthropic (fallback), Whisper (gpt-4o)"
-
-        # Start Moltbot Gateway with multi-agent routing
-        echo "Starting Moltbot Gateway with multi-agent routing..."
-        moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose
     ports:
       - "18789:18789"
     environment:
