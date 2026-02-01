@@ -202,6 +202,20 @@ export async function consultationsRoutes(app: FastifyInstance) {
         } : null
       }));
 
+      // Log sample for debugging
+      if (consultations.length > 0) {
+        app.log.debug({
+          sample: {
+            id: consultations[0].id?.substring(0, 8) + '...',
+            has_client_name: !!consultations[0].client_name,
+            has_client_phone: !!consultations[0].client_phone,
+            client_name_length: consultations[0].client_name?.length || 0,
+            client_phone_length: consultations[0].client_phone?.length || 0
+          },
+          total: consultations.length
+        }, '[GET /consultations] Returning consultations');
+      }
+
       return reply.send(consultations);
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching consultations');
