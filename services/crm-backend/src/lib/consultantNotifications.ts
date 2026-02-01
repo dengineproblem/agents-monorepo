@@ -10,6 +10,8 @@ export async function notifyConsultantAboutNewConsultation(
   consultationId: string
 ): Promise<void> {
   try {
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] START: consultationId=${consultationId}\n`);
+
     // 1. Получить полную информацию о консультации
     const { data: consultation, error: consultationError } = await supabase
       .from('consultations')
@@ -23,17 +25,21 @@ export async function notifyConsultantAboutNewConsultation(
       .single();
 
     if (consultationError || !consultation) {
-      console.error('Consultation not found:', consultationError);
+      process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: Consultation not found: ${JSON.stringify(consultationError)}\n`);
       return;
     }
+
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultation loaded\n`);
 
     const consultant = consultation.consultant;
     const consultantPhone = consultant?.phone;
 
     if (!consultantPhone) {
-      console.warn('Consultant phone not found, skipping notification');
+      process.stderr.write(`[CONSULTANT_NOTIFICATION] SKIP: No consultant phone\n`);
       return;
     }
+
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Consultant phone: ${consultantPhone}\n`);
 
     // 2. Получить instance_name для Evolution API
     const { data: userAccount, error: userAccountError } = await supabase
@@ -43,9 +49,11 @@ export async function notifyConsultantAboutNewConsultation(
       .single();
 
     if (userAccountError || !userAccount?.instance_name) {
-      console.error('User account or instance not found:', userAccountError);
+      process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: User account not found: ${JSON.stringify(userAccountError)}\n`);
       return;
     }
+
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Instance name: ${userAccount.instance_name}\n`);
 
     // 3. Форматировать сообщение
     const clientName = consultation.lead?.contact_name || 'Клиент';
@@ -63,6 +71,8 @@ export async function notifyConsultantAboutNewConsultation(
 
 Подробности в личном кабинете: https://crm.example.com/c/${consultant.id}`;
 
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] Sending WhatsApp message...\n`);
+
     // 4. Отправить уведомление через Evolution API
     await sendWhatsAppMessage({
       instanceName: userAccount.instance_name,
@@ -70,9 +80,9 @@ export async function notifyConsultantAboutNewConsultation(
       message,
     });
 
-    console.log(`Notification sent to consultant ${consultant.name} (${consultantPhone})`);
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] SUCCESS: Notification sent to ${consultant.name} (${consultantPhone})\n`);
   } catch (error) {
-    console.error('Failed to send consultant notification:', error);
+    process.stderr.write(`[CONSULTANT_NOTIFICATION] EXCEPTION: ${error}\n`);
     // Не пробрасываем ошибку, чтобы не блокировать создание консультации
   }
 }
