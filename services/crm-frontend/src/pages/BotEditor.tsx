@@ -130,7 +130,7 @@ export function BotEditor() {
   // Consultants for integrations
   const { data: consultantsData } = useQuery({
     queryKey: ['consultants'],
-    queryFn: () => consultationService.getConsultants(),
+    queryFn: () => consultationService.getConsultants(USER_ID),
   });
   const consultants = consultantsData || [];
 

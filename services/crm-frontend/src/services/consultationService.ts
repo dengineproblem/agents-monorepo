@@ -26,11 +26,10 @@ const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
 export const consultationService = {
   // Получение списка консультантов
-  async getConsultants(): Promise<Consultant[]> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+  async getConsultants(userAccountId: string): Promise<Consultant[]> {
     const response = await fetch(`${API_BASE_URL}/consultants`, {
       headers: {
-        'x-user-id': user.id || ''
+        'x-user-id': userAccountId
       }
     });
     if (!response.ok) throw new Error('Failed to fetch consultants');
@@ -55,13 +54,12 @@ export const consultationService = {
   },
 
   // Обновление консультанта
-  async updateConsultant(id: string, data: Partial<CreateConsultantData>): Promise<Consultant> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+  async updateConsultant(userAccountId: string, id: string, data: Partial<CreateConsultantData>): Promise<Consultant> {
     const response = await fetch(`${API_BASE_URL}/consultants/${id}`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': user.id || ''
+        'x-user-id': userAccountId
       },
       body: JSON.stringify(data)
     });
@@ -70,25 +68,23 @@ export const consultationService = {
   },
 
   // Удаление консультанта
-  async deleteConsultant(id: string): Promise<void> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+  async deleteConsultant(userAccountId: string, id: string): Promise<void> {
     const response = await fetch(`${API_BASE_URL}/consultants/${id}`, {
       method: 'DELETE',
       headers: {
-        'x-user-id': user.id || ''
+        'x-user-id': userAccountId
       }
     });
     if (!response.ok) throw new Error('Failed to delete consultant');
   },
 
   // Обновление флага accepts_new_leads (только для админов)
-  async updateConsultantAcceptsNewLeads(consultantId: string, acceptsNewLeads: boolean): Promise<{ success: boolean; consultant: Consultant; message: string }> {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+  async updateConsultantAcceptsNewLeads(userAccountId: string, consultantId: string, acceptsNewLeads: boolean): Promise<{ success: boolean; consultant: Consultant; message: string }> {
     const response = await fetch(`${API_BASE_URL}/admin/consultants/${consultantId}/accepts-new-leads`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': user.id || ''
+        'x-user-id': userAccountId
       },
       body: JSON.stringify({ acceptsNewLeads })
     });

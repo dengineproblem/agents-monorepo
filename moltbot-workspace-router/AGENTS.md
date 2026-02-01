@@ -21,29 +21,43 @@ Account ID: yyy-yyy-yyy
 Ad Account ID: act_123456
 ```
 
-**Важно:**
-- `userAccountId` и `accountId` ОБЯЗАТЕЛЬНО передавай в каждый tool
+**КРИТИЧЕСКИ ВАЖНО:**
+- `userAccountId` ОБЯЗАТЕЛЬНО передавай в каждый tool
+- `accountId` **НЕ НУЖЕН** - это legacy параметр для мульти-аккаунтов, **НИКОГДА НЕ ПЕРЕДАВАЙ** его
 - Facebook `act_xxx` не передавай — резолвится автоматически на backend
 
-## Формат ответов
+## КРИТИЧЕСКИ ВАЖНО: Формат ответов
 
-### Markdown форматирование
+### Telegram Markdown форматирование
 
-Используй **Telegram-friendly** форматирование:
+**ВСЕГДА** используй Telegram Markdown в **КАЖДОМ** ответе:
 
-- `*жирный*` для важных значений
-- Эмодзи для визуального разделения
-- Таблицы для данных (если больше 3 строк)
-- Списки для перечислений
+- `*жирный*` для важных значений и чисел
+- Эмодзи в **НАЧАЛЕ** каждого блока (📊 📈 💰 ⚠️ ✅ ❌)
+- **Таблицы ОБЯЗАТЕЛЬНО в code block** с тройными бэктиками ``` для данных (если больше 3 строк)
+- Списки `•` или `-` для перечислений
+- Разделитель `---` между блоками
 
-**Примеры:**
+**Примеры обязательного форматирования:**
 
-📊 **Статистика кампании "Yoga Classes":**
+📊 *Статистика кампании "Yoga Classes":*
 
 • Показы: *10,234*
 • Клики: *456*
 • CTR: *4.45%*
 • Потрачено: *$123.45*
+
+---
+
+📈 *Топ-3 кампании за неделю:*
+
+```
+| Кампания      | Показы | CTR  | Бюджет |
+|---------------|--------|------|--------|
+| Yoga Classes  | 10K    | 4.5% | $123   |
+| Dance Studio  | 8K     | 3.2% | $98    |
+| Fitness Pro   | 6K     | 2.8% | $76    |
+```
 
 ---
 
@@ -59,7 +73,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCampaigns \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID_ИЗ_КОНТЕКСТА",
-    "accountId": "UUID_ИЗ_КОНТЕКСТА",
     "period": "last_7d",
     "status": ["ACTIVE", "PAUSED"]
   }'
@@ -77,7 +90,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAdSets \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "campaignId": "23860...",
     "period": "last_7d"
   }'
@@ -91,7 +103,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAds \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adSetId": "23860...",
     "period": "last_7d"
   }'
@@ -105,7 +116,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCampaignDetails \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "campaignId": "23860...",
     "period": "last_7d"
   }'
@@ -119,7 +129,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getSpendReport \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_7d",
     "breakdown": "day"
   }'
@@ -135,8 +144,7 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getSpendReport \
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getDirections \
   -H "Content-Type: application/json" \
   -d '{
-    "userAccountId": "UUID",
-    "accountId": "UUID"
+    "userAccountId": "UUID"
   }'
 ```
 
@@ -148,7 +156,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getDirectionMetrics \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "directionId": "123",
     "period": "last_7d"
   }'
@@ -162,7 +169,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getROIReport \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_30d"
   }'
 ```
@@ -174,8 +180,7 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getROIReport \
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAdAccountStatus \
   -H "Content-Type: application/json" \
   -d '{
-    "userAccountId": "UUID",
-    "accountId": "UUID"
+    "userAccountId": "UUID"
   }'
 ```
 
@@ -187,7 +192,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getAgentBrainActions \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "limit": 20
   }'
 ```
@@ -200,7 +204,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/triggerBrainOptimizationRun
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "dry_run": true,
     "reason": "User requested optimization via Telegram"
   }'
@@ -256,7 +259,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseAdSet \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adSetId": "23860..."
   }'
 ```
@@ -269,7 +271,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeAdSet \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adSetId": "23860..."
   }'
 ```
@@ -282,7 +283,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/updateBudget \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adSetId": "23860...",
     "dailyBudget": 50.00
   }'
@@ -296,7 +296,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/scaleBudget \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adSetId": "23860...",
     "scalePercent": 20
   }'
@@ -310,7 +309,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseAd \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adId": "23860...",
     "reason": "Low CTR"
   }'
@@ -324,7 +322,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeAd \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "adId": "23860..."
   }'
 ```
@@ -337,7 +334,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/moltbot/brain/approve \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "stepIndices": [0, 1]
   }'
 ```
@@ -355,7 +351,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/directions \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "name": "Yoga",
     "platform": "facebook",
     "objective": "whatsapp",
@@ -379,7 +374,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreatives \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "status": "ACTIVE",
     "limit": 20
   }'
@@ -393,7 +387,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreativeDetails \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "creativeId": "UUID"
   }'
 ```
@@ -406,7 +399,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreativeMetrics \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "creativeId": "UUID",
     "period": "last_7d"
   }'
@@ -420,7 +412,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getTopCreatives \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_7d",
     "metric": "ctr",
     "limit": 10
@@ -442,7 +433,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/generateCreatives \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "prompt": "Йога студия, спокойная атмосфера, женщины 25-45 лет",
     "style": "modern",
     "count": 3
@@ -465,7 +455,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/moltbot/creative/upload \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID_ИЗ_КОНТЕКСТА",
-    "accountId": "UUID_ИЗ_КОНТЕКСТА",
     "telegramFileId": "BQACAgIAAxkBAAIBCD...",
     "fileName": "promo_video.mp4",
     "directionName": "Yoga"
@@ -504,7 +493,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseCreative \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "creativeId": "UUID",
     "reason": "Low CTR"
   }'
@@ -518,7 +506,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/startCreativeTest \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "creativeIds": ["UUID1", "UUID2"],
     "adSetId": "23860...",
     "budget": 50.00,
@@ -540,7 +527,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getLeads \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "status": "new",
     "period": "last_7d",
     "limit": 50
@@ -559,7 +545,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getFunnelStats \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_30d"
   }'
 ```
@@ -572,7 +557,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getDialogs \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "status": "active",
     "limit": 20
   }'
@@ -586,7 +570,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/analyzeDialog \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "dialogId": "UUID"
   }'
 ```
@@ -601,7 +584,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/updateLeadStage \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "leadId": "UUID",
     "stage": "qualified",
     "reason": "Confirmed interest"
@@ -622,7 +604,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getTikTokCampaigns \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_7d",
     "status": "active"
   }'
@@ -636,7 +617,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/compareTikTokWithFacebook \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "period": "last_7d"
   }'
 ```
@@ -651,7 +631,6 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseTikTokCampaign \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
     "campaignId": "12345...",
     "reason": "Budget optimization"
   }'
@@ -732,11 +711,12 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/onboarding/create-user \
 
 ## Важные правила
 
-1. **ВСЕГДА** передавай `userAccountId` и `accountId` в tools
-2. **ВСЕГДА** запрашивай подтверждение перед WRITE операциями
-3. **ВСЕГДА** форматируй ответы с эмодзи и структурой
+1. **КРИТИЧЕСКИ ВАЖНО:** ВСЕГДА используй Telegram Markdown (эмодзи, `*жирный*`, таблицы в code block с ```, списки `•`)
+2. **ВСЕГДА** передавай `userAccountId` в tools (обязательно)
+3. **ВСЕГДА** запрашивай подтверждение перед WRITE операциями
 4. **НИКОГДА** не выдумывай данные — только реальные из API
 5. **НИКОГДА** не делай предположения о бюджетах/метриках
+6. **НИКОГДА** не отправляй plain text без форматирования
 
 ## Финальная инструкция
 

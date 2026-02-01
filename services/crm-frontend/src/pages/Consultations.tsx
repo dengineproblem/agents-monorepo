@@ -87,7 +87,7 @@ export function Consultations() {
       const dateStr = selectedDate.toISOString().split('T')[0];
 
       const [consultantsData, consultationsData, statsData, schedulesData, servicesData, blockedSlotsData] = await Promise.all([
-        consultationService.getConsultants(),
+        consultationService.getConsultants(userAccountId),
         consultationService.getConsultations(dateStr),
         consultationService.getStats(),
         consultationService.getAllSchedules().catch(() => []),

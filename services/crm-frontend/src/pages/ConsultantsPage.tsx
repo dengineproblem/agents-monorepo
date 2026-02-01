@@ -90,7 +90,7 @@ export function ConsultantsPage() {
     try {
       setIsLoading(true);
       const [consultantsData, schedulesData, servicesData] = await Promise.all([
-        consultationService.getConsultants(),
+        consultationService.getConsultants(userAccountId),
         consultationService.getAllSchedules(),
         consultationService.getServices(userAccountId)
       ]);
@@ -179,7 +179,7 @@ export function ConsultantsPage() {
     }
 
     try {
-      await consultationService.updateConsultant(editingConsultantId, { ...editingConsultantData, user_account_id: userAccountId });
+      await consultationService.updateConsultant(userAccountId, editingConsultantId, { ...editingConsultantData, user_account_id: userAccountId });
       toast({ title: 'Консультант обновлён' });
       setIsEditConsultantOpen(false);
       setEditingConsultantId(null);
@@ -196,9 +196,10 @@ export function ConsultantsPage() {
 
   const handleDeleteConsultant = async (id: string) => {
     if (!confirm('Удалить консультанта?')) return;
+    if (!userAccountId) return;
 
     try {
-      await consultationService.deleteConsultant(id);
+      await consultationService.deleteConsultant(userAccountId, id);
       toast({ title: 'Консультант удалён' });
       loadData();
     } catch {
@@ -293,9 +294,10 @@ export function ConsultantsPage() {
   };
 
   const handleToggleAcceptsNewLeads = async (consultant: Consultant) => {
+    if (!userAccountId) return;
     const newValue = !consultant.accepts_new_leads;
     try {
-      const result = await consultationService.updateConsultantAcceptsNewLeads(consultant.id, newValue);
+      const result = await consultationService.updateConsultantAcceptsNewLeads(userAccountId, consultant.id, newValue);
       toast({
         title: 'Статус обновлён',
         description: result.message
