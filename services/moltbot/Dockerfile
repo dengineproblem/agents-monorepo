@@ -20,7 +20,8 @@ RUN npm install -g moltbot@beta
 
 WORKDIR /root/clawd
 
-# Точка входа - только setup и запуск, без установки зависимостей
+# Copy config template and entrypoint
+COPY moltbot-config-template.json /root/clawd/moltbot-config-template.json
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 

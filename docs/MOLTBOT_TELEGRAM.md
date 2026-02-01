@@ -357,14 +357,16 @@ Total: ~11-15K tokens вместо ~20K (экономия 35-40%)
 1. Проверить лимиты затрат (usage-limits skill)
 2. Получить контекст пользователя (context skill)
 3. Определить намерение запроса (анализ ключевых слов)
-4. Вернуть `ROUTE: specialist-name`
+4. Делегировать запрос specialist agent через `sessions_spawn` tool
 
 **Prompt size:** ~3,000 токенов
 
 **Skills:**
 - `context` — получение credentials
 - `usage-limits` — проверка лимитов (priority: 1000)
-- `router` — маршрутизация к specialists
+
+**Delegation Tool:**
+- `sessions_spawn({ task: "user request", agentId: "specialist-id" })`
 
 **Примеры маршрутизации:**
 
@@ -486,29 +488,29 @@ moltbot-workspace-tiktok/          # TikTok Specialist
 moltbot-workspace-onboarding/      # Onboarding Specialist
 ```
 
-### Routing Endpoint
+### Delegation Mechanism
 
-**Endpoint:** `POST /api/moltbot/route`
+**Метод:** `sessions_spawn` tool (встроенный в Moltbot)
 
-**Назначение:** Прямой вызов specialist агента (используется Router Agent).
+**Назначение:** Router Agent делегирует запросы specialist agents через встроенный механизм subagents.
 
-**Request:**
-```bash
-curl -X POST http://agent-brain:7080/api/moltbot/route \
-  -H "Content-Type: application/json" \
-  -d '{
-    "specialist": "facebook-ads",
-    "message": "Покажи статистику за неделю",
-    "telegramChatId": "313145981"
-  }'
+**Использование в Router Agent:**
+```javascript
+// Router Agent вызывает sessions_spawn tool
+sessions_spawn({
+  task: "Покажи статистику за неделю",  // Исходный запрос пользователя БЕЗ изменений
+  agentId: "facebook-ads"                // ID specialist agent из конфигурации
+})
 ```
 
-**Response:**
-```json
-{
-  "response": "📊 Статистика за последние 7 дней:\n\nКампания \"Yoga Classes\":\n- Показы: 10,234\n- Клики: 456\n- CTR: 4.45%\n- Потрачено: $123.45"
-}
-```
+**Параметры:**
+- `task` (required) - исходное сообщение пользователя без изменений
+- `agentId` (required) - ID specialist agent: `facebook-ads`, `creatives`, `crm`, `tiktok`, `onboarding`
+- `label` (optional) - метка для отслеживания
+- `model` (optional) - переопределить модель для subagent
+
+**Результат:**
+Specialist agent обрабатывает запрос в изолированной subagent session и возвращает ответ пользователю через Telegram.
 
 ### Flow обработки запроса
 
@@ -521,9 +523,9 @@ curl -X POST http://agent-brain:7080/api/moltbot/route \
    - Проверяет лимиты (usage-limits skill)
    - Получает контекст (context skill)
    - Анализирует: "статистика" → facebook-ads
-   - Вызывает: POST /api/moltbot/route
+   - Вызывает: sessions_spawn({ task: "Покажи статистику", agentId: "facebook-ads" })
          ↓
-4. Agent-Brain → Moltbot Gateway (specialist=facebook-ads)
+4. Moltbot Gateway → Facebook Ads Agent (subagent session)
          ↓
 5. Facebook Ads Agent:
    - Использует facebook-ads skill
@@ -568,22 +570,36 @@ docker logs moltbot 2>&1 | grep "agent model"
 # [onboarding] agent model: openai/gpt-5.2
 ```
 
-**2. Проверить routing:**
+**2. Проверить routing через sessions_spawn:**
 ```bash
-# Логи routing
-docker logs agent-brain 2>&1 | grep "Routing to specialist"
+# Проверить вызовы sessions_spawn от router
+docker logs moltbot 2>&1 | grep "sessions_spawn" | tail -10
 
-# Логи specialist агентов
-docker logs moltbot 2>&1 | grep "embedded run" | grep "facebook-ads"
+# Логи subagent sessions (specialist агенты)
+docker logs moltbot 2>&1 | grep "embedded run start.*agentId=facebook-ads" | tail -10
+
+# Проверить что specialist agents отвечают
+docker logs moltbot 2>&1 | grep "embedded run done.*facebook-ads" | tail -10
 ```
 
 **3. Тест E2E:**
 Отправь в Telegram бот: "Покажи статистику за неделю"
 
 Ожидаемый flow:
-1. Router определяет: `facebook-ads` specialist
-2. Вызывается специализированный агент
-3. Получаешь статистику
+1. Router Agent определяет специалиста: `facebook-ads`
+2. Router вызывает: `sessions_spawn({ task: "Покажи статистику за неделю", agentId: "facebook-ads" })`
+3. Facebook Ads Agent обрабатывает запрос в subagent session
+4. Получаешь статистику в Telegram
+
+Проверить в логах:
+```bash
+docker logs moltbot -f
+# Ожидаешь увидеть:
+# [router] embedded run start messageChannel=telegram
+# [router] calling tool sessions_spawn
+# [facebook-ads] embedded run start agentId=facebook-ads
+# [facebook-ads] embedded run done
+```
 
 ### Troubleshooting Multi-Agent
 
@@ -602,13 +618,14 @@ docker exec moltbot ls -la /root/.moltbot/agents/
 **Проблема: Routing не работает**
 
 ```bash
-# Проверить что endpoint доступен
-curl -X POST http://localhost:7080/api/moltbot/route \
-  -H "Content-Type: application/json" \
-  -d '{"specialist":"facebook-ads","message":"test","telegramChatId":"123"}'
+# Проверить логи router agent
+docker logs moltbot 2>&1 | grep "\[router\]" | tail -20
 
-# Проверить логи
-docker logs agent-brain 2>&1 | grep "router.js"
+# Проверить вызовы sessions_spawn
+docker logs moltbot 2>&1 | grep "sessions_spawn\|embedded run start" | tail -20
+
+# Проверить что router видит AGENTS.md с инструкциями
+docker exec moltbot cat /root/clawd/moltbot-workspace-router/AGENTS.md | grep "sessions_spawn"
 ```
 
 **Проблема: Specialist не отвечает**
