@@ -1,20 +1,19 @@
 import { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
-import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
+import { z } from 'zod';
 
-// ==================== VALIDATION SCHEMAS ====================
+// ==================== SCHEMAS ====================
 
 const CreateSaleSchema = z.object({
   lead_id: z.string().uuid(),
-  amount: z.number().min(0),
+  amount: z.number().positive(),
   product_name: z.string().min(1),
   sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   comment: z.string().optional()
 });
 
 const UpdateSaleSchema = z.object({
-  amount: z.number().min(0).optional(),
+  amount: z.number().positive().optional(),
   product_name: z.string().min(1).optional(),
   sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   comment: z.string().optional()
@@ -23,97 +22,78 @@ const UpdateSaleSchema = z.object({
 const SetSalesPlanSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2020).max(2100),
-  plan_amount: z.number().min(0)
+  plan_amount: z.number().positive()
 });
 
-// ==================== CONSULTANT SALES ROUTES ====================
+// ==================== TYPES ====================
 
+interface ConsultantAuthRequest {
+  consultant?: {
+    id: string;
+    user_account_id: string;
+    name: string;
+  };
+  headers: {
+    'x-user-id'?: string;
+  };
+}
+
+/**
+ * Routes для системы продаж консультантов
+ */
 export async function consultantSalesRoutes(app: FastifyInstance) {
-  // Применяем middleware ко всем роутам
-  app.addHook('preHandler', consultantAuthMiddleware);
+
+  // ==================== CONSULTANT ROUTES ====================
 
   /**
    * GET /consultant/sales
-   * Получить список продаж консультанта
+   * Получить продажи консультанта
    */
   app.get('/consultant/sales', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const isAdmin = request.userRole === 'admin';
-      const consultantIdFromQuery = (request.query as any).consultantId;
-
-      // Для админа берём consultantId из query, для консультанта из request.consultant
-      const consultantId = isAdmin
-        ? consultantIdFromQuery || request.consultant?.id
-        : request.consultant?.id;
+      const consultantId = request.query?.consultantId as string;
+      const dateFrom = request.query?.date_from as string | undefined;
+      const dateTo = request.query?.date_to as string | undefined;
+      const search = request.query?.search as string | undefined;
+      const productName = request.query?.product_name as string | undefined;
+      const limit = parseInt(request.query?.limit as string || '50');
+      const offset = parseInt(request.query?.offset as string || '0');
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
-      const query = request.query as {
-        date_from?: string;
-        date_to?: string;
-        search?: string;
-        product_name?: string;
-        limit?: string;
-        offset?: string;
-      };
-
-      // Базовый запрос
-      let dbQuery = supabase
+      let query = supabase
         .from('purchases')
-        .select(`
-          id,
-          consultant_id,
-          client_phone,
-          amount,
-          notes,
-          purchase_date
-        `)
+        .select('*')
         .eq('consultant_id', consultantId)
         .order('purchase_date', { ascending: false });
 
-      // Фильтр по дате от
-      if (query.date_from) {
-        dbQuery = dbQuery.gte('purchase_date', query.date_from);
+      if (dateFrom) {
+        query = query.gte('purchase_date', dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte('purchase_date', dateTo);
+      }
+      if (search) {
+        query = query.or(`client_name.ilike.%${search}%,client_phone.ilike.%${search}%`);
+      }
+      if (productName) {
+        query = query.ilike('product_name', `%${productName}%`);
       }
 
-      // Фильтр по дате до
-      if (query.date_to) {
-        dbQuery = dbQuery.lte('purchase_date', query.date_to);
-      }
+      query = query.range(offset, offset + limit - 1);
 
-      // Поиск по телефону клиента
-      if (query.search) {
-        dbQuery = dbQuery.ilike('client_phone', `%${query.search}%`);
-      }
-
-      // Фильтр по notes
-      if (query.product_name) {
-        dbQuery = dbQuery.ilike('notes', `%${query.product_name}%`);
-      }
-
-      // Пагинация
-      const limit = query.limit ? parseInt(query.limit) : 100;
-      const offset = query.offset ? parseInt(query.offset) : 0;
-      dbQuery = dbQuery.range(offset, offset + limit - 1);
-
-      const { data, error, count } = await dbQuery;
+      const { data, error, count } = await query;
 
       if (error) {
         app.log.error({ error }, 'Failed to fetch consultant sales');
         return reply.status(500).send({ error: error.message });
       }
 
-      // Получаем общее количество записей
-      const { count: totalCount } = await supabase
-        .from('purchases')
-        .select('*', { count: 'exact', head: true })
-        .eq('consultant_id', consultantId);
-
       return reply.send({
         sales: data || [],
-        total: totalCount || 0
+        total: count || 0
       });
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching consultant sales');
@@ -123,19 +103,19 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
   /**
    * POST /consultant/sales
-   * Добавить новую продажу
+   * Добавить продажу
    */
   app.post('/consultant/sales', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.consultant?.id;
+      const consultantId = request.query?.consultantId as string;
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
       const body = CreateSaleSchema.parse(request.body);
 
-      // Получаем информацию о лиде
+      // Получаем данные лида
       const { data: lead, error: leadError } = await supabase
         .from('dialog_analysis')
         .select('contact_name, contact_phone, chat_id')
@@ -151,9 +131,13 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         .from('purchases')
         .insert({
           consultant_id: consultantId,
-          client_phone: lead.contact_phone || lead.chat_id,
+          client_name: lead.contact_name || '',
+          client_phone: lead.chat_id || lead.contact_phone || '',
           amount: body.amount,
-          notes: body.product_name // Используем notes для хранения названия продукта
+          product_name: body.product_name,
+          purchase_date: body.sale_date,
+          comment: body.comment,
+          currency: 'KZT'
         })
         .select()
         .single();
@@ -165,9 +149,9 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
       app.log.info({
         consultantId,
-        saleId: sale.id,
         leadId: body.lead_id,
-        amount: body.amount
+        amount: body.amount,
+        productName: body.product_name
       }, 'Sale created by consultant');
 
       return reply.send(sale);
@@ -182,40 +166,38 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
   /**
    * PUT /consultant/sales/:saleId
-   * Обновить продажу
+   * Редактировать продажу
    */
   app.put('/consultant/sales/:saleId', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.consultant?.id;
       const { saleId } = request.params as { saleId: string };
+      const consultantId = request.query?.consultantId as string;
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
       const body = UpdateSaleSchema.parse(request.body);
 
-      // Проверяем что продажа принадлежит консультанту
+      // Проверяем что продажа принадлежит этому консультанту
       const { data: existingSale, error: checkError } = await supabase
         .from('purchases')
-        .select('id, consultant_id')
+        .select('id')
         .eq('id', saleId)
+        .eq('consultant_id', consultantId)
         .single();
 
       if (checkError || !existingSale) {
-        return reply.status(404).send({ error: 'Sale not found' });
+        return reply.status(404).send({ error: 'Sale not found or access denied' });
       }
 
-      if (existingSale.consultant_id !== consultantId) {
-        return reply.status(403).send({ error: 'You can only edit your own sales' });
-      }
-
-      // Обновляем продажу
       const updateData: any = {};
       if (body.amount !== undefined) updateData.amount = body.amount;
-      if (body.product_name !== undefined) updateData.notes = body.product_name;
+      if (body.product_name !== undefined) updateData.product_name = body.product_name;
+      if (body.sale_date !== undefined) updateData.purchase_date = body.sale_date;
+      if (body.comment !== undefined) updateData.comment = body.comment;
 
-      const { data: updatedSale, error: updateError } = await supabase
+      const { data: sale, error: updateError } = await supabase
         .from('purchases')
         .update(updateData)
         .eq('id', saleId)
@@ -227,13 +209,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: updateError.message });
       }
 
-      app.log.info({
-        consultantId,
-        saleId,
-        updatedFields: Object.keys(updateData)
-      }, 'Sale updated by consultant');
-
-      return reply.send(updatedSale);
+      return reply.send(sale);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: error.errors });
@@ -249,29 +225,25 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.delete('/consultant/sales/:saleId', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const consultantId = request.consultant?.id;
       const { saleId } = request.params as { saleId: string };
+      const consultantId = request.query?.consultantId as string;
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
-      // Проверяем что продажа принадлежит консультанту
+      // Проверяем что продажа принадлежит этому консультанту
       const { data: existingSale, error: checkError } = await supabase
         .from('purchases')
-        .select('id, consultant_id')
+        .select('id')
         .eq('id', saleId)
+        .eq('consultant_id', consultantId)
         .single();
 
       if (checkError || !existingSale) {
-        return reply.status(404).send({ error: 'Sale not found' });
+        return reply.status(404).send({ error: 'Sale not found or access denied' });
       }
 
-      if (existingSale.consultant_id !== consultantId) {
-        return reply.status(403).send({ error: 'You can only delete your own sales' });
-      }
-
-      // Удаляем продажу
       const { error: deleteError } = await supabase
         .from('purchases')
         .delete()
@@ -282,12 +254,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: deleteError.message });
       }
 
-      app.log.info({
-        consultantId,
-        saleId
-      }, 'Sale deleted by consultant');
-
-      return reply.send({ success: true, message: 'Sale deleted successfully' });
+      return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error }, 'Error deleting sale');
       return reply.status(500).send({ error: error.message });
@@ -296,69 +263,34 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
   /**
    * GET /consultant/sales/stats
-   * Получить статистику продаж консультанта
+   * Получить статистику и прогресс к плану
    */
   app.get('/consultant/sales/stats', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const isAdmin = request.userRole === 'admin';
-      const consultantIdFromQuery = (request.query as any).consultantId;
-
-      // Для админа берём consultantId из query, для консультанта из request.consultant
-      const consultantId = isAdmin
-        ? consultantIdFromQuery || request.consultant?.id
-        : request.consultant?.id;
+      const consultantId = request.query?.consultantId as string;
+      const month = parseInt(request.query?.month as string) || new Date().getMonth() + 1;
+      const year = parseInt(request.query?.year as string) || new Date().getFullYear();
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
-      const query = request.query as {
-        month?: string;
-        year?: string;
-      };
-
-      const currentDate = new Date();
-      const month = query.month ? parseInt(query.month) : currentDate.getMonth() + 1;
-      const year = query.year ? parseInt(query.year) : currentDate.getFullYear();
-
       // Получаем статистику из view
-      const { data: viewStats, error: viewError } = await supabase
+      const { data: stats, error: statsError } = await supabase
         .from('consultant_sales_stats')
         .select('*')
         .eq('consultant_id', consultantId)
         .single();
 
-      if (viewError && viewError.code !== 'PGRST116') { // PGRST116 = no rows
-        app.log.error({ error: viewError }, 'Failed to fetch consultant stats from view');
-      }
-
-      // Если нужны данные за конкретный месяц (не текущий), делаем отдельный запрос
-      let monthStats = null;
-      if (month !== currentDate.getMonth() + 1 || year !== currentDate.getFullYear()) {
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        const endDate = new Date(year, month, 0);
-        const endDateStr = `${year}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
-
-        const { data: salesData, error: salesError } = await supabase
-          .from('purchases')
-          .select('amount')
-          .eq('consultant_id', consultantId)
-          .gte('purchase_date', startDate)
-          .lte('purchase_date', endDateStr);
-
-        if (!salesError && salesData) {
-          const totalAmount = salesData.reduce((sum, sale) => sum + (sale.amount || 0), 0);
-          monthStats = {
-            sales_count: salesData.length,
-            total_amount: totalAmount
-          };
-        }
+      if (statsError && statsError.code !== 'PGRST116') { // PGRST116 = no rows
+        app.log.error({ error: statsError }, 'Failed to fetch sales stats');
+        return reply.status(500).send({ error: statsError.message });
       }
 
       // Получаем план на указанный месяц
       const { data: plan, error: planError } = await supabase
         .from('sales_plans')
-        .select('plan_amount')
+        .select('*')
         .eq('consultant_id', consultantId)
         .eq('period_year', year)
         .eq('period_month', month)
@@ -368,31 +300,53 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         consultantId,
         year,
         month,
-        plan: plan,
-        planError: planError
+        plan,
+        planError
       }, 'Sales plan query result');
 
-      if (planError && planError.code !== 'PGRST116') {
-        app.log.error({ error: planError }, 'Failed to fetch sales plan');
-      }
-
-      // Формируем ответ
-      const stats = monthStats || {
-        sales_count: viewStats?.current_month_sales_count || 0,
-        total_amount: viewStats?.current_month_sales_amount || 0
+      // Если план не на текущий месяц, пересчитываем статистику
+      let monthStats = stats || {
+        total_sales_count: 0,
+        total_sales_amount: 0,
+        current_month_sales_count: 0,
+        current_month_sales_amount: 0
       };
 
+      // Если запрашивается не текущий месяц, пересчитываем
+      const now = new Date();
+      if (month !== now.getMonth() + 1 || year !== now.getFullYear()) {
+        const startDate = `${year}-${month.toString().padStart(2, '0')}-01`;
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+
+        const { data: monthlySales, error: monthlyError } = await supabase
+          .from('purchases')
+          .select('id, amount')
+          .eq('consultant_id', consultantId)
+          .gte('purchase_date', startDate)
+          .lte('purchase_date', endDate);
+
+        if (!monthlyError && monthlySales) {
+          monthStats = {
+            ...monthStats,
+            current_month_sales_count: monthlySales.length,
+            current_month_sales_amount: monthlySales.reduce((sum, s) => sum + (s.amount || 0), 0)
+          };
+        }
+      }
+
       const planAmount = plan?.plan_amount || 0;
+      const currentMonthAmount = monthStats.current_month_sales_amount || 0;
       const progressPercent = planAmount > 0
-        ? Math.round((stats.total_amount / planAmount) * 100 * 10) / 10
+        ? Math.round((currentMonthAmount / planAmount) * 100 * 10) / 10
         : 0;
 
       return reply.send({
-        total_sales: viewStats?.total_sales_count || 0,
-        total_amount: stats.total_amount,
+        total_sales: monthStats.total_sales_count || 0,
+        total_amount: monthStats.total_sales_amount || 0,
         plan_amount: planAmount,
         progress_percent: progressPercent,
-        sales_count: stats.sales_count
+        sales_count: monthStats.current_month_sales_count || 0,
+        current_month_amount: currentMonthAmount
       });
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching sales stats');
@@ -406,76 +360,52 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
    */
   app.get('/consultant/sales/chart', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const isAdmin = request.userRole === 'admin';
-      const consultantIdFromQuery = (request.query as any).consultantId;
-
-      // Для админа берём consultantId из query, для консультанта из request.consultant
-      const consultantId = isAdmin
-        ? consultantIdFromQuery || request.consultant?.id
-        : request.consultant?.id;
+      const consultantId = request.query?.consultantId as string;
+      const period = (request.query?.period as string) || 'month';
+      const dateFrom = request.query?.date_from as string | undefined;
+      const dateTo = request.query?.date_to as string | undefined;
 
       if (!consultantId) {
-        return reply.status(403).send({ error: 'Consultant authentication required' });
+        return reply.status(400).send({ error: 'consultantId is required' });
       }
 
-      const query = request.query as {
-        period: 'week' | 'month';
-        date_from?: string;
-        date_to?: string;
-      };
+      // Определяем даты по умолчанию
+      const now = new Date();
+      const defaultDateTo = now.toISOString().split('T')[0];
+      const defaultDateFrom = period === 'week'
+        ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        : new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
 
-      const period = query.period || 'month';
-      let dateFrom = query.date_from;
-      let dateTo = query.date_to;
+      const startDate = dateFrom || defaultDateFrom;
+      const endDate = dateTo || defaultDateTo;
 
-      // Если даты не указаны, устанавливаем по умолчанию
-      if (!dateFrom || !dateTo) {
-        const now = new Date();
-        dateTo = now.toISOString().split('T')[0];
-
-        if (period === 'week') {
-          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          dateFrom = weekAgo.toISOString().split('T')[0];
-        } else {
-          const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-          dateFrom = monthAgo.toISOString().split('T')[0];
-        }
-      }
-
-      // Получаем продажи за период
       const { data: sales, error } = await supabase
         .from('purchases')
         .select('purchase_date, amount')
         .eq('consultant_id', consultantId)
-        .gte('purchase_date', dateFrom)
-        .lte('purchase_date', dateTo)
-        .order('purchase_date', { ascending: true });
+        .gte('purchase_date', startDate)
+        .lte('purchase_date', endDate)
+        .order('purchase_date');
 
       if (error) {
-        app.log.error({ error }, 'Failed to fetch sales for chart');
+        app.log.error({ error }, 'Failed to fetch chart data');
         return reply.status(500).send({ error: error.message });
       }
 
-      // Группируем по датам
-      const chartData: { [key: string]: { amount: number; count: number } } = {};
-
-      (sales || []).forEach(sale => {
+      // Группируем по дням
+      const grouped = (sales || []).reduce((acc: any, sale: any) => {
         const date = sale.purchase_date;
-        if (!chartData[date]) {
-          chartData[date] = { amount: 0, count: 0 };
+        if (!acc[date]) {
+          acc[date] = { date, amount: 0, count: 0 };
         }
-        chartData[date].amount += sale.amount || 0;
-        chartData[date].count += 1;
-      });
+        acc[date].amount += sale.amount || 0;
+        acc[date].count += 1;
+        return acc;
+      }, {});
 
-      // Преобразуем в массив
-      const result = Object.entries(chartData).map(([date, data]) => ({
-        date,
-        amount: data.amount,
-        count: data.count
-      }));
+      const chartData = Object.values(grouped);
 
-      return reply.send(result);
+      return reply.send(chartData);
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching chart data');
       return reply.status(500).send({ error: error.message });
@@ -579,24 +509,14 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: 'Admin access required' });
       }
 
-      const query = request.query as {
-        consultant_id?: string;
-        date_from?: string;
-        date_to?: string;
-        limit?: string;
-        offset?: string;
-      };
+      const consultantId = request.query?.consultant_id as string | undefined;
+      const dateFrom = request.query?.date_from as string | undefined;
+      const dateTo = request.query?.date_to as string | undefined;
 
-      // Базовый запрос
-      let dbQuery = supabase
+      let query = supabase
         .from('purchases')
         .select(`
-          id,
-          consultant_id,
-          client_phone,
-          amount,
-          notes,
-          purchase_date,
+          *,
           consultants (
             id,
             name
@@ -605,27 +525,17 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         .not('consultant_id', 'is', null)
         .order('purchase_date', { ascending: false });
 
-      // Фильтр по консультанту
-      if (query.consultant_id) {
-        dbQuery = dbQuery.eq('consultant_id', query.consultant_id);
+      if (consultantId) {
+        query = query.eq('consultant_id', consultantId);
+      }
+      if (dateFrom) {
+        query = query.gte('purchase_date', dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte('purchase_date', dateTo);
       }
 
-      // Фильтр по дате от
-      if (query.date_from) {
-        dbQuery = dbQuery.gte('purchase_date', query.date_from);
-      }
-
-      // Фильтр по дате до
-      if (query.date_to) {
-        dbQuery = dbQuery.lte('purchase_date', query.date_to);
-      }
-
-      // Пагинация
-      const limit = query.limit ? parseInt(query.limit) : 100;
-      const offset = query.offset ? parseInt(query.offset) : 0;
-      dbQuery = dbQuery.range(offset, offset + limit - 1);
-
-      const { data, error } = await dbQuery;
+      const { data, error } = await query;
 
       if (error) {
         app.log.error({ error }, 'Failed to fetch all consultant sales');
@@ -634,7 +544,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
       return reply.send(data || []);
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching all sales');
+      app.log.error({ error }, 'Error fetching all consultant sales');
       return reply.status(500).send({ error: error.message });
     }
   });
