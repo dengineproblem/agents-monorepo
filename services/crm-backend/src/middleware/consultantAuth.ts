@@ -5,7 +5,7 @@ export interface ConsultantAuthRequest extends FastifyRequest {
   consultant?: {
     id: string;
     name: string;
-    user_account_id: string;
+    parent_user_account_id: string;
   };
   userRole?: 'admin' | 'consultant' | 'manager';
   userAccountId?: string;
@@ -30,40 +30,50 @@ export async function consultantAuthMiddleware(
   request.userAccountId = userAccountId;
 
   try {
-    // Получаем информацию о пользователе
+    // Сначала проверяем user_accounts (для админов)
     const { data: userAccount, error: userError } = await supabase
       .from('user_accounts')
       .select('id, username, role, is_tech_admin')
       .eq('id', userAccountId)
+      .maybeSingle();
+
+    if (userAccount) {
+      // Это админ или manager
+      request.userRole = userAccount.is_tech_admin
+        ? 'admin'
+        : (userAccount.role || 'admin');
+      return;
+    }
+
+    // Если не найдено в user_accounts - проверяем consultant_accounts
+    const { data: consultantAccount, error: consultantError } = await supabase
+      .from('consultant_accounts')
+      .select('id, consultant_id, role')
+      .eq('id', userAccountId)
       .single();
 
-    if (userError || !userAccount) {
-      return reply.status(401).send({ error: 'User not found' });
+    if (consultantError || !consultantAccount) {
+      return reply.status(401).send({ error: 'User or consultant account not found' });
     }
 
-    // Определяем роль (используем is_tech_admin как fallback для совместимости)
-    request.userRole = userAccount.is_tech_admin
-      ? 'admin'
-      : (userAccount.role || 'admin');
+    // Это консультант - получаем его данные
+    request.userRole = 'consultant';
 
-    // Если консультант - получаем его данные
-    if (request.userRole === 'consultant') {
-      const { data: consultant, error: consultantError } = await supabase
-        .from('consultants')
-        .select('id, name, user_account_id')
-        .eq('user_account_id', userAccountId)
-        .eq('is_active', true)
-        .single();
+    const { data: consultant, error: fetchConsultantError } = await supabase
+      .from('consultants')
+      .select('id, name, parent_user_account_id')
+      .eq('id', consultantAccount.consultant_id)
+      .eq('is_active', true)
+      .single();
 
-      if (consultantError || !consultant) {
-        return reply.status(403).send({
-          error: 'Consultant profile not found or inactive',
-          details: 'Профиль консультанта не найден или неактивен'
-        });
-      }
-
-      request.consultant = consultant;
+    if (fetchConsultantError || !consultant) {
+      return reply.status(403).send({
+        error: 'Consultant profile not found or inactive',
+        details: 'Профиль консультанта не найден или неактивен'
+      });
     }
+
+    request.consultant = consultant;
 
   } catch (error: any) {
     request.log.error({ error, userAccountId }, 'Error in consultantAuthMiddleware');

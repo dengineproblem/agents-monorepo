@@ -4,7 +4,11 @@ export interface Consultant {
   email?: string;
   phone?: string;
   specialization?: string;
-  user_account_id?: string; // ID аккаунта консультанта для входа
+  parent_user_account_id?: string; // ID аккаунта компании (владельца)
+  consultant_account?: { // Логин консультанта (если создан)
+    username: string;
+    role: string;
+  };
   is_active: boolean;
   accepts_new_leads: boolean; // Принимает ли консультант новых лидов (участие в автоматическом распределении)
   created_at: string;

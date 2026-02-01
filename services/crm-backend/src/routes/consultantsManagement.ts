@@ -77,9 +77,9 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
         .from('consultants')
         .select(`
           *,
-          user_account:user_accounts(username, role)
+          consultant_account:consultant_accounts(username, role)
         `)
-        .eq('user_account_id', userAccountId)
+        .eq('parent_user_account_id', userAccountId)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -123,61 +123,39 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Name and phone are required' });
       }
 
-      let consultantUserAccountId: string | null = null;
       let credentials: { username: string; password: string } | null = null;
 
-      // Если нужно создать аккаунт для консультанта
+      // Генерируем логин из телефона (только цифры)
+      const username = phone.replace(/\D/g, '');
+
+      // Генерируем временный пароль (первые 4 цифры телефона)
+      const phoneDigits = phone.replace(/\D/g, '');
+      const password = phoneDigits.substring(0, 4);
+
+      if (password.length < 4) {
+        return reply.status(400).send({
+          error: 'Phone number too short for password generation'
+        });
+      }
+
+      // Проверяем что username уникален (в consultant_accounts)
       if (createAccount) {
-        // Генерируем логин из телефона (только цифры)
-        const username = phone.replace(/\D/g, '');
-
-        // Генерируем временный пароль (первые 4 цифры телефона)
-        const phoneDigits = phone.replace(/\D/g, '');
-        const password = phoneDigits.substring(0, 4);
-
-        if (password.length < 4) {
-          return reply.status(400).send({
-            error: 'Phone number too short for password generation'
-          });
-        }
-
-        // Проверяем что username уникален
-        const { data: existingUser } = await supabase
-          .from('user_accounts')
+        const { data: existingConsultantAccount } = await supabase
+          .from('consultant_accounts')
           .select('id')
           .eq('username', username)
           .single();
 
-        if (existingUser) {
+        if (existingConsultantAccount) {
           return reply.status(400).send({
             error: 'Account with this phone already exists'
           });
         }
-
-        // Создаем user_account
-        const { data: newUserAccount, error: userError } = await supabase
-          .from('user_accounts')
-          .insert({
-            username,
-            password, // TODO: в будущем добавить хеширование
-            role: 'consultant'
-          })
-          .select()
-          .single();
-
-        if (userError) {
-          app.log.error({ error: userError }, 'Failed to create user_account');
-          return reply.status(500).send({
-            error: 'Failed to create user account',
-            details: userError.message
-          });
-        }
-
-        consultantUserAccountId = newUserAccount.id;
-        credentials = { username, password };
       }
 
-      // Создаем консультанта
+      credentials = { username, password };
+
+      // Создаем консультанта (всегда с parent_user_account_id = userAccountId)
       const { data: consultant, error: consultantError } = await supabase
         .from('consultants')
         .insert({
@@ -185,7 +163,7 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
           email,
           phone,
           specialization,
-          user_account_id: createAccount ? consultantUserAccountId : userAccountId,
+          parent_user_account_id: userAccountId,
           is_active: true
         })
         .select()
@@ -193,19 +171,37 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
 
       if (consultantError) {
         app.log.error({ error: consultantError }, 'Failed to create consultant');
-
-        // Откатываем создание user_account если консультант не создан
-        if (consultantUserAccountId) {
-          await supabase
-            .from('user_accounts')
-            .delete()
-            .eq('id', consultantUserAccountId);
-        }
-
         return reply.status(500).send({
           error: 'Failed to create consultant',
           details: consultantError.message
         });
+      }
+
+      // Создаём логин консультанта (если createAccount=true)
+      if (createAccount && consultant) {
+        const { error: consultantAccountError } = await supabase
+          .from('consultant_accounts')
+          .insert({
+            consultant_id: consultant.id,
+            username,
+            password, // TODO: в будущем добавить хеширование
+            role: 'consultant'
+          });
+
+        if (consultantAccountError) {
+          app.log.error({ error: consultantAccountError }, 'Failed to create consultant_account');
+
+          // Откатываем создание консультанта
+          await supabase
+            .from('consultants')
+            .delete()
+            .eq('id', consultant.id);
+
+          return reply.status(500).send({
+            error: 'Failed to create consultant account',
+            details: consultantAccountError.message
+          });
+        }
       }
 
       // Отправляем учетные данные в WhatsApp если аккаунт создан
@@ -310,6 +306,18 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
         });
       }
 
+      // Удаляем связанные услуги консультанта (автоматически)
+      const { error: servicesError } = await supabase
+        .from('consultant_services')
+        .delete()
+        .eq('consultant_id', id);
+
+      if (servicesError) {
+        app.log.error({ error: servicesError }, 'Failed to delete consultant services');
+        return reply.status(500).send({ error: servicesError.message });
+      }
+
+      // Удаляем консультанта
       const { error } = await supabase
         .from('consultants')
         .delete()
@@ -323,6 +331,51 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error }, 'Error deleting consultant');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultants/:id/schedules
+   * Обновить расписание консультанта
+   */
+  app.put('/consultants/:id/schedules', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { schedules } = request.body as { schedules: any[] };
+
+      // Удаляем старое расписание
+      await supabase
+        .from('working_schedules')
+        .delete()
+        .eq('consultant_id', id);
+
+      // Вставляем новое
+      if (schedules && schedules.length > 0) {
+        const schedulesWithConsultant = schedules.map(s => ({
+          consultant_id: id,
+          day_of_week: s.day_of_week,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          is_active: s.is_active !== undefined ? s.is_active : true
+        }));
+
+        const { data, error } = await supabase
+          .from('working_schedules')
+          .insert(schedulesWithConsultant)
+          .select();
+
+        if (error) {
+          app.log.error({ error }, 'Failed to update schedules');
+          return reply.status(500).send({ error: error.message });
+        }
+
+        return reply.send(data);
+      }
+
+      return reply.send([]);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating schedules');
       return reply.status(500).send({ error: error.message });
     }
   });
