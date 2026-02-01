@@ -4,6 +4,38 @@ import { format } from 'date-fns';
 import ru from 'date-fns/locale/ru/index.js';
 
 /**
+ * Получить WhatsApp instance для отправки
+ */
+async function getInstanceName(
+  userAccountId: string,
+  dialogAnalysisId?: string
+): Promise<string | null> {
+  // Если есть dialog_analysis_id - берём инстанс оттуда
+  if (dialogAnalysisId) {
+    const { data: dialog } = await supabase
+      .from('dialog_analysis')
+      .select('instance_name')
+      .eq('id', dialogAnalysisId)
+      .single();
+
+    if (dialog?.instance_name) {
+      return dialog.instance_name;
+    }
+  }
+
+  // Fallback: первый активный connected инстанс пользователя
+  const { data: instance } = await supabase
+    .from('whatsapp_instances')
+    .select('instance_name')
+    .eq('user_account_id', userAccountId)
+    .eq('status', 'connected')
+    .limit(1)
+    .single();
+
+  return instance?.instance_name || null;
+}
+
+/**
  * Отправляет WhatsApp уведомление консультанту о новой консультации
  */
 export async function notifyConsultantAboutNewConsultation(
