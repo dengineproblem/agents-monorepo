@@ -15,7 +15,7 @@ export async function notifyConsultantAboutNewConsultation(
       .from('consultations')
       .select(`
         *,
-        consultant:consultants!inner(id, name, phone, user_account_id),
+        consultant:consultants!inner(id, name, phone, parent_user_account_id),
         service:consultation_services(name),
         lead:dialog_analysis(contact_name, contact_phone)
       `)
@@ -157,7 +157,7 @@ export async function sendConsultationReminder(
       .from('consultations')
       .select(`
         *,
-        consultant:consultants!inner(id, name, phone, user_account_id),
+        consultant:consultants!inner(id, name, phone, parent_user_account_id),
         service:consultation_services(name),
         lead:dialog_analysis(contact_name, contact_phone)
       `)

@@ -507,7 +507,7 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
 
       const { data, error } = await supabase
         .from('consultants')
-        .select('id, name, phone, email, specialization, user_account_id')
+        .select('id, name, phone, email, specialization, parent_user_account_id')
         .eq('id', targetConsultantId)
         .single();
 
