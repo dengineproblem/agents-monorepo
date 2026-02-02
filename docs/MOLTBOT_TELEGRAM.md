@@ -135,7 +135,7 @@ moltbot-workspace-{specialist}/    # Специализированный worksp
 
 ### Основной конфиг: moltbot.json
 
-Расположение в контейнере: `/root/.clawdbot/moltbot.json`
+Расположение в контейнере: `/root/.moltbot/moltbot.json`
 
 ```json
 {
@@ -331,11 +331,13 @@ curl -s -X POST http://agent-brain:7080/brain/tools/getCampaigns \
 
 ### Обзор
 
-**Single-Workspace Architecture** — упрощённая архитектура с одним универсальным агентом, который имеет доступ ко всем инструментам напрямую.
+**Single-Workspace Architecture** — упрощённая архитектура с одним универсальным агентом (router), который имеет доступ ко всем инструментам напрямую.
 
 **Проблема (устаревшая):** Multi-agent routing добавлял сложность и дополнительный overhead на delegation.
 
-**Решение:** Один универсальный агент со всеми tools в одном workspace.
+**Решение:** Один универсальный router agent со всеми tools в одном workspace. Внутри router агента есть 5 специализированных ролей (subagent roles), описанных в `AGENTS.md`: **facebook-ads**, **creatives**, **crm**, **tiktok**, **onboarding**.
+
+**Важно:** Это НЕ 6 отдельных агентов Moltbot. Это 1 router agent с 5 встроенными ролями для разных доменов.
 
 ### Архитектура
 
@@ -443,14 +445,28 @@ moltbot-workspace-router/          # Universal Agent
 ```
 
 **Преимущества single-workspace:**
-- ✅ Проще архитектура - один агент вместо 6
-- ✅ Быстрее - нет overhead на delegation
-- ✅ Меньше конфигурации - один workspace
-- ✅ Проще отладка - один поток выполнения
+- ✅ Проще архитектура - 1 router agent вместо 6 отдельных агентов
+- ✅ Быстрее - нет overhead на delegation между агентами
+- ✅ Меньше конфигурации - 1 workspace вместо 6
+- ✅ Проще отладка - 1 поток выполнения
+- ✅ Экономия ресурсов - 1 auth-profile вместо 6
 
 ### Проверка работы
 
-**1. Проверить загрузку агента:**
+**1. Проверить логи запуска:**
+```bash
+docker logs moltbot
+
+# Ожидаемый вывод:
+# ✓ Telegram bot token injected
+# ✓ Single-Workspace config ready: 1 router agent with 5 subagents (facebook-ads, creatives, crm, tiktok, onboarding)
+# ✓ Auth profile configured for router agent
+# [router] agent model: openai/gpt-5.2
+# Telegram channel enabled
+# Gateway listening on 0.0.0.0:18789
+```
+
+**2. Проверить загрузку агента:**
 ```bash
 docker logs moltbot 2>&1 | grep "agent model"
 
@@ -458,7 +474,7 @@ docker logs moltbot 2>&1 | grep "agent model"
 # [router] agent model: openai/gpt-5.2
 ```
 
-**2. Проверить что workspace загружен:**
+**3. Проверить что workspace загружен:**
 ```bash
 # Проверить что AGENTS.md читается
 docker exec moltbot ls -la /root/clawd/moltbot-workspace-router/AGENTS.md
@@ -651,7 +667,7 @@ CPC: $0.85
 
 ### Расположение
 
-Файл: `/root/.clawdbot/agents/main/agent/auth-profiles.json`
+Файл: `/root/.moltbot/agents/router/agent/auth-profiles.json`
 
 ### Формат
 
@@ -708,7 +724,7 @@ docker exec -it moltbot moltbot models auth paste-token --provider anthropic
 ### Ручная настройка (без TTY)
 
 ```bash
-docker exec moltbot sh -c 'cat > /root/.clawdbot/agents/main/agent/auth-profiles.json << EOF
+docker exec moltbot sh -c 'cat > /root/.moltbot/agents/router/agent/auth-profiles.json << EOF
 {
   "profiles": [
     {
@@ -1704,10 +1720,10 @@ Claude: [выполняет pauseAdSet]
 
 ```bash
 # Проверить конфиг
-docker exec moltbot cat /root/.clawdbot/moltbot.json | jq '.tools.media.audio'
+docker exec moltbot cat /root/.moltbot/moltbot.json | jq '.tools.media.audio'
 
 # Проверить OpenAI ключ
-docker exec moltbot cat /root/.clawdbot/agents/main/agent/auth-profiles.json | jq '.profiles[] | select(.provider=="openai")'
+docker exec moltbot cat /root/.moltbot/agents/router/agent/auth-profiles.json | jq '.profiles[] | select(.provider=="openai")'
 
 # Проверить логи
 docker logs moltbot 2>&1 | grep -i "audio\|whisper\|transcri"
@@ -2449,8 +2465,8 @@ moltbot:
     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     - AGENT_SERVICE_URL=http://agent-brain:7080
   volumes:
-    - ./moltbot-workspace:/root/clawd
-    - moltbot-data:/root/.clawdbot
+    - ./moltbot-workspace-router:/root/clawd/moltbot-workspace-router
+    - moltbot-config:/root/.moltbot
   ports:
     - "18789:18789"
   networks:
@@ -2458,8 +2474,8 @@ moltbot:
   restart: unless-stopped
 
 volumes:
-  moltbot-data:
-    name: moltbot-data
+  moltbot-config:
+    name: moltbot-config
 ```
 
 ### Переменные окружения (.env.brain)
@@ -2482,10 +2498,46 @@ AGENT_SERVICE_URL=http://agent-brain:7080
 
 | Volume | Путь в контейнере | Описание |
 |--------|-------------------|----------|
-| `./moltbot-workspace` | `/root/clawd` | Skills, AGENTS.md и др. |
-| `moltbot-data` | `/root/.clawdbot` | Конфиги, auth-profiles, логи |
+| `./moltbot-workspace-router` | `/root/clawd/moltbot-workspace-router` | Router workspace (AGENTS.md, skills) |
+| `moltbot-config` | `/root/.moltbot` | Конфиги, auth-profiles, сессии |
 
-**Важно:** `moltbot-data` — named volume, сохраняется между рестартами. Без него auth-profiles.json будет сбрасываться.
+**Важно:** `moltbot-config` — named volume, сохраняется между рестартами. Без него auth-profiles.json и сессии будут сбрасываться.
+
+### docker-compose.override.yml (локальная разработка)
+
+**Проблема:** Один Telegram bot token не может работать на двух инстансах одновременно. Если moltbot запущен и локально и на проде — будут дублироваться запросы или конфликты.
+
+**Решение:** Отключаем moltbot локально через `docker-compose.override.yml`:
+
+```yaml
+# LOCAL DEVELOPMENT OVERRIDES
+# Этот файл автоматически применяется при docker-compose up
+# На проде НЕ используется (там docker-compose -f docker-compose.yml up)
+
+services:
+  agent-brain:
+    environment:
+      - CRON_ENABLED=false
+      - HOURLY_CRON_ENABLED=false
+
+  # Moltbot - отключен локально чтобы не конфликтовал с prod
+  # (один Telegram bot token не может работать на двух инстансах одновременно)
+  moltbot:
+    scale: 0
+```
+
+**Как это работает:**
+- `docker-compose up` локально → автоматически применяет override → moltbot не запускается
+- `docker-compose -f docker-compose.yml up` на проде → override НЕ применяется → moltbot работает
+
+**Проверка:**
+```bash
+# Локально - moltbot не должен быть запущен
+docker ps | grep moltbot  # Пусто
+
+# На проде - moltbot должен работать
+docker ps | grep moltbot  # moltbot running
+```
 
 ---
 
@@ -2554,7 +2606,7 @@ docker logs moltbot 2>&1 | grep -i health
 
 3. **Проверить API ключи:**
    ```bash
-   docker exec moltbot cat /root/.clawdbot/agents/main/agent/auth-profiles.json
+   docker exec moltbot cat /root/.moltbot/agents/router/agent/auth-profiles.json
    ```
 
 ### Ошибки аутентификации
@@ -2612,7 +2664,7 @@ creating streamFn wrapper with params: {"cacheControlTtl":"1h"}
 
 **Если нет — проверить конфиг:**
 ```bash
-docker exec moltbot cat /root/.clawdbot/moltbot.json | jq '.agents.defaults.models'
+docker exec moltbot cat /root/.moltbot/moltbot.json | jq '.agents.defaults.models'
 ```
 
 ### Сброс конфигурации после рестарта
@@ -2624,11 +2676,11 @@ docker exec moltbot cat /root/.clawdbot/moltbot.json | jq '.agents.defaults.mode
 **Решение:** Использовать named volume:
 ```yaml
 volumes:
-  - moltbot-data:/root/.clawdbot
+  - moltbot-config:/root/.moltbot
 
 volumes:
-  moltbot-data:
-    name: moltbot-data
+  moltbot-config:
+    name: moltbot-config
 ```
 
 ---
@@ -2655,7 +2707,7 @@ docker restart moltbot
 docker exec -it moltbot moltbot models set anthropic/claude-sonnet-4-20250514
 
 # Или редактированием moltbot.json
-docker exec moltbot sh -c 'jq ".agents.defaults.model.primary = \"anthropic/claude-sonnet-4-20250514\"" /root/.clawdbot/moltbot.json > /tmp/moltbot.json && mv /tmp/moltbot.json /root/.clawdbot/moltbot.json'
+docker exec moltbot sh -c 'jq ".agents.defaults.model.primary = \"anthropic/claude-sonnet-4-20250514\"" /root/.moltbot/moltbot.json > /tmp/moltbot.json && mv /tmp/moltbot.json /root/.moltbot/moltbot.json'
 docker kill --signal=USR1 moltbot
 ```
 
@@ -2669,7 +2721,7 @@ docker logs moltbot 2>&1 | grep "agent model" | tail -1
 
 ```bash
 # Записать напрямую
-docker exec moltbot sh -c 'cat > /root/.clawdbot/agents/main/agent/auth-profiles.json << EOF
+docker exec moltbot sh -c 'cat > /root/.moltbot/agents/router/agent/auth-profiles.json << EOF
 {
   "profiles": [
     {
@@ -2690,7 +2742,7 @@ docker kill --signal=USR1 moltbot
 
 ```bash
 # Удалить данные сессий (полный сброс)
-docker exec moltbot rm -rf /root/.clawdbot/sessions/*
+docker exec moltbot rm -rf /root/.moltbot/sessions/*
 docker restart moltbot
 ```
 
