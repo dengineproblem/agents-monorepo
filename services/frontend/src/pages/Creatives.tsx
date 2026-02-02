@@ -1912,6 +1912,19 @@ const Creatives: React.FC = () => {
                   <Upload className="mr-2 h-4 w-4" />
                   Добавить файл
                 </Button>
+                {/* Кнопка импорта лучших креативов (только для Facebook) */}
+                {platform !== 'tiktok' && (
+                  <Button
+                    variant="outline"
+                    onClick={handleImportTopCreatives}
+                    disabled={!currentAdAccountId || isProcessing}
+                    className="flex-1 min-w-[140px]"
+                    title="Анализировать и импортировать топ-5 креативов по CPL из Facebook"
+                  >
+                    <Zap className="mr-2 h-4 w-4" />
+                    Импорт лучших
+                  </Button>
+                )}
                 {!isProcessing ? (
                   <Button variant="default" onClick={startProcessing} disabled={!queue.some(i => i.status === "queued") || !selectedDirectionId}>
                   <PlayCircle className="mr-2 h-4 w-4" />
@@ -2069,20 +2082,6 @@ const Creatives: React.FC = () => {
                       title={`Удалить выбранные (${selectedCreativeIds.size})`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  {/* Кнопка импорта лучших креативов (только для Facebook) */}
-                  {platform !== 'tiktok' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleImportTopCreatives}
-                      disabled={!currentAdAccountId}
-                      className="h-7 px-2 text-xs gap-1"
-                      title="Анализировать и импортировать топ-5 креативов по CPL из Facebook"
-                    >
-                      <Zap className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">Импорт лучших</span>
                     </Button>
                   )}
                   <Button size="sm" variant="ghost" onClick={reload} disabled={loading} className="h-7 w-7 p-0">
