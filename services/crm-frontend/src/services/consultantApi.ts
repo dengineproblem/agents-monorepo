@@ -149,6 +149,7 @@ export const consultantApi = {
     status?: string;
     from_date?: string;
     to_date?: string;
+    consultantId?: string;
   }): Promise<Consultation[]> => {
     const query = new URLSearchParams();
     if (params) {

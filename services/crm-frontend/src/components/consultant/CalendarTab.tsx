@@ -66,7 +66,7 @@ export function CalendarTab() {
       const userAccountId = JSON.parse(localStorage.getItem('user') || '{}').id;
 
       const [consultationsData, schedulesData, blockedSlotsData, servicesData] = await Promise.all([
-        consultantApi.getConsultations({ date: dateStr }),
+        consultantApi.getConsultations({ date: dateStr, consultantId }),
         consultantApi.getSchedule(consultantId),
         consultationService.getBlockedSlots({ date: dateStr, consultant_id: consultantId }).catch(() => []),
         consultationService.getServices(userAccountId).catch(() => [])

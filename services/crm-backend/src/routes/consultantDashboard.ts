@@ -155,15 +155,26 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
    */
   app.get('/consultant/consultations', async (request: ConsultantAuthRequest, reply) => {
     try {
-      const { date, status, from_date, to_date } = request.query as {
+      const { date, status, from_date, to_date, consultantId: queryConsultantId } = request.query as {
         date?: string;
         status?: string;
         from_date?: string;
         to_date?: string;
+        consultantId?: string;
       };
 
       const consultantId = request.consultant?.id;
       const isAdmin = request.userRole === 'admin';
+
+      // Для админа можно передать consultantId в query, иначе берём из токена
+      const targetConsultantId = isAdmin && queryConsultantId
+        ? queryConsultantId
+        : consultantId;
+
+      // ВСЕГДА фильтруем по consultantId (обязательно!)
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
 
       let query = supabase
         .from('consultations')
@@ -171,13 +182,9 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
           *,
           consultant:consultants(name, phone)
         `)
+        .eq('consultant_id', targetConsultantId)  // ← ИСПРАВЛЕНО: всегда фильтруем
         .order('date', { ascending: true })
         .order('start_time', { ascending: true });
-
-      // Консультант видит только свои консультации
-      if (!isAdmin && consultantId) {
-        query = query.eq('consultant_id', consultantId);
-      }
 
       if (date) {
         query = query.eq('date', date);
