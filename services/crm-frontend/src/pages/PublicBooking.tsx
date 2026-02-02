@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { Calendar, Clock, User, Phone, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { Calendar, Clock, Phone, Check, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -46,13 +46,12 @@ interface BookingConfig {
   };
 }
 
-type Step = 'service' | 'consultant' | 'datetime' | 'details' | 'success';
+type Step = 'select' | 'details' | 'success';
 
 export function PublicBooking() {
   const { userAccountId } = useParams<{ userAccountId: string }>();
-  const [searchParams] = useSearchParams();
 
-  const [step, setStep] = useState<Step>('service');
+  const [step, setStep] = useState<Step>('select');
   const [config, setConfig] = useState<BookingConfig | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,9 +60,6 @@ export function PublicBooking() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Selected values
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [selectedConsultant, setSelectedConsultant] = useState<Consultant | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
 
   // Form values
@@ -71,52 +67,24 @@ export function PublicBooking() {
   const [clientPhone, setClientPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Date navigation
-  const [viewDate, setViewDate] = useState(new Date());
-
-  // Pre-select from URL params
-  useEffect(() => {
-    const consultantId = searchParams.get('consultant');
-    const serviceId = searchParams.get('service');
-
-    if (config) {
-      if (serviceId) {
-        const service = config.services.find(s => s.id === serviceId);
-        if (service) {
-          setSelectedService(service);
-          setStep('consultant');
-        }
-      }
-      if (consultantId) {
-        const consultant = config.consultants.find(c => c.id === consultantId);
-        if (consultant) {
-          setSelectedConsultant(consultant);
-          if (selectedService) {
-            setStep('datetime');
-          } else {
-            setStep('service');
-          }
-        }
-      }
-    }
-  }, [config, searchParams]);
-
-  // Load config
+  // Load config and slots
   useEffect(() => {
     if (!userAccountId) return;
 
-    const loadConfig = async () => {
+    const loadData = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/public/booking/${userAccountId}/config`);
-        if (!response.ok) throw new Error('Failed to load configuration');
-        const data = await response.json();
-        setConfig(data);
+        // Load config
+        const configResponse = await fetch(`${API_BASE_URL}/public/booking/${userAccountId}/config`);
+        if (!configResponse.ok) throw new Error('Failed to load configuration');
+        const configData = await configResponse.json();
+        setConfig(configData);
 
-        // If no services, skip to consultant
-        if (!data.services.length) {
-          setStep('consultant');
-        }
+        // Load slots for all consultants
+        const slotsResponse = await fetch(`${API_BASE_URL}/public/booking/${userAccountId}/slots?days_ahead=14`);
+        if (!slotsResponse.ok) throw new Error('Failed to load slots');
+        const slotsData = await slotsResponse.json();
+        setSlots(slotsData.slots || []);
       } catch (err) {
         setError('Не удалось загрузить форму записи');
       } finally {
@@ -124,37 +92,11 @@ export function PublicBooking() {
       }
     };
 
-    loadConfig();
+    loadData();
   }, [userAccountId]);
 
-  // Load slots when consultant is selected
-  useEffect(() => {
-    if (!userAccountId || !selectedConsultant) return;
-
-    const loadSlots = async () => {
-      try {
-        const params = new URLSearchParams({
-          consultant_id: selectedConsultant.id,
-          days_ahead: '14'
-        });
-        if (selectedService) {
-          params.append('service_id', selectedService.id);
-        }
-
-        const response = await fetch(`${API_BASE_URL}/public/booking/${userAccountId}/slots?${params}`);
-        if (!response.ok) throw new Error('Failed to load slots');
-        const data = await response.json();
-        setSlots(data.slots || []);
-      } catch (err) {
-        console.error('Error loading slots:', err);
-      }
-    };
-
-    loadSlots();
-  }, [userAccountId, selectedConsultant, selectedService]);
-
   const handleSubmit = async () => {
-    if (!userAccountId || !selectedConsultant || !selectedSlot || !clientName || !clientPhone) {
+    if (!userAccountId || !selectedSlot || !clientName || !clientPhone) {
       return;
     }
 
@@ -167,8 +109,8 @@ export function PublicBooking() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_account_id: userAccountId,
-          consultant_id: selectedConsultant.id,
-          service_id: selectedService?.id,
+          consultant_id: selectedSlot.consultant_id,
+          service_id: config?.services[0]?.id, // Use first service or null
           client_name: clientName,
           client_phone: clientPhone,
           date: selectedSlot.date,
@@ -192,31 +134,27 @@ export function PublicBooking() {
     }
   };
 
-  // Group slots by date
-  const slotsByDate = slots.reduce((acc, slot) => {
-    if (!acc[slot.date]) {
-      acc[slot.date] = [];
+  // Group slots by consultant
+  const slotsByConsultant = slots.reduce((acc, slot) => {
+    if (!acc[slot.consultant_id]) {
+      acc[slot.consultant_id] = {
+        name: slot.consultant_name,
+        slots: []
+      };
     }
-    acc[slot.date].push(slot);
+    acc[slot.consultant_id].slots.push(slot);
     return acc;
-  }, {} as Record<string, Slot[]>);
+  }, {} as Record<string, { name: string; slots: Slot[] }>);
 
-  // Get dates for current week view
-  const getDatesInView = () => {
-    const dates: Date[] = [];
-    const start = new Date(viewDate);
-    start.setDate(start.getDate() - start.getDay() + 1); // Start from Monday
-
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(start);
-      date.setDate(start.getDate() + i);
-      dates.push(date);
-    }
-    return dates;
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toISOString().split('T')[0];
+  // Group slots by date within each consultant
+  const groupSlotsByDate = (consultantSlots: Slot[]) => {
+    return consultantSlots.reduce((acc, slot) => {
+      if (!acc[slot.date]) {
+        acc[slot.date] = [];
+      }
+      acc[slot.date].push(slot);
+      return acc;
+    }, {} as Record<string, Slot[]>);
   };
 
   const formatDisplayDate = (dateStr: string) => {
@@ -227,18 +165,9 @@ export function PublicBooking() {
     return `${weekdays[date.getDay()]}, ${day} ${months[date.getMonth()]}`;
   };
 
-  const formatPrice = (price: number, currency: string) => {
-    if (price === 0) return 'Бесплатно';
-    return new Intl.NumberFormat('ru-RU', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 0
-    }).format(price);
-  };
-
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
@@ -246,7 +175,7 @@ export function PublicBooking() {
 
   if (error && !config) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <Card className="max-w-md">
           <CardContent className="p-6 text-center">
             <p className="text-red-500">{error}</p>
@@ -257,8 +186,8 @@ export function PublicBooking() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-2xl mx-auto">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
+      <div className="max-w-4xl mx-auto">
         {/* Header */}
         {config?.business?.company_name && (
           <div className="text-center mb-6">
@@ -269,236 +198,73 @@ export function PublicBooking() {
                 className="h-12 mx-auto mb-2"
               />
             )}
-            <h1 className="text-2xl font-bold">{config.business.company_name}</h1>
-            <p className="text-gray-500">Онлайн-запись</p>
+            <h1 className="text-2xl font-bold dark:text-white">{config.business.company_name}</h1>
+            <p className="text-gray-500 dark:text-gray-400">Онлайн-запись на консультацию</p>
           </div>
         )}
 
-        {/* Progress Steps */}
-        {step !== 'success' && (
-          <div className="flex justify-center gap-2 mb-6">
-            {['service', 'consultant', 'datetime', 'details'].map((s, i) => (
-              <div
-                key={s}
-                className={`w-3 h-3 rounded-full ${
-                  ['service', 'consultant', 'datetime', 'details'].indexOf(step) >= i
-                    ? 'bg-primary'
-                    : 'bg-gray-300'
-                }`}
-              />
-            ))}
+        {/* Step: Slot Selection */}
+        {step === 'select' && (
+          <div className="space-y-6">
+            {Object.entries(slotsByConsultant).map(([consultantId, { name, slots: consultantSlots }]) => {
+              const slotsByDate = groupSlotsByDate(consultantSlots);
+              const dates = Object.keys(slotsByDate).sort();
+
+              return (
+                <Card key={consultantId}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calendar className="w-5 h-5" />
+                      {name}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {dates.map(date => (
+                      <div key={date}>
+                        <div className="font-medium mb-2 text-sm text-gray-600 dark:text-gray-400">
+                          {formatDisplayDate(date)}
+                        </div>
+                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                          {slotsByDate[date].map((slot, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setSelectedSlot(slot);
+                                setStep('details');
+                              }}
+                              className="p-2 rounded border text-center text-sm hover:border-primary hover:bg-primary/5 dark:border-gray-700 dark:hover:border-primary transition-colors"
+                            >
+                              {slot.start_time}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {consultantSlots.length === 0 && (
+                      <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                        Нет доступного времени
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+
+            {slots.length === 0 && (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <p className="text-gray-500 dark:text-gray-400">
+                    К сожалению, в ближайшее время нет доступных слотов для записи
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </div>
-        )}
-
-        {/* Step: Service Selection */}
-        {step === 'service' && config?.services && config.services.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                Выберите услугу
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {config.services.map(service => (
-                <button
-                  key={service.id}
-                  onClick={() => {
-                    setSelectedService(service);
-                    setStep('consultant');
-                  }}
-                  className="w-full p-4 border rounded-lg text-left hover:border-primary hover:bg-primary/5 transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="w-4 h-4 rounded-full mt-1"
-                      style={{ backgroundColor: service.color }}
-                    />
-                    <div className="flex-1">
-                      <div className="font-medium">{service.name}</div>
-                      {service.description && (
-                        <div className="text-sm text-gray-500">{service.description}</div>
-                      )}
-                      <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {service.duration_minutes} мин
-                        </span>
-                        <span>{formatPrice(service.price, service.currency)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              ))}
-
-              <Button
-                variant="ghost"
-                className="w-full"
-                onClick={() => {
-                  setSelectedService(null);
-                  setStep('consultant');
-                }}
-              >
-                Пропустить выбор услуги
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step: Consultant Selection */}
-        {step === 'consultant' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Выберите специалиста
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {config?.consultants.map(consultant => (
-                <button
-                  key={consultant.id}
-                  onClick={() => {
-                    setSelectedConsultant(consultant);
-                    setStep('datetime');
-                  }}
-                  className="w-full p-4 border rounded-lg text-left hover:border-primary hover:bg-primary/5 transition-colors"
-                >
-                  <div className="font-medium">{consultant.name}</div>
-                  {consultant.specialization && (
-                    <div className="text-sm text-gray-500">{consultant.specialization}</div>
-                  )}
-                </button>
-              ))}
-
-              {selectedService && (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => setStep('service')}
-                >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
-                  Назад
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Step: Date/Time Selection */}
-        {step === 'datetime' && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="w-5 h-5" />
-                  Выберите время
-                </CardTitle>
-                <div className="flex gap-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => {
-                      const newDate = new Date(viewDate);
-                      newDate.setDate(newDate.getDate() - 7);
-                      setViewDate(newDate);
-                    }}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => {
-                      const newDate = new Date(viewDate);
-                      newDate.setDate(newDate.getDate() + 7);
-                      setViewDate(newDate);
-                    }}
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* Date tabs */}
-              <div className="flex overflow-x-auto gap-2 mb-4 pb-2">
-                {getDatesInView().map(date => {
-                  const dateStr = formatDate(date);
-                  const hasSlots = slotsByDate[dateStr]?.length > 0;
-                  const isSelected = selectedDate === dateStr;
-                  const isPast = date < new Date(new Date().setHours(0, 0, 0, 0));
-
-                  return (
-                    <button
-                      key={dateStr}
-                      onClick={() => !isPast && hasSlots && setSelectedDate(dateStr)}
-                      disabled={isPast || !hasSlots}
-                      className={`
-                        flex-shrink-0 px-4 py-2 rounded-lg text-center min-w-[80px]
-                        ${isSelected ? 'bg-primary text-white' : ''}
-                        ${!isSelected && hasSlots && !isPast ? 'border hover:border-primary' : ''}
-                        ${isPast || !hasSlots ? 'opacity-40 cursor-not-allowed' : ''}
-                      `}
-                    >
-                      <div className="text-xs uppercase">
-                        {['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][date.getDay()]}
-                      </div>
-                      <div className="font-bold">{date.getDate()}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Time slots */}
-              {selectedDate && slotsByDate[selectedDate] && (
-                <div className="grid grid-cols-4 gap-2">
-                  {slotsByDate[selectedDate].map((slot, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setSelectedSlot(slot);
-                        setStep('details');
-                      }}
-                      className={`
-                        p-2 rounded border text-center hover:border-primary hover:bg-primary/5
-                        ${selectedSlot?.start_time === slot.start_time && selectedSlot?.date === slot.date
-                          ? 'border-primary bg-primary/10'
-                          : ''}
-                      `}
-                    >
-                      {slot.start_time}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {!selectedDate && (
-                <p className="text-center text-gray-500 py-4">
-                  Выберите дату для просмотра доступного времени
-                </p>
-              )}
-
-              {selectedDate && (!slotsByDate[selectedDate] || slotsByDate[selectedDate].length === 0) && (
-                <p className="text-center text-gray-500 py-4">
-                  Нет доступного времени на выбранную дату
-                </p>
-              )}
-
-              <Button
-                variant="outline"
-                className="w-full mt-4"
-                onClick={() => setStep('consultant')}
-              >
-                <ChevronLeft className="w-4 h-4 mr-1" />
-                Назад
-              </Button>
-            </CardContent>
-          </Card>
         )}
 
         {/* Step: Contact Details */}
-        {step === 'details' && (
+        {step === 'details' && selectedSlot && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -509,21 +275,9 @@ export function PublicBooking() {
             <CardContent className="space-y-4">
               {/* Summary */}
               <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg space-y-1 text-sm text-gray-900 dark:text-gray-100">
-                {selectedService && (
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: selectedService.color }}
-                    />
-                    <span>{selectedService.name}</span>
-                  </div>
-                )}
-                <div><strong>Специалист:</strong> {selectedConsultant?.name}</div>
-                <div><strong>Дата:</strong> {selectedSlot && formatDisplayDate(selectedSlot.date)}</div>
-                <div><strong>Время:</strong> {selectedSlot?.start_time}</div>
-                {selectedService && selectedService.price > 0 && (
-                  <div><strong>Стоимость:</strong> {formatPrice(selectedService.price, selectedService.currency)}</div>
-                )}
+                <div><strong>Специалист:</strong> {selectedSlot.consultant_name}</div>
+                <div><strong>Дата:</strong> {formatDisplayDate(selectedSlot.date)}</div>
+                <div><strong>Время:</strong> {selectedSlot.start_time}</div>
               </div>
 
               <div>
@@ -556,7 +310,7 @@ export function PublicBooking() {
               </div>
 
               {error && (
-                <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm">
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm">
                   {error}
                 </div>
               )}
@@ -564,10 +318,12 @@ export function PublicBooking() {
               <div className="flex gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => setStep('datetime')}
+                  onClick={() => {
+                    setSelectedSlot(null);
+                    setStep('select');
+                  }}
                   disabled={isSubmitting}
                 >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
                   Назад
                 </Button>
                 <Button
@@ -591,11 +347,11 @@ export function PublicBooking() {
         {step === 'success' && (
           <Card>
             <CardContent className="p-8 text-center">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Check className="w-8 h-8 text-green-600" />
+              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check className="w-8 h-8 text-green-600 dark:text-green-400" />
               </div>
-              <h2 className="text-xl font-bold mb-2">Запись подтверждена!</h2>
-              <p className="text-gray-600 mb-6">{successMessage}</p>
+              <h2 className="text-xl font-bold mb-2 dark:text-white">Запись подтверждена!</h2>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">{successMessage}</p>
               <Button
                 onClick={() => window.location.href = 'https://ai.performanteaiagency.com/'}
               >
