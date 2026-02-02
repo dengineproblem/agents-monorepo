@@ -89,7 +89,7 @@ const AdminAds: React.FC = () => {
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [cplAnalysis, setCplAnalysis] = useState<CplAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<'deviation' | 'spend'>('deviation');
+  const [sortBy, setSortBy] = useState<'deviation' | 'spend' | 'result'>('deviation');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -142,6 +142,14 @@ const AdminAds: React.FC = () => {
   const sortedCplAnalysis = [...cplAnalysis].sort((a, b) => {
     if (sortBy === 'deviation') {
       return Math.abs(b.deviation_percent) - Math.abs(a.deviation_percent);
+    }
+    if (sortBy === 'result') {
+      // Клиенты без лидов (leads_count = 0) в конец - это худший результат
+      if (a.leads_count === 0 && b.leads_count > 0) return 1;
+      if (a.leads_count > 0 && b.leads_count === 0) return -1;
+
+      // Сортировка по deviation_percent: лучший результат (отрицательное отклонение) наверх
+      return a.deviation_percent - b.deviation_percent;
     }
     return b.spend - a.spend;
   });
@@ -209,6 +217,7 @@ const AdminAds: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="deviation">По отклонению</SelectItem>
                     <SelectItem value="spend">По расходу</SelectItem>
+                    <SelectItem value="result">По результату</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
