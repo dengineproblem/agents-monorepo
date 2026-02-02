@@ -181,17 +181,22 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
 
       // Трансформируем структуру сообщений для frontend
       const transformedMessages = (lead.messages || []).map((msg: any) => {
-        // Если сообщение от бота (новый формат)
-        if (msg.sender) {
+        // Если сообщение от бота (новый формат с sender/content)
+        if (msg.sender && !msg.text) {
           return {
-            text: msg.content,
+            text: msg.content || '',
             from_me: msg.sender === 'bot',
             timestamp: msg.timestamp,
-            is_system: false
+            is_system: msg.is_system || false
           };
         }
-        // Если сообщение от консультанта (правильный формат)
-        return msg;
+        // Если сообщение от консультанта (формат с text/from_me) или уже трансформированное
+        return {
+          text: msg.text || msg.content || '',
+          from_me: msg.from_me !== undefined ? msg.from_me : (msg.sender === 'bot'),
+          timestamp: msg.timestamp,
+          is_system: msg.is_system || false
+        };
       });
 
       return reply.send({
