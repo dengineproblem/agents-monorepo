@@ -15,9 +15,12 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
    * Получить статистику для dashboard консультанта
    */
   app.get('/consultant/dashboard', async (request: ConsultantAuthRequest, reply) => {
+    const startTime = Date.now();
+
     try {
       const consultantId = request.consultant?.id;
       const isAdmin = request.userRole === 'admin';
+      const userId = request.userAccountId;
 
       // Для админа нужно передать consultant_id в query
       const targetConsultantId = isAdmin
@@ -25,39 +28,116 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         : consultantId;
 
       if (!targetConsultantId) {
+        app.log.warn({ userId, isAdmin }, 'GET /consultant/dashboard: Missing consultant ID');
         return reply.status(400).send({ error: 'Consultant ID required' });
       }
 
+      app.log.info({
+        userId,
+        consultantId: targetConsultantId,
+        isAdmin
+      }, 'GET /consultant/dashboard: Starting query');
+
       // Используем view из миграции
+      const dashboardQueryStart = Date.now();
       const { data, error } = await supabase
         .from('consultant_dashboard_stats')
         .select('*')
         .eq('consultant_id', targetConsultantId)
         .single();
+      const dashboardQueryDuration = Date.now() - dashboardQueryStart;
 
       if (error) {
-        app.log.error({ error }, 'Failed to fetch dashboard stats');
+        app.log.error({
+          error,
+          consultantId: targetConsultantId,
+          userId,
+          duration: dashboardQueryDuration
+        }, 'GET /consultant/dashboard: Failed to fetch dashboard stats');
         return reply.status(500).send({ error: error.message });
       }
 
-      return reply.send(data || {
-        consultant_id: targetConsultantId,
-        total_leads: 0,
-        hot_leads: 0,
-        warm_leads: 0,
-        cold_leads: 0,
-        booked_leads: 0,
-        total_consultations: 0,
-        scheduled: 0,
-        confirmed: 0,
-        completed: 0,
-        cancelled: 0,
-        no_show: 0,
-        total_revenue: 0,
-        completion_rate: 0
+      // Получить статистику задач эффективно через SQL агрегацию
+      const today = new Date().toISOString().split('T')[0];
+      const tasksQueryStart = Date.now();
+
+      // ОПТИМИЗИРОВАНО: Используем три параллельных count запроса вместо загрузки в память
+      const tasksStats = await Promise.all([
+        // Всего активных задач
+        supabase
+          .from('consultant_tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('consultant_id', targetConsultantId)
+          .eq('status', 'pending'),
+        // Просроченные задачи
+        supabase
+          .from('consultant_tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('consultant_id', targetConsultantId)
+          .eq('status', 'pending')
+          .lt('due_date', today),
+        // Задачи на сегодня
+        supabase
+          .from('consultant_tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('consultant_id', targetConsultantId)
+          .eq('status', 'pending')
+          .eq('due_date', today)
+      ]);
+
+      const tasksQueryDuration = Date.now() - tasksQueryStart;
+
+      // Извлекаем результаты из параллельных запросов
+      const [totalResult, overdueResult, todayResult] = tasksStats;
+      const tasks_total = totalResult?.count || 0;
+      const tasks_overdue = overdueResult?.count || 0;
+      const tasks_today = todayResult?.count || 0;
+
+      const totalDuration = Date.now() - startTime;
+
+      app.log.info({
+        userId,
+        consultantId: targetConsultantId,
+        stats: {
+          leads: data?.total_leads || 0,
+          consultations: data?.total_consultations || 0,
+          tasks: tasks_total
+        },
+        dashboardQueryDuration,
+        tasksQueryDuration,
+        totalDuration
+      }, 'GET /consultant/dashboard: Success');
+
+      return reply.send({
+        ...(data || {
+          consultant_id: targetConsultantId,
+          total_leads: 0,
+          hot_leads: 0,
+          warm_leads: 0,
+          cold_leads: 0,
+          booked_leads: 0,
+          total_consultations: 0,
+          scheduled: 0,
+          confirmed: 0,
+          completed: 0,
+          cancelled: 0,
+          no_show: 0,
+          total_revenue: 0,
+          completion_rate: 0
+        }),
+        // Добавляем статистику задач
+        tasks_total,
+        tasks_overdue,
+        tasks_today
       });
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching dashboard');
+      const totalDuration = Date.now() - startTime;
+
+      app.log.error({
+        error,
+        userId: request.userAccountId,
+        duration: totalDuration
+      }, 'GET /consultant/dashboard: Unexpected error');
       return reply.status(500).send({ error: error.message });
     }
   });
