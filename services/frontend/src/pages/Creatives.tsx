@@ -1631,9 +1631,24 @@ const Creatives: React.FC = () => {
     setQueue(prev => [...prev, ...added]);
   }, []);
 
-  const clearCompleted = useCallback(() => {
-    setQueue(prev => prev.filter(i => i.status === "queued" || i.status === "uploading"));
-  }, []);
+  const clearQueue = useCallback(() => {
+    // Удаляем все файлы, кроме тех, что сейчас загружаются
+    const queuedCount = queue.filter(i => i.status === "queued").length;
+    const completedCount = queue.filter(i => i.status === "completed" || i.status === "error").length;
+
+    if (queuedCount === 0 && completedCount === 0) {
+      return;
+    }
+
+    // Подтверждение, если есть файлы в очереди
+    if (queuedCount > 0) {
+      if (!confirm(`Удалить ${queuedCount} файл(ов) из очереди?`)) {
+        return;
+      }
+    }
+
+    setQueue(prev => prev.filter(i => i.status === "uploading"));
+  }, [queue]);
 
   // Повторная загрузка неудачного элемента
   const retryItem = useCallback((itemId: string) => {
@@ -1954,7 +1969,13 @@ const Creatives: React.FC = () => {
                     Повторить всё
                   </Button>
                 )}
-                <Button variant="ghost" onClick={clearCompleted} disabled={isProcessing} className="shrink-0">
+                <Button
+                  variant="ghost"
+                  onClick={clearQueue}
+                  disabled={isProcessing || queue.length === 0}
+                  className="shrink-0"
+                  title="Очистить очередь (удалить все файлы кроме загружающихся)"
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
