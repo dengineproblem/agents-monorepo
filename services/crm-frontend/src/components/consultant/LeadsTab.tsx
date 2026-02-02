@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { consultantApi, Lead } from '@/services/consultantApi';
 import { salesApi } from '@/services/salesApi';
+import { consultationService } from '@/services/consultationService';
+import { ConsultationService } from '@/types/consultation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,11 +11,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, MessageSquare, Calendar, Search, DollarSign } from 'lucide-react';
+import { Phone, MessageSquare, Calendar as CalendarIcon, Search, DollarSign } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { ChatSection } from './ChatSection';
 
 export function LeadsTab() {
   const { consultantId } = useParams<{ consultantId: string }>();
@@ -29,10 +32,6 @@ export function LeadsTab() {
 
   // Модальное окно для лида
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [sendingMessage, setSendingMessage] = useState(false);
-  const [loadingMessages, setLoadingMessages] = useState(false);
 
   // Модальное окно добавления продажи
   const [addSaleDialogOpen, setAddSaleDialogOpen] = useState(false);
@@ -42,6 +41,19 @@ export function LeadsTab() {
     product_name: '',
     sale_date: new Date().toISOString().split('T')[0],
     comment: ''
+  });
+
+  // Модальное окно записи на консультацию
+  const [bookConsultationDialogOpen, setBookConsultationDialogOpen] = useState(false);
+  const [leadForBooking, setLeadForBooking] = useState<Lead | null>(null);
+  const [services, setServices] = useState<ConsultationService[]>([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [consultationFormData, setConsultationFormData] = useState({
+    service_id: '',
+    date: addDays(new Date(), 1).toISOString().split('T')[0], // Завтра по умолчанию
+    start_time: '10:00',
+    end_time: '10:30',
+    notes: ''
   });
 
   // Загрузка лидов
@@ -71,54 +83,9 @@ export function LeadsTab() {
     loadLeads();
   }, [filters, consultantId]);
 
-  // Загрузка сообщений для лида
-  const loadMessages = async (leadId: string) => {
-    try {
-      setLoadingMessages(true);
-      const data = await consultantApi.getMessages(leadId);
-      setMessages(data.messages || []);
-    } catch (error: any) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось загрузить переписку',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoadingMessages(false);
-    }
-  };
-
   // Открыть модальное окно лида
   const handleOpenLead = (lead: Lead) => {
     setSelectedLead(lead);
-    loadMessages(lead.id);
-  };
-
-  // Отправить сообщение
-  const handleSendMessage = async () => {
-    if (!selectedLead || !newMessage.trim()) return;
-
-    try {
-      setSendingMessage(true);
-      await consultantApi.sendMessage(selectedLead.id, newMessage);
-
-      toast({
-        title: 'Успешно',
-        description: 'Сообщение отправлено',
-      });
-
-      // Обновить список сообщений
-      await loadMessages(selectedLead.id);
-      setNewMessage('');
-    } catch (error: any) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось отправить сообщение',
-        variant: 'destructive',
-      });
-    } finally {
-      setSendingMessage(false);
-    }
   };
 
   // Открыть модальное окно добавления продажи
@@ -165,6 +132,146 @@ export function LeadsTab() {
       toast({
         title: 'Ошибка',
         description: error.message || 'Не удалось добавить продажу',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Загрузить услуги консультанта
+  const loadServices = async () => {
+    if (!consultantId) return;
+
+    console.log('[LeadsTab] Loading services for consultantId:', consultantId);
+
+    try {
+      setLoadingServices(true);
+      const data = await consultantApi.getServices(consultantId);
+
+      // Фильтруем только активные услуги
+      const activeServices = data.filter((s: ConsultationService) =>
+        s.is_active && s.is_provided
+      );
+
+      console.log('[LeadsTab] Services loaded:', { count: activeServices.length, services: activeServices });
+
+      setServices(activeServices);
+    } catch (error: any) {
+      console.error('[LeadsTab] Failed to load services:', error);
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось загрузить услуги',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoadingServices(false);
+    }
+  };
+
+  // Открыть модальное окно записи на консультацию
+  const handleOpenBookConsultation = async (lead: Lead, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    console.log('[LeadsTab] Opening book consultation modal for lead:', lead.id);
+
+    setLeadForBooking(lead);
+    setConsultationFormData({
+      service_id: '',
+      date: addDays(new Date(), 1).toISOString().split('T')[0],
+      start_time: '10:00',
+      end_time: '10:30',
+      notes: ''
+    });
+
+    // Загрузить услуги
+    await loadServices();
+
+    setBookConsultationDialogOpen(true);
+  };
+
+  // Обновить время окончания при изменении услуги
+  const handleServiceChange = (serviceId: string) => {
+    const service = services.find(s => s.id === serviceId);
+
+    if (service) {
+      const duration = service.custom_duration || service.duration_minutes || 30;
+      const [hours, minutes] = consultationFormData.start_time.split(':').map(Number);
+      const startMinutes = hours * 60 + minutes;
+      const endMinutes = startMinutes + duration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      const end_time = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+
+      console.log('[LeadsTab] Service changed:', {
+        serviceId,
+        serviceName: service.name,
+        duration,
+        start_time: consultationFormData.start_time,
+        end_time
+      });
+
+      setConsultationFormData({
+        ...consultationFormData,
+        service_id: serviceId,
+        end_time
+      });
+    } else {
+      setConsultationFormData({
+        ...consultationFormData,
+        service_id: serviceId
+      });
+    }
+  };
+
+  // Создать консультацию для лида
+  const handleCreateConsultation = async () => {
+    if (!leadForBooking || !consultantId || !consultationFormData.service_id) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните обязательные поля',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    console.log('[LeadsTab] Creating consultation:', {
+      leadId: leadForBooking.id,
+      consultantId,
+      formData: consultationFormData
+    });
+
+    try {
+      await consultationService.createConsultation({
+        consultant_id: consultantId,
+        service_id: consultationFormData.service_id,
+        client_phone: leadForBooking.contact_phone,
+        client_name: leadForBooking.contact_name || 'Без имени',
+        dialog_analysis_id: leadForBooking.id,
+        date: consultationFormData.date,
+        start_time: consultationFormData.start_time,
+        end_time: consultationFormData.end_time,
+        status: 'scheduled',
+        consultation_type: 'general',
+        notes: consultationFormData.notes
+      });
+
+      console.log('[LeadsTab] Consultation created successfully');
+
+      toast({
+        title: 'Успешно',
+        description: 'Консультация успешно создана',
+      });
+
+      setBookConsultationDialogOpen(false);
+      setLeadForBooking(null);
+
+      // Обновить список лидов
+      await loadLeads();
+    } catch (error: any) {
+      console.error('[LeadsTab] Failed to create consultation:', error);
+
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось создать консультацию',
         variant: 'destructive',
       });
     }
@@ -289,6 +396,14 @@ export function LeadsTab() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={(e) => handleOpenBookConsultation(lead, e)}
+                    >
+                      <CalendarIcon className="h-4 w-4 mr-1" />
+                      Консультация
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={(e) => handleOpenAddSale(lead, e)}
                     >
                       <DollarSign className="h-4 w-4 mr-1" />
@@ -319,62 +434,20 @@ export function LeadsTab() {
 
       {/* Модальное окно лида */}
       <Dialog open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[80vh]">
           <DialogHeader>
             <DialogTitle>
               {selectedLead?.contact_name || 'Без имени'} ({selectedLead?.contact_phone})
             </DialogTitle>
           </DialogHeader>
 
-          {/* Переписка */}
-          <div className="flex-1 overflow-y-auto border rounded-lg p-4 space-y-3">
-            {loadingMessages ? (
-              <div className="text-center py-4">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="text-center py-4 text-muted-foreground">
-                Нет сообщений
-              </div>
-            ) : (
-              messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[70%] rounded-lg px-4 py-2 ${
-                      msg.from_me
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
-                    }`}
-                  >
-                    <p className="text-sm">{msg.text}</p>
-                    <p className="text-xs mt-1 opacity-70">
-                      {format(new Date(msg.timestamp), 'HH:mm', { locale: ru })}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Форма отправки */}
-          <div className="flex gap-2 pt-4 border-t">
-            <Textarea
-              placeholder="Введите сообщение..."
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              className="flex-1"
-              rows={2}
+          {selectedLead && (
+            <ChatSection
+              leadId={selectedLead.id}
+              clientName={selectedLead.contact_name}
+              clientPhone={selectedLead.contact_phone}
             />
-            <Button
-              onClick={handleSendMessage}
-              disabled={sendingMessage || !newMessage.trim()}
-            >
-              {sendingMessage ? 'Отправка...' : 'Отправить'}
-            </Button>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -434,6 +507,166 @@ export function LeadsTab() {
               Отмена
             </Button>
             <Button onClick={handleCreateSale}>Добавить</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно записи на консультацию */}
+      <Dialog open={bookConsultationDialogOpen} onOpenChange={setBookConsultationDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Запись на консультацию</DialogTitle>
+            <DialogDescription>
+              Клиент: {leadForBooking?.contact_name || 'Без имени'} ({leadForBooking?.contact_phone})
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Выбор услуги */}
+            <div>
+              <Label htmlFor="service">Услуга *</Label>
+              {loadingServices ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                </div>
+              ) : services.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-2">
+                  Нет доступных услуг
+                </div>
+              ) : (
+                <Select
+                  value={consultationFormData.service_id}
+                  onValueChange={handleServiceChange}
+                >
+                  <SelectTrigger id="service">
+                    <SelectValue placeholder="Выберите услугу" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {services.map((service) => {
+                      const price = service.custom_price || service.price || 0;
+                      const duration = service.custom_duration || service.duration_minutes || 30;
+                      return (
+                        <SelectItem key={service.id} value={service.id}>
+                          {service.name} ({duration} мин, {price} ₽)
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Выбор даты */}
+            <div>
+              <Label htmlFor="consultation_date">Дата *</Label>
+              <Input
+                id="consultation_date"
+                type="date"
+                value={consultationFormData.date}
+                onChange={(e) => setConsultationFormData({
+                  ...consultationFormData,
+                  date: e.target.value
+                })}
+                min={new Date().toISOString().split('T')[0]}
+                required
+              />
+            </div>
+
+            {/* Выбор времени */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="start_time">Начало *</Label>
+                <Input
+                  id="start_time"
+                  type="time"
+                  value={consultationFormData.start_time}
+                  onChange={(e) => {
+                    const newStartTime = e.target.value;
+
+                    // Пересчитать время окончания на основе длительности услуги
+                    if (consultationFormData.service_id) {
+                      const service = services.find(s => s.id === consultationFormData.service_id);
+                      if (service) {
+                        const duration = service.custom_duration || service.duration_minutes || 30;
+                        const [hours, minutes] = newStartTime.split(':').map(Number);
+                        const startMinutes = hours * 60 + minutes;
+                        const endMinutes = startMinutes + duration;
+                        const endHours = Math.floor(endMinutes / 60);
+                        const endMins = endMinutes % 60;
+                        const end_time = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+
+                        setConsultationFormData({
+                          ...consultationFormData,
+                          start_time: newStartTime,
+                          end_time
+                        });
+                        return;
+                      }
+                    }
+
+                    setConsultationFormData({
+                      ...consultationFormData,
+                      start_time: newStartTime
+                    });
+                  }}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="end_time">Окончание *</Label>
+                <Input
+                  id="end_time"
+                  type="time"
+                  value={consultationFormData.end_time}
+                  onChange={(e) => setConsultationFormData({
+                    ...consultationFormData,
+                    end_time: e.target.value
+                  })}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Примечания */}
+            <div>
+              <Label htmlFor="consultation_notes">Примечания (опционально)</Label>
+              <Textarea
+                id="consultation_notes"
+                value={consultationFormData.notes}
+                onChange={(e) => setConsultationFormData({
+                  ...consultationFormData,
+                  notes: e.target.value
+                })}
+                placeholder="Дополнительная информация..."
+                rows={3}
+              />
+            </div>
+
+            {/* Информация о выбранной дате и времени */}
+            {consultationFormData.date && consultationFormData.start_time && (
+              <div className="p-3 bg-muted rounded-md text-sm">
+                <p className="font-medium mb-1">Запись:</p>
+                <p>📅 {format(new Date(consultationFormData.date), 'dd MMMM yyyy', { locale: ru })}</p>
+                <p>🕐 {consultationFormData.start_time} - {consultationFormData.end_time}</p>
+                {consultationFormData.service_id && (
+                  <p className="mt-1">
+                    💼 {services.find(s => s.id === consultationFormData.service_id)?.name}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setBookConsultationDialogOpen(false)}>
+              Отмена
+            </Button>
+            <Button
+              onClick={handleCreateConsultation}
+              disabled={!consultationFormData.service_id || !consultationFormData.date || !consultationFormData.start_time}
+            >
+              Записать
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

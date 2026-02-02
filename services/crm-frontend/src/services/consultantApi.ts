@@ -65,12 +65,15 @@ export interface Consultation {
   id: string;
   consultant_id: string;
   dialog_analysis_id?: string;
+  client_name?: string;
+  client_phone?: string;
   date: string;
   start_time: string;
   end_time: string;
   status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show';
   service_name?: string;
   price?: number;
+  notes?: string;
   consultant?: {
     name: string;
     phone: string;

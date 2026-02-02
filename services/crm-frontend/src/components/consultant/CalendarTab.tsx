@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign } from 'lucide-react';
+import { ChatSection } from './ChatSection';
 
 export function CalendarTab() {
   const { consultantId } = useParams<{ consultantId: string }>();
@@ -622,109 +623,159 @@ export function CalendarTab() {
       </Dialog>
 
       {/* Модальное окно деталей консультации */}
-      <Dialog open={isDetailModalOpen} onOpenChange={setIsDetailModalOpen}>
-        <DialogContent>
+      <Dialog
+        open={isDetailModalOpen}
+        onOpenChange={(open) => {
+          console.log('[CalendarTab] Detail modal state changing:', {
+            open,
+            consultationId: selectedConsultation?.id,
+            hasDialogAnalysisId: !!selectedConsultation?.dialog_analysis_id
+          });
+          setIsDetailModalOpen(open);
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>Детали консультации</DialogTitle>
           </DialogHeader>
           {selectedConsultation && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Клиент</Label>
-                  <div className="font-medium">{selectedConsultation.client_name || 'Не указан'}</div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Телефон</Label>
-                  <div className="flex items-center gap-1">
-                    <Phone className="w-3 h-3" />
-                    {selectedConsultation.client_phone}
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Время</Label>
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {selectedConsultation.start_time} - {selectedConsultation.end_time}
-                  </div>
-                </div>
-                {selectedConsultation.service_name && (
+            <div className="flex-1 overflow-y-auto space-y-6">
+              {/* Детали консультации */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label className="text-muted-foreground">Услуга</Label>
-                    <div>{selectedConsultation.service_name}</div>
+                    <Label className="text-muted-foreground">Клиент</Label>
+                    <div className="font-medium">{selectedConsultation.client_name || 'Не указан'}</div>
                   </div>
-                )}
-                {selectedConsultation.price && (
                   <div>
-                    <Label className="text-muted-foreground">Стоимость</Label>
+                    <Label className="text-muted-foreground">Телефон</Label>
                     <div className="flex items-center gap-1">
-                      <DollarSign className="w-3 h-3" />
-                      {selectedConsultation.price} ₽
+                      <Phone className="w-3 h-3" />
+                      {selectedConsultation.client_phone}
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-muted-foreground">Время</Label>
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {selectedConsultation.start_time} - {selectedConsultation.end_time}
+                    </div>
+                  </div>
+                  {selectedConsultation.service_name && (
+                    <div>
+                      <Label className="text-muted-foreground">Услуга</Label>
+                      <div>{selectedConsultation.service_name}</div>
+                    </div>
+                  )}
+                  {selectedConsultation.price && (
+                    <div>
+                      <Label className="text-muted-foreground">Стоимость</Label>
+                      <div className="flex items-center gap-1">
+                        <DollarSign className="w-3 h-3" />
+                        {selectedConsultation.price} ₽
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {selectedConsultation.notes && (
+                  <div>
+                    <Label className="text-muted-foreground">Примечания</Label>
+                    <div className="text-sm bg-muted p-3 rounded-md whitespace-pre-wrap">
+                      {selectedConsultation.notes}
                     </div>
                   </div>
                 )}
-              </div>
 
-              {selectedConsultation.notes && (
                 <div>
-                  <Label className="text-muted-foreground">Примечания</Label>
-                  <div className="text-sm bg-muted p-3 rounded-md whitespace-pre-wrap">
-                    {selectedConsultation.notes}
+                  <Label className="text-muted-foreground">Статус</Label>
+                  <div className="mt-1">
+                    <Badge className={getStatusColor(selectedConsultation.status).replace('border-', '')}>
+                      {getStatusText(selectedConsultation.status)}
+                    </Badge>
                   </div>
                 </div>
-              )}
 
-              <div>
-                <Label className="text-muted-foreground">Статус</Label>
-                <div className="mt-1">
-                  <Badge className={getStatusColor(selectedConsultation.status).replace('border-', '')}>
-                    {getStatusText(selectedConsultation.status)}
-                  </Badge>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleUpdateStatus(selectedConsultation.id, 'confirmed')}
+                    disabled={selectedConsultation.status === 'confirmed'}
+                  >
+                    Подтвердить
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleUpdateStatus(selectedConsultation.id, 'completed')}
+                    disabled={selectedConsultation.status === 'completed'}
+                  >
+                    Завершить
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleUpdateStatus(selectedConsultation.id, 'no_show')}
+                    disabled={selectedConsultation.status === 'no_show'}
+                  >
+                    Не явился
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleUpdateStatus(selectedConsultation.id, 'cancelled')}
+                    disabled={selectedConsultation.status === 'cancelled'}
+                  >
+                    Отменить
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-600 border-red-300 hover:bg-red-50"
+                    onClick={() => handleDelete(selectedConsultation.id)}
+                  >
+                    Удалить
+                  </Button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleUpdateStatus(selectedConsultation.id, 'confirmed')}
-                  disabled={selectedConsultation.status === 'confirmed'}
-                >
-                  Подтвердить
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleUpdateStatus(selectedConsultation.id, 'completed')}
-                  disabled={selectedConsultation.status === 'completed'}
-                >
-                  Завершить
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleUpdateStatus(selectedConsultation.id, 'no_show')}
-                  disabled={selectedConsultation.status === 'no_show'}
-                >
-                  Не явился
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => handleUpdateStatus(selectedConsultation.id, 'cancelled')}
-                  disabled={selectedConsultation.status === 'cancelled'}
-                >
-                  Отменить
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-red-600 border-red-300 hover:bg-red-50"
-                  onClick={() => handleDelete(selectedConsultation.id)}
-                >
-                  Удалить
-                </Button>
-              </div>
+              {/* Чат с клиентом */}
+              {(() => {
+                const hasDialogAnalysisId = selectedConsultation.dialog_analysis_id &&
+                                            selectedConsultation.dialog_analysis_id.trim() !== '';
+
+                console.log('[CalendarTab] Rendering chat section:', {
+                  consultationId: selectedConsultation.id,
+                  dialog_analysis_id: selectedConsultation.dialog_analysis_id,
+                  hasDialogAnalysisId,
+                  client_name: selectedConsultation.client_name,
+                  client_phone: selectedConsultation.client_phone
+                });
+
+                if (hasDialogAnalysisId) {
+                  return (
+                    <div className="border-t pt-4">
+                      <ChatSection
+                        leadId={selectedConsultation.dialog_analysis_id}
+                        clientName={selectedConsultation.client_name}
+                        clientPhone={selectedConsultation.client_phone}
+                      />
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div className="border-t pt-4">
+                      <div className="text-center py-4 text-muted-foreground">
+                        Чат недоступен для этой консультации
+                        {selectedConsultation.dialog_analysis_id === null && (
+                          <p className="text-xs mt-1">(Консультация не связана с лидом)</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+              })()}
             </div>
           )}
         </DialogContent>
