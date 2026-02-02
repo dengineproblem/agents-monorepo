@@ -2,7 +2,7 @@
  * API клиент для работы с consultant endpoints
  */
 
-const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || 'http://localhost:8084';
+const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
 // Получить userId из localStorage
 const getUserId = (): string => {
