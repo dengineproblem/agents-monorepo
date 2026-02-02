@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { sendWhatsAppMessage } from './whatsapp.js';
+import { sendWhatsAppMessage } from './evolutionApi.js';
 import { format } from 'date-fns';
 import ru from 'date-fns/locale/ru/index.js';
 
@@ -120,11 +120,16 @@ export async function notifyConsultantAboutNewConsultation(
     process.stderr.write(`[CONSULTANT_NOTIFICATION] Sending WhatsApp message...\n`);
 
     // 4. Отправить уведомление через Evolution API
-    await sendWhatsAppMessage({
+    const result = await sendWhatsAppMessage({
       instanceName,
       phone: cleanPhone,
       message,
     });
+
+    if (!result.success) {
+      process.stderr.write(`[CONSULTANT_NOTIFICATION] ERROR: ${result.error}\n`);
+      return;
+    }
 
     process.stderr.write(`[CONSULTANT_NOTIFICATION] SUCCESS: Notification sent to ${consultant.name} (${cleanPhone})\n`);
   } catch (error) {
@@ -191,11 +196,16 @@ export async function notifyConsultantAboutNewLead(
 
 Посмотреть в личном кабинете: https://crm.example.com/c/${consultant.id}`;
 
-    await sendWhatsAppMessage({
+    const result = await sendWhatsAppMessage({
       instanceName,
       phone: cleanPhone,
       message,
     });
+
+    if (!result.success) {
+      console.error(`Failed to notify consultant about new lead: ${result.error}`);
+      return;
+    }
 
     console.log(`New lead notification sent to consultant ${consultant.name}`);
   } catch (error) {
@@ -259,11 +269,16 @@ export async function sendConsultationReminder(
 
 Подготовьтесь к встрече 😊`;
 
-    await sendWhatsAppMessage({
+    const result = await sendWhatsAppMessage({
       instanceName,
       phone: cleanPhone,
       message,
     });
+
+    if (!result.success) {
+      console.error(`Failed to send consultation reminder: ${result.error}`);
+      return;
+    }
 
     console.log(`Reminder sent to consultant ${consultant.name}`);
   } catch (error) {
