@@ -55,8 +55,8 @@ echo ""
 # 1. MOLTBOT_TELEGRAM_BOT_TOKEN
 echo "1. MOLTBOT_TELEGRAM_BOT_TOKEN"
 if ! check_env_var "MOLTBOT_TELEGRAM_BOT_TOKEN"; then
-    echo -e "${YELLOW}  Добавьте токен бота вручную:${NC}"
-    echo "  echo 'MOLTBOT_TELEGRAM_BOT_TOKEN=8270141950:AAFFa__O01_aT8kyu3d43y05mcg785FF-lQ' >> .env.brain"
+    echo -e "${GREEN}  Добавление MOLTBOT_TELEGRAM_BOT_TOKEN...${NC}"
+    add_env_var "MOLTBOT_TELEGRAM_BOT_TOKEN" "8270141950:AAFFa__O01_aT8kyu3d43y05mcg785FF-lQ"
 fi
 echo ""
 
@@ -70,11 +70,11 @@ echo "3. ANTHROPIC_API_KEY"
 check_env_var "ANTHROPIC_API_KEY"
 echo ""
 
-# 4. SUPERMEMORY_API_KEY (опционально)
-echo "4. SUPERMEMORY_API_KEY (опционально для долгосрочной памяти)"
+# 4. SUPERMEMORY_API_KEY
+echo "4. SUPERMEMORY_API_KEY (для долгосрочной памяти агента)"
 if ! check_env_var "SUPERMEMORY_API_KEY"; then
-    echo -e "${YELLOW}  Если хочешь включить Supermemory, добавь:${NC}"
-    echo "  echo 'SUPERMEMORY_API_KEY=sm_7x9qjUcog6Bd5dBALQujXa_fdAfFQIogtNPbksejoqunoIpFgrpyPlXIQGtoFitTAKtOkkheJQdpjuDawswCWXk' >> .env.brain"
+    echo -e "${GREEN}  Добавление SUPERMEMORY_API_KEY...${NC}"
+    add_env_var "SUPERMEMORY_API_KEY" "sm_7x9qjUcog6Bd5dBALQujXa_fdAfFQIogtNPbksejoqunoIpFgrpyPlXIQGtoFitTAKtOkkheJQdpjuDawswCWXk"
 fi
 echo ""
 
