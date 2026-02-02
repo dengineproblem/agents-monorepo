@@ -461,6 +461,25 @@ class SalesApiService {
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
+        // Проверяем что account_id принадлежит userAccountId (security check)
+        const { data: accountOwnership, error: ownershipError } = await supabase
+          .from('ad_accounts')
+          .select('id')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (ownershipError || !accountOwnership) {
+          console.error('Account ownership check failed in getROIData:', {
+            accountId,
+            userAccountId,
+            error: ownershipError
+          });
+          // НЕ применяем фильтр по account_id если проверка failed
+          // Возвращаем пустой результат для безопасности
+          return [];
+        }
+
         leadsQuery = leadsQuery.eq('account_id', accountId);
       }
 
@@ -1206,6 +1225,25 @@ class SalesApiService {
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
+        // Проверяем что account_id принадлежит userAccountId (security check)
+        const { data: accountOwnership, error: ownershipError } = await supabase
+          .from('ad_accounts')
+          .select('id')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (ownershipError || !accountOwnership) {
+          console.error('Account ownership check failed:', {
+            accountId,
+            userAccountId,
+            error: ownershipError
+          });
+          // НЕ применяем фильтр по account_id если проверка failed
+          // Возвращаем пустой результат для безопасности
+          return { data: [], error: null };
+        }
+
         query = query.eq('account_id', accountId);
       }
 

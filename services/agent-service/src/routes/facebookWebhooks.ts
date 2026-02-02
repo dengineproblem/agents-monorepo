@@ -345,6 +345,30 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             }, 'Resolved creative from lead form ad_id');
           }
 
+          // Validate account ownership (security check)
+          if (accountId && userAccountId) {
+            const { data: ownership } = await supabase
+              .from('ad_accounts')
+              .select('id')
+              .eq('id', accountId)
+              .eq('user_account_id', userAccountId)
+              .single();
+
+            if (!ownership) {
+              log.warn({
+                accountId,
+                userAccountId,
+                page_id: targetPageId
+              }, 'Account ownership validation failed: account_id does not belong to user_account_id, setting to NULL');
+              accountId = null;  // Сбрасываем в NULL вместо ошибки (не блокируем лида)
+            } else {
+              log.info({
+                accountId,
+                userAccountId
+              }, 'Account ownership validated successfully');
+            }
+          }
+
           // Prepare lead data for parallel processing
           const leadInsertData = {
             user_account_id: userAccountId,

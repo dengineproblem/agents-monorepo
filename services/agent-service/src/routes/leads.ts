@@ -334,7 +334,35 @@ export default async function leadsRoutes(app: FastifyInstance) {
         app.log.warn('No ad_id or utm_content provided for lead');
       }
 
-      // 6. Insert lead into database
+      // 6. Validate account ownership (security check)
+      if (leadData.accountId) {
+        const { data: adAccount, error: ownershipError } = await supabase
+          .from('ad_accounts')
+          .select('id')
+          .eq('id', leadData.accountId)
+          .eq('user_account_id', leadData.userAccountId)
+          .single();
+
+        if (ownershipError || !adAccount) {
+          app.log.error({
+            accountId: leadData.accountId,
+            userAccountId: leadData.userAccountId,
+            error: ownershipError
+          }, 'Account ownership validation failed: account_id does not belong to user_account_id');
+
+          return reply.code(403).send({
+            error: 'forbidden',
+            message: 'Account ID does not belong to this user'
+          });
+        }
+
+        app.log.info({
+          accountId: leadData.accountId,
+          userAccountId: leadData.userAccountId
+        }, 'Account ownership validated successfully');
+      }
+
+      // 7. Insert lead into database
       const { data: lead, error: insertError } = await supabase
         .from('leads')
         .insert({
