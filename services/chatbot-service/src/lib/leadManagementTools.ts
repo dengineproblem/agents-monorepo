@@ -81,7 +81,7 @@ export function getLeadManagementToolDefinitions(): OpenAI.Chat.Completions.Chat
           properties: {
             contact_name: {
               type: 'string',
-              description: 'Имя клиента. Сохрани сразу когда клиент представляется или отвечает на вопрос "как к вам обращаться"'
+              description: 'Имя клиента. Сохрани ТОЛЬКО когда клиент САМ назвал своё имя в диалоге или ответил на вопрос "как к вам обращаться". КРИТИЧНО: НЕ выдумывай имена! НЕ угадывай! Используй только то имя, которое клиент явно сообщил в переписке.'
             },
             company_name: {
               type: 'string',

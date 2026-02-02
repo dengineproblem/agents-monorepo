@@ -210,7 +210,7 @@ export function getConsultationToolDefinitions(
             },
             client_name: {
               type: 'string',
-              description: 'Имя клиента (если известно)'
+              description: 'Имя клиента ТОЛЬКО если он САМ назвал его в диалоге. КРИТИЧНО: НЕ выдумывай имена! Если клиент не представлялся - НЕ передавай этот параметр вообще!'
             }
           },
           required: ['consultant_id', 'date', 'start_time']
