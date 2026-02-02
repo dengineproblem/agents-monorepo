@@ -64,8 +64,8 @@ docker logs moltbot -f
 **Ожидаемый вывод:**
 ```
 ✓ Telegram bot token injected
-✓ Multi-agent config ready (6 agents: ...)
-✓ Auth profiles configured for all 6 agents
+✓ Single-Workspace config ready: 1 router agent with 5 subagents (facebook-ads, creatives, crm, tiktok, onboarding)
+✓ Auth profile configured for router agent
 [router] agent model: openai/gpt-5.2
 Telegram channel enabled
 Gateway listening on 0.0.0.0:18789
@@ -174,6 +174,11 @@ docker logs moltbot -f
 
 ## Архитектура
 
+**Single-Workspace Architecture:**
+- 1 Router агент обслуживает ВСЕХ пользователей
+- Изоляция пользователей через Telegram Chat ID → userAccountId
+- Router содержит 5 встроенных ролей (subagents): facebook-ads, creatives, crm, tiktok, onboarding
+
 ```
 ┌─────────────────────────────────────────┐
 │ Telegram API (external)                 │
@@ -183,18 +188,26 @@ docker logs moltbot -f
 ┌─────────────────────────────────────────┐
 │ Moltbot Gateway (moltbot:18789)         │
 │ - Telegram transport                    │
-│ - Multi-agent routing                   │
+│ - Single router agent                   │
+│ - Session isolation (Chat ID → UUID)    │
 │ - Auth profiles                         │
-│ - Session management                    │
 └─────────────┬───────────────────────────┘
-              │ ws://moltbot:18789
+              │ HTTP tools (AGENT_SERVICE_URL)
               ▼
 ┌─────────────────────────────────────────┐
-│ Agent Brain (agent-brain:7080)          │
-│ - Tool execution                        │
+│ Agent Service (agent-service:8082)      │
 │ - Facebook Ads API                      │
+│ - Creative generation                   │
+│ - CRM & Leads                           │
 │ - Database access                       │
 └─────────────────────────────────────────┘
+
+Router Subagents:
+├─ facebook-ads   (Facebook/Instagram управление)
+├─ creatives      (Генерация креативов)
+├─ crm            (Лиды и продажи)
+├─ tiktok         (TikTok управление)
+└─ onboarding     (Регистрация пользователей)
 ```
 
 ## Порты
