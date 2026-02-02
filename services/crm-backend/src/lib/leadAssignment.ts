@@ -187,7 +187,7 @@ export async function getLeadDistributionStats(
         name,
         dialog_analysis:dialog_analysis(count)
       `)
-      .eq('user_account_id', userAccountId)
+      .eq('parent_user_account_id', userAccountId)
       .eq('is_active', true);
 
     if (error) {

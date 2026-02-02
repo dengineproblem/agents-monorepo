@@ -597,19 +597,9 @@ export function PublicBooking() {
               <h2 className="text-xl font-bold mb-2">Запись подтверждена!</h2>
               <p className="text-gray-600 mb-6">{successMessage}</p>
               <Button
-                onClick={() => {
-                  setStep('service');
-                  setSelectedService(null);
-                  setSelectedConsultant(null);
-                  setSelectedDate('');
-                  setSelectedSlot(null);
-                  setClientName('');
-                  setClientPhone('');
-                  setNotes('');
-                  setSuccessMessage(null);
-                }}
+                onClick={() => window.location.href = 'https://ai.performanteaiagency.com/'}
               >
-                Записаться ещё раз
+                Вернуться на сайт
               </Button>
             </CardContent>
           </Card>

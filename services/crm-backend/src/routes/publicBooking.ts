@@ -109,8 +109,9 @@ export async function publicBookingRoutes(app: FastifyInstance) {
       const { data: consultants, error: consultantsError } = await supabase
         .from('consultants')
         .select('id, name, specialization')
-        .eq('user_account_id', userAccountId)
+        .eq('parent_user_account_id', userAccountId)
         .eq('is_active', true)
+        .eq('accepts_new_leads', true)
         .order('name');
 
       if (consultantsError) {
@@ -222,8 +223,9 @@ export async function publicBookingRoutes(app: FastifyInstance) {
           .from('consultants')
           .select('id')
           .eq('id', query.consultant_id)
-          .eq('user_account_id', userAccountId)
+          .eq('parent_user_account_id', userAccountId)
           .eq('is_active', true)
+          .eq('accepts_new_leads', true)
           .single();
 
         if (consultantError || !consultant) {
@@ -235,8 +237,9 @@ export async function publicBookingRoutes(app: FastifyInstance) {
         const { data: consultants } = await supabase
           .from('consultants')
           .select('id')
-          .eq('user_account_id', userAccountId)
-          .eq('is_active', true);
+          .eq('parent_user_account_id', userAccountId)
+          .eq('is_active', true)
+          .eq('accepts_new_leads', true);
         consultantIds = consultants?.map(c => c.id);
       }
 
@@ -352,10 +355,11 @@ export async function publicBookingRoutes(app: FastifyInstance) {
       // Validate consultant belongs to user account
       const { data: consultant, error: consultantError } = await supabase
         .from('consultants')
-        .select('id, name, user_account_id')
+        .select('id, name, parent_user_account_id')
         .eq('id', body.consultant_id)
-        .eq('user_account_id', body.user_account_id)
+        .eq('parent_user_account_id', body.user_account_id)
         .eq('is_active', true)
+        .eq('accepts_new_leads', true)
         .single();
 
       if (consultantError || !consultant) {
@@ -566,8 +570,9 @@ export async function publicBookingRoutes(app: FastifyInstance) {
         .from('consultants')
         .select('id, name, specialization')
         .eq('id', consultantId)
-        .eq('user_account_id', userAccountId)
+        .eq('parent_user_account_id', userAccountId)
         .eq('is_active', true)
+        .eq('accepts_new_leads', true)
         .single();
 
       if (consultantError || !consultant) {
