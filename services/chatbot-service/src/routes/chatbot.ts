@@ -125,13 +125,19 @@ export default async function chatbotRoutes(app: FastifyInstance) {
         .update({
           assigned_to_human: false,
           bot_paused: false,
-          bot_paused_until: null
+          bot_paused_until: null,
+          has_unread: false, // Сбрасываем непрочитанные при возврате боту
+          last_consultant_message_at: null // Очищаем время последнего сообщения консультанта
         })
         .eq('id', leadId);
 
       if (error) throw error;
 
-      app.log.info({ leadId }, 'Lead returned to bot');
+      app.log.info({
+        leadId: leadId.substring(0, 8) + '...',
+        hasUnreadReset: true,
+        lastConsultantMessageAtCleared: true
+      }, 'Lead returned to bot - reset unread flags and consultant message timestamp');
 
       return reply.send({ success: true, message: 'Lead returned to bot' });
     } catch (error: any) {

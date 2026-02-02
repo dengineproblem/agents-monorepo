@@ -129,14 +129,18 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
       // Обновляем историю сообщений в dialog_analysis
       const updatedMessages = [...(lead.messages || []), newMessage];
 
+      const now = new Date().toISOString();
+
       const { error: updateError } = await supabase
         .from('dialog_analysis')
         .update({
           messages: updatedMessages,
-          last_message: new Date().toISOString(),
+          last_message: now,
           outgoing_count: (lead.outgoing_count || 0) + 1,
           assigned_to_human: true, // Устанавливаем флаг вмешательства консультанта
-          updated_at: new Date().toISOString()
+          last_consultant_message_at: now, // Время последнего сообщения консультанта
+          has_unread: false, // Сбрасываем флаг непрочитанных при ответе консультанта
+          updated_at: now
         })
         .eq('id', leadId);
 
@@ -154,11 +158,13 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
       }
 
       app.log.info({
-        leadId,
-        consultantId,
+        leadId: leadId.substring(0, 8) + '...',
+        consultantId: consultantId ? consultantId.substring(0, 8) + '...' : null,
         phone: lead.contact_phone,
-        messageId: result.key?.id
-      }, 'Consultant sent message to lead');
+        messageId: result.key?.id,
+        lastConsultantMessageAt: now,
+        hasUnreadReset: true
+      }, 'Consultant sent message - set last_consultant_message_at and reset has_unread');
 
       return reply.status(200).send({
         success: true,
@@ -197,6 +203,32 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
       // Проверяем доступ
       if (!isAdmin && consultantId !== lead.assigned_consultant_id) {
         return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      // Сбрасываем has_unread только для самого консультанта (не для админа)
+      if (!isAdmin && consultantId) {
+        const { error: markReadError } = await supabase
+          .from('dialog_analysis')
+          .update({ has_unread: false })
+          .eq('id', leadId)
+          .eq('assigned_consultant_id', consultantId);
+
+        if (markReadError) {
+          app.log.warn({
+            leadId: leadId.substring(0, 8) + '...',
+            consultantId: consultantId.substring(0, 8) + '...',
+            error: markReadError.message
+          }, 'Failed to mark messages as read (non-critical)');
+        } else {
+          app.log.info({
+            leadId: leadId.substring(0, 8) + '...',
+            consultantId: consultantId.substring(0, 8) + '...'
+          }, 'Marked messages as read - consultant opened chat');
+        }
+      } else if (isAdmin) {
+        app.log.debug({
+          leadId: leadId.substring(0, 8) + '...'
+        }, 'Admin opened chat - not marking as read');
       }
 
       // Трансформируем структуру сообщений для frontend
@@ -263,6 +295,8 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
         .from('dialog_analysis')
         .update({
           assigned_to_human: false,
+          has_unread: false, // Сбрасываем непрочитанные при возврате боту
+          last_consultant_message_at: null, // Очищаем время последнего сообщения консультанта
           updated_at: new Date().toISOString()
         })
         .eq('id', leadId);

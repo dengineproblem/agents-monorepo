@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { consultantApi, DashboardStats } from '@/services/consultantApi';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
@@ -33,6 +34,8 @@ export function ConsultantPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('calendar');
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [prevUnreadCount, setPrevUnreadCount] = useState(0);
 
   // Проверка доступа
   useEffect(() => {
@@ -63,6 +66,38 @@ export function ConsultantPage() {
 
     loadStats();
   }, [consultantId, toast]);
+
+  // Загрузка счетчика непрочитанных с polling и toast уведомлениями
+  useEffect(() => {
+    const loadUnreadCount = async () => {
+      try {
+        const data = await consultantApi.getUnreadCount();
+        const newCount = data.unreadCount;
+
+        // Показываем toast только если счетчик увеличился и это не первая загрузка
+        if (newCount > prevUnreadCount && prevUnreadCount > 0) {
+          const diff = newCount - prevUnreadCount;
+          toast({
+            title: 'Новые сообщения',
+            description: `У вас ${diff} ${diff === 1 ? 'новое непрочитанное сообщение' : 'новых непрочитанных сообщений'}`,
+            duration: 5000,
+          });
+        }
+
+        setPrevUnreadCount(newCount);
+        setUnreadCount(newCount);
+      } catch (error) {
+        console.error('Failed to load unread count:', error);
+      }
+    };
+
+    // Начальная загрузка
+    loadUnreadCount();
+
+    // Polling каждые 30 секунд
+    const interval = setInterval(loadUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [toast, prevUnreadCount]);
 
   const handleLogout = () => {
     logout();
@@ -179,9 +214,14 @@ export function ConsultantPage() {
               <Calendar className="h-4 w-4 mr-2" />
               Календарь
             </TabsTrigger>
-            <TabsTrigger value="leads">
+            <TabsTrigger value="leads" className="relative">
               <Users className="h-4 w-4 mr-2" />
               Лиды
+              {unreadCount > 0 && (
+                <Badge variant="destructive" className="ml-2">
+                  {unreadCount}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="tasks">
               <CheckSquare className="h-4 w-4 mr-2" />

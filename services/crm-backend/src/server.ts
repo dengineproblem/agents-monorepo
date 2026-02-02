@@ -20,6 +20,7 @@ import { consultantDashboardRoutes } from './routes/consultantDashboard.js';
 import { consultantMessagesRoutes } from './routes/consultantMessages.js';
 import { adminConsultantManagementRoutes } from './routes/adminConsultantManagement.js';
 import { consultantSalesRoutes } from './routes/consultantSales.js';
+import { consultantTasksRoutes } from './routes/consultantTasks.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
@@ -67,6 +68,7 @@ app.register(consultantDashboardRoutes);
 app.register(consultantMessagesRoutes);
 app.register(adminConsultantManagementRoutes);
 app.register(consultantSalesRoutes);
+app.register(consultantTasksRoutes);
 
 // Start notification cron job
 startNotificationCron();

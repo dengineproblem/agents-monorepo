@@ -812,7 +812,7 @@ async function processAIBotResponse(
       // Получить текущую историю и счётчики
       const { data: currentLead } = await supabase
         .from('dialog_analysis')
-        .select('messages, incoming_count, outgoing_count')
+        .select('messages, incoming_count, outgoing_count, last_consultant_message_at')
         .eq('id', lead.id)
         .single();
 
@@ -842,14 +842,35 @@ async function processAIBotResponse(
       // Ограничить историю по количеству (последние 100 сообщений)
       const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
 
+      // Подготовить данные для обновления
+      const updateData: any = {
+        messages: trimmedMessages,
+        incoming_count: currentIncoming + 1,  // +1 за входящее сообщение
+        outgoing_count: currentOutgoing + 1,  // +1 за ответ бота
+        last_client_message_at: now // Время последнего сообщения клиента
+      };
+
+      // Проверяем, нужно ли пометить как непрочитанное
+      // Логика: если консультант когда-либо писал этому лиду (last_consultant_message_at существует),
+      // то новое входящее сообщение от клиента должно быть помечено как непрочитанное
+      if (currentLead?.last_consultant_message_at) {
+        updateData.has_unread = true;
+
+        ctxLog.info({
+          leadId: lead.id.substring(0, 8) + '...',
+          lastConsultantMessageAt: currentLead.last_consultant_message_at,
+          clientMessageAt: now
+        }, '[processAIBotResponse] Marking message as unread - consultant previously engaged with this lead');
+      } else {
+        ctxLog.debug({
+          leadId: lead.id.substring(0, 8) + '...'
+        }, '[processAIBotResponse] Not marking as unread - consultant never messaged this lead');
+      }
+
       // Сохранить обновлённую историю и инкрементировать счётчики
       const { error: historyError } = await supabase
         .from('dialog_analysis')
-        .update({
-          messages: trimmedMessages,
-          incoming_count: currentIncoming + 1,  // +1 за входящее сообщение
-          outgoing_count: currentOutgoing + 1   // +1 за ответ бота
-        })
+        .update(updateData)
         .eq('id', lead.id);
 
       if (historyError) {

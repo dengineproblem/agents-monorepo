@@ -836,4 +836,42 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: error.message });
     }
   });
+
+  /**
+   * GET /consultant/unread-count
+   * Получить количество лидов с непрочитанными сообщениями
+   */
+  app.get('/consultant/unread-count', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+
+      if (!consultantId) {
+        return reply.status(403).send({ error: 'Consultant only' });
+      }
+
+      const { count, error } = await supabase
+        .from('dialog_analysis')
+        .select('*', { count: 'exact', head: true })
+        .eq('assigned_consultant_id', consultantId)
+        .eq('has_unread', true);
+
+      if (error) {
+        app.log.error({
+          error,
+          consultantId: consultantId.substring(0, 8) + '...'
+        }, 'Failed to get unread count');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      app.log.debug({
+        consultantId: consultantId.substring(0, 8) + '...',
+        unreadCount: count || 0
+      }, 'Successfully fetched unread count');
+
+      return reply.send({ unreadCount: count || 0 });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting unread count');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
 }
