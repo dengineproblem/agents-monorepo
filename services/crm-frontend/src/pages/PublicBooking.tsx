@@ -67,6 +67,10 @@ export function PublicBooking() {
   const [clientPhone, setClientPhone] = useState('');
   const [notes, setNotes] = useState('');
 
+  // Calendar navigation - separate for each consultant
+  const [viewDates, setViewDates] = useState<Record<string, Date>>({});
+  const [selectedDates, setSelectedDates] = useState<Record<string, string>>({});
+
   // Load config and slots
   useEffect(() => {
     if (!userAccountId) return;
@@ -165,6 +169,40 @@ export function PublicBooking() {
     return `${weekdays[date.getDay()]}, ${day} ${months[date.getMonth()]}`;
   };
 
+  // Get dates for week view
+  const getDatesInView = (viewDate: Date) => {
+    const dates: Date[] = [];
+    const start = new Date(viewDate);
+    start.setDate(start.getDate() - start.getDay() + 1); // Start from Monday
+
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  };
+
+  const formatDate = (date: Date) => {
+    return date.toISOString().split('T')[0];
+  };
+
+  const getViewDate = (consultantId: string) => {
+    return viewDates[consultantId] || new Date();
+  };
+
+  const getSelectedDate = (consultantId: string) => {
+    return selectedDates[consultantId] || '';
+  };
+
+  const setViewDate = (consultantId: string, date: Date) => {
+    setViewDates(prev => ({ ...prev, [consultantId]: date }));
+  };
+
+  const setSelectedDate = (consultantId: string, date: string) => {
+    setSelectedDates(prev => ({ ...prev, [consultantId]: date }));
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -208,42 +246,101 @@ export function PublicBooking() {
           <div className="space-y-6">
             {Object.entries(slotsByConsultant).map(([consultantId, { name, slots: consultantSlots }]) => {
               const slotsByDate = groupSlotsByDate(consultantSlots);
-              const dates = Object.keys(slotsByDate).sort();
+              const viewDate = getViewDate(consultantId);
+              const selectedDate = getSelectedDate(consultantId);
+              const datesInView = getDatesInView(viewDate);
 
               return (
                 <Card key={consultantId}>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Calendar className="w-5 h-5" />
-                      {name}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {dates.map(date => (
-                      <div key={date}>
-                        <div className="font-medium mb-2 text-sm text-gray-600 dark:text-gray-400">
-                          {formatDisplayDate(date)}
-                        </div>
-                        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
-                          {slotsByDate[date].map((slot, i) => (
-                            <button
-                              key={i}
-                              onClick={() => {
-                                setSelectedSlot(slot);
-                                setStep('details');
-                              }}
-                              className="p-2 rounded border text-center text-sm hover:border-primary hover:bg-primary/5 dark:border-gray-700 dark:hover:border-primary transition-colors"
-                            >
-                              {slot.start_time}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-2">
+                        <Calendar className="w-5 h-5" />
+                        {name}
+                      </CardTitle>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            const newDate = new Date(viewDate);
+                            newDate.setDate(newDate.getDate() - 7);
+                            setViewDate(consultantId, newDate);
+                          }}
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => {
+                            const newDate = new Date(viewDate);
+                            newDate.setDate(newDate.getDate() + 7);
+                            setViewDate(consultantId, newDate);
+                          }}
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
                       </div>
-                    ))}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {/* Date tabs */}
+                    <div className="flex overflow-x-auto gap-2 mb-4 pb-2">
+                      {datesInView.map(date => {
+                        const dateStr = formatDate(date);
+                        const hasSlots = slotsByDate[dateStr]?.length > 0;
+                        const isSelected = selectedDate === dateStr;
+                        const isPast = date < new Date(new Date().setHours(0, 0, 0, 0));
 
-                    {consultantSlots.length === 0 && (
+                        return (
+                          <button
+                            key={dateStr}
+                            onClick={() => !isPast && hasSlots && setSelectedDate(consultantId, dateStr)}
+                            disabled={isPast || !hasSlots}
+                            className={`
+                              flex-shrink-0 px-4 py-2 rounded-lg text-center min-w-[80px]
+                              ${isSelected ? 'bg-primary text-white' : ''}
+                              ${!isSelected && hasSlots && !isPast ? 'border hover:border-primary dark:border-gray-700' : ''}
+                              ${isPast || !hasSlots ? 'opacity-40 cursor-not-allowed' : ''}
+                            `}
+                          >
+                            <div className="text-xs uppercase">
+                              {['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'][date.getDay()]}
+                            </div>
+                            <div className="font-bold">{date.getDate()}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Time slots */}
+                    {selectedDate && slotsByDate[selectedDate] && (
+                      <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                        {slotsByDate[selectedDate].map((slot, i) => (
+                          <button
+                            key={i}
+                            onClick={() => {
+                              setSelectedSlot(slot);
+                              setStep('details');
+                            }}
+                            className="p-2 rounded border text-center text-sm hover:border-primary hover:bg-primary/5 dark:border-gray-700 dark:hover:border-primary transition-colors"
+                          >
+                            {slot.start_time}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {!selectedDate && (
                       <p className="text-center text-gray-500 dark:text-gray-400 py-4">
-                        Нет доступного времени
+                        Выберите дату для просмотра доступного времени
+                      </p>
+                    )}
+
+                    {selectedDate && (!slotsByDate[selectedDate] || slotsByDate[selectedDate].length === 0) && (
+                      <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                        Нет доступного времени на выбранную дату
                       </p>
                     )}
                   </CardContent>
