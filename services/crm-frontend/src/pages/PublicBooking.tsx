@@ -508,7 +508,7 @@ export function PublicBooking() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Summary */}
-              <div className="p-4 bg-gray-100 rounded-lg space-y-1 text-sm">
+              <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg space-y-1 text-sm text-gray-900 dark:text-gray-100">
                 {selectedService && (
                   <div className="flex items-center gap-2">
                     <div
