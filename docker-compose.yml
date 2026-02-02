@@ -29,22 +29,23 @@ services:
       - HYBRID_ENABLED=true
       - ENABLE_LAYER_LOGGING=true
       # Claude Agent SDK (ANTHROPIC_API_KEY берётся из .env.brain)
-      - LLM_PROVIDER=moltbot
+      # Agent-brain использует прямое подключение к OpenAI/Anthropic для cron задач
+      - LLM_PROVIDER=openai
       - LLM_FALLBACK=true
       - CLAUDE_MODEL=claude-sonnet-4-20250514
       - CLAUDE_MAX_TURNS=10
       - CLAUDE_TIMEOUT_MS=120000
       - MCP_ENABLED=true
-      # Moltbot Gateway
-      - MOLTBOT_GATEWAY_URL=ws://moltbot:18789
-      - MOLTBOT_TOKEN=moltbot-dev-token-2026
+      # Moltbot Gateway - НЕ используется agent-brain (только для Telegram)
+      # - MOLTBOT_GATEWAY_URL=ws://moltbot:18789
+      # - MOLTBOT_TOKEN=moltbot-dev-token-2026
     ports:
       - "7080:7080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
-    depends_on:
-      - moltbot
+    # Agent-brain больше не зависит от moltbot напрямую
+    # Moltbot вызывает agent-brain через HTTP API
 
   creative-analyzer:
     build: ./services/agent-brain
