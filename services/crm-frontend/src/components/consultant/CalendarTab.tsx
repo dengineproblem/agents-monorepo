@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { consultantApi, Consultation, WorkingSchedule } from '@/services/consultantApi';
 import { consultationService, BlockedSlot } from '@/services/consultationService';
 import { ConsultationService } from '@/types/consultation';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign } from 'lucide-react';
+import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare } from 'lucide-react';
 import { ChatSection } from './ChatSection';
 
 export function CalendarTab() {
@@ -499,6 +499,38 @@ export function CalendarTab() {
                 );
               })}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Задачи на выбранную дату */}
+      <Card className="mt-4">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <CheckSquare className="h-5 w-5" />
+              Задачи на {selectedDate.toLocaleDateString('ru-RU')}
+            </CardTitle>
+            <Button
+              size="sm"
+              onClick={() => {
+                toast({
+                  title: 'Функция в разработке',
+                  description: 'Создание задачи из календаря будет доступно в следующей версии',
+                });
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Добавить задачу
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">
+            <p>Интеграция задач в CalendarTab будет доступна в следующей версии</p>
+            <p className="text-xs mt-1">
+              Пока создавайте задачи во вкладке "Задачи" с выбором даты
+            </p>
           </div>
         </CardContent>
       </Card>

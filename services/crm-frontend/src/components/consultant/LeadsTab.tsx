@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { Phone, MessageSquare, Calendar as CalendarIcon, Search, DollarSign } from 'lucide-react';
+import { Phone, MessageSquare, Calendar as CalendarIcon, Search, DollarSign, CheckSquare, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { format, addDays } from 'date-fns';
@@ -416,9 +416,16 @@ export function LeadsTab() {
                         e.stopPropagation();
                         handleOpenLead(lead);
                       }}
+                      className="relative"
                     >
                       <MessageSquare className="h-4 w-4 mr-1" />
                       Написать
+                      {lead.has_unread && (
+                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        </span>
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -442,11 +449,42 @@ export function LeadsTab() {
           </DialogHeader>
 
           {selectedLead && (
-            <ChatSection
-              leadId={selectedLead.id}
-              clientName={selectedLead.contact_name}
-              clientPhone={selectedLead.contact_phone}
-            />
+            <>
+              <ChatSection
+                leadId={selectedLead.id}
+                clientName={selectedLead.contact_name}
+                clientPhone={selectedLead.contact_phone}
+              />
+
+              {/* Секция задач по лиду */}
+              <div className="mt-4 border-t pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <CheckSquare className="h-4 w-4" />
+                    Задачи по лиду
+                  </h3>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      toast({
+                        title: 'Функция в разработке',
+                        description: 'Создание задачи из лида будет доступно в следующей версии',
+                      });
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Поставить задачу
+                  </Button>
+                </div>
+
+                <div className="text-sm text-muted-foreground">
+                  <p>Интеграция задач в LeadsTab будет доступна в следующей версии</p>
+                  <p className="text-xs mt-1">
+                    Пока создавайте задачи во вкладке "Задачи" с выбором лида
+                  </p>
+                </div>
+              </div>
+            </>
           )}
         </DialogContent>
       </Dialog>

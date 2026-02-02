@@ -11,6 +11,7 @@ import { CalendarTab } from '@/components/consultant/CalendarTab';
 import { ProfileTab } from '@/components/consultant/ProfileTab';
 import { ScheduleTab } from '@/components/consultant/ScheduleTab';
 import { SalesTab } from '@/components/consultant/SalesTab';
+import { TasksTab } from '@/components/consultant/TasksTab';
 import {
   Users,
   Calendar,
@@ -22,6 +23,7 @@ import {
   Settings,
   MessageSquare,
   Briefcase,
+  CheckSquare,
 } from 'lucide-react';
 
 export function ConsultantPage() {
@@ -98,7 +100,7 @@ export function ConsultantPage() {
 
       <div className="container mx-auto px-4 py-6">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Всего лидов</CardTitle>
@@ -150,11 +152,29 @@ export function ConsultantPage() {
               </p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Активные задачи</CardTitle>
+              <CheckSquare className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats?.tasks_total || 0}</div>
+              <div className="flex gap-4 mt-2 text-xs">
+                <span className="text-red-600">
+                  Просрочено: {stats?.tasks_overdue || 0}
+                </span>
+                <span className="text-blue-600">
+                  Сегодня: {stats?.tasks_today || 0}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="calendar">
               <Calendar className="h-4 w-4 mr-2" />
               Календарь
@@ -162,6 +182,10 @@ export function ConsultantPage() {
             <TabsTrigger value="leads">
               <Users className="h-4 w-4 mr-2" />
               Лиды
+            </TabsTrigger>
+            <TabsTrigger value="tasks">
+              <CheckSquare className="h-4 w-4 mr-2" />
+              Задачи
             </TabsTrigger>
             <TabsTrigger value="schedule">
               <Clock className="h-4 w-4 mr-2" />
@@ -183,6 +207,10 @@ export function ConsultantPage() {
 
           <TabsContent value="leads" className="space-y-4">
             <LeadsTab />
+          </TabsContent>
+
+          <TabsContent value="tasks" className="space-y-4">
+            <TasksTab />
           </TabsContent>
 
           <TabsContent value="schedule" className="space-y-4">

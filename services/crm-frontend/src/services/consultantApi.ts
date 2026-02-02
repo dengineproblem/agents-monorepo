@@ -33,6 +33,9 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
   return response.json();
 }
 
+// Импорт типов задач
+import type { Task, CreateTaskData, UpdateTaskData } from '@/types/task';
+
 // Типы данных
 export interface DashboardStats {
   consultant_id: string;
@@ -48,6 +51,10 @@ export interface DashboardStats {
   cancelled: number;
   no_show: number;
   total_revenue: number;
+  // Статистика задач
+  tasks_total?: number;
+  tasks_overdue?: number;
+  tasks_today?: number;
   completion_rate: number;
 }
 
@@ -59,6 +66,7 @@ export interface Lead {
   funnel_stage?: string;
   last_message?: string;
   assigned_consultant_id?: string;
+  has_unread?: boolean; // Флаг наличия непрочитанных сообщений
 }
 
 export interface Consultation {
@@ -279,5 +287,50 @@ export const consultantApi = {
     return fetchWithAuth(`/consultant/release-lead/${leadId}`, {
       method: 'POST',
     });
+  },
+
+  // Tasks
+  getTasks: async (params?: {
+    consultantId?: string;
+    status?: string;
+    due_date_from?: string;
+    due_date_to?: string;
+    lead_id?: string;
+    search?: string;
+  }): Promise<{ tasks: Task[]; total: number }> => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          query.append(key, String(value));
+        }
+      });
+    }
+    return fetchWithAuth(`/consultant/tasks?${query}`);
+  },
+
+  createTask: async (data: CreateTaskData): Promise<Task> => {
+    return fetchWithAuth('/consultant/tasks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateTask: async (taskId: string, data: UpdateTaskData): Promise<Task> => {
+    return fetchWithAuth(`/consultant/tasks/${taskId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteTask: async (taskId: string): Promise<void> => {
+    return fetchWithAuth(`/consultant/tasks/${taskId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Получить количество непрочитанных сообщений
+  getUnreadCount: async (): Promise<{ unreadCount: number }> => {
+    return fetchWithAuth('/consultant/unread-count');
   },
 };
