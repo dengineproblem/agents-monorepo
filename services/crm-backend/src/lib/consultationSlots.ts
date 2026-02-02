@@ -170,7 +170,7 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
 
   // Нормализация параметров
   const safeDaysAhead = Math.min(Math.max(days_ahead || 7, 1), 30); // от 1 до 30 дней
-  const safeLimit = Math.min(Math.max(limit || 5, 1), 50); // от 1 до 50 слотов
+  const safeLimit = Math.min(Math.max(limit || 5, 1), 500); // от 1 до 500 слотов
 
   log.info({
     consultant_ids: consultant_ids.length,

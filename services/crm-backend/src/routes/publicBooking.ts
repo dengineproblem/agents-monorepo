@@ -252,7 +252,7 @@ export async function publicBookingRoutes(app: FastifyInstance) {
         consultant_ids: consultantIds,
         date: query.date,
         days_ahead: query.days_ahead || 14,
-        limit: 50,
+        limit: 200,
         duration_minutes: durationMinutes,
         timezone: query.timezone || 'Europe/Moscow'
       });
