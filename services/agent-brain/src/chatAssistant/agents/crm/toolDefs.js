@@ -1,7 +1,7 @@
 /**
  * CRMAgent Tool Definitions
  * Zod schemas as single source of truth for validation
- * 12 tools: 10 READ + 2 WRITE
+ * 13 tools: 11 READ + 2 WRITE
  */
 
 import { z } from 'zod';
@@ -59,9 +59,35 @@ export const CrmToolDefs = {
     meta: { timeout: 25000, retryable: true }
   },
 
+  getSales: {
+    description: 'Получить список продаж с детализацией. Возвращает: client_phone, amount, created_at, lead_source, creative_name, direction_name. Используй для анализа продаж и поиска покупателей.',
+    schema: z.object({
+      direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
+      period: periodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
+      min_amount: z.number().optional().describe('Минимальная сумма покупки'),
+      search: z.string().optional().describe('Поиск по номеру телефона (частичное совпадение)'),
+      limit: z.number().min(1).max(100).optional()
+    }),
+    meta: { timeout: 20000, retryable: true }
+  },
+
   // ============================================================
   // WRITE TOOLS
   // ============================================================
+
+  addSale: {
+    description: 'Добавить продажу вручную. ОБЯЗАТЕЛЬНО укажи client_phone и amount. Система автоматически найдет лида по номеру телефона и привяжет продажу. Если лид не найден - вернет ошибку с предложением выбрать креатив.',
+    schema: z.object({
+      client_phone: nonEmptyString('client_phone').describe('Номер телефона клиента (формат: +77001234567)'),
+      amount: z.number().positive('Amount must be positive').describe('Сумма продажи в тенге'),
+      direction_id: uuidSchema.optional().describe('UUID направления (опционально)'),
+      manual_source_id: z.string().optional().describe('Source ID креатива если лид не найден (для создания нового лида)'),
+      manual_creative_url: z.string().optional().describe('URL креатива если лид не найден')
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: false }
+  },
 
   updateLeadStage: {
     description: 'Изменить этап воронки для лида. Обновляет funnel_stage в БД, записывает в историю. Опционально указать reason для аудита. НЕ синхронизирует с amoCRM автоматически.',
@@ -132,7 +158,7 @@ export const CrmToolDefs = {
 };
 
 // List of write tools for mode checks
-export const CRM_WRITE_TOOLS = ['updateLeadStage', 'syncAmoCRMLeads'];
+export const CRM_WRITE_TOOLS = ['addSale', 'updateLeadStage', 'syncAmoCRMLeads'];
 
 // Dangerous tools that ALWAYS require confirmation
 export const CRM_DANGEROUS_TOOLS = ['syncAmoCRMLeads'];

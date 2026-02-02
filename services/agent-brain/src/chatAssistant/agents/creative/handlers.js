@@ -1081,7 +1081,7 @@ export const creativeHandlers = {
    * generateCarousel - Генерация карусели (2-10 карточек)
    * Вызывает /generate-carousel endpoint Creative Generation Service
    */
-  async generateCarousel({ carousel_texts, visual_style, style_prompt, direction_id }, { userAccountId, adAccountDbId }) {
+  async generateCarousel({ carousel_texts, visual_style, style_prompt, reference_image, direction_id }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
@@ -1112,6 +1112,7 @@ export const creativeHandlers = {
           carousel_texts,
           visual_style: visual_style || 'clean_minimal',
           style_prompt: style_prompt || null,
+          reference_image: reference_image || null,
           direction_id: direction_id || null
         })
       });

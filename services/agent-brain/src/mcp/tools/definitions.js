@@ -77,12 +77,13 @@ export const whatsappTools = [
 ];
 
 /**
- * CRM Agent Tools (11 READ + 1 WRITE)
+ * CRM Agent Tools (12 READ + 2 WRITE)
  */
 export const crmTools = [
   // READ tools
   createMCPTool('getLeads', CrmToolDefs.getLeads, crmHandlers.getLeads, 'crm'),
   createMCPTool('getLeadDetails', CrmToolDefs.getLeadDetails, crmHandlers.getLeadDetails, 'crm'),
+  createMCPTool('getSales', CrmToolDefs.getSales, crmHandlers.getSales, 'crm'),
   createMCPTool('getFunnelStats', CrmToolDefs.getFunnelStats, crmHandlers.getFunnelStats, 'crm'),
   createMCPTool('getSalesQuality', CrmToolDefs.getSalesQuality, crmHandlers.getSalesQuality, 'crm'),
   // AmoCRM tools
@@ -93,6 +94,7 @@ export const crmTools = [
   createMCPTool('getAmoCRMQualificationStats', CrmToolDefs.getAmoCRMQualificationStats, crmHandlers.getAmoCRMQualificationStats, 'crm'),
   createMCPTool('getAmoCRMLeadHistory', CrmToolDefs.getAmoCRMLeadHistory, crmHandlers.getAmoCRMLeadHistory, 'crm'),
   // WRITE tools
+  createMCPTool('addSale', CrmToolDefs.addSale, crmHandlers.addSale, 'crm'),
   createMCPTool('updateLeadStage', CrmToolDefs.updateLeadStage, crmHandlers.updateLeadStage, 'crm')
 ];
 
@@ -217,7 +219,7 @@ export const tikTokAdsTools = [
 
 /**
  * All MCP tools - Complete
- * WhatsApp (4) + CRM (12) + Creative (23) + Ads (24) + TikTok (24) = 87 tools
+ * WhatsApp (4) + CRM (13) + Creative (23) + Ads (27) + TikTok (25) = 92 tools
  */
 export const allMCPTools = [
   ...whatsappTools,

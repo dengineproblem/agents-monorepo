@@ -260,6 +260,7 @@ export const CreativeToolDefs = {
       carousel_texts: z.array(z.string()).min(2).max(10).describe('Массив готовых текстов для каждой карточки (2-10 штук)'),
       visual_style: z.string().optional().describe('Стиль: clean_minimal (минималистичный), modern_performance (современный), bold_dark (тёмный), gradient_soft (градиент)'),
       style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля'),
+      reference_image: z.string().optional().describe('Base64 референсного изображения для копирования стиля карусели'),
       direction_id: uuidSchema.optional().describe('UUID направления')
     }),
     meta: { timeout: 300000, retryable: false, dangerous: true }

@@ -200,6 +200,212 @@ export const crmHandlers = {
     };
   },
 
+  async getSales({ direction_id, period, date_from, date_to, min_amount, search, limit }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Get date range
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
+
+    // Query purchases
+    let purchasesQuery = supabase
+      .from('purchases')
+      .select(`
+        id,
+        client_phone,
+        amount,
+        created_at,
+        user_account_id,
+        account_id
+      `)
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', since)
+      .lte('created_at', until)
+      .order('created_at', { ascending: false })
+      .limit(limit || 50);
+
+    if (dbAccountId) {
+      purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
+    }
+
+    if (min_amount) {
+      purchasesQuery = purchasesQuery.gte('amount', min_amount);
+    }
+
+    if (search) {
+      purchasesQuery = purchasesQuery.ilike('client_phone', `%${search}%`);
+    }
+
+    const { data: purchases, error: purchasesError } = await purchasesQuery;
+
+    if (purchasesError) {
+      return { success: false, error: `Ошибка загрузки продаж: ${purchasesError.message}` };
+    }
+
+    // Get leads info for each purchase
+    const phones = purchases?.map(p => p.client_phone).filter(Boolean) || [];
+    let leadsMap = new Map();
+
+    if (phones.length > 0) {
+      let leadsQuery = supabase
+        .from('leads')
+        .select(`
+          chat_id,
+          source_id,
+          direction_id,
+          direction:direction_id(name),
+          creative:creative_id(name)
+        `)
+        .eq('user_account_id', userAccountId)
+        .in('chat_id', phones);
+
+      if (dbAccountId) {
+        leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+      }
+
+      const { data: leads } = await leadsQuery;
+
+      if (leads) {
+        for (const lead of leads) {
+          leadsMap.set(lead.chat_id, lead);
+        }
+      }
+    }
+
+    // Map purchases with lead info
+    const salesList = purchases?.map(p => {
+      const lead = leadsMap.get(p.client_phone);
+      return {
+        id: p.id,
+        client_phone: p.client_phone,
+        amount: p.amount,
+        amount_formatted: `${(p.amount / 1000).toFixed(0)}K ₸`,
+        created_at: p.created_at,
+        lead_source: lead?.source_id || 'unknown',
+        creative_name: lead?.creative?.name || null,
+        direction_name: lead?.direction?.name || null,
+        direction_id: lead?.direction_id || null
+      };
+    }) || [];
+
+    // Filter by direction_id if specified
+    const filteredSales = direction_id
+      ? salesList.filter(s => s.direction_id === direction_id)
+      : salesList;
+
+    // Calculate totals
+    const totalAmount = filteredSales.reduce((sum, s) => sum + s.amount, 0);
+    const averageCheck = filteredSales.length > 0 ? Math.round(totalAmount / filteredSales.length) : 0;
+
+    return {
+      success: true,
+      sales: filteredSales,
+      total_count: filteredSales.length,
+      total_amount: totalAmount,
+      total_amount_formatted: `${(totalAmount / 1000).toFixed(0)}K ₸`,
+      average_check: averageCheck,
+      average_check_formatted: `${(averageCheck / 1000).toFixed(0)}K ₸`,
+      period: periodDescription
+    };
+  },
+
+  async addSale({ client_phone, amount, direction_id, manual_source_id, manual_creative_url }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Normalize phone (remove spaces, dashes)
+    const normalizedPhone = client_phone.replace(/[\s-]/g, '');
+
+    // Check if lead exists
+    let leadQuery = supabase
+      .from('leads')
+      .select('id, source_id, creative_url, direction_id, creative_id')
+      .eq('user_account_id', userAccountId)
+      .eq('chat_id', normalizedPhone);
+
+    if (dbAccountId) {
+      leadQuery = leadQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: existingLead, error: leadCheckError } = await leadQuery.maybeSingle();
+
+    if (leadCheckError && leadCheckError.code !== 'PGRST116') {
+      return { success: false, error: `Ошибка проверки лида: ${leadCheckError.message}` };
+    }
+
+    // If lead not found and no manual_source_id - error
+    if (!existingLead && !manual_source_id) {
+      return {
+        success: false,
+        error: `Клиент с номером ${client_phone} не найден в базе лидов. Укажите manual_source_id и manual_creative_url для создания нового лида.`,
+        lead_not_found: true
+      };
+    }
+
+    // If lead not found but manual_source_id provided - create lead
+    if (!existingLead && manual_source_id) {
+      const leadInsertData = {
+        user_account_id: userAccountId,
+        account_id: dbAccountId,
+        chat_id: normalizedPhone,
+        source_id: manual_source_id,
+        creative_url: manual_creative_url || '',
+        direction_id: direction_id || null,
+        created_at: new Date().toISOString()
+      };
+
+      const { data: newLead, error: leadError } = await supabase
+        .from('leads')
+        .insert(leadInsertData)
+        .select()
+        .single();
+
+      if (leadError) {
+        return { success: false, error: `Ошибка создания лида: ${leadError.message}` };
+      }
+    }
+
+    // Add purchase
+    const purchaseInsertData = {
+      user_account_id: userAccountId,
+      account_id: dbAccountId,
+      client_phone: normalizedPhone,
+      amount: amount
+    };
+
+    const { data: purchase, error: purchaseError } = await supabase
+      .from('purchases')
+      .insert(purchaseInsertData)
+      .select()
+      .single();
+
+    if (purchaseError) {
+      return { success: false, error: `Ошибка добавления продажи: ${purchaseError.message}` };
+    }
+
+    // Update sale_amount in lead
+    let updateQuery = supabase
+      .from('leads')
+      .update({
+        sale_amount: supabase.raw('COALESCE(sale_amount, 0) + ?', [amount]),
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_account_id', userAccountId)
+      .eq('chat_id', normalizedPhone);
+
+    if (dbAccountId) {
+      updateQuery = updateQuery.eq('account_id', dbAccountId);
+    }
+
+    await updateQuery;
+
+    return {
+      success: true,
+      message: `Продажа на сумму ${amount} ₸ успешно добавлена для клиента ${client_phone}`,
+      purchase_id: purchase.id,
+      amount: amount,
+      amount_formatted: `${(amount / 1000).toFixed(0)}K ₸`
+    };
+  },
+
   async getFunnelStats({ period, date_from, date_to }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
     const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
