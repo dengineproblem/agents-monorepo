@@ -1362,7 +1362,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
 const Creatives: React.FC = () => {
   const navigate = useNavigate();
-  const { currentAdAccountId, platform, setPlatform } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled, platform, setPlatform } = useAppContext();
   // Передаём currentAdAccountId для фильтрации креативов по выбранному рекламному аккаунту
   const { items, loading, reload, testStatuses } = useUserCreatives(currentAdAccountId, platform);
 
@@ -1465,7 +1465,8 @@ const Creatives: React.FC = () => {
 
   // Открыть модалку анализа топ креативов
   const handleImportTopCreatives = () => {
-    if (!currentAdAccountId) {
+    // В мультиаккаунтном режиме требуется выбранный аккаунт
+    if (multiAccountEnabled && !currentAdAccountId) {
       toast.error('Выберите рекламный аккаунт');
       return;
     }
@@ -1917,7 +1918,7 @@ const Creatives: React.FC = () => {
                   <Button
                     variant="outline"
                     onClick={handleImportTopCreatives}
-                    disabled={!currentAdAccountId || isProcessing}
+                    disabled={(multiAccountEnabled && !currentAdAccountId) || isProcessing}
                     className="flex-1 min-w-[140px]"
                     title="Анализировать и импортировать топ-5 креативов по CPL из Facebook"
                   >
