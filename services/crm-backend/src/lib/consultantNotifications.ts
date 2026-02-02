@@ -17,8 +17,9 @@ function sanitizePhoneNumber(phone: string): string {
 
 /**
  * Получить WhatsApp instance для отправки
+ * @exported используется также в consultantMessages.ts
  */
-async function getInstanceName(
+export async function getInstanceName(
   userAccountId: string,
   dialogAnalysisId?: string
 ): Promise<string | null> {

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { sendWhatsAppMessage } from '../lib/evolutionApi.js';
 import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
+import { getInstanceName } from '../lib/consultantNotifications.js';
 
 /**
  * Routes для отправки сообщений консультантами
@@ -60,21 +61,40 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Получаем Evolution instance
-      const { data: userAccount, error: accountError } = await supabase
-        .from('user_accounts')
-        .select('evolution_instance')
-        .eq('id', userAccountId!)
-        .single();
+      // Получаем parent_user_account_id для поиска WhatsApp instance
+      let parentUserAccountId: string | null = null;
 
-      if (accountError || !userAccount?.evolution_instance) {
+      if (consultantId) {
+        // Для консультанта - берём из request.consultant
+        parentUserAccountId = request.consultant?.parent_user_account_id || null;
+      } else if (isAdmin && lead.assigned_consultant_id) {
+        // Для админа - получаем из assigned_consultant_id лида
+        const { data: assignedConsultant } = await supabase
+          .from('consultants')
+          .select('parent_user_account_id')
+          .eq('id', lead.assigned_consultant_id)
+          .single();
+
+        parentUserAccountId = assignedConsultant?.parent_user_account_id || null;
+      }
+
+      if (!parentUserAccountId) {
         return reply.status(500).send({
-          error: 'Evolution instance not configured',
-          details: 'WhatsApp инстанс не настроен для вашего аккаунта'
+          error: 'Cannot determine user account',
+          details: 'Не удалось определить аккаунт для отправки сообщения'
         });
       }
 
-      const instanceName = userAccount.evolution_instance;
+      // Получаем WhatsApp instance
+      // Приоритет: instance из dialog_analysis → первый connected instance пользователя
+      const instanceName = await getInstanceName(parentUserAccountId, leadId);
+
+      if (!instanceName) {
+        return reply.status(500).send({
+          error: 'Evolution instance not configured',
+          details: 'WhatsApp инстанс не настроен или не подключён'
+        });
+      }
 
       // Отправляем сообщение через Evolution API
       const result = await sendWhatsAppMessage({
