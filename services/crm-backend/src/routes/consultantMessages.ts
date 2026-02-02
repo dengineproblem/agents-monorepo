@@ -179,11 +179,26 @@ export async function consultantMessagesRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: 'Access denied' });
       }
 
+      // Трансформируем структуру сообщений для frontend
+      const transformedMessages = (lead.messages || []).map((msg: any) => {
+        // Если сообщение от бота (новый формат)
+        if (msg.sender) {
+          return {
+            text: msg.content,
+            from_me: msg.sender === 'bot',
+            timestamp: msg.timestamp,
+            is_system: false
+          };
+        }
+        // Если сообщение от консультанта (правильный формат)
+        return msg;
+      });
+
       return reply.send({
         leadId: lead.id,
         contactName: lead.contact_name,
         contactPhone: lead.contact_phone,
-        messages: lead.messages || []
+        messages: transformedMessages
       });
 
     } catch (error: any) {
