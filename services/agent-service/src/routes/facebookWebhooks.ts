@@ -896,147 +896,19 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         }
       }
 
-      // 4. Validate active directions - check if adsets can be created
-      const directionsValidation: any[] = [];
-
-      log.info({ hasToken: checks.token, hasAdAccount: checks.adAccount }, 'Starting directions validation');
-
-      if (checks.token && checks.adAccount) {
-        try {
-          // Normalize ad_account_id (remove 'act_' prefix if present)
-          const normalizedAdAccountId = adAccountId?.replace('act_', '');
-          
-          log.info({ adAccountId: `act_${normalizedAdAccountId}` }, 'Searching for active directions for this ad account');
-          
-          // Get active directions for this ad_account_id (через join с user_accounts)
-          const { data: directions, error: directionsError } = await supabase
-            .from('account_directions')
-            .select(`
-              id, 
-              name, 
-              objective, 
-              fb_campaign_id, 
-              daily_budget_cents, 
-              whatsapp_phone_number_id,
-              user_accounts!inner(ad_account_id)
-            `)
-            .eq('user_accounts.ad_account_id', `act_${normalizedAdAccountId}`)
-            .eq('is_active', true);
-
-          log.info({ 
-            found: !!directions, 
-            count: directions?.length || 0,
-            error: directionsError?.message 
-          }, 'Directions search result');
-
-          if (directions && directions.length > 0) {
-            log.info({ directionsCount: directions.length }, 'Validating directions');
-
-            for (const direction of directions) {
-                const validation: any = {
-                  id: direction.id,
-                  name: direction.name,
-                  objective: direction.objective,
-                  success: false,
-                  error: null,
-                  errorDetails: null
-                };
-
-                // Only validate WhatsApp directions (they require phone number)
-                if (direction.objective === 'whatsapp') {
-                  try {
-                    // Get WhatsApp phone number
-                    let whatsappPhone = null;
-                    if (direction.whatsapp_phone_number_id) {
-                      const { data: phoneData } = await supabase
-                        .from('whatsapp_phone_numbers')
-                        .select('phone_number')
-                        .eq('id', direction.whatsapp_phone_number_id)
-                        .single();
-                      whatsappPhone = phoneData?.phone_number;
-                    }
-
-                    // Prepare adset validation params
-                    const params = new URLSearchParams({
-                      name: `VALIDATION TEST | ${direction.name}`,
-                      campaign_id: direction.fb_campaign_id,
-                      status: 'PAUSED',
-                      billing_event: 'IMPRESSIONS',
-                      optimization_goal: 'CONVERSATIONS',
-                      daily_budget: String(direction.daily_budget_cents),
-                      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-                      targeting: JSON.stringify({
-                        age_min: 23,
-                        age_max: 55,
-                        geo_locations: { cities: [{ key: '1301648' }] }
-                      }),
-                      destination_type: 'WHATSAPP',
-                      promoted_object: JSON.stringify({
-                        page_id: pageId,
-                        ...(whatsappPhone ? { whatsapp_phone_number: whatsappPhone } : {})
-                      }),
-                      validate_only: 'true'
-                    });
-
-                    // Validate adset creation
-                    const validateUrl = `https://graph.facebook.com/v21.0/${adAccountId}/adsets`;
-                    const validateResponse = await fetch(validateUrl, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                      body: `access_token=${accessToken}&${params.toString()}`
-                    });
-
-                    const validateData = await validateResponse.json();
-
-                    if (validateResponse.ok) {
-                      validation.success = true;
-                      log.info({ directionId: direction.id, directionName: direction.name }, 'Direction adset validation passed');
-                    } else {
-                      validation.success = false;
-                      validation.error = validateData.error?.message || 'Validation failed';
-                      validation.errorCode = validateData.error?.code;
-                      validation.errorSubcode = validateData.error?.error_subcode;
-                      
-                      // Special handling for WhatsApp error 2446885
-                      if (validateData.error?.error_subcode === 2446885) {
-                        validation.errorDetails = 'WhatsApp Business не подключён к странице. Подключите WhatsApp Business Account в Facebook Business Manager.';
-                      }
-                      
-                      log.warn({
-                        directionId: direction.id,
-                        directionName: direction.name,
-                        error: validateData.error
-                      }, 'Direction adset validation failed');
-                    }
-                  } catch (e: any) {
-                    validation.success = false;
-                    validation.error = e.message || 'Validation error';
-                    log.error({ error: e, directionId: direction.id }, 'Direction validation request failed');
-                  }
-                } else {
-                  // Non-WhatsApp directions - assume valid (or add validation later)
-                  validation.success = true;
-                  validation.error = null;
-                }
-
-              directionsValidation.push(validation);
-            }
-          }
-        } catch (e) {
-          log.error({ error: e }, 'Failed to validate directions');
-        }
-      }
-
-      checks.directions = directionsValidation;
+      // 4. Validate active directions - DISABLED (WhatsApp validation not needed)
+      // Валидация направлений отключена по запросу пользователя
+      checks.directions = [];
 
       const allPassed = checks.token && checks.adAccount && checks.page;
-      const directionsOk = directionsValidation.length === 0 || directionsValidation.every(d => d.success);
+      // Не включаем валидацию направлений в общий success - только базовые проверки
+      // const directionsOk = directionsValidation.length === 0 || directionsValidation.every(d => d.success);
 
       return res.send({
-        success: allPassed && directionsOk,
+        success: allPassed,
         checks,
-        error: allPassed ? (directionsOk ? null : 'Some directions have validation errors') : 'Some checks failed',
-        details: allPassed && directionsOk ? 'All validations passed' : 'Check individual statuses'
+        error: allPassed ? null : 'Some checks failed',
+        details: allPassed ? 'All validations passed' : 'Check individual statuses'
       });
     } catch (error: any) {
       log.error({ error }, 'Error validating Facebook connection');
