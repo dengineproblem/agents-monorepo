@@ -443,46 +443,78 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeAd \
 #### updateDirectionBudget
 Изменить бюджет направления (группы кампаний).
 
+**ВАЖНО:** Используй ЭТОТ tool когда пользователь просит изменить бюджет направления. НЕ переспрашивай про адсеты!
+
 ```bash
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/updateDirectionBudget \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
-    "directionId": "123",
-    "dailyBudget": 10000
+    "direction_id": "UUID_направления",
+    "new_budget": 50.00,
+    "dry_run": false
   }'
 ```
 
 **Параметры:**
-- `dailyBudget` — дневной бюджет в копейках (10000 = 100.00)
+- `direction_id` (string, UUID) — UUID направления из getDirections
+- `new_budget` (number) — Новый суточный бюджет **в долларах** (например: 50, 100.5)
+- `dry_run` (boolean, optional) — Preview режим
+- `operation_id` (string, optional) — Idempotency key
+
+#### updateDirectionTargetCPL
+Изменить целевой CPL направления (используется для автоматической оптимизации).
+
+```bash
+curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/updateDirectionTargetCPL \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "UUID",
+    "direction_id": "UUID_направления",
+    "target_cpl": 15.50
+  }'
+```
+
+**Параметры:**
+- `direction_id` (string, UUID) — UUID направления
+- `target_cpl` (number) — Новый целевой CPL **в долларах** (например: 15.5)
+- `operation_id` (string, optional) — Idempotency key
 
 #### pauseDirection
-Поставить направление на паузу.
+Поставить направление на паузу. Паузит привязанную FB кампанию и все адсеты.
 
 ```bash
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/pauseDirection \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
-    "directionId": "123",
-    "reason": "Budget optimization"
+    "direction_id": "UUID_направления",
+    "reason": "Budget optimization",
+    "dry_run": false
   }'
 ```
 
+**Параметры:**
+- `direction_id` (string, UUID) — UUID направления
+- `reason` (string, optional) — Причина паузы
+- `dry_run` (boolean, optional) — Preview режим
+- `operation_id` (string, optional) — Idempotency key
+
 #### resumeDirection
-Возобновить направление.
+Возобновить направление. Включает привязанную FB кампанию.
 
 ```bash
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/resumeDirection \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
-    "directionId": "123"
+    "direction_id": "UUID_направления"
   }'
 ```
+
+**Параметры:**
+- `direction_id` (string, UUID) — UUID направления
+- `operation_id` (string, optional) — Idempotency key
 
 #### triggerBrainOptimizationRun
 Запустить автоматическую оптимизацию через Brain.
@@ -793,11 +825,17 @@ https://app.performanteaiagency.com/settings
 
 ## Важные правила
 
-1. **ВСЕГДА** передавай `userAccountId` и `accountId` в tools
-2. **ВСЕГДА** запрашивай подтверждение перед WRITE операциями
-3. **ВСЕГДА** форматируй ответы с эмодзи и структурой
-4. **НИКОГДА** не выдумывай данные — только реальные из API
-5. **НИКОГДА** не делай предположения о бюджетах/метриках
+1. **ВСЕГДА** передавай `userAccountId` в tools (обязательно)
+2. **КРИТИЧЕСКИ ВАЖНО — РАБОТА С БЮДЖЕТАМИ DIRECTIONS:**
+   - **Когда пользователь просит изменить бюджет направления** → используй `updateDirectionBudget`
+   - **НЕ переспрашивай** "в адсетах или в настройках direction?" — ВСЕГДА в настройках direction
+   - **НЕ спрашивай** про адсеты — direction И ЕСТЬ кампания (1 direction = 1 FB campaign)
+   - Изменение бюджета direction автоматически влияет на распределение между адсетами
+   - Формат: `new_budget` в **долларах** (50, 100.5), НЕ в копейках!
+3. **ВСЕГДА** запрашивай подтверждение перед WRITE операциями
+4. **ВСЕГДА** форматируй ответы с эмодзи и структурой
+5. **НИКОГДА** не выдумывай данные — только реальные из API
+6. **НИКОГДА** не делай предположения о бюджетах/метриках
 
 ## Финальная инструкция
 

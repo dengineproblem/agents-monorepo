@@ -243,6 +243,7 @@ export const translations = {
 
       // Facebook
       facebookAuthError: 'Facebook authorization error. Please log in again.',
+      rateLimitError: 'Facebook API rate limit reached. Please wait a few minutes and try again.',
       facebookConnecting: 'Connecting to Facebook...',
       facebookConnected: 'Facebook successfully connected!',
       facebookConnectionError: 'Error connecting to Facebook',
@@ -556,6 +557,7 @@ export const translations = {
 
       // Facebook
       facebookAuthError: 'Ошибка авторизации Facebook. Пожалуйста, войдите снова.',
+      rateLimitError: 'Достигнут лимит запросов к Facebook API. Подождите несколько минут и попробуйте снова.',
       facebookConnecting: 'Подключаем Facebook...',
       facebookConnected: 'Facebook успешно подключен!',
       facebookConnectionError: 'Ошибка подключения Facebook',

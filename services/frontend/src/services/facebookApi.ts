@@ -166,7 +166,16 @@ const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, str
     if (!response.ok) {
       const errorData = await response.json();
       console.error('Ошибка Facebook API:', errorData);
-      
+      const errorDetails = {
+        code: errorData?.error?.code,
+        error_subcode: errorData?.error?.error_subcode,
+        type: errorData?.error?.type,
+        message: errorData?.error?.message,
+        fbtrace_id: errorData?.error?.fbtrace_id,
+      };
+      console.error('Facebook API Error Details:', errorDetails);
+      console.error(`[FB Error] Code: ${errorDetails.code}, Type: ${errorDetails.type}, Message: ${errorDetails.message}`);
+
       // Проверка на истекший или недействительный токен
       if (errorData?.error?.code === 190) {
         console.error('Токен доступа недействителен или истек срок его действия');
@@ -183,7 +192,13 @@ const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, str
           }
         }
       }
-      
+
+      // Проверка на rate limit (код 4, 17, или 613)
+      if (errorData?.error?.code === 4 || errorData?.error?.code === 17 || errorData?.error?.code === 613) {
+        console.error('Достигнут лимит запросов Facebook API. Подождите несколько минут.');
+        toastT.error('rateLimitError');
+      }
+
       throw new Error(`Ошибка Facebook API: ${errorData?.error?.message || response.statusText}`);
     }
     

@@ -135,29 +135,44 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreativeScores \
 ```
 
 #### getCreativeTests
-Активные A/B тесты креативов.
+История A/B тестов креатива (быстрые тесты).
+
+**ВАЖНО:** Принимает только creative_id. Показывает все тесты конкретного креатива.
 
 ```bash
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreativeTests \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID"
+    "creative_id": "UUID"
   }'
 ```
 
+**Что включает:**
+- История всех тестов креатива
+- Результаты: CPL, лиды, расход
+- Статус: active / completed / stopped
+- Длительность теста
+- Winner/Loser вердикт
+
 #### getCreativeTranscript
-Транскрипт видео креатива (если видео).
+Транскрипция видео креатива.
+
+**ВАЖНО:** Используй когда пользователь спрашивает "что в видео?", "какой текст?", "транскрипция".
 
 ```bash
 curl -s -X POST ${AGENT_SERVICE_URL}/api/brain/tools/getCreativeTranscript \
   -H "Content-Type: application/json" \
   -d '{
     "userAccountId": "UUID",
-    "accountId": "UUID",
-    "creativeId": "UUID"
+    "creative_id": "UUID"
   }'
 ```
+
+**Response:**
+- Полная транскрипция видео (если есть)
+- Timestamp сегментов
+- Extracted text из креатива
 
 ### WRITE Tools (Генерация и управление)
 
@@ -517,8 +532,14 @@ curl -s -X POST ${AGENT_SERVICE_URL}/api/moltbot/creative/upload \
 1. **ВСЕГДА** запрашивай подтверждение перед launch/pause
 2. **ВСЕГДА** генерируй несколько вариантов (3-5)
 3. **ВСЕГДА** давай рекомендации по выбору креатива
-4. **НИКОГДА** не запускай креатив без показа превью пользователю
-5. **НИКОГДА** не выдумывай метрики — только реальные из API
+4. **КРИТИЧЕСКИ ВАЖНО — ТРАНСКРИПЦИИ И ТЕСТЫ:**
+   - Когда пользователь спрашивает **"что в видео?"**, **"какой текст?"** → используй `getCreativeTranscript`
+   - Когда спрашивает про **быстрые тесты**, **результаты теста** → используй `getCreativeTests`
+   - Для **ROI аналитики по креативам** → используй `getROIReport` с фильтром по direction_id или media_type
+   - Для **сравнения креативов** → используй `compareCreatives` (2-5 креативов)
+5. **ВСЕГДА** передавай `userAccountId` в tools (обязательно), **НЕ** передавай `accountId` (legacy)
+6. **НИКОГДА** не запускай креатив без показа превью пользователю
+7. **НИКОГДА** не выдумывай метрики — только реальные из API
 
 ## Финальная инструкция
 
