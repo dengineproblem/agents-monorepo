@@ -258,7 +258,7 @@ export function ConsultantPage() {
           </TabsContent>
 
           <TabsContent value="sales" className="space-y-4">
-            <SalesTab consultantId={consultantId} />
+            <SalesTab />
           </TabsContent>
 
           <TabsContent value="profile" className="space-y-4">

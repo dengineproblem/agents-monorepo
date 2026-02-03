@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,11 +44,8 @@ import { salesApi } from '@/services/salesApi';
 import { Sale, SalesStats, ChartDataPoint } from '@/types/sales';
 import { toast } from 'sonner';
 
-interface SalesTabProps {
-  consultantId?: string; // Опционально, если используется в контексте авторизованного консультанта
-}
-
-export function SalesTab({ consultantId }: SalesTabProps) {
+export function SalesTab() {
+  const { consultantId } = useParams<{ consultantId: string }>();
   const [sales, setSales] = useState<Sale[]>([]);
   const [stats, setStats] = useState<SalesStats | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
