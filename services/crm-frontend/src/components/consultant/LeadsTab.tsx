@@ -27,7 +27,6 @@ export function LeadsTab() {
   const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState({
     is_booked: 'all',
-    interest_level: 'all',
     search: '',
   });
 
@@ -72,7 +71,6 @@ export function LeadsTab() {
       setLoading(true);
       const params: any = {};
       if (filters.is_booked && filters.is_booked !== 'all') params.is_booked = filters.is_booked;
-      if (filters.interest_level && filters.interest_level !== 'all') params.interest_level = filters.interest_level;
       if (consultantId) params.consultantId = consultantId;
 
       const data = await consultantApi.getLeads(params);
@@ -335,26 +333,39 @@ export function LeadsTab() {
     }
   };
 
-  const getInterestBadge = (level?: string) => {
-    if (!level) return null;
+  const getLeadBadges = (lead: Lead) => {
+    const badges = [];
 
-    const colors: Record<string, string> = {
-      hot: 'bg-red-500',
-      warm: 'bg-yellow-500',
-      cold: 'bg-blue-500',
-    };
+    // Теги консультации в зависимости от статуса
+    if (lead.consultation_status) {
+      const statusConfig: Record<string, { label: string; className: string }> = {
+        scheduled: { label: 'Назначена', className: 'bg-blue-500' },
+        confirmed: { label: 'Подтверждена', className: 'bg-cyan-500' },
+        completed: { label: 'Проведена', className: 'bg-green-600' },
+        cancelled: { label: 'Отменена', className: 'bg-red-500' },
+        no_show: { label: 'Не пришел', className: 'bg-orange-500' }
+      };
 
-    const labels: Record<string, string> = {
-      hot: 'Горячий',
-      warm: 'Теплый',
-      cold: 'Холодный',
-    };
+      const config = statusConfig[lead.consultation_status];
+      if (config) {
+        badges.push(
+          <Badge key="consultation" className={config.className}>
+            {config.label}
+          </Badge>
+        );
+      }
+    }
 
-    return (
-      <Badge className={colors[level] || 'bg-gray-500'}>
-        {labels[level] || level}
-      </Badge>
-    );
+    // Тег продажи
+    if (lead.has_sale) {
+      badges.push(
+        <Badge key="sale" className="bg-emerald-500">
+          Продажа
+        </Badge>
+      );
+    }
+
+    return badges.length > 0 ? <div className="flex gap-1">{badges}</div> : null;
   };
 
   const filteredLeads = leads.filter(lead => {
@@ -397,21 +408,6 @@ export function LeadsTab() {
                 <SelectItem value="true">Записан</SelectItem>
               </SelectContent>
             </Select>
-
-            <Select
-              value={filters.interest_level}
-              onValueChange={(value) => setFilters({ ...filters, interest_level: value })}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Уровень интереса" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все</SelectItem>
-                <SelectItem value="hot">Горячий</SelectItem>
-                <SelectItem value="warm">Теплый</SelectItem>
-                <SelectItem value="cold">Холодный</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           {/* Таблица лидов */}
@@ -436,7 +432,7 @@ export function LeadsTab() {
                       <span className="font-medium">
                         {lead.contact_name || 'Без имени'}
                       </span>
-                      {getInterestBadge(lead.interest_level)}
+                      {getLeadBadges(lead)}
                     </div>
                     <div className="text-sm text-muted-foreground flex items-center gap-4">
                       <span className="flex items-center gap-1">

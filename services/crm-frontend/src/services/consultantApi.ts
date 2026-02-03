@@ -67,6 +67,8 @@ export interface Lead {
   last_message?: string;
   assigned_consultant_id?: string;
   has_unread?: boolean; // Флаг наличия непрочитанных сообщений
+  consultation_status?: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show' | null; // Статус консультации
+  has_sale?: boolean; // Есть ли продажа по клиенту
 }
 
 export interface Consultation {

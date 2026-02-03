@@ -150,14 +150,12 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
     try {
       const {
         status,
-        interest_level,
         is_booked,
         consultantId: queryConsultantId,
         limit = 50,
         offset = 0
       } = request.query as {
         status?: string;
-        interest_level?: string;
         is_booked?: string;
         consultantId?: string;
         limit?: number;
@@ -187,13 +185,9 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         query = query.eq('funnel_stage', status);
       }
 
-      if (interest_level) {
-        query = query.eq('interest_level', interest_level);
-      }
-
-      // Фильтр "не записан" - лиды без консультации
-      if (is_booked === 'false') {
-        // Получаем ID лидов которые записаны
+      // Фильтр по статусу записи
+      if (is_booked === 'false' || is_booked === 'true') {
+        // Получаем ID лидов которые записаны на консультацию
         const { data: bookedLeads } = await supabase
           .from('consultations')
           .select('dialog_analysis_id')
@@ -203,8 +197,19 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
           .map(c => c.dialog_analysis_id)
           .filter(Boolean);
 
-        if (bookedLeadIds.length > 0) {
-          query = query.not('id', 'in', `(${bookedLeadIds.join(',')})`);
+        if (is_booked === 'false') {
+          // Не записан - исключаем записанных
+          if (bookedLeadIds.length > 0) {
+            query = query.not('id', 'in', `(${bookedLeadIds.join(',')})`);
+          }
+        } else {
+          // Записан - только записанные
+          if (bookedLeadIds.length > 0) {
+            query = query.in('id', bookedLeadIds);
+          } else {
+            // Если нет записанных, возвращаем пустой массив
+            return reply.send({ leads: [], total: 0, limit, offset });
+          }
         }
       }
 
@@ -217,8 +222,43 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: error.message });
       }
 
+      const leads = data || [];
+
+      // Добавляем теги consultation_status и has_sale для каждого лида
+      const leadsWithTags = await Promise.all(
+        leads.map(async (lead) => {
+          // Получаем статус последней консультации
+          const { data: consultations } = await supabase
+            .from('consultations')
+            .select('status')
+            .eq('dialog_analysis_id', lead.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          const consultation_status = consultations && consultations.length > 0
+            ? consultations[0].status
+            : null;
+
+          // Проверяем наличие продажи
+          const { data: purchases } = await supabase
+            .from('purchases')
+            .select('id')
+            .eq('client_phone', lead.contact_phone)
+            .eq('consultant_id', targetConsultantId)
+            .limit(1);
+
+          const has_sale = (purchases || []).length > 0;
+
+          return {
+            ...lead,
+            consultation_status,
+            has_sale
+          };
+        })
+      );
+
       return reply.send({
-        leads: data || [],
+        leads: leadsWithTags,
         total: count || 0,
         limit,
         offset

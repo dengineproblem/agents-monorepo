@@ -130,18 +130,41 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
       // Если указан lead_id, получаем данные из лида
       if (body.lead_id) {
+        app.log.info({
+          lead_id: body.lead_id,
+          message: 'Searching for lead in dialog_analysis'
+        }, 'Before lead query');
+
         const { data: lead, error: leadError } = await supabase
           .from('dialog_analysis')
-          .select('contact_name, contact_phone, chat_id')
+          .select('contact_name, contact_phone')
           .eq('id', body.lead_id)
           .single();
 
+        app.log.info({
+          lead_id: body.lead_id,
+          lead,
+          leadError,
+          errorCode: leadError?.code,
+          errorMessage: leadError?.message,
+          errorDetails: leadError?.details
+        }, 'Lead query result');
+
         if (leadError || !lead) {
-          return reply.status(404).send({ error: 'Lead not found' });
+          app.log.warn({
+            lead_id: body.lead_id,
+            leadError,
+            lead
+          }, 'Lead not found - returning 404');
+          return reply.status(404).send({
+            error: 'Lead not found',
+            lead_id: body.lead_id,
+            details: leadError?.message || 'No lead data returned'
+          });
         }
 
         clientName = lead.contact_name || '';
-        clientPhone = lead.chat_id || lead.contact_phone || '';
+        clientPhone = lead.contact_phone || '';
       }
 
       // Проверяем что есть хотя бы имя или телефон клиента
@@ -161,7 +184,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
           amount: body.amount,
           product_name: body.product_name,
           purchase_date: body.sale_date,
-          comment: body.comment,
+          notes: body.comment, // маппинг comment -> notes
           currency: 'KZT'
         })
         .select()
@@ -220,7 +243,7 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
       if (body.amount !== undefined) updateData.amount = body.amount;
       if (body.product_name !== undefined) updateData.product_name = body.product_name;
       if (body.sale_date !== undefined) updateData.purchase_date = body.sale_date;
-      if (body.comment !== undefined) updateData.comment = body.comment;
+      if (body.comment !== undefined) updateData.notes = body.comment; // маппинг comment -> notes
 
       const { data: sale, error: updateError } = await supabase
         .from('purchases')
