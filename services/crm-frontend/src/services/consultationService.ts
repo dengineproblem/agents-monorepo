@@ -144,6 +144,28 @@ export const consultationService = {
     return response.json();
   },
 
+  // Перенос консультации на новое время
+  async rescheduleConsultation(id: string, data: {
+    new_date: string;
+    new_start_time: string;
+    new_end_time?: string;
+  }): Promise<Consultation> {
+    const userAccountId = JSON.parse(localStorage.getItem('user') || '{}').id;
+    const response = await fetch(`${API_BASE_URL}/consultations/${id}/reschedule`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userAccountId
+      },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to reschedule consultation' }));
+      throw new Error(error.message || 'Failed to reschedule consultation');
+    }
+    return response.json();
+  },
+
   // Отмена консультации
   async cancelConsultation(id: string): Promise<void> {
     const response = await fetch(`${API_BASE_URL}/consultations/${id}`, {
@@ -415,16 +437,25 @@ export const consultationService = {
     if (params?.start_date) searchParams.append('start_date', params.start_date);
     if (params?.end_date) searchParams.append('end_date', params.end_date);
 
-    const response = await fetch(`${API_BASE_URL}/blocked-slots?${searchParams}`);
+    const userAccountId = JSON.parse(localStorage.getItem('user') || '{}').id;
+    const response = await fetch(`${API_BASE_URL}/blocked-slots?${searchParams}`, {
+      headers: {
+        'x-user-id': userAccountId
+      }
+    });
     if (!response.ok) throw new Error('Failed to fetch blocked slots');
     return response.json();
   },
 
   // Создание блокировки слота (перерыв)
   async createBlockedSlot(data: CreateBlockedSlotData): Promise<BlockedSlot> {
+    const userAccountId = JSON.parse(localStorage.getItem('user') || '{}').id;
     const response = await fetch(`${API_BASE_URL}/blocked-slots`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userAccountId
+      },
       body: JSON.stringify(data)
     });
     if (!response.ok) {
@@ -436,8 +467,12 @@ export const consultationService = {
 
   // Удаление блокировки слота
   async deleteBlockedSlot(id: string): Promise<void> {
+    const userAccountId = JSON.parse(localStorage.getItem('user') || '{}').id;
     const response = await fetch(`${API_BASE_URL}/blocked-slots/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: {
+        'x-user-id': userAccountId
+      }
     });
     if (!response.ok) throw new Error('Failed to delete blocked slot');
   }

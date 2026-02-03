@@ -35,6 +35,13 @@ export function CalendarTab() {
   const [slotToBlock, setSlotToBlock] = useState<{ time: string } | null>(null);
   const [blockReason, setBlockReason] = useState('Перерыв');
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+  const [rescheduleData, setRescheduleData] = useState({
+    date: '',
+    start_time: ''
+  });
+  const [draggedConsultation, setDraggedConsultation] = useState<Consultation | null>(null);
+  const [dropTargetSlot, setDropTargetSlot] = useState<string | null>(null);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -226,10 +233,17 @@ export function CalendarTab() {
     const dateStr = selectedDate.toISOString().split('T')[0];
     const normalizeTime = (time: string) => time?.split(':').slice(0, 2).join(':') || '';
 
-    return consultations.find(c =>
-      c.date === dateStr &&
-      normalizeTime(c.start_time) === normalizeTime(timeSlot)
-    );
+    // Проверяем, попадает ли слот в интервал консультации (start_time <= slot < end_time)
+    return consultations.find(c => {
+      if (c.date !== dateStr) return false;
+
+      const consultationStart = normalizeTime(c.start_time);
+      const consultationEnd = normalizeTime(c.end_time);
+      const slot = normalizeTime(timeSlot);
+
+      // Слот попадает в консультацию, если он >= start и < end
+      return slot >= consultationStart && slot < consultationEnd;
+    });
   };
 
   const isSlotBlocked = (timeSlot: string) => {
@@ -336,6 +350,110 @@ export function CalendarTab() {
         variant: 'destructive'
       });
     }
+  };
+
+  const handleOpenRescheduleModal = () => {
+    if (!selectedConsultation) return;
+    setRescheduleData({
+      date: selectedConsultation.date,
+      start_time: selectedConsultation.start_time
+    });
+    setIsRescheduleModalOpen(true);
+  };
+
+  const handleRescheduleConsultation = async () => {
+    if (!selectedConsultation || !rescheduleData.date || !rescheduleData.start_time) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните дату и время',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      await consultationService.rescheduleConsultation(selectedConsultation.id, {
+        new_date: rescheduleData.date,
+        new_start_time: rescheduleData.start_time
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Консультация перенесена'
+      });
+
+      setIsRescheduleModalOpen(false);
+      setIsDetailModalOpen(false);
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось перенести консультацию',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // Drag & Drop handlers
+  const handleDragStart = (consultation: Consultation) => (e: React.DragEvent) => {
+    setDraggedConsultation(consultation);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.currentTarget.innerHTML);
+    // Добавляем класс для визуального эффекта
+    e.currentTarget.classList.add('opacity-50');
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    e.currentTarget.classList.remove('opacity-50');
+    setDraggedConsultation(null);
+    setDropTargetSlot(null);
+  };
+
+  const handleDragOver = (timeSlot: string) => (e: React.DragEvent) => {
+    e.preventDefault(); // Необходимо для drop
+    e.dataTransfer.dropEffect = 'move';
+    setDropTargetSlot(timeSlot);
+  };
+
+  const handleDragLeave = () => {
+    setDropTargetSlot(null);
+  };
+
+  const handleDrop = (timeSlot: string) => async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDropTargetSlot(null);
+
+    if (!draggedConsultation) return;
+
+    const newDate = selectedDate.toISOString().split('T')[0];
+    const newStartTime = timeSlot;
+
+    // Проверяем, что не переносим на то же время
+    if (draggedConsultation.date === newDate && draggedConsultation.start_time === newStartTime) {
+      return;
+    }
+
+    try {
+      await consultationService.rescheduleConsultation(draggedConsultation.id, {
+        new_date: newDate,
+        new_start_time: newStartTime
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Консультация перенесена'
+      });
+
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось перенести консультацию',
+        variant: 'destructive'
+      });
+    }
+
+    setDraggedConsultation(null);
   };
 
   const getStatusColor = (status: string) => {
@@ -483,15 +601,19 @@ export function CalendarTab() {
                     <div className="p-1 min-h-[40px]">
                       {consultation ? (
                         <button
+                          draggable={consultation.status !== 'completed' && consultation.status !== 'cancelled'}
+                          onDragStart={handleDragStart(consultation)}
+                          onDragEnd={handleDragEnd}
                           onClick={() => {
                             setSelectedConsultation(consultation);
                             setIsDetailModalOpen(true);
                           }}
                           className={`
                             w-full p-2 rounded text-white text-left text-xs
-                            hover:opacity-90 transition-opacity
+                            hover:opacity-90 transition-opacity cursor-move
                             ${getStatusColor(consultation.status)}
                           `}
+                          title="Перетащите для переноса на другое время"
                         >
                           <div className="font-medium truncate">
                             {consultation.client_name || 'Клиент'}
@@ -512,7 +634,12 @@ export function CalendarTab() {
                           </div>
                         </button>
                       ) : (
-                        <div className="relative group w-full h-full">
+                        <div
+                          className="relative group w-full h-full"
+                          onDragOver={handleDragOver(timeSlot)}
+                          onDragLeave={handleDragLeave}
+                          onDrop={handleDrop(timeSlot)}
+                        >
                           <button
                             onClick={() => {
                               setNewConsultation(prev => ({
@@ -522,7 +649,12 @@ export function CalendarTab() {
                               }));
                               setIsNewConsultationOpen(true);
                             }}
-                            className="w-full h-full rounded border border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/5 transition-colors flex items-center justify-center text-muted-foreground hover:text-primary"
+                            className={`
+                              w-full h-full rounded border border-dashed transition-colors flex items-center justify-center
+                              ${dropTargetSlot === timeSlot
+                                ? 'border-primary bg-primary/20 border-2'
+                                : 'border-muted-foreground/30 hover:border-primary hover:bg-primary/5 text-muted-foreground hover:text-primary'}
+                            `}
                           >
                             <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </button>
@@ -771,6 +903,15 @@ export function CalendarTab() {
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={handleOpenRescheduleModal}
+                    disabled={selectedConsultation.status === 'completed' || selectedConsultation.status === 'cancelled'}
+                  >
+                    <Calendar className="w-3 h-3 mr-1" />
+                    Перенести
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => handleUpdateStatus(selectedConsultation.id, 'confirmed')}
                     disabled={selectedConsultation.status === 'confirmed'}
                   >
@@ -946,6 +1087,62 @@ export function CalendarTab() {
             </Button>
             <Button onClick={handleCreateTask}>Создать</Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно переноса консультации */}
+      <Dialog open={isRescheduleModalOpen} onOpenChange={setIsRescheduleModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="w-5 h-5" />
+              Перенести консультацию
+            </DialogTitle>
+          </DialogHeader>
+          {selectedConsultation && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+                <p><strong>Клиент:</strong> {selectedConsultation.client_name || 'Не указан'}</p>
+                <p><strong>Текущее время:</strong> {selectedConsultation.date} в {selectedConsultation.start_time}</p>
+              </div>
+
+              <div>
+                <Label>Новая дата</Label>
+                <Input
+                  type="date"
+                  value={rescheduleData.date}
+                  onChange={(e) => setRescheduleData(prev => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <Label>Новое время начала</Label>
+                <Select
+                  value={rescheduleData.start_time}
+                  onValueChange={(value) => setRescheduleData(prev => ({ ...prev, start_time: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите время" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {timeSlots.map(time => (
+                      <SelectItem key={time} value={time}>{time}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button onClick={handleRescheduleConsultation} className="flex-1">
+                  <Calendar className="w-4 h-4 mr-1" />
+                  Перенести
+                </Button>
+                <Button variant="outline" onClick={() => setIsRescheduleModalOpen(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

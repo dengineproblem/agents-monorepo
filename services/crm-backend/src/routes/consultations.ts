@@ -13,6 +13,7 @@ import {
   getClientConsultations
 } from '../lib/consultationSlots.js';
 import { summarizeDialog, getClientInfo } from '../lib/dialogSummarizer.js';
+import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 
 // Validation schemas
 const CreateConsultantSchema = z.object({
@@ -54,6 +55,15 @@ const UpdateConsultationSchema = z.object({
   client_name: z.string().optional(),
   is_sale_closed: z.boolean().optional()
 });
+
+const RescheduleConsultationSchema = z.object({
+  new_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  new_start_time: z.string().regex(/^\d{2}:\d{2}$/),
+  new_end_time: z.string().regex(/^\d{2}:\d{2}$/).optional()
+}).refine(
+  (data) => !data.new_end_time || data.new_end_time > data.new_start_time,
+  { message: 'Время окончания должно быть после времени начала', path: ['new_end_time'] }
+);
 
 const BookFromLeadSchema = z.object({
   dialog_analysis_id: z.string().uuid(),
@@ -693,6 +703,187 @@ export async function consultationsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /consultations/:id/reschedule
+   * Reschedule a consultation to a new date/time
+   * Requires authentication (via consultantAuthMiddleware for consultant routes)
+   */
+  app.post('/consultations/:id/reschedule', {
+    preHandler: consultantAuthMiddleware
+  }, async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const body = RescheduleConsultationSchema.parse(request.body);
+
+      // Get the consultation
+      const { data: consultation, error: fetchError } = await supabase
+        .from('consultations')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (fetchError || !consultation) {
+        return reply.status(404).send({ error: 'Consultation not found' });
+      }
+
+      // Check access: consultant can only reschedule their own consultations
+      if (request.userRole === 'consultant' && request.consultant) {
+        if (consultation.consultant_id !== request.consultant.id) {
+          app.log.warn({
+            userId: request.userAccountId,
+            consultantId: request.consultant.id,
+            targetConsultantId: consultation.consultant_id,
+            consultationId: id
+          }, 'Consultant attempted to reschedule another consultant\'s consultation');
+
+          return reply.status(403).send({
+            error: 'Forbidden',
+            message: 'Вы можете переносить только свои консультации'
+          });
+        }
+      }
+
+      // Calculate new end time if not provided
+      let newEndTime = body.new_end_time;
+      if (!newEndTime) {
+        const [oldStartH, oldStartM] = consultation.start_time.split(':').map(Number);
+        const [oldEndH, oldEndM] = consultation.end_time.split(':').map(Number);
+        const durationMinutes = (oldEndH * 60 + oldEndM) - (oldStartH * 60 + oldStartM);
+
+        const [newStartH, newStartM] = body.new_start_time.split(':').map(Number);
+        const endMinTotal = newStartH * 60 + newStartM + durationMinutes;
+        const endHour = Math.floor(endMinTotal / 60);
+        const endMin = endMinTotal % 60;
+        newEndTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
+      }
+
+      // Check if the new slot is available (only if date or time changed)
+      const dateChanged = body.new_date !== consultation.date;
+      const timeChanged = body.new_start_time !== consultation.start_time;
+
+      if (dateChanged || timeChanged) {
+        // Check for conflicting consultations
+        app.log.info({
+          checking: 'consultations_for_reschedule',
+          consultation_id: id,
+          consultant_id: consultation.consultant_id,
+          new_date: body.new_date,
+          requested_time: `${body.new_start_time} - ${newEndTime}`,
+          filters: {
+            'status IN': ['scheduled', 'confirmed'],
+            'id !=': id,
+            'start_time <': newEndTime,
+            'end_time >': body.new_start_time
+          }
+        }, '[POST /consultations/:id/reschedule] Checking for conflicting consultations');
+
+        const { data: conflictingConsultations } = await supabase
+          .from('consultations')
+          .select('id, date, start_time, end_time, status')
+          .eq('consultant_id', consultation.consultant_id)
+          .eq('date', body.new_date)
+          .in('status', ['scheduled', 'confirmed'])
+          .neq('id', id) // Exclude current consultation
+          .lt('start_time', newEndTime)
+          .gt('end_time', body.new_start_time);
+
+        app.log.info({
+          found_consultations: conflictingConsultations?.length || 0,
+          consultations: conflictingConsultations
+        }, '[POST /consultations/:id/reschedule] Conflicting consultations check result');
+
+        if (conflictingConsultations && conflictingConsultations.length > 0) {
+          app.log.warn({
+            consultation_id: id,
+            consultant_id: consultation.consultant_id,
+            new_date: body.new_date,
+            requested_slot: `${body.new_start_time} - ${newEndTime}`,
+            conflicting: conflictingConsultations
+          }, '[POST /consultations/:id/reschedule] CONFLICT: Found conflicting consultations');
+
+          return reply.status(409).send({
+            error: 'Conflict',
+            message: 'Это время уже занято другой консультацией'
+          });
+        }
+
+        // Check for blocked slots
+        const { data: blockedSlots } = await supabase
+          .from('blocked_slots')
+          .select('id')
+          .eq('consultant_id', consultation.consultant_id)
+          .eq('date', body.new_date)
+          .lt('start_time', newEndTime)
+          .gt('end_time', body.new_start_time)
+          .limit(1);
+
+        if (blockedSlots && blockedSlots.length > 0) {
+          return reply.status(409).send({
+            error: 'Conflict',
+            message: 'Это время заблокировано (перерыв)'
+          });
+        }
+      }
+
+      // Update the consultation
+      const { data: updatedConsultation, error: updateError } = await supabase
+        .from('consultations')
+        .update({
+          date: body.new_date,
+          start_time: body.new_start_time,
+          end_time: newEndTime
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (updateError) {
+        app.log.error({ error: updateError }, 'Failed to reschedule consultation');
+        return reply.status(500).send({ error: updateError.message });
+      }
+
+      // Cancel old notifications and schedule new ones
+      if (consultation.user_account_id) {
+        cancelPendingNotifications(id).catch(err => {
+          app.log.error({ error: err.message, consultationId: id }, 'Failed to cancel pending notifications');
+        });
+
+        const consultationForNotification = {
+          id: updatedConsultation.id,
+          consultant_id: updatedConsultation.consultant_id,
+          user_account_id: consultation.user_account_id,
+          client_phone: updatedConsultation.client_phone,
+          client_name: updatedConsultation.client_name,
+          dialog_analysis_id: updatedConsultation.dialog_analysis_id,
+          date: updatedConsultation.date,
+          start_time: updatedConsultation.start_time,
+          end_time: updatedConsultation.end_time
+        };
+
+        scheduleReminderNotifications(consultationForNotification).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
+        });
+      }
+
+      app.log.info({
+        userId: request.userAccountId,
+        consultationId: id,
+        oldDate: consultation.date,
+        oldTime: `${consultation.start_time}-${consultation.end_time}`,
+        newDate: body.new_date,
+        newTime: `${body.new_start_time}-${newEndTime}`
+      }, 'Consultation rescheduled successfully');
+
+      return reply.send(updatedConsultation);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: 'Validation error', details: error.errors });
+      }
+      app.log.error({ error }, 'Error rescheduling consultation');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
    * POST /consultations/book-from-lead
    * Book consultation from a lead (dialog_analysis)
    */
@@ -1308,8 +1499,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
   /**
    * GET /blocked-slots
    * Get blocked slots by date or date range
+   * Requires authentication
    */
-  app.get('/blocked-slots', async (request, reply) => {
+  app.get('/blocked-slots', {
+    preHandler: consultantAuthMiddleware
+  }, async (request: ConsultantAuthRequest, reply) => {
     try {
       const { date, consultant_id, start_date, end_date } = request.query as {
         date?: string;
@@ -1327,11 +1521,16 @@ export async function consultationsRoutes(app: FastifyInstance) {
         .order('date', { ascending: true })
         .order('start_time', { ascending: true });
 
+      // Фильтрация по доступу: консультант видит только свои блокировки
+      if (request.userRole === 'consultant' && request.consultant) {
+        query = query.eq('consultant_id', request.consultant.id);
+      } else if (consultant_id) {
+        // Админ может фильтровать по любому консультанту
+        query = query.eq('consultant_id', consultant_id);
+      }
+
       if (date) {
         query = query.eq('date', date);
-      }
-      if (consultant_id) {
-        query = query.eq('consultant_id', consultant_id);
       }
       if (start_date && end_date) {
         query = query.gte('date', start_date).lte('date', end_date);
@@ -1354,23 +1553,80 @@ export async function consultationsRoutes(app: FastifyInstance) {
   /**
    * POST /blocked-slots
    * Create a blocked slot (break/pause)
+   * Requires authentication
    */
-  app.post('/blocked-slots', async (request, reply) => {
+  app.post('/blocked-slots', {
+    preHandler: consultantAuthMiddleware
+  }, async (request: ConsultantAuthRequest, reply) => {
     try {
       const body = CreateBlockedSlotSchema.parse(request.body);
 
+      // Определяем, для какого консультанта создаётся блокировка
+      let targetConsultantId: string;
+
+      if (request.userRole === 'admin') {
+        // Админ может создавать блокировки для любого консультанта
+        targetConsultantId = body.consultant_id;
+      } else if (request.userRole === 'consultant' && request.consultant) {
+        // Консультант может создавать блокировки только для себя
+        // Игнорируем consultant_id из body и используем ID текущего консультанта
+        targetConsultantId = request.consultant.id;
+
+        // Проверка на попытку создать блокировку для другого консультанта
+        if (body.consultant_id !== targetConsultantId) {
+          app.log.warn({
+            userId: request.userAccountId,
+            requestedConsultantId: body.consultant_id,
+            actualConsultantId: targetConsultantId
+          }, 'Consultant attempted to create blocked slot for another consultant');
+
+          return reply.status(403).send({
+            error: 'Forbidden',
+            message: 'Вы можете создавать блокировки только для себя'
+          });
+        }
+      } else {
+        return reply.status(403).send({
+          error: 'Forbidden',
+          message: 'Недостаточно прав для создания блокировок'
+        });
+      }
+
       // Check if there's already a consultation at this time
+      app.log.info({
+        checking: 'consultations',
+        consultant_id: targetConsultantId,
+        date: body.date,
+        requested_time: `${body.start_time} - ${body.end_time}`,
+        filters: {
+          'status IN': ['scheduled', 'confirmed'],
+          'start_time <': body.end_time,
+          'end_time >': body.start_time
+        }
+      }, '[POST /blocked-slots] Checking for existing consultations');
+
       const { data: existingConsultation } = await supabase
         .from('consultations')
-        .select('id')
-        .eq('consultant_id', body.consultant_id)
+        .select('id, date, start_time, end_time, status')
+        .eq('consultant_id', targetConsultantId)
         .eq('date', body.date)
         .in('status', ['scheduled', 'confirmed'])
         .lt('start_time', body.end_time)
-        .gt('end_time', body.start_time)
-        .limit(1);
+        .gt('end_time', body.start_time);
+
+      app.log.info({
+        found_consultations: existingConsultation?.length || 0,
+        consultations: existingConsultation
+      }, '[POST /blocked-slots] Existing consultations check result');
 
       if (existingConsultation && existingConsultation.length > 0) {
+        app.log.warn({
+          consultant_id: targetConsultantId,
+          date: body.date,
+          requested_slot: `${body.start_time} - ${body.end_time}`,
+          conflicting_consultations: existingConsultation
+        }, '[POST /blocked-slots] CONFLICT: Found existing consultations');
+
         return reply.status(409).send({
           error: 'Conflict',
           message: 'В это время уже есть запись на консультацию'
@@ -1381,7 +1637,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
       const { data: existingBlock } = await supabase
         .from('blocked_slots')
         .select('id')
-        .eq('consultant_id', body.consultant_id)
+        .eq('consultant_id', targetConsultantId)
         .eq('date', body.date)
         .lt('start_time', body.end_time)
         .gt('end_time', body.start_time)
@@ -1394,9 +1650,18 @@ export async function consultationsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Создаём блокировку с правильным consultant_id
+      const blockData = {
+        consultant_id: targetConsultantId,
+        date: body.date,
+        start_time: body.start_time,
+        end_time: body.end_time,
+        reason: body.reason || 'Перерыв'
+      };
+
       const { data, error } = await supabase
         .from('blocked_slots')
-        .insert([body])
+        .insert([blockData])
         .select(`
           *,
           consultant:consultants(id, name)
@@ -1414,6 +1679,13 @@ export async function consultationsRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: error.message });
       }
 
+      app.log.info({
+        userId: request.userAccountId,
+        consultantId: targetConsultantId,
+        date: body.date,
+        time: `${body.start_time}-${body.end_time}`
+      }, 'Blocked slot created successfully');
+
       return reply.status(201).send(data);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -1427,10 +1699,40 @@ export async function consultationsRoutes(app: FastifyInstance) {
   /**
    * DELETE /blocked-slots/:id
    * Delete a blocked slot
+   * Requires authentication
    */
-  app.delete('/blocked-slots/:id', async (request, reply) => {
+  app.delete('/blocked-slots/:id', {
+    preHandler: consultantAuthMiddleware
+  }, async (request: ConsultantAuthRequest, reply) => {
     try {
       const { id } = request.params as { id: string };
+
+      // Проверяем, что блокировка принадлежит консультанту (если не админ)
+      if (request.userRole === 'consultant' && request.consultant) {
+        const { data: blockedSlot } = await supabase
+          .from('blocked_slots')
+          .select('consultant_id')
+          .eq('id', id)
+          .single();
+
+        if (!blockedSlot) {
+          return reply.status(404).send({ error: 'Blocked slot not found' });
+        }
+
+        if (blockedSlot.consultant_id !== request.consultant.id) {
+          app.log.warn({
+            userId: request.userAccountId,
+            consultantId: request.consultant.id,
+            targetConsultantId: blockedSlot.consultant_id,
+            blockedSlotId: id
+          }, 'Consultant attempted to delete blocked slot of another consultant');
+
+          return reply.status(403).send({
+            error: 'Forbidden',
+            message: 'Вы можете удалять только свои блокировки'
+          });
+        }
+      }
 
       const { error } = await supabase
         .from('blocked_slots')
@@ -1441,6 +1743,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
         app.log.error({ error }, 'Failed to delete blocked slot');
         return reply.status(500).send({ error: error.message });
       }
+
+      app.log.info({
+        userId: request.userAccountId,
+        blockedSlotId: id
+      }, 'Blocked slot deleted successfully');
 
       return reply.status(204).send();
     } catch (error: any) {
