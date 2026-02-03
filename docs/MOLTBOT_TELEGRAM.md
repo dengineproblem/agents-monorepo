@@ -1568,6 +1568,59 @@ curl -s -X POST http://agent-brain:7080/brain/tools/{toolName} \
 | `getDialogs` | READ | WhatsApp диалоги |
 | `updateLeadStage` | WRITE | Изменение стадии |
 
+#### WhatsApp Метрики качества лидов
+
+**Важно:** Эти метрики доступны даже если CRM система не подключена.
+
+| Tool | Тип | Описание |
+|------|-----|----------|
+| `getLeadsEngagementRate` | READ | % лидов WhatsApp отправивших 2+ сообщения (Facebook метрика) |
+| `getSalesQuality` | READ | Конверсия лидов в продажи (требует CRM) |
+
+**getLeadsEngagementRate** - Качество лидов WhatsApp:
+
+```javascript
+// Параметры
+{
+  "period": "last_7d",        // required: last_3d/7d/14d/30d
+  "direction_id": "uuid-..."  // optional: фильтр по направлению
+}
+
+// Ответ
+{
+  "leads_total": 150,
+  "leads_with_2plus_msgs": 87,
+  "engagement_rate": 58.0,  // В процентах
+  "qcpl": 4.25              // Quality Cost Per Lead
+}
+```
+
+**Когда использовать:** При запросе статистики WhatsApp кампаний **ОБЯЗАТЕЛЬНО** показывать эту метрику вместе с основными метриками.
+
+**Пример использования:**
+
+```
+👤 Пользователь: Покажи результаты WhatsApp кампаний за неделю
+
+🤖 Claude:
+1. Вызывает getCampaigns с period=last_7d
+2. Вызывает getLeadsEngagementRate с period=last_7d
+3. Отвечает:
+
+📊 WhatsApp кампании за последние 7 дней:
+
+💰 Расход: $450
+📥 Лиды: 87
+💵 CPL: $5.17
+
+📈 Качество лидов:
+✉️ 2+ сообщений: 58% (50 из 87)
+💎 Quality CPL: $4.25
+
+Engagement rate 58% - хороший показатель!
+Более половины лидов активно общаются.
+```
+
 #### TikTok (18 tools)
 
 | Tool | Тип | Описание |
@@ -1747,6 +1800,11 @@ docker logs moltbot 2>&1 | grep -i "audio\|whisper\|transcri"
 
 ### Архитектура
 
+**Двухуровневая система защиты:**
+
+1. **Проактивная проверка агентом** - AI агент самостоятельно проверяет лимит в начале обработки запроса через HTTP endpoint
+2. **Backend валидация** - Дублирующая проверка в domainRouter.js перед выполнением tools
+
 **Поток данных:**
 
 ```
@@ -1754,20 +1812,29 @@ Telegram User → telegramHandler.js (добавляет telegramChatId)
                ↓
             orchestrator/index.js (передаёт в Moltbot context)
                ↓
-            moltbot/orchestrator.js
+            Moltbot Gateway API (router agent)
                ↓
-         [1] checkUserLimit() ← БД: user_ai_limits + user_ai_usage
+         [1a] AI Agent → GET /api/limits/check (проактивная проверка)
                ↓
-         [allowed=true] → Отправка к Moltbot Gateway
+         [allowed=false] → Агент отправляет сообщение о превышении лимита
                ↓
-         [result + usage] → trackUsage()
+         [allowed=true] → Агент продолжает обработку
+               ↓
+            domainRouter.js (tool execution)
+               ↓
+         [1b] checkUserLimit() ← БД: user_ai_limits + user_ai_usage (backend валидация)
+               ↓
+         [allowed=true] → Выполнение tools
+               ↓
+         [result] → Автоматический трекинг через usageTracker.js
                ↓
          [2] БД: user_ai_usage (increment_usage)
 ```
 
 **Точки перехвата:**
-1. **До запроса** (`moltbot/orchestrator.js:119`) - проверка лимита
-2. **После ответа** (`moltbot/orchestrator.js:223`) - запись usage
+1. **Проактивная проверка** (`AGENTS.md` инструкции) - агент самостоятельно вызывает `/api/limits/check` в начале диалога
+2. **Backend валидация** (`domainRouter.js:15`) - проверка перед выполнением tools как safety net
+3. **Автоматический трекинг** (`usageTracker.js`) - парсинг логов Moltbot каждые 15 секунд
 
 ### База данных
 
@@ -1844,6 +1911,10 @@ export const MODEL_PRICING = {
   'gpt-4o': {
     input: 2.50 / 1_000_000,
     output: 10.00 / 1_000_000
+  },
+  'gemini-3-pro-preview': {
+    input: 2.00 / 1_000_000,   // $2.00 per 1M input tokens
+    output: 8.00 / 1_000_000   // $8.00 per 1M output tokens
   }
 };
 ```
@@ -1863,6 +1934,7 @@ totalCost = inputCost + outputCost
 | GPT-5.2 | 1000 | 500 | $0.0087 |
 | GPT-5.2 | 5000 | 2000 | $0.0368 |
 | Claude Sonnet | 1000 | 500 | $0.0105 |
+| Gemini 3 Pro | 1000 | 500 | $0.0060 |
 | GPT-4o (Whisper) | 500 | 100 | $0.0023 |
 
 ### API
@@ -1929,6 +2001,85 @@ const warning = formatNearLimitWarning(limitCheck);
 // ⚠️ Внимание: Использовано 85% дневного лимита AI.
 //
 // Осталось: 15%
+```
+
+### Проактивная проверка лимитов агентом
+
+**Новое в v1.2:** AI агент самостоятельно проверяет лимиты в начале обработки запроса.
+
+**Как это работает:**
+
+1. В файле [`AGENTS.md`](../moltbot-workspace-router/AGENTS.md) добавлены инструкции для агента:
+   - Извлечь Telegram Chat ID из метаданных сообщения
+   - Вызвать `GET http://agent-brain:7080/api/limits/check` с заголовком `X-Telegram-Id`
+   - Если `allowed: false` - прервать обработку и отправить сообщение пользователю
+   - Если `nearLimit: true` (>=80%) - показать предупреждение
+   - После формирования ответа отправить данные в `POST http://agent-brain:7080/api/limits/track`
+
+2. **Backend валидация** как safety net в `domainRouter.js`:
+   ```javascript
+   // Проверка лимитов ДО выполнения tools
+   if (context.telegramChatId) {
+     const limitCheck = await checkUserLimit(context.telegramChatId);
+
+     if (!limitCheck.allowed) {
+       throw new Error(formatLimitExceededMessage(limitCheck));
+     }
+   }
+   ```
+
+**Преимущества двухуровневой защиты:**
+
+✅ **Агент проверяет первым** - экономит API вызовы, если лимит превышен
+✅ **Backend дублирует** - гарантирует защиту, даже если агент пропустил проверку
+✅ **Проактивное предупреждение** - пользователь видит предупреждение при 80% лимита
+
+**HTTP Endpoints:**
+
+```bash
+# Проверка лимита (вызывается агентом)
+curl -X GET http://agent-brain:7080/api/limits/check \
+  -H "X-Telegram-Id: 313145981"
+
+# Ответ:
+{
+  "allowed": true,
+  "remaining": 0.73,
+  "limit": 1.00,
+  "spent": 0.27,
+  "nearLimit": false
+}
+
+# Трекинг usage (вызывается агентом после ответа)
+curl -X POST http://agent-brain:7080/api/limits/track \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Id: 313145981" \
+  -d '{
+    "model": "gemini-3-pro-preview",
+    "usage": {
+      "prompt_tokens": 1234,
+      "completion_tokens": 567
+    }
+  }'
+```
+
+**Пример взаимодействия:**
+
+```
+User: "Покажи статистику кампаний"
+  ↓
+[Moltbot Router Agent]
+  1. Извлекает Telegram ID: 313145981
+  2. GET /api/limits/check → {allowed: true, remaining: 0.85}
+  3. Продолжает обработку → вызывает getCampaigns
+  ↓
+[domainRouter.js]
+  4. checkUserLimit(313145981) → {allowed: true} (backend validation)
+  5. Выполняет getCampaigns tool
+  ↓
+[usageTracker.js]
+  6. Автоматически парсит логи Moltbot
+  7. Записывает usage в БД
 ```
 
 ### Логирование
@@ -2436,6 +2587,202 @@ docker logs agent-brain 2>&1 | grep "No usage data in result"
 docker logs agent-brain 2>&1 | grep "Unknown model in pricing table"
 
 # Если модель неизвестна - добавить в MODEL_PRICING (usageLimits.js)
+```
+
+---
+
+## Creative Generation Service
+
+### Обзор
+
+Сервис генерации креативов использует Gemini Image Generation API для создания рекламных изображений.
+
+**Основные особенности:**
+- ✅ Генерация через Gemini Image Generation (~45 секунд)
+- ✅ Таймауты 90 секунд для предотвращения преждевременного обрыва
+- ✅ Поддержка стилей и reference images
+- ✅ Интеграция с agent-brain через HTTP API
+
+### Конфигурация
+
+**Environment Variables:**
+
+Файл: `.env.brain`
+
+```bash
+CREATIVE_GENERATION_URL=http://creative-generation-service:8085
+```
+
+Этот URL используется в `agent-brain` для вызова сервиса генерации креативов.
+
+**Docker Configuration:**
+
+```yaml
+creative-generation-service:
+  build:
+    context: ./services/creative-generation-service
+  container_name: creative-generation-service
+  ports:
+    - "8085:8085"
+  environment:
+    - GEMINI_API_KEY=${GEMINI_API_KEY}
+    - SUPABASE_URL=${SUPABASE_URL}
+    - SUPABASE_SERVICE_ROLE=${SUPABASE_SERVICE_ROLE}
+  networks:
+    - app-network
+  restart: unless-stopped
+```
+
+### Таймауты
+
+**Проблема:** Генерация изображений через Gemini занимает ~45 секунд, стандартные таймауты (30 сек) приводят к ошибкам.
+
+**Решение:** Увеличены таймауты до 90 секунд во всех fetch вызовах к creative-generation-service.
+
+**Файл:** `services/agent-brain/src/chatAssistant/agents/creative/handlers.js`
+
+```javascript
+// generateCreatives (строка 1018)
+const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 секунд
+
+const response = await fetch(`${creativeServiceUrl}/generate-creative`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    user_id: userAccountId,
+    account_id: dbAccountId,
+    offer, bullets, profits, cta,
+    direction_id, style_id, style_prompt, reference_image
+  }),
+  signal: controller.signal
+});
+
+clearTimeout(timeoutId);
+
+// generateCarousel (строка 1116)
+// Аналогичный таймаут 90 секунд
+```
+
+**Типичное время генерации:**
+
+| Операция | Среднее время | Таймаут |
+|----------|---------------|---------|
+| Single creative (Gemini Image Gen) | ~45 сек | 90 сек |
+| Carousel (4 креатива) | ~180 сек | 300 сек |
+| API upload to Facebook | ~2 сек | 30 сек |
+
+### API Endpoints
+
+**Generate Creative:**
+
+```bash
+POST http://creative-generation-service:8085/generate-creative
+Content-Type: application/json
+
+{
+  "user_id": "uuid-...",
+  "account_id": "uuid-...",
+  "offer": "Скидка 50% на первый заказ",
+  "bullets": "Быстрая доставка\nБез комиссии",
+  "profits": "Экономия времени",
+  "cta": "Заказать сейчас",
+  "direction_id": "uuid-..." (optional),
+  "style_id": "modern_performance" (optional),
+  "style_prompt": "Minimalist design" (optional),
+  "reference_image": "base64..." (optional)
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "creative_id": "uuid-...",
+  "image_url": "https://storage.url/...",
+  "generation_time_sec": 45.2
+}
+```
+
+### Moltbot Integration
+
+**Skill:** `creative-image-generator`
+
+Файл: `moltbot-workspace-router/skills/creative-image-generator/`
+
+Агент может генерировать креативы через:
+
+```bash
+# В чате с Moltbot:
+"Создай креатив для кампании по доставке еды с офером 'Скидка 30%'"
+```
+
+Агент автоматически:
+1. Получает контекст пользователя (userAccountId, accountId)
+2. Формирует параметры креатива
+3. Вызывает generateCreatives tool
+4. Возвращает ссылку на сгенерированное изображение
+
+### Troubleshooting
+
+**Проблема: "Not Configured" ошибка**
+
+```bash
+# Проверить переменную окружения
+docker exec agent-brain env | grep CREATIVE_GENERATION_URL
+
+# Если пусто - добавить в .env.brain:
+echo "CREATIVE_GENERATION_URL=http://creative-generation-service:8085" >> .env.brain
+
+# Пересоздать контейнер
+docker-compose up -d --force-recreate agent-brain
+```
+
+**Проблема: Timeout после 30 секунд**
+
+```bash
+# Проверить версию handlers.js
+docker exec agent-brain grep -A5 "setTimeout.*controller.abort" \
+  /app/src/chatAssistant/agents/creative/handlers.js
+
+# Должно быть: setTimeout(() => controller.abort(), 90000)
+```
+
+**Проблема: Генерация не завершается**
+
+```bash
+# Проверить логи creative-generation-service
+docker logs creative-generation-service 2>&1 | tail -50
+
+# Проверить GEMINI_API_KEY
+docker exec creative-generation-service env | grep GEMINI_API_KEY
+```
+
+### Мониторинг
+
+**Логирование времени генерации:**
+
+```javascript
+// В handlers.js
+logger.info({
+  duration: Date.now() - startTime,
+  creativeId: result.creative_id
+}, 'Creative generation completed');
+```
+
+**Метрики успешности:**
+
+```sql
+-- Количество успешных генераций за день
+SELECT
+  DATE(created_at) as date,
+  COUNT(*) as total_generated,
+  AVG(EXTRACT(EPOCH FROM (updated_at - created_at))) as avg_generation_time_sec
+FROM ad_creatives
+WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'
+GROUP BY DATE(created_at)
+ORDER BY date DESC;
 ```
 
 ---
