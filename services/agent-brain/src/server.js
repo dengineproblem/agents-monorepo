@@ -8338,9 +8338,9 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
     }
 
     // Проверяем обязательные поля
-    if (!answers?.business_name || !answers?.business_niche) {
+    if (!answers?.business_name || !answers?.business_niche || !answers?.username || !answers?.password) {
       return reply.code(400).send({
-        error: 'Required fields: business_name, business_niche'
+        error: 'Required fields: business_name, business_niche, username, password'
       });
     }
 
@@ -8364,9 +8364,25 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
       });
     }
 
-    // 2. Генерируем уникальный username и password
-    const username = await generateUniqueUsername();
-    const password = generatePassword();
+    // 2. Используем username и password от пользователя
+    const username = answers.username;
+    const password = answers.password;
+
+    // Проверяем уникальность username
+    const { data: existingUsername } = await supabase
+      .from('user_accounts')
+      .select('id')
+      .eq('username', username)
+      .single();
+
+    if (existingUsername) {
+      fastify.log.info({ telegramId, username }, 'Username already taken');
+      return reply.send({
+        success: false,
+        error: 'Username already taken',
+        message: 'Этот логин уже занят. Пожалуйста, выберите другой.'
+      });
+    }
 
     // 3. Создаём user_accounts
     const { data: newUser, error: userError } = await supabase
@@ -8409,9 +8425,7 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
         price_segment: answers.price_segment || null,
         tone_of_voice: answers.tone_of_voice || null,
         main_promises: answers.main_promises || null,
-        social_proof: answers.social_proof || null,
-        guarantees: answers.guarantees || null,
-        competitor_instagrams: answers.competitor_instagrams || []
+        guarantees: answers.guarantees || null
       });
 
     if (briefingError) {
@@ -8419,12 +8433,103 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
       // Не критично - пользователь создан, продолжаем
     }
 
-    // 5. Генерируем Facebook OAuth URL
+    // 5. Генерируем промпты через agent-service
+    try {
+      const generatePromptPayload = {
+        user_id: userId,
+        business_name: answers.business_name,
+        business_niche: answers.business_niche,
+        instagram_url: answers.instagram_url || undefined,
+        website_url: answers.website_url || undefined,
+        target_audience: answers.target_audience || undefined,
+        geography: answers.geography || undefined,
+        main_pains: answers.main_pains || undefined,
+        main_services: answers.main_services || undefined,
+        competitive_advantages: answers.competitive_advantages || undefined,
+        price_segment: answers.price_segment || undefined,
+        tone_of_voice: answers.tone_of_voice || undefined,
+        main_promises: answers.main_promises || undefined,
+        guarantees: answers.guarantees || undefined
+      };
+
+      fastify.log.info({ userId, payload: generatePromptPayload }, 'Calling prompt generation service');
+
+      const promptResponse = await fetch('http://agent-service:8082/briefing/generate-prompt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Source': 'agent-brain-onboarding'
+        },
+        body: JSON.stringify(generatePromptPayload)
+      });
+
+      if (!promptResponse.ok) {
+        const errorText = await promptResponse.text();
+        fastify.log.error({
+          userId,
+          status: promptResponse.status,
+          error: errorText,
+          payload: generatePromptPayload
+        }, 'CRITICAL: Failed to generate prompts');
+
+        // Логируем в admin_error_logs для мониторинга
+        await supabase.from('admin_error_logs').insert({
+          user_account_id: userId,
+          error_type: 'prompt_generation_failed',
+          raw_error: errorText,
+          action: 'onboarding_create_user',
+          severity: 'error',
+          metadata: { status: promptResponse.status }
+        }).catch(err => fastify.log.error({ err }, 'Failed to log error'));
+
+      } else {
+        const promptResult = await promptResponse.json();
+        fastify.log.info({
+          userId,
+          prompt1Length: promptResult.prompt1?.length,
+          prompt4Length: promptResult.prompt4?.length,
+          hasCta: !!promptResult.cta
+        }, 'Prompts generated successfully');
+
+        // Проверяем что промпты действительно сохранились
+        const { data: userCheck } = await supabase
+          .from('user_accounts')
+          .select('prompt1, prompt4')
+          .eq('id', userId)
+          .single();
+
+        if (!userCheck?.prompt1 || !userCheck?.prompt4) {
+          fastify.log.error({
+            userId,
+            hasPrompt1: !!userCheck?.prompt1,
+            hasPrompt4: !!userCheck?.prompt4
+          }, 'CRITICAL: Prompts not saved to database');
+        }
+      }
+    } catch (promptError) {
+      fastify.log.error({
+        error: promptError.message,
+        stack: promptError.stack,
+        userId
+      }, 'CRITICAL: Exception when calling prompt generation');
+
+      // Логируем в admin_error_logs
+      await supabase.from('admin_error_logs').insert({
+        user_account_id: userId,
+        error_type: 'prompt_generation_exception',
+        raw_error: promptError.message,
+        stack_trace: promptError.stack,
+        action: 'onboarding_create_user',
+        severity: 'critical'
+      }).catch(err => fastify.log.error({ err }, 'Failed to log error'));
+    }
+
+    // 6. Генерируем Facebook OAuth URL
     const fbOAuthUrl = buildFacebookOAuthUrl(userId);
 
     fastify.log.info({ userId, username, telegramId }, 'User created successfully');
 
-    // 6. Возвращаем результат
+    // 7. Возвращаем результат
     return reply.send({
       success: true,
       userId,
@@ -8435,6 +8540,93 @@ fastify.post('/api/onboarding/create-user', async (request, reply) => {
 
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Onboarding error');
+    return reply.code(500).send({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/onboarding/regenerate-prompts
+ *
+ * Принудительно регенерировать промпты для пользователя
+ */
+fastify.post('/api/onboarding/regenerate-prompts', async (request, reply) => {
+  try {
+    const { userId } = request.body;
+
+    if (!userId) {
+      return reply.code(400).send({ error: 'userId required' });
+    }
+
+    // Получаем briefing данные
+    const { data: briefing, error: briefingError } = await supabase
+      .from('user_briefing_responses')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (briefingError || !briefing) {
+      fastify.log.warn({ userId, error: briefingError }, 'Briefing not found');
+      return reply.code(404).send({ error: 'Briefing not found' });
+    }
+
+    // Вызываем генерацию
+    const promptResponse = await fetch('http://agent-service:8082/briefing/generate-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        business_name: briefing.business_name,
+        business_niche: briefing.business_niche,
+        instagram_url: briefing.instagram_url,
+        website_url: briefing.website_url,
+        target_audience: briefing.target_audience,
+        geography: briefing.geography,
+        main_pains: briefing.main_pains,
+        main_services: briefing.main_services,
+        competitive_advantages: briefing.competitive_advantages,
+        price_segment: briefing.price_segment,
+        tone_of_voice: briefing.tone_of_voice,
+        main_promises: briefing.main_promises,
+        guarantees: briefing.guarantees
+      })
+    });
+
+    if (!promptResponse.ok) {
+      const errorText = await promptResponse.text();
+      fastify.log.error({ userId, status: promptResponse.status, error: errorText }, 'Failed to regenerate prompts');
+      return reply.code(500).send({
+        error: 'Failed to generate prompts',
+        details: errorText
+      });
+    }
+
+    const result = await promptResponse.json();
+
+    // Проверяем что промпты сохранились
+    const { data: userCheck } = await supabase
+      .from('user_accounts')
+      .select('prompt1, prompt4')
+      .eq('id', userId)
+      .single();
+
+    fastify.log.info({
+      userId,
+      prompt1Saved: !!userCheck?.prompt1,
+      prompt4Saved: !!userCheck?.prompt4,
+      prompt1Length: userCheck?.prompt1?.length,
+      prompt4Length: userCheck?.prompt4?.length
+    }, 'Prompts regenerated');
+
+    return reply.send({
+      success: true,
+      prompt1Length: result.prompt1?.length,
+      prompt4Length: result.prompt4?.length,
+      prompt1Saved: !!userCheck?.prompt1,
+      prompt4Saved: !!userCheck?.prompt4
+    });
+
+  } catch (error) {
+    fastify.log.error({ error: String(error), stack: error.stack }, 'Error regenerating prompts');
     return reply.code(500).send({ error: 'Internal server error' });
   }
 });
