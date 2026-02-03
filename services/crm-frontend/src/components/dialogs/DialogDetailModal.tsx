@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { DialogAnalysis } from '@/types/dialogAnalysis';
+import { CreateTaskData } from '@/types/task';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -10,10 +11,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { dialogAnalysisService } from '@/services/dialogAnalysisService';
+import { consultantApi } from '@/services/consultantApi';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Upload, Loader2, Sparkles, Send } from 'lucide-react';
+import { Upload, Loader2, Sparkles, Send, CheckSquare } from 'lucide-react';
 
 const USER_ACCOUNT_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
@@ -21,6 +23,7 @@ interface DialogDetailModalProps {
   dialog: DialogAnalysis | null;
   open: boolean;
   onClose: () => void;
+  consultantId?: string; // Опционально: для создания задач консультанта
 }
 
 // Parse reasoning into structured format
@@ -49,13 +52,20 @@ function parseReasoning(reasoning: string): { positive: string[]; negative: stri
   return { positive, negative };
 }
 
-export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalProps) {
+export function DialogDetailModal({ dialog, open, onClose, consultantId }: DialogDetailModalProps) {
   if (!dialog) return null;
 
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState(dialog.manual_notes || '');
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const [messageText, setMessageText] = useState('');
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [newTask, setNewTask] = useState<CreateTaskData>({
+    title: '',
+    description: '',
+    due_date: '',
+    lead_id: dialog.id,
+  });
 
   // Upload audio mutation
   const uploadAudioMutation = useMutation({
@@ -133,12 +143,12 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
 
   // Send message mutation
   const sendMessageMutation = useMutation({
-    mutationFn: (message: string) => 
+    mutationFn: (message: string) =>
       dialogAnalysisService.sendMessage(dialog.id, USER_ACCOUNT_ID, message),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leads'] });
       setMessageText('');
-      toast({ 
+      toast({
         title: '✓ Сообщение отправлено',
         description: 'Сообщение успешно отправлено в WhatsApp'
       });
@@ -146,6 +156,32 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
     onError: (error: Error) => {
       toast({
         title: 'Ошибка отправки сообщения',
+        description: error.message,
+        variant: 'destructive'
+      });
+    },
+  });
+
+  // Create task mutation
+  const createTaskMutation = useMutation({
+    mutationFn: (taskData: CreateTaskData) =>
+      consultantApi.createTask({ ...taskData, consultantId }),
+    onSuccess: () => {
+      toast({
+        title: 'Задача создана',
+        description: 'Задача успешно добавлена в список'
+      });
+      setIsCreateTaskOpen(false);
+      setNewTask({
+        title: '',
+        description: '',
+        due_date: '',
+        lead_id: dialog.id,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Ошибка создания задачи',
         description: error.message,
         variant: 'destructive'
       });
@@ -163,6 +199,18 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
   const handleSendMessage = () => {
     if (!messageText.trim()) return;
     sendMessageMutation.mutate(messageText);
+  };
+
+  const handleCreateTask = () => {
+    if (!newTask.title || !newTask.due_date) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните название и дату задачи',
+        variant: 'destructive'
+      });
+      return;
+    }
+    createTaskMutation.mutate(newTask);
   };
 
   return (
@@ -409,6 +457,30 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
               </div>
             </div>
 
+            {/* Create Task Section */}
+            {consultantId && (
+              <div>
+                <h3 className="font-semibold mb-3">Задачи</h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setNewTask({
+                      title: '',
+                      description: '',
+                      due_date: new Date().toISOString().split('T')[0],
+                      lead_id: dialog.id,
+                    });
+                    setIsCreateTaskOpen(true);
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <CheckSquare className="h-4 w-4" />
+                  Создать задачу для этого лида
+                </Button>
+              </div>
+            )}
+
             {/* Metadata */}
             <div>
               <h3 className="font-semibold mb-3">Метаданные</h3>
@@ -472,6 +544,75 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
           </div>
         </ScrollArea>
       </DialogContent>
+
+      {/* Create Task Modal */}
+      <Dialog open={isCreateTaskOpen} onOpenChange={setIsCreateTaskOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Новая задача для лида</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-muted p-3 rounded-md text-sm">
+              <p className="font-medium">{dialog.contact_name || 'Лид'}</p>
+              <p className="text-muted-foreground text-xs">{dialog.contact_phone}</p>
+            </div>
+            <div>
+              <Label>Название *</Label>
+              <Input
+                value={newTask.title}
+                onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                placeholder="Введите название задачи"
+              />
+            </div>
+            <div>
+              <Label>Описание</Label>
+              <Textarea
+                value={newTask.description}
+                onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                placeholder="Дополнительная информация..."
+                rows={3}
+              />
+            </div>
+            <div>
+              <Label>Дата выполнения *</Label>
+              <Input
+                type="date"
+                value={newTask.due_date}
+                onChange={(e) => setNewTask({ ...newTask, due_date: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreateTaskOpen(false);
+                setNewTask({
+                  title: '',
+                  description: '',
+                  due_date: '',
+                  lead_id: dialog.id,
+                });
+              }}
+            >
+              Отмена
+            </Button>
+            <Button
+              onClick={handleCreateTask}
+              disabled={createTaskMutation.isPending}
+            >
+              {createTaskMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Создание...
+                </>
+              ) : (
+                'Создать'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

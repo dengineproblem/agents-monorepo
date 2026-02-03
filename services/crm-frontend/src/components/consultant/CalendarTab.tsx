@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { consultantApi, Consultation, WorkingSchedule } from '@/services/consultantApi';
 import { consultationService, BlockedSlot } from '@/services/consultationService';
 import { ConsultationService } from '@/types/consultation';
+import { CreateTaskData } from '@/types/task';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +34,7 @@ export function CalendarTab() {
   const [isBlockSlotModalOpen, setIsBlockSlotModalOpen] = useState(false);
   const [slotToBlock, setSlotToBlock] = useState<{ time: string } | null>(null);
   const [blockReason, setBlockReason] = useState('Перерыв');
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -43,6 +45,13 @@ export function CalendarTab() {
     start_time: '',
     end_time: '',
     notes: ''
+  });
+
+  // Форма новой задачи
+  const [newTask, setNewTask] = useState<CreateTaskData>({
+    title: '',
+    description: '',
+    due_date: '',
   });
 
   // Временные слоты (с 00:00 до 23:30 с интервалом 30 минут)
@@ -293,6 +302,42 @@ export function CalendarTab() {
     }
   };
 
+  const handleCreateTask = async () => {
+    if (!consultantId || !newTask.title || !newTask.due_date) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните название и дату задачи',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      await consultantApi.createTask({
+        ...newTask,
+        consultantId,
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Задача создана'
+      });
+
+      setIsCreateTaskOpen(false);
+      setNewTask({
+        title: '',
+        description: '',
+        due_date: '',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось создать задачу',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'scheduled': return 'bg-blue-500 border-blue-600';
@@ -514,10 +559,12 @@ export function CalendarTab() {
             <Button
               size="sm"
               onClick={() => {
-                toast({
-                  title: 'Функция в разработке',
-                  description: 'Создание задачи из календаря будет доступно в следующей версии',
+                setNewTask({
+                  title: '',
+                  description: '',
+                  due_date: selectedDate.toISOString().split('T')[0],
                 });
+                setIsCreateTaskOpen(true);
               }}
             >
               <Plus className="h-4 w-4 mr-1" />
@@ -527,9 +574,9 @@ export function CalendarTab() {
         </CardHeader>
         <CardContent>
           <div className="text-sm text-muted-foreground">
-            <p>Интеграция задач в CalendarTab будет доступна в следующей версии</p>
+            <p>Интеграция отображения задач будет доступна в следующей версии</p>
             <p className="text-xs mt-1">
-              Пока создавайте задачи во вкладке "Задачи" с выбором даты
+              Создавайте задачи здесь, просматривайте во вкладке "Задачи"
             </p>
           </div>
         </CardContent>
@@ -855,6 +902,58 @@ export function CalendarTab() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно создания задачи */}
+      <Dialog open={isCreateTaskOpen} onOpenChange={setIsCreateTaskOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Новая задача</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Название *</Label>
+              <Input
+                value={newTask.title}
+                onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                placeholder="Введите название задачи"
+              />
+            </div>
+            <div>
+              <Label>Описание</Label>
+              <Textarea
+                value={newTask.description}
+                onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                placeholder="Дополнительная информация..."
+                rows={3}
+              />
+            </div>
+            <div>
+              <Label>Дата выполнения *</Label>
+              <Input
+                type="date"
+                value={newTask.due_date}
+                onChange={(e) => setNewTask({ ...newTask, due_date: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreateTaskOpen(false);
+                setNewTask({
+                  title: '',
+                  description: '',
+                  due_date: '',
+                });
+              }}
+            >
+              Отмена
+            </Button>
+            <Button onClick={handleCreateTask}>Создать</Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

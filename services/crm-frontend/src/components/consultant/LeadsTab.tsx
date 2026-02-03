@@ -4,6 +4,7 @@ import { consultantApi, Lead } from '@/services/consultantApi';
 import { salesApi } from '@/services/salesApi';
 import { consultationService } from '@/services/consultationService';
 import { ConsultationService } from '@/types/consultation';
+import { CreateTaskData } from '@/types/task';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -54,6 +55,15 @@ export function LeadsTab() {
     start_time: '10:00',
     end_time: '10:30',
     notes: ''
+  });
+
+  // Модальное окно создания задачи
+  const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
+  const [taskFormData, setTaskFormData] = useState<CreateTaskData>({
+    title: '',
+    description: '',
+    due_date: new Date().toISOString().split('T')[0],
+    lead_id: undefined,
   });
 
   // Загрузка лидов
@@ -223,6 +233,54 @@ export function LeadsTab() {
   };
 
   // Создать консультацию для лида
+  const handleOpenCreateTask = (lead: Lead, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTaskFormData({
+      title: '',
+      description: '',
+      due_date: new Date().toISOString().split('T')[0],
+      lead_id: lead.id,
+    });
+    setCreateTaskDialogOpen(true);
+  };
+
+  const handleCreateTask = async () => {
+    if (!taskFormData.title || !taskFormData.due_date || !consultantId) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните название и дату задачи',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      await consultantApi.createTask({
+        ...taskFormData,
+        consultantId,
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Задача создана',
+      });
+
+      setCreateTaskDialogOpen(false);
+      setTaskFormData({
+        title: '',
+        description: '',
+        due_date: new Date().toISOString().split('T')[0],
+        lead_id: undefined,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось создать задачу',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleCreateConsultation = async () => {
     if (!leadForBooking || !consultantId || !consultationFormData.service_id) {
       toast({
@@ -465,11 +523,15 @@ export function LeadsTab() {
                   </h3>
                   <Button
                     size="sm"
-                    onClick={() => {
-                      toast({
-                        title: 'Функция в разработке',
-                        description: 'Создание задачи из лида будет доступно в следующей версии',
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTaskFormData({
+                        title: '',
+                        description: '',
+                        due_date: new Date().toISOString().split('T')[0],
+                        lead_id: selectedLead.id,
                       });
+                      setCreateTaskDialogOpen(true);
                     }}
                   >
                     <Plus className="h-4 w-4 mr-1" />
@@ -478,9 +540,9 @@ export function LeadsTab() {
                 </div>
 
                 <div className="text-sm text-muted-foreground">
-                  <p>Интеграция задач в LeadsTab будет доступна в следующей версии</p>
+                  <p>Список задач по этому лиду будет доступен в следующей версии</p>
                   <p className="text-xs mt-1">
-                    Пока создавайте задачи во вкладке "Задачи" с выбором лида
+                    Создавайте задачи здесь, просматривайте во вкладке "Задачи"
                   </p>
                 </div>
               </div>
@@ -705,6 +767,59 @@ export function LeadsTab() {
             >
               Записать
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно создания задачи */}
+      <Dialog open={createTaskDialogOpen} onOpenChange={setCreateTaskDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Новая задача</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Название *</Label>
+              <Input
+                value={taskFormData.title}
+                onChange={(e) => setTaskFormData({ ...taskFormData, title: e.target.value })}
+                placeholder="Введите название задачи"
+              />
+            </div>
+            <div>
+              <Label>Описание</Label>
+              <Textarea
+                value={taskFormData.description}
+                onChange={(e) => setTaskFormData({ ...taskFormData, description: e.target.value })}
+                placeholder="Дополнительная информация..."
+                rows={3}
+              />
+            </div>
+            <div>
+              <Label>Дата выполнения *</Label>
+              <Input
+                type="date"
+                value={taskFormData.due_date}
+                onChange={(e) => setTaskFormData({ ...taskFormData, due_date: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateTaskDialogOpen(false);
+                setTaskFormData({
+                  title: '',
+                  description: '',
+                  due_date: new Date().toISOString().split('T')[0],
+                  lead_id: undefined,
+                });
+              }}
+            >
+              Отмена
+            </Button>
+            <Button onClick={handleCreateTask}>Создать</Button>
           </div>
         </DialogContent>
       </Dialog>
