@@ -572,14 +572,6 @@ export function CalendarTab() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">
-            <p>Интеграция отображения задач будет доступна в следующей версии</p>
-            <p className="text-xs mt-1">
-              Создавайте задачи здесь, просматривайте во вкладке "Задачи"
-            </p>
-          </div>
-        </CardContent>
       </Card>
 
       {/* Модальное окно новой консультации */}
