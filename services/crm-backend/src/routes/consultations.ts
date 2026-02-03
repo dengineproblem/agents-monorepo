@@ -53,7 +53,8 @@ const UpdateConsultationSchema = z.object({
   status: z.enum(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']).optional(),
   notes: z.string().optional(),
   client_name: z.string().optional(),
-  is_sale_closed: z.boolean().optional()
+  is_sale_closed: z.boolean().optional(),
+  dialog_analysis_id: z.string().uuid().optional()
 });
 
 const RescheduleConsultationSchema = z.object({
@@ -557,12 +558,44 @@ export async function consultationsRoutes(app: FastifyInstance) {
         from_body: !!body.user_account_id
       }, '[POST /consultations] Resolved user_account_id');
 
+      // Автоматическая привязка к лиду по номеру телефона
+      let dialogAnalysisId = body.dialog_analysis_id || null;
+      if (!dialogAnalysisId && body.client_phone) {
+        // Нормализуем номер телефона (убираем +, пробелы, скобки)
+        const normalizedPhone = body.client_phone.replace(/[\s\+\(\)\-]/g, '');
+
+        app.log.info({
+          client_phone: body.client_phone,
+          normalized: normalizedPhone
+        }, '[POST /consultations] Attempting to find lead by phone');
+
+        const { data: lead, error: leadError } = await supabase
+          .from('dialog_analysis')
+          .select('id')
+          .or(`contact_phone.eq.${body.client_phone},contact_phone.eq.${normalizedPhone},contact_phone.eq.+${normalizedPhone}`)
+          .limit(1)
+          .single();
+
+        if (!leadError && lead) {
+          dialogAnalysisId = lead.id;
+          app.log.info({
+            client_phone: body.client_phone,
+            found_lead_id: lead.id.substring(0, 8) + '...'
+          }, '[POST /consultations] Auto-linked consultation to existing lead');
+        } else {
+          app.log.info({
+            client_phone: body.client_phone,
+            error: leadError?.message
+          }, '[POST /consultations] No existing lead found for phone number');
+        }
+      }
+
       const consultationData: any = {
         consultant_id: body.consultant_id,
         client_phone: body.client_phone,
         client_name: body.client_name || null,
         client_chat_id: body.client_chat_id || null,
-        dialog_analysis_id: body.dialog_analysis_id || null,
+        dialog_analysis_id: dialogAnalysisId,
         user_account_id: userAccountId || null,
         service_id: body.service_id || null,
         date: body.date,
@@ -590,11 +623,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
       }
 
       // If linked to a lead, update the lead's funnel_stage
-      if (body.dialog_analysis_id) {
+      if (dialogAnalysisId) {
         await supabase
           .from('dialog_analysis')
           .update({ funnel_stage: 'consultation_booked' })
-          .eq('id', body.dialog_analysis_id);
+          .eq('id', dialogAnalysisId);
       }
 
       // Send confirmation notification and schedule reminders (async, don't block response)

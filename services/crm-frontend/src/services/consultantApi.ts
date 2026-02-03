@@ -129,6 +129,19 @@ export interface CallLog {
   next_follow_up?: string;
 }
 
+export interface Sale {
+  id: string;
+  consultant_id: string;
+  client_name?: string;
+  client_phone?: string;
+  amount: number;
+  currency: string;
+  product_name?: string;
+  purchase_date: string;
+  notes?: string;
+  created_at: string;
+}
+
 // API методы
 
 export const consultantApi = {
@@ -328,6 +341,42 @@ export const consultantApi = {
   deleteTask: async (taskId: string): Promise<void> => {
     return fetchWithAuth(`/consultant/tasks/${taskId}`, {
       method: 'DELETE',
+    });
+  },
+
+  // Sales
+  getSales: async (params: {
+    consultantId: string;
+    search?: string;
+    date_from?: string;
+    date_to?: string;
+    product_name?: string;
+    limit?: string;
+    offset?: string;
+  }): Promise<{ sales: Sale[]; total: number }> => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') {
+        query.append(key, String(value));
+      }
+    });
+    return fetchWithAuth(`/consultant/sales?${query}`);
+  },
+
+  createSale: async (data: {
+    consultantId: string;
+    amount: number;
+    product_name: string;
+    sale_date: string;
+    comment?: string;
+    client_name?: string;
+    client_phone?: string;
+    lead_id?: string;
+  }): Promise<Sale> => {
+    const { consultantId, ...body } = data;
+    return fetchWithAuth(`/consultant/sales?consultantId=${consultantId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   },
 

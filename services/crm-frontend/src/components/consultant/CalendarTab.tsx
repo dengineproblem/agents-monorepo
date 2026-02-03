@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { consultantApi, Consultation, WorkingSchedule } from '@/services/consultantApi';
+import { consultantApi, Consultation, WorkingSchedule, Sale } from '@/services/consultantApi';
 import { consultationService, BlockedSlot } from '@/services/consultationService';
 import { ConsultationService } from '@/types/consultation';
 import { CreateTaskData } from '@/types/task';
@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare } from 'lucide-react';
+import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare, ShoppingBag } from 'lucide-react';
 import { ChatSection } from './ChatSection';
 
 export function CalendarTab() {
@@ -42,6 +42,17 @@ export function CalendarTab() {
   });
   const [draggedConsultation, setDraggedConsultation] = useState<Consultation | null>(null);
   const [dropTargetSlot, setDropTargetSlot] = useState<string | null>(null);
+
+  // Продажи
+  const [clientSales, setClientSales] = useState<Sale[]>([]);
+  const [isLoadingSales, setIsLoadingSales] = useState(false);
+  const [isAddSaleModalOpen, setIsAddSaleModalOpen] = useState(false);
+  const [newSale, setNewSale] = useState({
+    amount: '',
+    product_name: '',
+    sale_date: '',
+    comment: ''
+  });
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -394,6 +405,97 @@ export function CalendarTab() {
     }
   };
 
+  // Загрузка продаж клиента
+  const loadClientSales = async (clientPhone: string) => {
+    if (!consultantId || !clientPhone) return;
+
+    setIsLoadingSales(true);
+    try {
+      const data = await consultantApi.getSales({
+        consultantId,
+        search: clientPhone,
+        limit: '100'
+      });
+      setClientSales(data.sales || []);
+    } catch (error) {
+      console.error('Ошибка загрузки продаж клиента:', error);
+      setClientSales([]);
+    } finally {
+      setIsLoadingSales(false);
+    }
+  };
+
+  // Открытие модалки с загрузкой продаж
+  const handleOpenConsultationDetail = async (consultation: Consultation) => {
+    setSelectedConsultation(consultation);
+    setIsDetailModalOpen(true);
+    if (consultation.client_phone) {
+      await loadClientSales(consultation.client_phone);
+    }
+  };
+
+  // Создание продажи
+  const handleCreateSale = async () => {
+    if (!consultantId || !selectedConsultation) return;
+
+    if (!newSale.amount || !newSale.product_name || !newSale.sale_date) {
+      toast({
+        title: 'Ошибка',
+        description: 'Заполните все обязательные поля',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    try {
+      await consultantApi.createSale({
+        consultantId,
+        amount: parseFloat(newSale.amount),
+        product_name: newSale.product_name,
+        sale_date: newSale.sale_date,
+        comment: newSale.comment || undefined,
+        client_name: selectedConsultation.client_name || undefined,
+        client_phone: selectedConsultation.client_phone,
+        lead_id: selectedConsultation.dialog_analysis_id || undefined
+      });
+
+      toast({
+        title: 'Успешно',
+        description: 'Продажа добавлена'
+      });
+
+      setIsAddSaleModalOpen(false);
+      setNewSale({
+        amount: '',
+        product_name: '',
+        sale_date: '',
+        comment: ''
+      });
+
+      // Перезагрузить продажи
+      if (selectedConsultation.client_phone) {
+        await loadClientSales(selectedConsultation.client_phone);
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось добавить продажу',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // Открытие формы добавления продажи
+  const handleOpenAddSaleModal = () => {
+    setNewSale({
+      amount: '',
+      product_name: '',
+      sale_date: new Date().toISOString().split('T')[0],
+      comment: ''
+    });
+    setIsAddSaleModalOpen(true);
+  };
+
   // Drag & Drop handlers
   const handleDragStart = (consultation: Consultation) => (e: React.DragEvent) => {
     setDraggedConsultation(consultation);
@@ -604,10 +706,7 @@ export function CalendarTab() {
                           draggable={consultation.status !== 'completed' && consultation.status !== 'cancelled'}
                           onDragStart={handleDragStart(consultation)}
                           onDragEnd={handleDragEnd}
-                          onClick={() => {
-                            setSelectedConsultation(consultation);
-                            setIsDetailModalOpen(true);
-                          }}
+                          onClick={() => handleOpenConsultationDetail(consultation)}
                           className={`
                             w-full p-2 rounded text-white text-left text-xs
                             hover:opacity-90 transition-opacity cursor-move
@@ -952,6 +1051,50 @@ export function CalendarTab() {
                 </div>
               </div>
 
+              {/* Продажи клиента */}
+              <div className="border-t pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <Label className="text-lg font-medium flex items-center gap-2">
+                    <ShoppingBag className="w-4 h-4" />
+                    Продажи клиента
+                  </Label>
+                  <Button size="sm" onClick={handleOpenAddSaleModal}>
+                    <Plus className="w-3 h-3 mr-1" />
+                    Добавить продажу
+                  </Button>
+                </div>
+
+                {isLoadingSales ? (
+                  <div className="text-center py-4 text-muted-foreground">
+                    <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-2" />
+                    Загрузка продаж...
+                  </div>
+                ) : clientSales.length === 0 ? (
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    Продаж пока нет
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {clientSales.map(sale => (
+                      <div key={sale.id} className="bg-muted p-3 rounded-md text-sm">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium">{sale.product_name || 'Продукт не указан'}</span>
+                          <span className="font-bold text-green-600">{sale.amount} {sale.currency || 'KZT'}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Дата: {new Date(sale.purchase_date).toLocaleDateString('ru-RU')}
+                        </div>
+                        {sale.notes && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {sale.notes}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Чат с клиентом */}
               {(() => {
                 const hasDialogAnalysisId = selectedConsultation.dialog_analysis_id &&
@@ -1138,6 +1281,74 @@ export function CalendarTab() {
                   Перенести
                 </Button>
                 <Button variant="outline" onClick={() => setIsRescheduleModalOpen(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно добавления продажи */}
+      <Dialog open={isAddSaleModalOpen} onOpenChange={setIsAddSaleModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShoppingBag className="w-5 h-5" />
+              Добавить продажу
+            </DialogTitle>
+          </DialogHeader>
+          {selectedConsultation && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+                <p><strong>Клиент:</strong> {selectedConsultation.client_name || 'Не указан'}</p>
+                <p><strong>Телефон:</strong> {selectedConsultation.client_phone}</p>
+              </div>
+
+              <div>
+                <Label>Название товара/услуги *</Label>
+                <Input
+                  value={newSale.product_name}
+                  onChange={(e) => setNewSale(prev => ({ ...prev, product_name: e.target.value }))}
+                  placeholder="Например: Консультация"
+                />
+              </div>
+
+              <div>
+                <Label>Сумма (KZT) *</Label>
+                <Input
+                  type="number"
+                  value={newSale.amount}
+                  onChange={(e) => setNewSale(prev => ({ ...prev, amount: e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <Label>Дата продажи *</Label>
+                <Input
+                  type="date"
+                  value={newSale.sale_date}
+                  onChange={(e) => setNewSale(prev => ({ ...prev, sale_date: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <Label>Комментарий</Label>
+                <Textarea
+                  value={newSale.comment}
+                  onChange={(e) => setNewSale(prev => ({ ...prev, comment: e.target.value }))}
+                  placeholder="Дополнительная информация..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button onClick={handleCreateSale} className="flex-1">
+                  <ShoppingBag className="w-4 h-4 mr-1" />
+                  Добавить
+                </Button>
+                <Button variant="outline" onClick={() => setIsAddSaleModalOpen(false)}>
                   Отмена
                 </Button>
               </div>
