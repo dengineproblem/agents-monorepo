@@ -187,11 +187,10 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
 
       // Фильтр по статусу записи
       if (is_booked === 'false' || is_booked === 'true') {
-        // Получаем ID лидов которые записаны на консультацию
+        // Получаем ID лидов у которых когда-либо была консультация (любой статус)
         const { data: bookedLeads } = await supabase
           .from('consultations')
-          .select('dialog_analysis_id')
-          .in('status', ['scheduled', 'confirmed']);
+          .select('dialog_analysis_id');
 
         const bookedLeadIds = (bookedLeads || [])
           .map(c => c.dialog_analysis_id)
