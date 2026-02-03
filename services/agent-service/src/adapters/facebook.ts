@@ -860,7 +860,7 @@ export async function createLeadFormVideoCreative(
  * Загрузка изображения в Facebook Ad Account
  * @returns { hash: string } - Hash изображения для использования в креативах
  */
-export async function uploadImage(adAccountId: string, token: string, imageBuffer: Buffer): Promise<{ hash: string }> {
+export async function uploadImage(adAccountId: string, token: string, imageBuffer: Buffer): Promise<{ hash: string; url?: string }> {
   // Multipart загрузка как в n8n: поле 'filename' с бинарным файлом
   const tmpPath = path.join('/var/tmp', `fb_image_${randomUUID()}.jpg`);
   fs.writeFileSync(tmpPath, imageBuffer);
@@ -884,10 +884,12 @@ export async function uploadImage(adAccountId: string, token: string, imageBuffe
 
     const images = (response.data && response.data.images) || {};
     const firstKey = Object.keys(images)[0];
-    const hash = firstKey ? images[firstKey]?.hash : undefined;
+    const imageData = firstKey ? images[firstKey] : undefined;
+    const hash = imageData?.hash;
+    const imageUrl = imageData?.url;
     if (!hash) throw new Error('No image hash returned from Facebook API');
-    log.info({ adAccountId, hash }, 'Image uploaded successfully');
-    return { hash };
+    log.info({ adAccountId, hash, imageUrl }, 'Image uploaded successfully');
+    return { hash, url: imageUrl };
   } catch (error: any) {
     console.error('[uploadImage] Facebook API Error (multipart):', {
       status: error?.response?.status,

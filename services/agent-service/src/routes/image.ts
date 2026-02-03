@@ -331,6 +331,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         // Обновляем запись креатива - новый стандарт: один креатив = один objective
         const updateData: any = {
           fb_image_hash: fbImage.hash,
+          image_url: fbImage.url, // Сохраняем URL для отображения миниатюры
           status: 'ready',
           fb_creative_id: fbCreativeId,
           // Старые поля для обратной совместимости (deprecated)
