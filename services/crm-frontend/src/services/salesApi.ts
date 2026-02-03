@@ -52,8 +52,12 @@ export const salesApi = {
   /**
    * Создать новую продажу
    */
-  async createSale(data: CreateSaleRequest): Promise<Sale> {
-    const response = await fetch(`${API_BASE_URL}/consultant/sales`, {
+  async createSale(data: CreateSaleRequest, consultantId?: string): Promise<Sale> {
+    const queryParams = new URLSearchParams();
+    if (consultantId) queryParams.append('consultantId', consultantId);
+
+    const url = `${API_BASE_URL}/consultant/sales${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const response = await fetch(url, {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(data)
@@ -70,8 +74,12 @@ export const salesApi = {
   /**
    * Обновить продажу
    */
-  async updateSale(saleId: string, data: UpdateSaleRequest): Promise<Sale> {
-    const response = await fetch(`${API_BASE_URL}/consultant/sales/${saleId}`, {
+  async updateSale(saleId: string, data: UpdateSaleRequest, consultantId?: string): Promise<Sale> {
+    const queryParams = new URLSearchParams();
+    if (consultantId) queryParams.append('consultantId', consultantId);
+
+    const url = `${API_BASE_URL}/consultant/sales/${saleId}${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const response = await fetch(url, {
       method: 'PUT',
       headers: getHeaders(),
       body: JSON.stringify(data)
@@ -88,8 +96,12 @@ export const salesApi = {
   /**
    * Удалить продажу
    */
-  async deleteSale(saleId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/consultant/sales/${saleId}`, {
+  async deleteSale(saleId: string, consultantId?: string): Promise<void> {
+    const queryParams = new URLSearchParams();
+    if (consultantId) queryParams.append('consultantId', consultantId);
+
+    const url = `${API_BASE_URL}/consultant/sales/${saleId}${queryParams.toString() ? `?${queryParams}` : ''}`;
+    const response = await fetch(url, {
       method: 'DELETE',
       headers: getHeaders()
     });

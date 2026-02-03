@@ -128,7 +128,7 @@ export function SalesTab({ consultantId }: SalesTabProps) {
         product_name: formData.product_name,
         sale_date: formData.sale_date,
         comment: formData.comment || undefined
-      });
+      }, consultantId);
 
       toast.success('Продажа успешно добавлена');
       setIsAddDialogOpen(false);
@@ -149,7 +149,7 @@ export function SalesTab({ consultantId }: SalesTabProps) {
         product_name: formData.product_name || undefined,
         sale_date: formData.sale_date || undefined,
         comment: formData.comment || undefined
-      });
+      }, consultantId);
 
       toast.success('Продажа успешно обновлена');
       setIsEditDialogOpen(false);
@@ -166,7 +166,7 @@ export function SalesTab({ consultantId }: SalesTabProps) {
     if (!saleToDelete) return;
 
     try {
-      await salesApi.deleteSale(saleToDelete.id);
+      await salesApi.deleteSale(saleToDelete.id, consultantId);
       toast.success('Продажа успешно удалена');
       setDeleteConfirmOpen(false);
       setSaleToDelete(null);
@@ -182,9 +182,9 @@ export function SalesTab({ consultantId }: SalesTabProps) {
     setFormData({
       lead_id: '',
       amount: sale.amount.toString(),
-      product_name: sale.notes || '',
+      product_name: sale.product_name || '',
       sale_date: sale.purchase_date,
-      comment: ''
+      comment: sale.comment || ''
     });
     setIsEditDialogOpen(true);
   };
@@ -465,7 +465,7 @@ export function SalesTab({ consultantId }: SalesTabProps) {
                     <TableRow key={sale.id}>
                       <TableCell>{formatDate(sale.purchase_date)}</TableCell>
                       <TableCell>{sale.client_phone}</TableCell>
-                      <TableCell>{sale.notes || '—'}</TableCell>
+                      <TableCell>{sale.product_name || '—'}</TableCell>
                       <TableCell className="font-medium">{formatCurrency(sale.amount)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">

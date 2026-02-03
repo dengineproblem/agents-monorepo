@@ -129,7 +129,7 @@ export function LeadsTab() {
         product_name: saleFormData.product_name,
         sale_date: saleFormData.sale_date,
         comment: saleFormData.comment || undefined
-      });
+      }, consultantId);
 
       toast({
         title: 'Успешно',

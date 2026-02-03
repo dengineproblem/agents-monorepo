@@ -5,7 +5,8 @@ export interface Sale {
   consultant_id: string;
   client_phone: string;
   amount: number;
-  notes?: string; // Название продукта/комментарий
+  product_name?: string; // Название продукта/услуги
+  comment?: string; // Комментарий к продаже
   purchase_date: string; // YYYY-MM-DD
   created_at: string;
 }
@@ -40,16 +41,16 @@ export interface ChartDataPoint {
 export interface CreateSaleRequest {
   lead_id: string;
   amount: number;
-  product_name: string; // Будет сохранено в campaign_name
-  sale_date?: string; // Игнорируется, используется created_at автоматически
-  comment?: string; // Игнорируется, поле не существует в БД
+  product_name: string; // Название продукта/услуги
+  sale_date?: string; // Дата продажи (YYYY-MM-DD), по умолчанию текущая дата
+  comment?: string; // Комментарий к продаже
 }
 
 export interface UpdateSaleRequest {
   amount?: number;
-  product_name?: string; // Будет сохранено в campaign_name
-  sale_date?: string; // Игнорируется
-  comment?: string; // Игнорируется
+  product_name?: string; // Название продукта/услуги
+  sale_date?: string; // Дата продажи (YYYY-MM-DD)
+  comment?: string; // Комментарий к продаже
 }
 
 export interface SetSalesPlanRequest {
