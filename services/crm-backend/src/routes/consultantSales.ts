@@ -6,13 +6,25 @@ import { ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 // ==================== SCHEMAS ====================
 
 const CreateSaleSchema = z.object({
-  lead_id: z.string().uuid().optional().or(z.literal('').transform(() => undefined)),
-  client_name: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
-  client_phone: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+  lead_id: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().uuid().optional()
+  ),
+  client_name: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().min(1).optional()
+  ),
+  client_phone: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().min(1).optional()
+  ),
   amount: z.number().positive(),
   product_name: z.string().min(1),
   sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  comment: z.string().optional().or(z.literal('').transform(() => undefined))
+  comment: z.preprocess(
+    (val) => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+    z.string().optional()
+  )
 });
 
 const UpdateSaleSchema = z.object({
@@ -104,6 +116,14 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
       }
 
       const body = CreateSaleSchema.parse(request.body);
+
+      app.log.info({
+        rawBody: request.body,
+        parsedBody: body,
+        lead_id: body.lead_id,
+        lead_id_type: typeof body.lead_id,
+        lead_id_undefined: body.lead_id === undefined
+      }, 'Creating sale - parsed request body');
 
       let clientName = body.client_name || '';
       let clientPhone = body.client_phone || '';
