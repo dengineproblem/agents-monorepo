@@ -26,6 +26,10 @@ export const MODEL_PRICING = {
   'gpt-4o': {
     input: 2.50 / 1_000_000,
     output: 10.00 / 1_000_000
+  },
+  'gemini-3-pro-preview': {
+    input: 2.00 / 1_000_000,    // $2.00 per 1M input tokens (estimated)
+    output: 8.00 / 1_000_000    // $8.00 per 1M output tokens (estimated)
   }
 };
 
@@ -43,7 +47,7 @@ function isValidTelegramId(telegramId) {
 
 /**
  * Нормализация имени модели
- * Убирает префиксы openai/ anthropic/ и приводит к стандартному виду
+ * Убирает префиксы openai/ anthropic/ google/ и приводит к стандартному виду
  */
 export function normalizeModelName(model) {
   if (!model) {
@@ -52,7 +56,7 @@ export function normalizeModelName(model) {
   }
 
   // Убираем провайдера
-  const normalized = model.replace(/^(openai|anthropic)\//, '');
+  const normalized = model.replace(/^(openai|anthropic|google)\//, '');
 
   // Проверяем есть ли в pricing
   if (MODEL_PRICING[normalized]) {

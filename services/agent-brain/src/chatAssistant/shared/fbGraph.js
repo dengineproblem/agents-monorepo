@@ -9,6 +9,7 @@ import { logger } from '../../lib/logger.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const DEFAULT_TIMEOUT = 25000;  // 25 seconds
+const LONG_TIMEOUT = 600000;    // 10 minutes for video uploads
 const DEFAULT_MAX_RETRIES = 2;
 
 // Circuit breaker name for Facebook API
@@ -39,15 +40,20 @@ function isFbRetryable(error) {
  * @param {string} path - API path (e.g., 'act_123/campaigns')
  * @param {string} accessToken - Facebook access token
  * @param {object} params - Query/body parameters
- * @param {object} options - { timeout, maxRetries, skipCircuitBreaker }
+ * @param {object} options - { timeout, longTimeout, maxRetries, skipCircuitBreaker }
+ *   - longTimeout: Set to true for video uploads (uses 10 minute timeout)
  * @returns {Promise<object>} API response
  */
 export async function fbGraph(method, path, accessToken, params = {}, options = {}) {
   const {
     timeout = DEFAULT_TIMEOUT,
+    longTimeout = false,
     maxRetries = DEFAULT_MAX_RETRIES,
     skipCircuitBreaker = false
   } = options;
+
+  // Use long timeout for video operations (10 minutes instead of 25 seconds)
+  const effectiveTimeout = longTimeout ? LONG_TIMEOUT : timeout;
 
   // Extract first segment of path for operation name (e.g., 'act_123' from 'act_123/campaigns')
   const pathSegment = path.split('/')[0] || path;
@@ -58,7 +64,7 @@ export async function fbGraph(method, path, accessToken, params = {}, options = 
     () => fbGraphInternal(method, path, accessToken, params),
     {
       maxRetries,
-      timeoutMs: timeout,
+      timeoutMs: effectiveTimeout,
       operationName,
       shouldRetry: isFbRetryable
     }

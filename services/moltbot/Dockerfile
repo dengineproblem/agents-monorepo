@@ -20,9 +20,10 @@ RUN npm install -g moltbot@beta
 
 WORKDIR /root/clawd
 
-# Copy config template and entrypoint
+# Copy config template, patch script and entrypoint
 COPY moltbot-config-template.json /root/clawd/moltbot-config-template.json
+COPY patch-telegram-video.js /root/clawd/patch-telegram-video.js
 COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /root/clawd/patch-telegram-video.js
 
 ENTRYPOINT ["docker-entrypoint.sh"]

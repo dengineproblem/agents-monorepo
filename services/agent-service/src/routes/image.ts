@@ -478,14 +478,40 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // 2. Проверяем наличие 4K версии (9:16)
+      // 2. Проверяем наличие 4K версии (9:16), если нет - автоматически upscale
       if (!creative.image_url_4k) {
-        app.log.error({ has_4k: !!creative.image_url_4k }, '4K version not available');
-        return reply.status(400).send({
-          success: false,
-          error: '4K version is required. Please upscale the image first.',
-          details: { has_image_url_4k: !!creative.image_url_4k }
-        });
+        app.log.info({ creative_id }, 'No 4K version found, starting automatic upscale...');
+
+        try {
+          // Вызываем upscale endpoint
+          const upscaleResponse = await fetch('http://creative-generation-service:8085/upscale-to-4k', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              creative_id,
+              user_id
+            })
+          });
+
+          if (!upscaleResponse.ok) {
+            const error = await upscaleResponse.json();
+            throw new Error(`Upscale failed: ${error.error || upscaleResponse.statusText}`);
+          }
+
+          const upscaleResult = await upscaleResponse.json();
+          app.log.info({ image_url_4k: upscaleResult.image_url_4k }, 'Automatic upscale completed');
+
+          // Обновляем creative объект с новым 4K URL
+          creative.image_url_4k = upscaleResult.image_url_4k;
+
+        } catch (upscaleError: any) {
+          app.log.error({ err: upscaleError }, 'Automatic upscale failed');
+          return reply.status(500).send({
+            success: false,
+            error: 'Failed to upscale image automatically',
+            details: upscaleError.message
+          });
+        }
       }
 
       // 3. Загружаем direction для получения objective

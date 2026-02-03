@@ -1567,11 +1567,11 @@ export const adsHandlers = {
       .update({ daily_budget_cents: newBudgetCents, updated_at: new Date().toISOString() })
       .eq('id', direction_id);
 
+    // В multi-account режиме проверяем владение через account_id
     if (dbAccountId) {
       query = query.eq('account_id', dbAccountId);
-    } else {
-      query = query.is('account_id', null);
     }
+    // В legacy режиме не фильтруем по account_id - обновляем по ID
 
     const { data, error } = await query
       .select('id, name, daily_budget_cents')

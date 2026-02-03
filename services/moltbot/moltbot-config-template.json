@@ -8,7 +8,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       },
       "models": {
         "openai/gpt-4o": {
@@ -23,6 +23,13 @@
             "maxTokens": 140000
           },
           "alias": "gpt"
+        },
+        "google/gemini-3-pro-preview": {
+          "params": {
+            "temperature": 1.0,
+            "maxTokens": 140000
+          },
+          "alias": "gemini"
         },
         "anthropic/claude-sonnet-4-20250514": {
           "params": {
@@ -41,6 +48,7 @@
       "heartbeat": {
         "every": "30m"
       },
+      "bootstrapMaxChars": 80000,
       "maxConcurrent": 4
     },
     "list": [
@@ -51,7 +59,7 @@
         "workspace": "/root/clawd/moltbot-workspace-router",
         "agentDir": "~/.moltbot/agents/router",
         "model": {
-          "primary": "openai/gpt-5.2"
+          "primary": "google/gemini-3-pro-preview"
         }
       }
     ]
@@ -80,9 +88,8 @@
         "enabled": true,
         "models": [
           {
-            "provider": "openai",
-            "model": "whisper-1",
-            "baseUrl": "https://api.openai.com/v1"
+            "provider": "google",
+            "model": "gemini-3-flash-preview"
           }
         ]
       }

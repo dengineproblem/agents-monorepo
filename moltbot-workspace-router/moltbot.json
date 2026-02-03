@@ -12,7 +12,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       },
       "models": {
         "openai/gpt-4o": {
@@ -28,6 +28,13 @@
             "maxTokens": 4096
           },
           "alias": "gpt"
+        },
+        "google/gemini-3-pro-preview": {
+          "params": {
+            "temperature": 1.0,
+            "maxTokens": 140000
+          },
+          "alias": "gemini"
         },
         "anthropic/claude-sonnet-4-20250514": {
           "params": {
@@ -74,7 +81,7 @@
       "agentDir": "~/.moltbot/agents/facebook-ads",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       }
     },
     "creatives": {
@@ -83,7 +90,7 @@
       "agentDir": "~/.moltbot/agents/creatives",
       "bootstrapMaxChars": 12000,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       }
     },
     "crm": {
@@ -92,7 +99,7 @@
       "agentDir": "~/.moltbot/agents/crm",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       }
     },
     "tiktok": {
@@ -101,7 +108,7 @@
       "agentDir": "~/.moltbot/agents/tiktok",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       }
     },
     "onboarding": {
@@ -110,7 +117,7 @@
       "agentDir": "~/.moltbot/agents/onboarding",
       "bootstrapMaxChars": 15000,
       "model": {
-        "primary": "openai/gpt-5.2"
+        "primary": "google/gemini-3-pro-preview"
       }
     }
   },
@@ -130,9 +137,17 @@
         "enabled": true,
         "models": [
           {
-            "provider": "openai",
-            "model": "whisper-1",
-            "baseUrl": "https://api.openai.com/v1"
+            "provider": "google",
+            "model": "gemini-3-flash-preview"
+          }
+        ]
+      },
+      "video": {
+        "enabled": false,
+        "models": [
+          {
+            "provider": "google",
+            "model": "gemini-3-flash-preview"
           }
         ]
       }

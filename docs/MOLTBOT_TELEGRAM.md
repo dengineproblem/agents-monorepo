@@ -1553,11 +1553,20 @@ curl -s -X POST http://agent-brain:7080/brain/tools/{toolName} \
 
 #### Креативы (23 tools)
 
+**⚠️ ВАЖНО: Загрузка медиа через Telegram НЕ поддерживается**
+
+Креативы создаются только через:
+1. **Генерация через Gemini** (`creative-image-generator` skill)
+2. **Автоматическая загрузка в Supabase Storage**
+3. **Upscale до 9:16 4K** происходит автоматически при вызове `createImageCreative`
+4. **Загрузка в Facebook** по команде пользователя через `launchCreative`
+
 | Tool | Тип | Описание |
 |------|-----|----------|
 | `getCreatives` | READ | Список креативов |
 | `getTopCreatives` | READ | Лучшие креативы |
-| `generateCreatives` | WRITE | Генерация изображений |
+| `generateCreatives` | WRITE | Генерация изображений (Gemini) |
+| `createImageCreative` | WRITE | Создание креатива из Supabase + auto-upscale до 9:16 4K (timeout: 3 мин) |
 | `launchCreative` | WRITE | Запуск в рекламу |
 
 #### CRM (18 tools)
@@ -2723,6 +2732,95 @@ Content-Type: application/json
 2. Формирует параметры креатива
 3. Вызывает generateCreatives tool
 4. Возвращает ссылку на сгенерированное изображение
+
+#### Workflow: От генерации до Facebook
+
+**⚠️ КРИТИЧНО: Загрузка медиа через Telegram НЕ поддерживается!**
+
+**Правильный workflow:**
+
+```
+1. Генерация → 2. Сохранение в Supabase → 3. Auto-upscale → 4. Загрузка в Facebook
+```
+
+**Шаг 1: Генерация изображения**
+```
+Пользователь: "Сгенерируй креатив про доставку еды"
+→ Moltbot вызывает generateCreatives
+→ Генерируется изображение 4:5 (1080×1350)
+→ Сохраняется в Supabase Storage
+```
+
+**Шаг 2: Создание креатива с auto-upscale**
+```
+Пользователь: "Загрузи креатив из Supabase"
+→ Moltbot вызывает createImageCreative с creative_id из user_creatives
+→ АВТОМАТИЧЕСКИ проверяет наличие image_url_4k
+→ Если нет 4K версии - вызывает upscale endpoint (timeout: 180 секунд)
+→ Upscale расширяет 4:5 до 9:16 4K (1080×1920)
+→ Возвращает image_url и image_url_4k
+```
+
+**⚠️ Moltbot НЕ должен говорить про upscale!**
+- Процесс upscale полностью прозрачен
+- Пользователь видит только итоговый результат
+- Timeout: 3 минуты на всю операцию
+
+**Шаг 3: Загрузка в Facebook**
+```
+Пользователь: "Запусти креатив в рекламу"
+→ Moltbot вызывает launchCreative
+→ Загружает 9:16 4K версию в Facebook
+→ Создает AdCreative object
+```
+
+**createImageCreative Tool**
+
+**Параметры:**
+```json
+{
+  "creative_id": "uuid",        // ID из user_creatives
+  "user_id": "uuid",            // userAccountId из контекста
+  "account_id": "uuid"          // accountId из контекста
+}
+```
+
+**Ответ:**
+```json
+{
+  "success": true,
+  "creative": {
+    "id": "uuid",
+    "title": "Delivery Promo",
+    "image_url": "https://...storage.supabase.co/.../image_4_5.png",
+    "image_url_4k": "https://...storage.supabase.co/.../image_9_16_4k.png",
+    "status": "ready"
+  }
+}
+```
+
+**Таймауты:**
+- generateCreatives: 90 секунд (генерация через Gemini)
+- createImageCreative: 180 секунд (upscale + загрузка)
+- launchCreative: 60 секунд (загрузка в Facebook)
+
+**Meta для tool definitions:**
+```json
+{
+  "generateCreatives": {
+    "timeout": 90000,
+    "dangerous": false
+  },
+  "createImageCreative": {
+    "timeout": 180000,
+    "dangerous": false
+  },
+  "launchCreative": {
+    "timeout": 60000,
+    "dangerous": true
+  }
+}
+```
 
 ### Troubleshooting
 

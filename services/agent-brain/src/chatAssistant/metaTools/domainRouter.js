@@ -9,6 +9,7 @@ import { executeToolAdaptive } from './mcpBridge.js';
 import { getDomainForTool } from './formatters.js';
 import { processDomainResults } from './domainAgents.js';
 import { logger } from '../../lib/logger.js';
+import { checkUserLimit } from '../../lib/usageLimits.js';
 
 /**
  * Process tool calls through domain routing
@@ -21,6 +22,34 @@ import { logger } from '../../lib/logger.js';
 export async function routeToolCallsToDomains(toolCalls, context, userMessage = '') {
   const startTime = Date.now();
   const { layerLogger } = context;
+
+  // 0. Check user limits BEFORE executing any tools
+  if (context.telegramChatId) {
+    logger.info({ telegramChatId: context.telegramChatId }, 'Domain router: checking user limits');
+
+    const limitCheck = await checkUserLimit(context.telegramChatId);
+
+    if (!limitCheck.allowed) {
+      const errorMsg = `⚠️ Превышен дневной лимит использования AI\n\nИспользовано: $${limitCheck.spent.toFixed(2)} из $${limitCheck.limit.toFixed(2)}\n\nПопробуйте завтра или обратитесь в поддержку для увеличения лимита.`;
+      logger.warn({
+        telegramChatId: context.telegramChatId,
+        spent: limitCheck.spent,
+        limit: limitCheck.limit
+      }, 'Domain router: user limit exceeded');
+
+      throw new Error(errorMsg);
+    }
+
+    if (limitCheck.nearLimit) {
+      logger.info({
+        telegramChatId: context.telegramChatId,
+        spent: limitCheck.spent,
+        remaining: limitCheck.remaining
+      }, 'Domain router: user approaching limit');
+
+      // TODO: Add warning to response (not implemented yet - would need to modify response structure)
+    }
+  }
 
   // 1. Group tool calls by domain
   const byDomain = groupByDomain(toolCalls);

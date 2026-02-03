@@ -19,6 +19,7 @@ import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
 import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
 import { collectTikTokMetricsForDays } from './tiktokMetricsCollector.js';
+import { uploadVideoToFacebook } from './lib/videoUpload.js';
 
 // Основной бот для отправки отчётов клиентам и в мониторинг
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -8680,39 +8681,98 @@ fastify.post('/api/moltbot/creative/upload', async (request, reply) => {
       title: fileName || tempFileName
     }, 'Database creative record created');
 
-    // TODO: Implement full processing pipeline:
-    // - Transcription via Whisper
-    // - Thumbnail generation
-    // - Upload to Facebook
-    // - Update creative status to 'ready'
+    // 6. Получить credentials пользователя через /api/context
+    // Нужно telegramId для получения accessToken
+    const { telegramId } = request.body;
+    if (!telegramId) {
+      return reply.code(400).send({
+        error: 'Missing telegramId',
+        message: 'telegramId is required to fetch user credentials'
+      });
+    }
 
-    // Для MVP просто возвращаем успех
+    request.log.info({ telegramId, creativeId: creative.id }, 'Fetching user credentials');
+
+    const contextResponse = await fetch(
+      `http://localhost:${process.env.PORT || 7080}/api/context`,
+      {
+        headers: {
+          'X-Telegram-Id': telegramId,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!contextResponse.ok) {
+      request.log.error({ status: contextResponse.status }, 'Failed to fetch user context');
+      return reply.code(500).send({
+        error: 'Failed to get user credentials',
+        details: `Context API returned ${contextResponse.status}`
+      });
+    }
+
+    const context = await contextResponse.json();
+    const { adAccountId, accessToken } = context;
+
+    if (!adAccountId || !accessToken) {
+      return reply.code(500).send({
+        error: 'Incomplete user credentials',
+        details: 'Context missing adAccountId or accessToken'
+      });
+    }
+
+    // 7. Загрузить видео в Facebook через Graph API
+    request.log.info({
+      creativeId: creative.id,
+      tempPath,
+      adAccountId: adAccountId?.slice(0, 15) + '...',
+      fileSize: buffer.length
+    }, 'Uploading video to Facebook');
+
+    const videoUploadResult = await uploadVideoToFacebook({
+      adAccountId,
+      accessToken,
+      filePath: tempPath,
+      title: fileName || tempFileName
+    });
+
+    request.log.info({
+      fbVideoId: videoUploadResult.id,
+      thumbnailUrl: videoUploadResult.thumbnail_url
+    }, 'Video uploaded to Facebook successfully');
+
+    // 8. Обновить creative с fb_video_id и thumbnail
+    await supabase
+      .from('user_creatives')
+      .update({
+        status: 'ready',
+        fb_video_id: videoUploadResult.id,
+        fb_thumbnail_url: videoUploadResult.thumbnail_url
+      })
+      .eq('id', creative.id);
+
     const { data: direction } = await supabase
       .from('account_directions')
       .select('name')
       .eq('id', targetDirectionId)
       .single();
 
-    // Обновляем статус на ready (временно, пока нет полной обработки)
-    await supabase
-      .from('user_creatives')
-      .update({ status: 'ready' })
-      .eq('id', creative.id);
-
     // P3: Structured logging - upload complete
     request.log.info({
       event: 'creative_upload_complete',
       creativeId: creative.id,
+      fbVideoId: videoUploadResult.id,
+      thumbnailUrl: videoUploadResult.thumbnail_url,
       directionName: direction?.name,
       fileName: fileName || tempFileName,
       duration_ms: Date.now() - uploadStartTime
-    }, 'Creative upload completed successfully');
+    }, 'Creative upload completed successfully (video uploaded to Facebook)');
 
     return reply.send({
       success: true,
       creative_id: creative.id,
-      // fb_video_id: result.fbVideoId, // TODO
-      // thumbnail_url: result.thumbnailUrl, // TODO
+      fb_video_id: videoUploadResult.id,
+      thumbnail_url: videoUploadResult.thumbnail_url,
       direction_name: direction?.name || 'Unknown'
     });
 

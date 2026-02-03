@@ -22,7 +22,7 @@ echo "  ✓ Single-Workspace config ready: 1 router agent with 5 subagents (face
 # Setup auth profile for router agent
 echo "Setting up auth profile for router agent..."
 mkdir -p "/root/.moltbot/agents/router/agent"
-echo "{\"profiles\":[{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\",\"default\":true},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > "/root/.moltbot/agents/router/agent/auth-profiles.json"
+echo "{\"profiles\":[{\"id\":\"google\",\"provider\":\"google\",\"apiKey\":\"$GEMINI_API_KEY\",\"default\":true},{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\"},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > "/root/.moltbot/agents/router/agent/auth-profiles.json"
 echo "  ✓ Auth profile configured for router agent"
 
 # Start Moltbot Gateway with Single-Workspace router

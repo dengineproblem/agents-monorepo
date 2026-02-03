@@ -16,7 +16,7 @@ import { getValidAmoCRMToken } from '../lib/amocrmTokens.js';
  * Normalize phone number for comparison
  * Removes all non-digits and WhatsApp suffixes
  */
-function normalizePhone(phone: string | null): string | null {
+export function normalizePhone(phone: string | null): string | null {
   if (!phone) return null;
   
   // Remove WhatsApp suffixes
@@ -39,7 +39,7 @@ function normalizePhone(phone: string | null): string | null {
 /**
  * Qualification field configuration from user_accounts.amocrm_qualification_fields
  */
-interface QualificationFieldConfig {
+export interface QualificationFieldConfig {
   field_id: number;
   field_name: string;
   field_type: 'checkbox' | 'select' | 'multiselect';
@@ -56,7 +56,7 @@ interface QualificationFieldConfig {
  * @param qualificationFields - array of qualification field configs
  * @returns true if lead is qualified
  */
-function checkQualification(
+export function checkQualification(
   amocrmLead: any,
   qualificationFields: QualificationFieldConfig[]
 ): boolean {

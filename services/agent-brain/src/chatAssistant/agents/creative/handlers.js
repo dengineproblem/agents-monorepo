@@ -1016,6 +1016,10 @@ export const creativeHandlers = {
     }
 
     try {
+      // Timeout 90 секунд для генерации (нормально для Gemini Image Generation ~40-50 сек)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
+
       const response = await fetch(`${creativeServiceUrl}/generate-creative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1030,8 +1034,11 @@ export const creativeHandlers = {
           style_id: style_id || 'modern_performance',
           style_prompt: style_prompt || null,
           reference_image: reference_image || null
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -1047,16 +1054,20 @@ export const creativeHandlers = {
       const result = await response.json();
 
       // Log the generation
-      await supabase.from('agent_logs').insert({
-        ad_account_id: dbAccountId,
-        level: 'info',
-        message: `Image creative generated via Chat Assistant`,
-        context: {
-          creative_id: result.creative_id,
-          style_id: style_id || 'modern_performance',
-          source: 'CreativeAgent'
-        }
-      }).catch(() => {});
+      try {
+        await supabase.from('agent_logs').insert({
+          ad_account_id: dbAccountId,
+          level: 'info',
+          message: `Image creative generated via Chat Assistant`,
+          context: {
+            creative_id: result.creative_id,
+            style_id: style_id || 'modern_performance',
+            source: 'CreativeAgent'
+          }
+        });
+      } catch (logError) {
+        // Ignore logging errors
+      }
 
       return {
         success: true,
@@ -1103,6 +1114,10 @@ export const creativeHandlers = {
     }
 
     try {
+      // Timeout 90 секунд для генерации карусели (может быть дольше чем single image)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
+
       const response = await fetch(`${creativeServiceUrl}/generate-carousel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1114,8 +1129,11 @@ export const creativeHandlers = {
           style_prompt: style_prompt || null,
           reference_image: reference_image || null,
           direction_id: direction_id || null
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));

@@ -375,6 +375,7 @@ services:
       - ./moltbot-workspace-crm:/root/clawd/moltbot-workspace-crm
       - ./moltbot-workspace-tiktok:/root/clawd/moltbot-workspace-tiktok
       - ./moltbot-workspace-onboarding:/root/clawd/moltbot-workspace-onboarding
+      - ./services/moltbot/moltbot-config-template.json:/root/clawd/moltbot-config-template.json
       - moltbot-config:/root/.moltbot
     restart: unless-stopped
     networks:
