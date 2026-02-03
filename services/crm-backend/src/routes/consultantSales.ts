@@ -6,7 +6,9 @@ import { ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 // ==================== SCHEMAS ====================
 
 const CreateSaleSchema = z.object({
-  lead_id: z.string().uuid(),
+  lead_id: z.string().uuid().optional(),
+  client_name: z.string().min(1).optional(),
+  client_phone: z.string().min(1).optional(),
   amount: z.number().positive(),
   product_name: z.string().min(1),
   sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -103,15 +105,30 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
 
       const body = CreateSaleSchema.parse(request.body);
 
-      // Получаем данные лида
-      const { data: lead, error: leadError } = await supabase
-        .from('dialog_analysis')
-        .select('contact_name, contact_phone, chat_id')
-        .eq('id', body.lead_id)
-        .single();
+      let clientName = body.client_name || '';
+      let clientPhone = body.client_phone || '';
 
-      if (leadError || !lead) {
-        return reply.status(404).send({ error: 'Lead not found' });
+      // Если указан lead_id, получаем данные из лида
+      if (body.lead_id) {
+        const { data: lead, error: leadError } = await supabase
+          .from('dialog_analysis')
+          .select('contact_name, contact_phone, chat_id')
+          .eq('id', body.lead_id)
+          .single();
+
+        if (leadError || !lead) {
+          return reply.status(404).send({ error: 'Lead not found' });
+        }
+
+        clientName = lead.contact_name || '';
+        clientPhone = lead.chat_id || lead.contact_phone || '';
+      }
+
+      // Проверяем что есть хотя бы имя или телефон клиента
+      if (!clientName && !clientPhone) {
+        return reply.status(400).send({
+          error: 'Client name or phone is required. Provide either lead_id or client_name/client_phone.'
+        });
       }
 
       // Создаём продажу
@@ -119,8 +136,8 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         .from('purchases')
         .insert({
           consultant_id: consultantId,
-          client_name: lead.contact_name || '',
-          client_phone: lead.chat_id || lead.contact_phone || '',
+          client_name: clientName,
+          client_phone: clientPhone,
           amount: body.amount,
           product_name: body.product_name,
           purchase_date: body.sale_date,

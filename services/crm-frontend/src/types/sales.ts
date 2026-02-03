@@ -39,7 +39,9 @@ export interface ChartDataPoint {
 // ==================== REQUEST TYPES ====================
 
 export interface CreateSaleRequest {
-  lead_id: string;
+  lead_id?: string; // UUID лида (опционально, если создается из лида)
+  client_name?: string; // Имя клиента (если нет lead_id)
+  client_phone?: string; // Телефон клиента (если нет lead_id)
   amount: number;
   product_name: string; // Название продукта/услуги
   sale_date?: string; // Дата продажи (YYYY-MM-DD), по умолчанию текущая дата

@@ -67,6 +67,8 @@ export function SalesTab() {
   // Форма добавления/редактирования
   const [formData, setFormData] = useState({
     lead_id: '',
+    client_name: '',
+    client_phone: '',
     amount: '',
     product_name: '',
     sale_date: new Date().toISOString().split('T')[0],
@@ -121,7 +123,9 @@ export function SalesTab() {
   const handleAddSale = async () => {
     try {
       await salesApi.createSale({
-        lead_id: formData.lead_id,
+        lead_id: formData.lead_id || undefined,
+        client_name: formData.client_name || undefined,
+        client_phone: formData.client_phone || undefined,
         amount: parseFloat(formData.amount),
         product_name: formData.product_name,
         sale_date: formData.sale_date,
@@ -195,6 +199,8 @@ export function SalesTab() {
   const resetForm = () => {
     setFormData({
       lead_id: '',
+      client_name: '',
+      client_phone: '',
       amount: '',
       product_name: '',
       sale_date: new Date().toISOString().split('T')[0],
@@ -377,18 +383,40 @@ export function SalesTab() {
                 <DialogHeader>
                   <DialogTitle>Добавить продажу</DialogTitle>
                   <DialogDescription>
-                    Заполните информацию о новой продаже
+                    Заполните информацию о новой продаже. Укажите либо ID лида, либо имя/телефон клиента.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
                   <div>
-                    <Label htmlFor="lead_id">ID лида</Label>
+                    <Label htmlFor="lead_id">ID лида (опционально)</Label>
                     <Input
                       id="lead_id"
                       value={formData.lead_id}
                       onChange={(e) => setFormData({ ...formData, lead_id: e.target.value })}
-                      placeholder="UUID лида"
+                      placeholder="UUID лида (если есть)"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="client_name">Имя клиента</Label>
+                      <Input
+                        id="client_name"
+                        value={formData.client_name}
+                        onChange={(e) => setFormData({ ...formData, client_name: e.target.value })}
+                        placeholder="Иван Иванов"
+                        disabled={!!formData.lead_id}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="client_phone">Телефон клиента</Label>
+                      <Input
+                        id="client_phone"
+                        value={formData.client_phone}
+                        onChange={(e) => setFormData({ ...formData, client_phone: e.target.value })}
+                        placeholder="+77001234567"
+                        disabled={!!formData.lead_id}
+                      />
+                    </div>
                   </div>
                   <div>
                     <Label htmlFor="amount">Сумма (KZT)</Label>
