@@ -24,6 +24,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { Plus, CheckSquare, Trash2, Edit, Search, Calendar as CalendarIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LeadPhoneSearch } from '@/components/ui/LeadPhoneSearch';
 
 interface Lead {
   id: string;
@@ -42,7 +43,7 @@ export function TasksTab() {
   const [filters, setFilters] = useState({
     status: 'all',
     dateFilter: 'all', // all, overdue, today, week, month
-    leadId: 'all',
+    leadId: undefined as string | undefined,
     search: '',
   });
 
@@ -107,7 +108,7 @@ export function TasksTab() {
       }
 
       // Фильтр по лиду
-      if (filters.leadId !== 'all') {
+      if (filters.leadId) {
         params.lead_id = filters.leadId;
       }
 
@@ -414,19 +415,14 @@ export function TasksTab() {
                 <SelectItem value="month">Месяц</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={filters.leadId} onValueChange={(value) => setFilters({ ...filters, leadId: value })}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Лид" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все лиды</SelectItem>
-                {leads.map((lead) => (
-                  <SelectItem key={lead.id} value={lead.id}>
-                    {lead.contact_name || lead.contact_phone}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <LeadPhoneSearch
+              leads={leads}
+              value={filters.leadId}
+              onChange={(leadId) => setFilters({ ...filters, leadId })}
+              placeholder="Фильтр по телефону лида..."
+              className="w-[220px]"
+              allowNone={true}
+            />
           </div>
 
           {/* Список задач */}
@@ -573,22 +569,13 @@ export function TasksTab() {
             </div>
             <div>
               <Label>Лид (опционально)</Label>
-              <Select
-                value={formData.lead_id || 'none'}
-                onValueChange={(value) => setFormData({ ...formData, lead_id: value === 'none' ? undefined : value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Без лида</SelectItem>
-                  {leads.map((lead) => (
-                    <SelectItem key={lead.id} value={lead.id}>
-                      {lead.contact_name || lead.contact_phone}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <LeadPhoneSearch
+                leads={leads}
+                value={formData.lead_id}
+                onChange={(leadId) => setFormData({ ...formData, lead_id: leadId })}
+                placeholder="Введите номер телефона..."
+                allowNone={true}
+              />
             </div>
           </div>
           <div className="flex justify-end gap-2">
