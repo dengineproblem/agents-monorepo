@@ -122,15 +122,23 @@ export function SalesTab() {
 
   const handleAddSale = async () => {
     try {
-      await salesApi.createSale({
-        lead_id: formData.lead_id || undefined,
-        client_name: formData.client_name || undefined,
-        client_phone: formData.client_phone || undefined,
+      const saleData: any = {
         amount: parseFloat(formData.amount),
         product_name: formData.product_name,
         sale_date: formData.sale_date,
         comment: formData.comment || undefined
-      }, consultantId);
+      };
+
+      // Если указан lead_id, используем его
+      if (formData.lead_id?.trim()) {
+        saleData.lead_id = formData.lead_id.trim();
+      } else {
+        // Иначе используем прямые данные клиента
+        saleData.client_name = formData.client_name?.trim();
+        saleData.client_phone = formData.client_phone?.trim();
+      }
+
+      await salesApi.createSale(saleData, consultantId);
 
       toast.success('Продажа успешно добавлена');
       setIsAddDialogOpen(false);

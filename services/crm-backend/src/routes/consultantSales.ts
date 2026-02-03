@@ -6,13 +6,13 @@ import { ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 // ==================== SCHEMAS ====================
 
 const CreateSaleSchema = z.object({
-  lead_id: z.string().uuid().optional(),
-  client_name: z.string().min(1).optional(),
-  client_phone: z.string().min(1).optional(),
+  lead_id: z.string().uuid().optional().or(z.literal('').transform(() => undefined)),
+  client_name: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+  client_phone: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   amount: z.number().positive(),
   product_name: z.string().min(1),
   sale_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  comment: z.string().optional()
+  comment: z.string().optional().or(z.literal('').transform(() => undefined))
 });
 
 const UpdateSaleSchema = z.object({
