@@ -234,7 +234,7 @@ export async function consultantTasksRoutes(app: FastifyInstance) {
         .insert({
           consultant_id: targetConsultantId,
           user_account_id: consultant.parent_user_account_id,
-          created_by_user_id: request.userAccountId,
+          created_by_user_id: consultant.parent_user_account_id, // Консультант создает задачу для себя
           title: body.title,
           description: body.description,
           due_date: body.due_date,
