@@ -51,7 +51,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
   app.get('/admin/chats/:userId', async (req, res) => {
     try {
       const { userId } = req.params as { userId: string };
-      const { limit = '100', offset = '0' } = req.query as { limit?: string; offset?: string };
+      const { limit = '1000', offset = '0' } = req.query as { limit?: string; offset?: string };
 
       // Получаем информацию о пользователе (включая telegram_id)
       const { data: user } = await supabase

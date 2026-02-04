@@ -94,7 +94,7 @@ const AdminChats: React.FC = () => {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const headers = { 'x-user-id': currentUser.id || '' };
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=50`, { headers });
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=1000`, { headers });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -438,7 +438,7 @@ const MoltbotChat: React.FC = () => {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const headers = { 'x-user-id': currentUser.id || '' };
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}?limit=50`, { headers });
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}?limit=1000`, { headers });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
