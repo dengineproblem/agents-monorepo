@@ -45,6 +45,7 @@ import notificationsRoutes from './routes/notifications.js';
 import brainProposalsRoutes from './routes/brainProposals.js';
 import impersonationRoutes from './routes/impersonation.js';
 import telegramWebhook from './routes/telegramWebhook.js';
+import supportBotWebhook from './routes/supportBotWebhook.js';
 import adminChatRoutes from './routes/adminChat.js';
 import adminMoltbotRoutes from './routes/adminMoltbot.js';
 import adminStatsRoutes from './routes/adminStats.js';
@@ -200,6 +201,7 @@ app.register(notificationsRoutes);
 app.register(brainProposalsRoutes);
 app.register(impersonationRoutes);
 app.register(telegramWebhook);
+app.register(supportBotWebhook);
 app.register(budgetForecastRoutes);
 app.register(creativeAnalysisRoutes);
 

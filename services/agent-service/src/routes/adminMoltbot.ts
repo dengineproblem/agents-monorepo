@@ -9,6 +9,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
+import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 
@@ -136,6 +137,237 @@ export default async function adminMoltbotRoutes(app: FastifyInstance) {
       return res.send({ specialists });
     } catch (err: any) {
       log.error({ error: String(err) }, 'Error getting specialists list');
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /admin/moltbot/users-with-messages
+   * Получает список пользователей из чатов техподдержки (support bot)
+   */
+  app.get('/admin/moltbot/users-with-messages', async (req, res) => {
+    try {
+      const { limit = '20' } = req.query as { limit?: string };
+      const limitNum = parseInt(limit);
+
+      // Получаем последние сообщения от support бота
+      const { data: chats, error } = await supabase
+        .from('admin_user_chats')
+        .select(`
+          user_account_id,
+          message,
+          direction,
+          created_at,
+          read_at
+        `)
+        .eq('source', 'support')
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (error) {
+        log.error({ error: error.message }, 'Failed to fetch support chat users');
+        return res.status(500).send({ error: 'Failed to fetch data' });
+      }
+
+      if (!chats || chats.length === 0) {
+        return res.send({ users: [] });
+      }
+
+      // Группируем по пользователям
+      const userMap = new Map<string, {
+        lastMessage: string;
+        lastMessageTime: string;
+        unreadCount: number;
+      }>();
+
+      for (const chat of chats) {
+        const userId = chat.user_account_id;
+        if (!userId) continue;
+
+        const existing = userMap.get(userId);
+        if (!existing) {
+          userMap.set(userId, {
+            lastMessage: chat.message,
+            lastMessageTime: chat.created_at,
+            unreadCount: chat.direction === 'from_user' && !chat.read_at ? 1 : 0
+          });
+        } else {
+          if (chat.direction === 'from_user' && !chat.read_at) {
+            existing.unreadCount++;
+          }
+        }
+      }
+
+      // Загружаем данные пользователей
+      const userIds = Array.from(userMap.keys()).filter((id): id is string => id != null);
+      const { data: usersData } = await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id')
+        .in('id', userIds);
+
+      const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
+
+      // Собираем результат
+      const users = Array.from(userMap.entries())
+        .map(([userId, data]) => {
+          const userData = usersMap.get(userId);
+          return {
+            id: userId,
+            username: userData?.username || 'Unknown',
+            telegram_id: userData?.telegram_id || null,
+            last_message: data.lastMessage,
+            last_message_time: data.lastMessageTime,
+            unread_count: data.unreadCount,
+            is_online: false
+          };
+        })
+        .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime())
+        .slice(0, limitNum);
+
+      return res.send({ users });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error fetching support chat users');
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /admin/moltbot/chats/:userId
+   * Получает историю сообщений с пользователем из support бота
+   */
+  app.get('/admin/moltbot/chats/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+      const { limit = '100', offset = '0' } = req.query as { limit?: string; offset?: string };
+
+      const { data: messages, error } = await supabase
+        .from('admin_user_chats')
+        .select('*')
+        .eq('user_account_id', userId)
+        .eq('source', 'support')
+        .order('created_at', { ascending: true })
+        .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+      if (error) {
+        log.error({ error: error.message, userId }, 'Failed to fetch support chat messages');
+        return res.status(500).send({ error: 'Failed to fetch messages' });
+      }
+
+      return res.send({ messages: messages || [] });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error fetching support chat messages');
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /admin/moltbot/chats/:userId
+   * Отправляет сообщение пользователю через support бота
+   */
+  app.post('/admin/moltbot/chats/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+      const { message } = req.body as SendMessageBody;
+      const adminId = req.headers['x-user-id'] as string;
+
+      if (!message || message.trim().length === 0) {
+        return res.status(400).send({ error: 'Message is required' });
+      }
+
+      // Получаем telegram_id пользователя
+      const { data: user, error: userError } = await supabase
+        .from('user_accounts')
+        .select('telegram_id, username')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !user) {
+        log.error({ error: userError?.message, userId }, 'User not found');
+        return res.status(404).send({ error: 'User not found' });
+      }
+
+      if (!user.telegram_id) {
+        return res.status(400).send({ error: 'User has no Telegram ID' });
+      }
+
+      // Отправляем через support бота
+      const botToken = process.env.SUPPORT_BOT_TELEGRAM_TOKEN;
+      if (!botToken) {
+        log.error('SUPPORT_BOT_TELEGRAM_TOKEN not configured');
+        return res.status(500).send({ error: 'Support bot not configured' });
+      }
+
+      const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const response = await fetch(telegramApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: user.telegram_id,
+          text: message.trim(),
+          parse_mode: 'HTML'
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        log.error({ error: errorText, userId }, 'Failed to send message via support bot');
+        return res.status(500).send({ error: 'Failed to send message' });
+      }
+
+      // Сохраняем в БД
+      const { data: chatMessage, error: insertError } = await supabase
+        .from('admin_user_chats')
+        .insert({
+          user_account_id: userId,
+          direction: 'to_user',
+          message: message.trim(),
+          admin_id: adminId || null,
+          source: 'support',
+          delivered: true
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        log.error({ error: insertError.message, userId }, 'Failed to save support chat message');
+      }
+
+      log.info({ userId, username: user.username, adminId }, 'Support message sent');
+
+      return res.send({
+        success: true,
+        message: chatMessage || { message, direction: 'to_user', created_at: new Date().toISOString() }
+      });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error sending support chat message');
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /admin/moltbot/chats/:userId/mark-read
+   * Отмечает все сообщения от пользователя в support боте как прочитанные
+   */
+  app.post('/admin/moltbot/chats/:userId/mark-read', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+
+      const { error } = await supabase
+        .from('admin_user_chats')
+        .update({ read_at: new Date().toISOString() })
+        .eq('user_account_id', userId)
+        .eq('source', 'support')
+        .eq('direction', 'from_user')
+        .is('read_at', null);
+
+      if (error) {
+        log.error({ error: error.message, userId }, 'Failed to mark support messages as read');
+        return res.status(500).send({ error: 'Failed to mark messages as read' });
+      }
+
+      return res.send({ success: true });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error marking support messages as read');
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
