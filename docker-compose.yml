@@ -364,7 +364,7 @@ services:
     environment:
       # Только переменные которых нет в env_file
       - AGENT_SERVICE_URL=http://agent-service:8082
-      - MOLTBOT_TOKEN=moltbot-dev-token-2026
+      - MOLTBOT_TOKEN=moltbot-prod-token-2026
       # API Keys и MOLTBOT_TELEGRAM_BOT_TOKEN приходят из env_file (.env.brain)
       # Enable subagent tools
       - OPENCLAW_TOOLS_SANDBOX_ALLOW=sessions_*,system/*
