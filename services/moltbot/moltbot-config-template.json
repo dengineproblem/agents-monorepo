@@ -65,7 +65,10 @@
     ]
   },
   "gateway": {
-    "mode": "local"
+    "mode": "local",
+    "auth": {
+      "token": "moltbot-prod-token-2026"
+    }
   },
   "bindings": [
     {
