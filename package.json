@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.28",
+    "@anthropic-ai/sdk": "^0.72.1",
     "openai": "^6.9.1"
   }
 }

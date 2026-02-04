@@ -70,3 +70,7 @@ coverage/
 # MCP config with tokens
 .mcp.json
 moltbot-workspace/
+
+# Password reset sensitive data
+password_reset_data.json
+password_reset_results.json

@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
-import { ConsultantAuthRequest } from '../middleware/consultantAuth.js';
+import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 
 // ==================== SCHEMAS ====================
 
@@ -44,6 +44,7 @@ const SetSalesPlanSchema = z.object({
  * Routes для системы продаж консультантов
  */
 export async function consultantSalesRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', consultantAuthMiddleware);
 
   // ==================== CONSULTANT ROUTES ====================
 

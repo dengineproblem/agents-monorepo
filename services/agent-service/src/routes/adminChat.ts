@@ -60,10 +60,11 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .eq('id', userId)
         .single();
 
-      // Ищем сообщения по user_account_id ИЛИ telegram_id
+      // Ищем сообщения по user_account_id ИЛИ telegram_id (только source='bot' или 'admin')
       let query = supabase
         .from('admin_user_chats')
         .select('*')
+        .in('source', ['bot', 'admin'])
         .order('created_at', { ascending: true });
 
       if (user?.telegram_id) {
@@ -203,6 +204,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .from('admin_user_chats')
         .update({ read_at: new Date().toISOString() })
         .eq('user_account_id', userId)
+        .in('source', ['bot', 'admin'])
         .eq('direction', 'from_user')
         .is('read_at', null);
 
@@ -234,10 +236,11 @@ export default async function adminChatRoutes(app: FastifyInstance) {
    */
   app.get('/admin/chats/unread-count', async (_req, res) => {
     try {
-      // Общее количество непрочитанных
+      // Общее количество непрочитанных (только source='bot' или 'admin')
       const { count: totalUnread } = await supabase
         .from('admin_user_chats')
         .select('*', { count: 'exact', head: true })
+        .in('source', ['bot', 'admin'])
         .eq('direction', 'from_user')
         .is('read_at', null);
 
@@ -245,6 +248,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
       const { data: usersWithUnread } = await supabase
         .from('admin_user_chats')
         .select('user_account_id')
+        .in('source', ['bot', 'admin'])
         .eq('direction', 'from_user')
         .is('read_at', null);
 
@@ -283,6 +287,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .from('admin_user_chats')
         .select('*', { count: 'exact', head: true })
         .eq('user_account_id', userId)
+        .in('source', ['bot', 'admin'])
         .eq('direction', 'from_user')
         .is('read_at', null);
 
@@ -313,7 +318,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
       const { limit = '20' } = req.query as { limit?: string };
       const limitNum = parseInt(limit);
 
-      // Получаем последние сообщения (без FK join)
+      // Получаем последние сообщения (без FK join, только source='bot' или 'admin')
       const { data: chats, error } = await supabase
         .from('admin_user_chats')
         .select(`
@@ -323,6 +328,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
           created_at,
           read_at
         `)
+        .in('source', ['bot', 'admin'])
         .order('created_at', { ascending: false })
         .limit(500); // Берём больше для корректной группировки
 

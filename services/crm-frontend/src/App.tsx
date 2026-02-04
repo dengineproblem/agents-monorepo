@@ -6,6 +6,7 @@ import { Consultations } from './pages/Consultations';
 import { ConsultantsPage } from './pages/ConsultantsPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { SubscriptionsPage } from './pages/SubscriptionsPage';
 import { BotsList } from './pages/BotsList';
 import { BotEditor } from './pages/BotEditor';
 import { ChatsPage } from './pages/ChatsPage';
@@ -113,6 +114,7 @@ function AppRoutes() {
         <Route path="/consultations/consultants" element={<ConsultantsPage />} />
         <Route path="/consultations/services" element={<ServicesPage />} />
         <Route path="/consultations/analytics" element={<AnalyticsPage />} />
+        <Route path="/consultations/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/reactivation" element={<ReactivationCampaigns />} />
         <Route path="/bots" element={<BotsList />} />
         <Route path="/bots/chats" element={<ChatsPage />} />

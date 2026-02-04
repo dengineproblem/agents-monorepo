@@ -1,4 +1,5 @@
 import { processPendingNotifications, retryFailedNotifications, getNotificationStats } from '../lib/consultationNotifications.js';
+import { processSubscriptionBillingSweep } from '../lib/subscriptionBilling.js';
 import { logger } from '../lib/logger.js';
 
 // Интервал проверки pending уведомлений (каждую минуту)
@@ -9,6 +10,9 @@ const RETRY_INTERVAL_MS = 5 * 60 * 1000;
 
 // Интервал логирования статистики (каждые 10 минут)
 const STATS_INTERVAL_MS = 10 * 60 * 1000;
+
+// Интервал sweep подписок (каждый час)
+const SUBSCRIPTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 /**
  * Start all notification cron jobs
@@ -25,10 +29,14 @@ export function startNotificationCron(): void {
   // Логирование статистики
   startStatsJob();
 
+  // Sweep подписок (reminders + auto-disable)
+  startSubscriptionBillingJob();
+
   logger.info({
     processInterval: `${PROCESS_INTERVAL_MS / 1000}s`,
     retryInterval: `${RETRY_INTERVAL_MS / 1000}s`,
-    statsInterval: `${STATS_INTERVAL_MS / 1000}s`
+    statsInterval: `${STATS_INTERVAL_MS / 1000}s`,
+    subscriptionSweepInterval: `${SUBSCRIPTION_SWEEP_INTERVAL_MS / 1000}s`
   }, '[NotificationCron] All cron jobs started');
 }
 
@@ -126,5 +134,34 @@ async function runStats(): Promise<void> {
     logger.error({
       error: error.message
     }, '[NotificationCron] Stats job failed');
+  }
+}
+
+/**
+ * Subscription billing sweep job
+ */
+function startSubscriptionBillingJob(): void {
+  // Запускаем через 20 секунд после старта и далее каждый час
+  setTimeout(() => {
+    runSubscriptionSweep();
+    setInterval(runSubscriptionSweep, SUBSCRIPTION_SWEEP_INTERVAL_MS);
+  }, 20 * 1000);
+}
+
+async function runSubscriptionSweep(): Promise<void> {
+  const startTime = Date.now();
+
+  try {
+    const stats = await processSubscriptionBillingSweep();
+    logger.info({
+      ...stats,
+      durationMs: Date.now() - startTime
+    }, '[NotificationCron] Subscription billing sweep completed');
+  } catch (error: any) {
+    logger.error({
+      error: error.message,
+      stack: error.stack,
+      durationMs: Date.now() - startTime
+    }, '[NotificationCron] Subscription billing sweep failed');
   }
 }

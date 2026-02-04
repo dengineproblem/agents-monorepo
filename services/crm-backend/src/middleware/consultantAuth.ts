@@ -1,6 +1,8 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export interface ConsultantAuthRequest extends FastifyRequest {
   consultant?: {
     id: string;
@@ -9,6 +11,40 @@ export interface ConsultantAuthRequest extends FastifyRequest {
   };
   userRole?: 'admin' | 'consultant' | 'manager';
   userAccountId?: string;
+  isTechAdmin?: boolean;
+}
+
+async function enforceReadOnlyForMutations(
+  request: ConsultantAuthRequest,
+  reply: FastifyReply,
+  ownerUserAccountId: string
+): Promise<boolean> {
+  if (!MUTATING_METHODS.has(request.method)) {
+    return true;
+  }
+
+  const { data: owner, error } = await supabase
+    .from('user_accounts')
+    .select('is_active')
+    .eq('id', ownerUserAccountId)
+    .maybeSingle<{ is_active: boolean | null }>();
+
+  if (error || !owner) {
+    request.log.error({ ownerUserAccountId, error }, 'Failed to check owner account status');
+    await reply.status(500).send({ error: 'Failed to verify account access mode' });
+    return false;
+  }
+
+  if (owner.is_active === false) {
+    await reply.status(403).send({
+      error: 'Account is in read-only mode',
+      code: 'READ_ONLY_MODE',
+      details: 'Подписка истекла. Изменения недоступны до продления.'
+    });
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -33,11 +69,13 @@ export async function consultantAuthMiddleware(
     // Сначала проверяем user_accounts (для админов И legacy консультантов)
     const { data: userAccount, error: userError } = await supabase
       .from('user_accounts')
-      .select('id, username, role, is_tech_admin')
+      .select('id, username, role, is_tech_admin, is_active')
       .eq('id', userAccountId)
       .maybeSingle();
 
     if (userAccount) {
+      request.isTechAdmin = userAccount.is_tech_admin === true;
+
       // Если это legacy консультант (role='consultant' в user_accounts)
       if (userAccount.role === 'consultant') {
         request.userRole = 'consultant';
@@ -58,6 +96,16 @@ export async function consultantAuthMiddleware(
         }
 
         request.consultant = consultant;
+
+        const canWrite = await enforceReadOnlyForMutations(
+          request,
+          reply,
+          consultant.parent_user_account_id || userAccount.id
+        );
+        if (!canWrite) {
+          return;
+        }
+
         return;
       }
 
@@ -65,6 +113,14 @@ export async function consultantAuthMiddleware(
       request.userRole = userAccount.is_tech_admin
         ? 'admin'
         : (userAccount.role as 'admin' | 'manager' || 'admin');
+
+      if (!request.isTechAdmin) {
+        const canWrite = await enforceReadOnlyForMutations(request, reply, userAccount.id);
+        if (!canWrite) {
+          return;
+        }
+      }
+
       return;
     }
 
@@ -97,6 +153,22 @@ export async function consultantAuthMiddleware(
     }
 
     request.consultant = consultant;
+
+    if (!consultant.parent_user_account_id) {
+      return reply.status(403).send({
+        error: 'Consultant parent account is not configured',
+        details: 'Невозможно определить аккаунт владельца для проверки доступа'
+      });
+    }
+
+    const canWrite = await enforceReadOnlyForMutations(
+      request,
+      reply,
+      consultant.parent_user_account_id
+    );
+    if (!canWrite) {
+      return;
+    }
 
   } catch (error: any) {
     request.log.error({ error, userAccountId }, 'Error in consultantAuthMiddleware');

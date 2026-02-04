@@ -1,4 +1,4 @@
-import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3, Moon, Sun } from 'lucide-react';
+import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3, Moon, Sun, CreditCard } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useTheme } from '@/hooks/useTheme';
@@ -41,6 +41,7 @@ export function Sidebar() {
         { path: '/consultations/consultants', icon: Users, label: 'Консультанты' },
         { path: '/consultations/services', icon: Settings, label: 'Услуги' },
         { path: '/consultations/analytics', icon: BarChart3, label: 'Аналитика' },
+        { path: '/consultations/subscriptions', icon: CreditCard, label: 'Подписки' },
       ]
     },
     {
