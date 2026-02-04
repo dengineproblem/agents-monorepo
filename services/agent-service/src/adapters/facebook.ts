@@ -639,6 +639,13 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   return finalVideoId;
 }
 
+/**
+ * Создает WhatsApp креатив с видео
+ *
+ * ВАЖНО: Facebook постепенно отключает поддержку page_welcome_message через API.
+ * Для некоторых аккаунтов работает, для некоторых нет (error_subcode: 1815166).
+ * Используем fallback: сначала пробуем с page_welcome_message, если не работает - без него.
+ */
 export async function createWhatsAppCreative(
   adAccountId: string,
   token: string,
@@ -674,32 +681,74 @@ export async function createWhatsAppCreative(
   }
 
   log.debug({ adAccountId, callToAction }, 'WhatsApp creative callToAction');
-  const videoData: any = {
+
+  // Пробуем сначала с page_welcome_message
+  const videoDataWithWelcome: any = {
     video_id: params.videoId,
     message: params.message,
     call_to_action: callToAction,
     page_welcome_message: pageWelcomeMessage
   };
-  
+
   // Добавляем image_hash если есть thumbnail
   if (params.thumbnailHash) {
-    videoData.image_hash = params.thumbnailHash;
+    videoDataWithWelcome.image_hash = params.thumbnailHash;
   }
-  
-  const objectStorySpec: any = {
+
+  const objectStorySpecWithWelcome: any = {
     page_id: params.pageId,
-    video_data: videoData
+    video_data: videoDataWithWelcome
   };
 
   // Instagram ID опционален - без него реклама будет показываться от имени страницы
   if (params.instagramId) {
-    objectStorySpec.instagram_user_id = params.instagramId;
+    objectStorySpecWithWelcome.instagram_user_id = params.instagramId;
   }
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, {
-    name: "Video CTWA – WhatsApp",
-    object_story_spec: JSON.stringify(objectStorySpec)
-  });
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, {
+      name: "Video CTWA – WhatsApp",
+      object_story_spec: JSON.stringify(objectStorySpecWithWelcome)
+    });
+  } catch (error: any) {
+    // Если ошибка 1815166 (Invalid creative's object story spec) или 1487194 (Permissions error) - пробуем без page_welcome_message
+    const isWelcomeMessageError = error?.fb?.error_subcode === 1815166 || error?.fb?.error_subcode === 1487194;
+    if (isWelcomeMessageError) {
+      log.warn({
+        adAccountId,
+        error_subcode: error?.fb?.error_subcode,
+        msg: 'page_welcome_message not supported, retrying without it'
+      }, 'WhatsApp creative: page_welcome_message не поддерживается для этого аккаунта, создаем без него');
+
+      const videoDataWithoutWelcome: any = {
+        video_id: params.videoId,
+        message: params.message,
+        call_to_action: callToAction
+        // page_welcome_message убран
+      };
+
+      if (params.thumbnailHash) {
+        videoDataWithoutWelcome.image_hash = params.thumbnailHash;
+      }
+
+      const objectStorySpecWithoutWelcome: any = {
+        page_id: params.pageId,
+        video_data: videoDataWithoutWelcome
+      };
+
+      if (params.instagramId) {
+        objectStorySpecWithoutWelcome.instagram_user_id = params.instagramId;
+      }
+
+      return await graph('POST', `${adAccountId}/adcreatives`, token, {
+        name: "Video CTWA – WhatsApp",
+        object_story_spec: JSON.stringify(objectStorySpecWithoutWelcome)
+      });
+    }
+
+    // Другие ошибки пробрасываем дальше
+    throw error;
+  }
 }
 
 export async function createInstagramCreative(
@@ -919,6 +968,10 @@ export async function uploadImage(adAccountId: string, token: string, imageBuffe
 
 /**
  * Создает WhatsApp креатив с изображением
+ *
+ * ВАЖНО: Facebook постепенно отключает поддержку page_welcome_message через API.
+ * Для некоторых аккаунтов работает, для некоторых нет (error_subcode: 1815166).
+ * Используем fallback: сначала пробуем с page_welcome_message, если не работает - без него.
  */
 export async function createWhatsAppImageCreative(
   adAccountId: string,
@@ -951,22 +1004,82 @@ export async function createWhatsAppImageCreative(
 
   log.debug({ adAccountId, callToAction }, 'WhatsApp image creative callToAction');
 
-  const objectStorySpec = {
+  // Пробуем сначала с page_welcome_message
+  const objectStorySpecWithWelcome = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash,
-      link: "https://www.facebook.com/", // Facebook требует валидный URL, но для WhatsApp он игнорируется
+      link: "https://www.facebook.com/",
       message: params.message,
       call_to_action: callToAction,
       page_welcome_message: pageWelcomeMessage
     }
   };
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, {
-    name: "Image CTWA – WhatsApp",
-    object_story_spec: JSON.stringify(objectStorySpec)
-  });
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, {
+      name: "Image CTWA – WhatsApp",
+      object_story_spec: JSON.stringify(objectStorySpecWithWelcome)
+    });
+  } catch (error: any) {
+    // Если ошибка 1815166 (Invalid creative's object story spec) или 1487194 (Permissions error) - пробуем без page_welcome_message
+    const isWelcomeMessageError = error?.fb?.error_subcode === 1815166 || error?.fb?.error_subcode === 1487194;
+    if (isWelcomeMessageError) {
+      log.warn({
+        adAccountId,
+        error_subcode: error?.fb?.error_subcode,
+        msg: 'page_welcome_message not supported, retrying without it'
+      }, 'WhatsApp creative: page_welcome_message не поддерживается для этого аккаунта, создаем без него');
+
+      const objectStorySpecWithoutWelcome = {
+        page_id: params.pageId,
+        instagram_user_id: params.instagramId,
+        link_data: {
+          image_hash: params.imageHash,
+          link: "https://www.facebook.com/",
+          message: params.message,
+          call_to_action: callToAction
+          // page_welcome_message убран
+        }
+      };
+
+      try {
+        return await graph('POST', `${adAccountId}/adcreatives`, token, {
+          name: "Image CTWA – WhatsApp",
+          object_story_spec: JSON.stringify(objectStorySpecWithoutWelcome)
+        });
+      } catch (retryError: any) {
+        // Если снова ошибка 1487194 - пробуем без instagram_user_id
+        if (retryError?.fb?.error_subcode === 1487194) {
+          log.warn({
+            adAccountId,
+            msg: 'instagram_user_id causing permissions error, retrying without it'
+          }, 'WhatsApp creative: instagram_user_id вызывает ошибку прав, создаем без него (только Facebook)');
+
+          const objectStorySpecWithoutInstagram = {
+            page_id: params.pageId,
+            // instagram_user_id убран - креатив покажется только в Facebook
+            link_data: {
+              image_hash: params.imageHash,
+              link: "https://www.facebook.com/",
+              message: params.message,
+              call_to_action: callToAction
+            }
+          };
+
+          return await graph('POST', `${adAccountId}/adcreatives`, token, {
+            name: "Image CTWA – WhatsApp",
+            object_story_spec: JSON.stringify(objectStorySpecWithoutInstagram)
+          });
+        }
+        throw retryError;
+      }
+    }
+
+    // Другие ошибки пробрасываем дальше
+    throw error;
+  }
 }
 
 /**
@@ -1264,6 +1377,10 @@ interface CarouselCardParams {
 /**
  * Создаёт WhatsApp carousel creative
  * Каждая карточка карусели ведёт на WhatsApp
+ *
+ * ВАЖНО: Facebook постепенно отключает поддержку page_welcome_message через API.
+ * Для некоторых аккаунтов работает, для некоторых нет (error_subcode: 1815166).
+ * Используем fallback: сначала пробуем с page_welcome_message, если не работает - без него.
  */
 export async function createWhatsAppCarouselCreative(
   adAccountId: string,
@@ -1306,7 +1423,10 @@ export async function createWhatsAppCarouselCreative(
     }
   }));
 
-  const objectStorySpec = {
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating WhatsApp carousel creative');
+
+  // Пробуем сначала с page_welcome_message
+  const objectStorySpecWithWelcome = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
     link_data: {
@@ -1322,13 +1442,45 @@ export async function createWhatsAppCarouselCreative(
     }
   };
 
-  const payload = {
-    name: "Carousel CTWA – WhatsApp",
-    object_story_spec: JSON.stringify(objectStorySpec)
-  };
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, {
+      name: "Carousel CTWA – WhatsApp",
+      object_story_spec: JSON.stringify(objectStorySpecWithWelcome)
+    });
+  } catch (error: any) {
+    // Если ошибка 1815166 (Invalid creative's object story spec) - пробуем без page_welcome_message
+    if (error?.fb?.error_subcode === 1815166) {
+      log.warn({
+        adAccountId,
+        error_subcode: 1815166,
+        msg: 'page_welcome_message not supported, retrying without it'
+      }, 'WhatsApp carousel creative: page_welcome_message не поддерживается для этого аккаунта, создаем без него');
 
-  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating WhatsApp carousel creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+      const objectStorySpecWithoutWelcome = {
+        page_id: params.pageId,
+        instagram_user_id: params.instagramId,
+        link_data: {
+          message: params.message,
+          link: whatsappLink,
+          multi_share_optimized: true,
+          child_attachments: childAttachments,
+          call_to_action: {
+            type: "WHATSAPP_MESSAGE",
+            value: { app_destination: "WHATSAPP" }
+          }
+          // page_welcome_message убран
+        }
+      };
+
+      return await graph('POST', `${adAccountId}/adcreatives`, token, {
+        name: "Carousel CTWA – WhatsApp",
+        object_story_spec: JSON.stringify(objectStorySpecWithoutWelcome)
+      });
+    }
+
+    // Другие ошибки пробрасываем дальше
+    throw error;
+  }
 }
 
 /**

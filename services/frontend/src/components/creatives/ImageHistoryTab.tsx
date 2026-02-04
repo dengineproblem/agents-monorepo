@@ -241,7 +241,7 @@ export const ImageHistoryTab: React.FC<ImageHistoryTabProps> = ({ userId, onUseA
                 <img
                   src={selectedCreative.image_url}
                   alt="Креатив"
-                  className="max-h-[60vh] object-contain rounded"
+                  className="max-h-[40vh] max-w-full object-contain rounded"
                 />
               </div>
 

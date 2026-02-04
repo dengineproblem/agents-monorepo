@@ -164,7 +164,7 @@ const formatSeconds = (seconds: number | null | undefined) => {
   return `${mins} мин ${secs.toString().padStart(2, "0")} сек`;
 };
 
-const FACEBOOK_MIN_DAILY_BUDGET = 10;
+const FACEBOOK_MIN_DAILY_BUDGET = 5;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
 
 // Генерация цвета для направления на основе его ID
