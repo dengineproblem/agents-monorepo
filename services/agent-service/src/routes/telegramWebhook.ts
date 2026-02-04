@@ -20,6 +20,7 @@ const log = createLogger({ module: 'telegramWebhook' });
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+const ENABLE_LEGACY_ONBOARDING = process.env.ENABLE_LEGACY_ONBOARDING === 'true';
 
 // =====================================================
 // Типы Telegram API
@@ -124,13 +125,19 @@ export default async function telegramWebhook(app: FastifyInstance) {
       });
 
       // ===================================================
-      // 1. Пробуем обработать как онбординг
+      // 1. Пробуем обработать как онбординг (если включён)
       // ===================================================
-      const onboardingResult = await handleOnboardingMessage(message as OnboardingMessage);
+      // ВАЖНО: Легаси онбординг можно отключить через ENABLE_LEGACY_ONBOARDING=false
+      // По умолчанию онбординг теперь обрабатывается через Moltbot (GPT 5.2)
+      if (ENABLE_LEGACY_ONBOARDING && TELEGRAM_BOT_TOKEN) {
+        const onboardingResult = await handleOnboardingMessage(message as OnboardingMessage);
 
-      if (onboardingResult.handled) {
-        log.debug({ telegramId }, 'Message handled by onboarding');
-        return res.send({ ok: true });
+        if (onboardingResult.handled) {
+          log.debug({ telegramId }, 'Message handled by legacy onboarding');
+          return res.send({ ok: true });
+        }
+      } else if (!ENABLE_LEGACY_ONBOARDING) {
+        log.debug({ telegramId }, 'Legacy onboarding disabled (ENABLE_LEGACY_ONBOARDING=false)');
       }
 
       // ===================================================
