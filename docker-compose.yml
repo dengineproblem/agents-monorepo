@@ -78,8 +78,8 @@ services:
       - CREATIVE_GENERATION_SERVICE_URL=http://creative-generation-service:8085
       - LOG_ALERT_TELEGRAM_BOT_TOKEN=${LOG_ALERT_TELEGRAM_BOT_TOKEN}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      # Отключить легаси онбординг (теперь используется Moltbot с GPT 5.2)
-      - ENABLE_LEGACY_ONBOARDING=false
+      # Вернуть легаси онбординг (Moltbot не работает на production)
+      - ENABLE_LEGACY_ONBOARDING=true
     ports:
       - "8082:8082"
     restart: unless-stopped
