@@ -142,7 +142,8 @@ export default async function telegramWebhook(app: FastifyInstance) {
           const result = await uploadTelegramMediaToStorage(
             message.voice.file_id,
             user.id,
-            'voice'
+            'voice',
+            TELEGRAM_BOT_TOKEN!
           );
 
           if (!result) {
@@ -178,7 +179,8 @@ export default async function telegramWebhook(app: FastifyInstance) {
           const result = await uploadTelegramMediaToStorage(
             largestPhoto.file_id,
             user.id,
-            'photo'
+            'photo',
+            TELEGRAM_BOT_TOKEN!
           );
 
           if (!result) {

@@ -12,10 +12,6 @@ import { randomUUID } from 'crypto';
 
 const log = createLogger({ module: 'chatMediaHandler' });
 
-const SUPPORT_BOT_TOKEN = process.env.SUPPORT_BOT_TELEGRAM_TOKEN;
-const TELEGRAM_API_URL = `https://api.telegram.org/bot${SUPPORT_BOT_TOKEN}`;
-const TELEGRAM_FILE_URL = `https://api.telegram.org/file/bot${SUPPORT_BOT_TOKEN}`;
-
 const BUCKET_NAME = 'chat-media';
 const FETCH_TIMEOUT_MS = 30000; // 30 секунд
 const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB (лимит Telegram)
@@ -49,8 +45,9 @@ export interface MediaUploadResult {
 /**
  * Получает информацию о файле через Telegram API
  */
-async function getFileInfo(fileId: string): Promise<TelegramFile | null> {
+async function getFileInfo(fileId: string, botToken: string): Promise<TelegramFile | null> {
   try {
+    const TELEGRAM_API_URL = `https://api.telegram.org/bot${botToken}`;
     const response = await fetch(`${TELEGRAM_API_URL}/getFile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -74,13 +71,14 @@ async function getFileInfo(fileId: string): Promise<TelegramFile | null> {
 /**
  * Скачивает файл из Telegram
  */
-async function downloadTelegramFile(filePath: string): Promise<Buffer | null> {
+async function downloadTelegramFile(filePath: string, botToken: string): Promise<Buffer | null> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
     let response: Response;
     try {
+      const TELEGRAM_FILE_URL = `https://api.telegram.org/file/bot${botToken}`;
       const url = `${TELEGRAM_FILE_URL}/${filePath}`;
       response = await fetch(url, { signal: controller.signal });
     } finally {
@@ -189,12 +187,14 @@ function getContentType(mediaType: 'voice' | 'photo'): string {
  * @param fileId - Telegram file_id
  * @param userId - ID пользователя (для организации папок)
  * @param mediaType - Тип медиа ('voice' или 'photo')
+ * @param botToken - Telegram Bot API token
  * @returns {url, metadata} или null при ошибке
  */
 export async function uploadTelegramMediaToStorage(
   fileId: string,
   userId: string,
-  mediaType: 'voice' | 'photo'
+  mediaType: 'voice' | 'photo',
+  botToken: string
 ): Promise<MediaUploadResult | null> {
   log.info({ fileId, userId, mediaType }, 'Uploading Telegram media to storage');
 
@@ -206,14 +206,14 @@ export async function uploadTelegramMediaToStorage(
     }
 
     // 1. Получаем информацию о файле
-    const fileInfo = await getFileInfo(fileId);
+    const fileInfo = await getFileInfo(fileId, botToken);
     if (!fileInfo?.file_path) {
       log.error({ fileId }, 'Failed to get file info');
       return null;
     }
 
     // 2. Скачиваем файл
-    const buffer = await downloadTelegramFile(fileInfo.file_path);
+    const buffer = await downloadTelegramFile(fileInfo.file_path, botToken);
     if (!buffer) {
       log.error({ fileId, filePath: fileInfo.file_path }, 'Failed to download file');
       return null;

@@ -16,6 +16,8 @@ import { uploadTelegramMediaToStorage } from '../lib/chatMediaHandler.js';
 
 const log = createLogger({ module: 'supportBotWebhook' });
 
+const SUPPORT_BOT_TOKEN = process.env.SUPPORT_BOT_TELEGRAM_TOKEN;
+
 // =====================================================
 // Типы Telegram API
 // =====================================================
@@ -131,7 +133,8 @@ export default async function supportBotWebhook(app: FastifyInstance) {
         const result = await uploadTelegramMediaToStorage(
           message.voice.file_id,
           user.id,
-          'voice'
+          'voice',
+          SUPPORT_BOT_TOKEN!
         );
 
         if (!result) {
@@ -162,7 +165,8 @@ export default async function supportBotWebhook(app: FastifyInstance) {
         const result = await uploadTelegramMediaToStorage(
           largestPhoto.file_id,
           user.id,
-          'photo'
+          'photo',
+          SUPPORT_BOT_TOKEN!
         );
 
         if (!result) {

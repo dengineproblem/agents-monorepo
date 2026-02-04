@@ -76,8 +76,6 @@ services:
       - ANALYZER_URL=http://creative-analyzer:7081
       - CHATBOT_SERVICE_URL=http://chatbot-service:8083
       - CREATIVE_GENERATION_SERVICE_URL=http://creative-generation-service:8085
-      - LOG_ALERT_TELEGRAM_BOT_TOKEN=${LOG_ALERT_TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       # Вернуть легаси онбординг (Moltbot не работает на production)
       - ENABLE_LEGACY_ONBOARDING=true
     ports:
@@ -354,36 +352,37 @@ services:
   # Uses beta channel (moltbot@beta) which has the CLI
   # Using Debian-slim for better native module support (vs Alpine/musl)
   # Telegram интеграция через channels add (не отдельный контейнер)
-  moltbot:
-    build: ./services/moltbot
-    container_name: moltbot
-    env_file:
-      - ./.env.brain
-    ports:
-      - "18789:18789"
-    environment:
-      # Только переменные которых нет в env_file
-      - AGENT_SERVICE_URL=http://agent-service:8082
-      - MOLTBOT_TOKEN=moltbot-prod-token-2026
-      # API Keys и MOLTBOT_TELEGRAM_BOT_TOKEN приходят из env_file (.env.brain)
-      # Enable subagent tools
-      - OPENCLAW_TOOLS_SANDBOX_ALLOW=sessions_*,system/*
-      - MOLTBOT_AGENT_TOOLS_AUTO_REGISTER=true
-      - OPENCLAW_GATEWAY_OPENAI_TOOL_SCHEMA=true
-    volumes:
-      - ./moltbot-workspace-router:/root/clawd/moltbot-workspace-router
-      - ./moltbot-workspace-facebook:/root/clawd/moltbot-workspace-facebook
-      - ./moltbot-workspace-creatives:/root/clawd/moltbot-workspace-creatives
-      - ./moltbot-workspace-crm:/root/clawd/moltbot-workspace-crm
-      - ./moltbot-workspace-tiktok:/root/clawd/moltbot-workspace-tiktok
-      - ./moltbot-workspace-onboarding:/root/clawd/moltbot-workspace-onboarding
-      - ./services/moltbot/moltbot-config-template.json:/root/clawd/moltbot-config-template.json
-      - moltbot-config:/root/.moltbot
-    restart: unless-stopped
-    networks:
-      - default
-    depends_on:
-      - agent-service
+  # ❌ ОТКЛЮЧЕНО: moltbot заменён на telegram-claude-bot
+  # moltbot:
+  #   build: ./services/moltbot
+  #   container_name: moltbot
+  #   env_file:
+  #     - ./.env.brain
+  #   ports:
+  #     - "18789:18789"
+  #   environment:
+  #     # Только переменные которых нет в env_file
+  #     - AGENT_SERVICE_URL=http://agent-service:8082
+  #     - MOLTBOT_TOKEN=moltbot-prod-token-2026
+  #     # API Keys и MOLTBOT_TELEGRAM_BOT_TOKEN приходят из env_file (.env.brain)
+  #     # Enable subagent tools
+  #     - OPENCLAW_TOOLS_SANDBOX_ALLOW=sessions_*,system/*
+  #     - MOLTBOT_AGENT_TOOLS_AUTO_REGISTER=true
+  #     - OPENCLAW_GATEWAY_OPENAI_TOOL_SCHEMA=true
+  #   volumes:
+  #     - ./moltbot-workspace-router:/root/clawd/moltbot-workspace-router
+  #     - ./moltbot-workspace-facebook:/root/clawd/moltbot-workspace-facebook
+  #     - ./moltbot-workspace-creatives:/root/clawd/moltbot-workspace-creatives
+  #     - ./moltbot-workspace-crm:/root/clawd/moltbot-workspace-crm
+  #     - ./moltbot-workspace-tiktok:/root/clawd/moltbot-workspace-tiktok
+  #     - ./moltbot-workspace-onboarding:/root/clawd/moltbot-workspace-onboarding
+  #     - ./services/moltbot/moltbot-config-template.json:/root/clawd/moltbot-config-template.json
+  #     - moltbot-config:/root/.moltbot
+  #   restart: unless-stopped
+  #   networks:
+  #     - default
+  #   depends_on:
+  #     - agent-service
 
   fake-reports-service:
     build: ./services/fake-reports-service
