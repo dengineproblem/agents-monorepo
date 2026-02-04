@@ -27,4 +27,4 @@ echo "  ✓ Auth profile configured for router agent"
 
 # Start Moltbot Gateway with Single-Workspace router
 echo "Starting Moltbot Gateway with Single-Workspace router..."
-exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --verbose
+exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose

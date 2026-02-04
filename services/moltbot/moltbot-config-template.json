@@ -1,7 +1,4 @@
 {
-  "gateway": {
-    "mode": "local"
-  },
   "agents": {
     "defaults": {
       "model": {
