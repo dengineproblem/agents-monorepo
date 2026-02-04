@@ -192,7 +192,11 @@ services:
 
   # CRM Frontend
   crm-frontend:
-    build: ./services/crm-frontend
+    build:
+      context: ./services/crm-frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     environment:
       - NODE_ENV=production
     ports:
@@ -208,6 +212,8 @@ services:
       context: ./services/frontend
       args:
         BUILD_MODE: production
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     environment:
       - NODE_ENV=production
     ports:
@@ -222,6 +228,8 @@ services:
       context: ./services/frontend
       args:
         BUILD_MODE: appreview
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
     environment:
       - NODE_ENV=production
     ports:
