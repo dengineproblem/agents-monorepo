@@ -27,4 +27,21 @@ echo "  ✓ Auth profile configured for router agent"
 
 # Start Moltbot Gateway with Single-Workspace router
 echo "Starting Moltbot Gateway with Single-Workspace router..."
-exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --verbose
+
+# Start gateway in background
+moltbot gateway --bind lan --token "moltbot-dev-token-2026" --verbose &
+GATEWAY_PID=$!
+
+# Wait for gateway to be ready
+sleep 3
+
+# Start router agent
+echo "Starting router agent..."
+moltbot agent start router &
+AGENT_PID=$!
+
+echo "  ✓ Gateway PID: $GATEWAY_PID"
+echo "  ✓ Router agent PID: $AGENT_PID"
+
+# Wait for both processes
+wait $GATEWAY_PID $AGENT_PID
