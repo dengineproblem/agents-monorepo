@@ -2206,6 +2206,8 @@ curl -s -X POST http://agent-brain:7080/api/onboarding/create-user \
 🔗 [Подключить Facebook](https://www.facebook.com/v21.0/dialog/oauth?...)
 
 ⚠️ Сохраните эти данные — они понадобятся для входа!
+
+❓ Нужна помощь? [Техподдержка](https://t.me/Moltbot_prfmnt_bot)
 ```
 
 ---
