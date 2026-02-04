@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "meta-ads": {
+      "command": "/Users/anatolijstepanov/.local/bin/uv",
+      "args": ["run", "--directory", "/Users/anatolijstepanov/meta-ads-mcp", "meta-ads-mcp"],
+      "env": {
+        "META_APP_ID": "your-meta-app-id",
+        "META_APP_SECRET": "your-meta-app-secret",
+        "META_ACCESS_TOKEN": "your-meta-access-token"
+      }
+    },
+    "tiktok-ads": {
+      "command": "/Users/anatolijstepanov/.local/bin/uv",
+      "args": ["run", "--directory", "/Users/anatolijstepanov/tiktok-ads-mcp-server", "tiktok-ads-mcp"],
+      "env": {
+        "TIKTOK_APP_ID": "your-tiktok-app-id",
+        "TIKTOK_APP_SECRET": "your-tiktok-app-secret"
+      }
+    }
+  }
+}

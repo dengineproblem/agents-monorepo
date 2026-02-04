@@ -207,7 +207,14 @@ docker-compose restart nginx
 
 ## 🔧 Переменные окружения
 
-`.env` файл для production (создать `.env.crm`):
+Frontend (`services/crm-frontend/.env`):
+```bash
+VITE_CRM_BACKEND_URL=/api/crm
+VITE_SUPABASE_URL=https://your-project-ref.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-publishable-key
+```
+
+Backend (`.env.crm` в корне проекта):
 ```bash
 PORT=8084
 SUPABASE_URL=
@@ -278,7 +285,6 @@ npm run build
 - [shadcn/ui](https://ui.shadcn.com/) - UI компоненты
 - [Recharts](https://recharts.org/) - графики статистики
 - [Lucide Icons](https://lucide.dev/) - иконки
-
 
 
 
