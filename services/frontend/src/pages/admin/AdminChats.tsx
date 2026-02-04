@@ -198,7 +198,7 @@ const AdminChats: React.FC = () => {
     <Tabs defaultValue="user-chats" className="w-full">
       <TabsList className="mb-4">
         <TabsTrigger value="user-chats">AI-чат</TabsTrigger>
-        <TabsTrigger value="moltbot">Support</TabsTrigger>
+        <TabsTrigger value="moltbot">Техподдержка</TabsTrigger>
       </TabsList>
 
       <TabsContent value="user-chats" className="mt-0">
@@ -403,83 +403,115 @@ const AdminChats: React.FC = () => {
   );
 };
 
-// Moltbot Chat Component
+// Moltbot Chat Component (Техподдержка)
 const MoltbotChat: React.FC = () => {
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>>([]);
+  const [users, setUsers] = useState<ChatUser[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [selectedUser, setSelectedUser] = useState<ChatUser | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
-  const [specialist, setSpecialist] = useState('facebook-ads');
-  const [specialists, setSpecialists] = useState<Array<{ id: string; name: string; description: string }>>([]);
 
-  useEffect(() => {
-    // Load specialists list
-    const loadSpecialists = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/admin/moltbot/specialists`, {
-          headers: {
-            'x-user-id': JSON.parse(localStorage.getItem('user') || '{}').id || '',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setSpecialists(data.specialists || []);
-        }
-      } catch (err) {
-        console.error('Error loading specialists:', err);
+  // Fetch users with messages from support bot
+  const fetchUsers = useCallback(async () => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/users-with-messages`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data.users || []);
       }
-    };
-    loadSpecialists();
+    } catch (err) {
+      console.error('Error fetching support users:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
   }, []);
 
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || sending) return;
+  // Fetch messages for selected user from support bot
+  const fetchMessages = useCallback(async (uId: string) => {
+    setLoadingMessages(true);
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { 'x-user-id': currentUser.id || '' };
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}?limit=50`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
 
-    const userMessage = newMessage.trim();
-    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }]);
-    setNewMessage('');
+        // Mark as read
+        await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}/mark-read`, {
+          method: 'POST',
+          headers,
+        });
+
+        // Update unread count in users list
+        setUsers((prev) =>
+          prev.map((u) => (u.id === uId ? { ...u, unread_count: 0 } : u))
+        );
+      }
+    } catch (err) {
+      console.error('Error fetching support messages:', err);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
+
+  // Load messages when user selected
+  useEffect(() => {
+    if (selectedUser) {
+      fetchMessages(selectedUser.id);
+    }
+  }, [selectedUser, fetchMessages]);
+
+  // Polling for users list (every 30 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchUsers();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [fetchUsers]);
+
+  // Send message to support bot
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !selectedUser || sending) return;
+
     setSending(true);
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chat`, {
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${selectedUser.id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': currentUser.id || '',
         },
-        body: JSON.stringify({
-          message: userMessage,
-          specialist,
-        }),
+        body: JSON.stringify({ message: newMessage.trim() }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: data.response || 'Ошибка: пустой ответ',
-          timestamp: new Date()
-        }]);
-      } else {
-        const error = await res.text();
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `Ошибка: ${error}`,
-          timestamp: new Date()
-        }]);
+        setMessages((prev) => [...prev, data.message]);
+        setNewMessage('');
       }
     } catch (err) {
-      console.error('Error sending message to Moltbot:', err);
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `Ошибка: ${err}`,
-        timestamp: new Date()
-      }]);
+      console.error('Error sending support message:', err);
     } finally {
       setSending(false);
     }
   };
 
+  // Handle Enter key
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -487,92 +519,214 @@ const MoltbotChat: React.FC = () => {
     }
   };
 
+  // Filter users by search
+  const filteredUsers = users.filter(
+    (u) =>
+      u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.telegram_id?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Sort: unread first, then by last message time
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
+    if (a.unread_count > 0 && b.unread_count === 0) return -1;
+    if (b.unread_count > 0 && a.unread_count === 0) return 1;
+    if (a.last_message_time && b.last_message_time) {
+      return new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime();
+    }
+    return 0;
+  });
+
   return (
     <div className="flex h-[calc(100vh-180px)] border rounded-lg overflow-hidden">
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b flex items-center justify-between">
-          <div>
-            <h2 className="font-semibold">Чат с Молтбот</h2>
-            <p className="text-sm text-muted-foreground">AI-агент для управления рекламой</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-muted-foreground">Specialist:</label>
-            <select
-              value={specialist}
-              onChange={(e) => setSpecialist(e.target.value)}
-              className="border rounded px-2 py-1 text-sm"
-            >
-              {specialists.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+      {/* Users List */}
+      <div className="w-80 border-r flex flex-col">
+        <div className="p-3 border-b">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Поиск пользователя..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
           </div>
         </div>
 
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-4">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <MessageSquare className="h-16 w-16 mb-4 opacity-50" />
-              <p className="text-lg">Начните диалог с Молтбот</p>
-              <p className="text-sm">Задайте вопрос о рекламе или попросите помощь</p>
+        <ScrollArea className="flex-1">
+          {loadingUsers ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : sortedUsers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+              <MessageSquare className="h-8 w-8 mb-2 opacity-50" />
+              <p className="text-sm">Нет чатов</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {messages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={cn(
-                    'flex',
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+            sortedUsers.map((user) => (
+              <div
+                key={user.id}
+                className={cn(
+                  'flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 border-b',
+                  selectedUser?.id === user.id && 'bg-muted'
+                )}
+                onClick={() => setSelectedUser(user)}
+              >
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <User className="h-5 w-5" />
+                  </div>
+                  {user.is_online && (
+                    <Circle className="absolute bottom-0 right-0 h-3 w-3 fill-green-500 text-green-500" />
                   )}
-                >
-                  <div
-                    className={cn(
-                      'max-w-[70%] rounded-lg px-4 py-2',
-                      msg.role === 'user'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted'
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium truncate">{user.username}</p>
+                    {user.last_message_time && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(user.last_message_time), {
+                          addSuffix: false,
+                          locale: ru,
+                        })}
+                      </span>
                     )}
-                  >
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                    <p className="text-xs opacity-70 mt-1">
-                      {format(msg.timestamp, 'HH:mm', { locale: ru })}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground truncate">
+                      {user.last_message || 'Нет сообщений'}
                     </p>
+                    {user.unread_count > 0 && (
+                      <Badge className="ml-2">{user.unread_count}</Badge>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))
           )}
         </ScrollArea>
+      </div>
 
-        {/* Input */}
-        <div className="p-4 border-t">
-          <div className="flex gap-2">
-            <Textarea
-              placeholder="Напишите сообщение..."
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={sending}
-              className="resize-none"
-              rows={2}
-            />
-            <Button
-              onClick={handleSendMessage}
-              disabled={!newMessage.trim() || sending}
-              size="icon"
-              className="h-auto"
-            >
-              {sending ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
+      {/* Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {selectedUser ? (
+          <>
+            {/* Chat Header */}
+            <div className="p-4 border-b flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <User className="h-5 w-5" />
+                  </div>
+                  {selectedUser.is_online && (
+                    <Circle className="absolute bottom-0 right-0 h-3 w-3 fill-green-500 text-green-500" />
+                  )}
+                </div>
+                <div>
+                  <p className="font-medium">{selectedUser.username}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedUser.telegram_id ? `@${selectedUser.telegram_id}` : 'Нет Telegram'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fetchMessages(selectedUser.id)}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {loadingMessages ? (
+                <div className="flex items-center justify-center h-full">
+                  <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mb-2 opacity-50" />
+                  <p>Нет сообщений</p>
+                  <p className="text-sm">Начните диалог первым</p>
+                </div>
               ) : (
-                <Send className="h-4 w-4" />
+                <div className="space-y-3">
+                  {messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={cn(
+                        'flex flex-col max-w-[70%] rounded-lg p-3',
+                        msg.direction === 'to_user'
+                          ? 'ml-auto bg-primary text-primary-foreground'
+                          : 'mr-auto bg-muted'
+                      )}
+                    >
+                      <p className="text-sm whitespace-pre-wrap break-words">
+                        {msg.message}
+                      </p>
+                      <div
+                        className={cn(
+                          'flex items-center gap-1 mt-1',
+                          msg.direction === 'to_user' ? 'justify-end' : 'justify-start'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'text-xs',
+                            msg.direction === 'to_user'
+                              ? 'text-primary-foreground/70'
+                              : 'text-muted-foreground'
+                          )}
+                        >
+                          {format(new Date(msg.created_at), 'd MMM HH:mm', { locale: ru })}
+                        </span>
+                        {msg.direction === 'to_user' && msg.delivered && (
+                          <CheckCheck
+                            className={cn(
+                              'h-3 w-3',
+                              msg.read_at ? 'text-blue-400' : 'text-primary-foreground/70'
+                            )}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
-            </Button>
+            </div>
+
+            {/* Input */}
+            <div className="p-4 border-t flex gap-2">
+              <Textarea
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Написать сообщение..."
+                disabled={sending || !selectedUser.telegram_id}
+                className="resize-none min-h-[60px]"
+                rows={2}
+              />
+              <Button
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim() || sending || !selectedUser.telegram_id}
+                className="self-end"
+              >
+                {sending ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+            <MessageSquare className="h-16 w-16 mb-4 opacity-50" />
+            <p className="text-lg">Выберите чат</p>
+            <p className="text-sm">Выберите пользователя из списка слева</p>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

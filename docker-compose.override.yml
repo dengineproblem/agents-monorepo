@@ -8,10 +8,10 @@ services:
       - CRON_ENABLED=false
       - HOURLY_CRON_ENABLED=false
 
-  # Moltbot - отключен локально чтобы не конфликтовал с prod
+  # Moltbot - временно включен для тестирования onboarding
   # (один Telegram bot token не может работать на двух инстансах одновременно)
   moltbot:
-    scale: 0
+    # scale: 0  # ВРЕМЕННО ЗАКОММЕНТИРОВАНО для локального тестирования
 
   # Nginx - используем локальную конфигурацию без SSL
   nginx:

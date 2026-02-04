@@ -12,7 +12,7 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       },
       "models": {
         "openai/gpt-4o": {
@@ -29,7 +29,14 @@
           },
           "alias": "gpt"
         },
-        "google/gemini-3-pro-preview": {
+        "openai/gpt-5-mini": {
+          "params": {
+            "temperature": 0.7,
+            "maxTokens": 128000
+          },
+          "alias": "gpt5mini"
+        },
+        "google/gemini-3-flash-preview": {
           "params": {
             "temperature": 1.0,
             "maxTokens": 140000
@@ -81,7 +88,7 @@
       "agentDir": "~/.moltbot/agents/facebook-ads",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       }
     },
     "creatives": {
@@ -90,7 +97,7 @@
       "agentDir": "~/.moltbot/agents/creatives",
       "bootstrapMaxChars": 12000,
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       }
     },
     "crm": {
@@ -99,7 +106,7 @@
       "agentDir": "~/.moltbot/agents/crm",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       }
     },
     "tiktok": {
@@ -108,7 +115,7 @@
       "agentDir": "~/.moltbot/agents/tiktok",
       "bootstrapMaxChars": 10000,
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       }
     },
     "onboarding": {
@@ -117,7 +124,7 @@
       "agentDir": "~/.moltbot/agents/onboarding",
       "bootstrapMaxChars": 15000,
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "openai/gpt-5-mini"
       }
     }
   },
@@ -137,8 +144,8 @@
         "enabled": true,
         "models": [
           {
-            "provider": "google",
-            "model": "gemini-3-flash-preview"
+            "provider": "openai",
+            "model": "gpt-5-mini-audio-preview"
           }
         ]
       },
