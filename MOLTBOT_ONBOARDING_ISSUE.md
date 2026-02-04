@@ -489,5 +489,54 @@ wait
 
 ---
 
-**Последнее обновление:** 2024-02-04 04:00 UTC
-**Следующий агент:** Начните с проверки `moltbot --help` и поиска правильного способа запуска агентов
+### Попытка 6: Убрать `--allow-unconfigured` для embedded режима (ТЕКУЩЕЕ ИСПРАВЛЕНИЕ)
+**Конфиг:**
+```json
+{
+  "agents": {
+    "list": [{ "id": "router", ... }]
+  }
+  // БЕЗ gateway section
+}
+```
+
+**Команда:**
+```bash
+exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --verbose
+# ↑ БЕЗ флага --allow-unconfigured!
+```
+
+**Гипотеза:**
+- Флаг `--allow-unconfigured` **отключает** автоматический запуск агентов
+- БЕЗ этого флага Gateway должен автоматически запустить router агента в embedded режиме
+- `clients=0` будет нормально (embedded не использует WebSocket)
+- В логах должны появиться `[agent/router]` при обработке сообщений
+
+**Ожидаемый результат:**
+```bash
+[gateway] listening on ws://0.0.0.0:18789
+[agent/router] bootstrapping agent...  ← НОВОЕ!
+[agent/router] loaded workspace /root/clawd/moltbot-workspace-router
+[telegram] update: {..."/start"...}
+[agent/router] embedded run start  ← НОВОЕ!
+```
+
+**Статус:** 🔄 В процессе применения (2026-02-04 04:30 UTC)
+
+**Файлы изменены:**
+- `services/moltbot/docker-entrypoint.sh` - убран флаг `--allow-unconfigured`
+
+**Команды для деплоя на production:**
+```bash
+cd ~/agents-monorepo
+git pull origin main
+docker-compose build moltbot
+docker-compose up -d moltbot
+docker logs moltbot -f
+# Отправить /start боту для проверки
+```
+
+---
+
+**Последнее обновление:** 2026-02-04 04:30 UTC
+**Статус:** Попытка №6 - убран --allow-unconfigured для embedded режима

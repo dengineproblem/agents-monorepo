@@ -25,6 +25,6 @@ mkdir -p "/root/.moltbot/agents/router/agent"
 echo "{\"profiles\":[{\"id\":\"google\",\"provider\":\"google\",\"apiKey\":\"$GEMINI_API_KEY\",\"default\":true},{\"id\":\"openai\",\"provider\":\"openai\",\"apiKey\":\"$OPENAI_API_KEY\",\"model\":\"gpt-5.2\"},{\"id\":\"anthropic\",\"provider\":\"anthropic\",\"apiKey\":\"$ANTHROPIC_API_KEY\"}],\"whisper\":{\"provider\":\"openai\",\"model\":\"gpt-4o\"}}" > "/root/.moltbot/agents/router/agent/auth-profiles.json"
 echo "  ✓ Auth profile configured for router agent"
 
-# Start Moltbot Gateway with Single-Workspace router
-echo "Starting Moltbot Gateway with Single-Workspace router..."
-exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --allow-unconfigured --verbose
+# Start Moltbot Gateway with embedded router agent
+echo "Starting Moltbot Gateway with embedded router agent..."
+exec moltbot gateway --bind lan --token "moltbot-dev-token-2026" --verbose
