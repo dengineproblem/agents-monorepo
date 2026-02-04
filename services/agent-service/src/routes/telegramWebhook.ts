@@ -15,6 +15,7 @@ import { createLogger } from '../lib/logger.js';
 import { notifyAdminGroup, APP_BASE_URL } from '../lib/notificationService.js';
 import { handleOnboardingMessage, type TelegramMessage as OnboardingMessage } from '../lib/telegramOnboarding/index.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { uploadTelegramMediaToStorage } from '../lib/chatMediaHandler.js';
 
 const log = createLogger({ module: 'telegramWebhook' });
 
@@ -43,12 +44,22 @@ interface TelegramVoice {
   file_size?: number;
 }
 
+interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
   date: number;
   text?: string;
   voice?: TelegramVoice;
+  photo?: TelegramPhotoSize[];
+  caption?: string;
   chat: {
     id: number;
     type: string;
@@ -94,12 +105,12 @@ export default async function telegramWebhook(app: FastifyInstance) {
       const message = update.message;
       const telegramId = String(message.from!.id);
       const telegramMessageId = message.message_id;
-      const messageText = message.text || (message.voice ? '[Голосовое сообщение]' : '[Медиа]');
 
       log.info({
         telegramId,
         hasText: !!message.text,
         hasVoice: !!message.voice,
+        hasPhoto: !!message.photo,
         messageId: telegramMessageId
       }, 'Received message from Telegram');
 
@@ -108,21 +119,111 @@ export default async function telegramWebhook(app: FastifyInstance) {
       // ===================================================
       const { data: users } = await supabase
         .from('user_accounts')
-        .select('id')
+        .select('id, username')
         .eq('telegram_id', telegramId);
 
       const user = users?.[0];
 
-      // Логируем входящее сообщение (по user_account_id или telegram_id)
-      await supabase.from('admin_user_chats').insert({
+      let messageText = '';
+      let chatData: any = {
         user_account_id: user?.id || null,
-        telegram_id: !user ? telegramId : null, // telegram_id только если юзер не найден
+        telegram_id: !user ? telegramId : null,
         direction: 'from_user',
-        message: messageText,
         source: 'bot',
         telegram_message_id: telegramMessageId,
         delivered: true
-      });
+      };
+
+      // VOICE MESSAGE
+      if (message.voice) {
+        log.info({ telegramId, duration: message.voice.duration }, 'Processing voice message');
+
+        if (user) {
+          const result = await uploadTelegramMediaToStorage(
+            message.voice.file_id,
+            user.id,
+            'voice'
+          );
+
+          if (!result) {
+            log.error({ telegramId, fileId: message.voice.file_id }, 'Failed to upload voice to storage');
+            return res.send({ ok: true });
+          }
+
+          chatData = {
+            ...chatData,
+            message: null,
+            media_type: 'voice',
+            media_url: result.url,
+            media_metadata: {
+              duration: message.voice.duration,
+              file_size: message.voice.file_size,
+              original_telegram_file_id: message.voice.file_id
+            }
+          };
+
+          messageText = `🎤 Голосовое сообщение (${message.voice.duration}с)`;
+        } else {
+          // Для незарегистрированных пользователей просто сохраняем текст
+          chatData.message = '[Голосовое сообщение]';
+          messageText = '[Голосовое сообщение]';
+        }
+      }
+      // PHOTO MESSAGE
+      else if (message.photo && message.photo.length > 0) {
+        const largestPhoto = message.photo[message.photo.length - 1];
+        log.info({ telegramId, photoCount: message.photo.length, size: `${largestPhoto.width}x${largestPhoto.height}` }, 'Processing photo message');
+
+        if (user) {
+          const result = await uploadTelegramMediaToStorage(
+            largestPhoto.file_id,
+            user.id,
+            'photo'
+          );
+
+          if (!result) {
+            log.error({ telegramId, fileId: largestPhoto.file_id }, 'Failed to upload photo to storage');
+            return res.send({ ok: true });
+          }
+
+          chatData = {
+            ...chatData,
+            message: message.caption || null,
+            media_type: 'photo',
+            media_url: result.url,
+            media_metadata: {
+              width: largestPhoto.width,
+              height: largestPhoto.height,
+              file_size: largestPhoto.file_size,
+              original_telegram_file_id: largestPhoto.file_id
+            }
+          };
+
+          messageText = '📷 Фото' + (message.caption ? `: ${message.caption}` : '');
+        } else {
+          // Для незарегистрированных пользователей
+          chatData.message = message.caption || '[Фото]';
+          messageText = chatData.message;
+        }
+      }
+      // TEXT MESSAGE
+      else if (message.text) {
+        chatData.message = message.text;
+        chatData.media_type = 'text';
+        messageText = message.text;
+      }
+      // UNSUPPORTED MESSAGE TYPE
+      else {
+        log.debug({ telegramId }, 'Unsupported message type, ignoring');
+        return res.send({ ok: true });
+      }
+
+      // Сохраняем сообщение в БД
+      const { error: insertError } = await supabase.from('admin_user_chats').insert(chatData);
+
+      if (insertError) {
+        log.error({ error: insertError.message, telegramId }, 'Failed to save message');
+      }
 
       // ===================================================
       // 1. Пробуем обработать как онбординг (если включён)
@@ -144,12 +245,6 @@ export default async function telegramWebhook(app: FastifyInstance) {
       // 2. Онбординг не обработал - проверяем существующего пользователя
       // ===================================================
 
-      // Для существующих пользователей обрабатываем только текстовые сообщения
-      if (!message.text) {
-        log.debug({ telegramId }, 'Non-text message from non-onboarding user, ignoring');
-        return res.send({ ok: true });
-      }
-
       // Если пользователь не найден - подсказываем /start
       if (!user) {
         log.debug({ telegramId }, 'Message from unknown user');
@@ -157,23 +252,23 @@ export default async function telegramWebhook(app: FastifyInstance) {
         return res.send({ ok: true });
       }
 
-      // Получаем username для уведомления
-      const { data: userData } = await supabase
-        .from('user_accounts')
-        .select('username')
-        .eq('id', user.id)
-        .single();
+      // Уведомляем админов в группу о новом сообщении
+      try {
+        const username = user.username || 'Unknown';
+        const chatUrl = `${APP_BASE_URL}/admin/chats/${user.id}`;
+        const truncatedMessage = messageText.substring(0, 200) + (messageText.length > 200 ? '...' : '');
 
-      // Уведомляем админов в группу
-      const adminNotification = `<b>Новое сообщение от ${userData?.username || 'пользователя'}</b>
+        await notifyAdminGroup(
+          `📩 <b>Новое сообщение от ${escapeHtml(username)}</b>\n\n` +
+          `От: ${escapeHtml(username)} (@${telegramId})\n` +
+          `Сообщение: ${escapeHtml(truncatedMessage)}\n\n` +
+          `<a href="${chatUrl}">Открыть чат</a>`
+        );
+      } catch (notifyErr: any) {
+        log.error({ error: String(notifyErr) }, 'Failed to notify admin group');
+      }
 
-${escapeHtml(message.text)}
-
-<a href="${APP_BASE_URL}/admin/chats/${user.id}">Ответить в админке</a>`;
-
-      notifyAdminGroup(adminNotification).catch(err => {
-        log.error({ error: String(err) }, 'Failed to notify admin group');
-      });
+      log.info({ telegramId, userId: user.id, username: user.username, mediaType: chatData.media_type }, 'Message saved');
 
       return res.send({ ok: true });
     } catch (err: any) {
