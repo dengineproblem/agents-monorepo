@@ -64,6 +64,9 @@
       }
     ]
   },
+  "gateway": {
+    "mode": "local"
+  },
   "bindings": [
     {
       "agentId": "router",
