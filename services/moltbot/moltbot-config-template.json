@@ -1,6 +1,6 @@
 {
   "gateway": {
-    "mode": "local",
+    "mode": "embedded",
     "auth": {
       "token": "moltbot-dev-token-2026"
     }
