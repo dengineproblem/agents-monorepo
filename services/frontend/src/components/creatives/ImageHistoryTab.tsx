@@ -236,7 +236,7 @@ export const ImageHistoryTab: React.FC<ImageHistoryTabProps> = ({ userId, onUseA
             <DialogTitle>Просмотр креатива</DialogTitle>
           </DialogHeader>
           {selectedCreative && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex justify-center bg-muted/30 rounded-lg p-4">
                 <img
                   src={selectedCreative.image_url}
@@ -252,21 +252,21 @@ export const ImageHistoryTab: React.FC<ImageHistoryTabProps> = ({ userId, onUseA
               )}
 
               {selectedCreative.offer && (
-                <div>
+                <div className="space-y-1">
                   <p className="text-sm font-medium">Заголовок:</p>
                   <p className="text-sm text-muted-foreground">{selectedCreative.offer}</p>
                 </div>
               )}
 
               {selectedCreative.bullets && (
-                <div>
+                <div className="space-y-1">
                   <p className="text-sm font-medium">Буллеты:</p>
-                  <p className="text-sm text-muted-foreground whitespace-pre-line">{selectedCreative.bullets}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-line leading-snug">{selectedCreative.bullets.trim()}</p>
                 </div>
               )}
 
               {selectedCreative.profits && (
-                <div>
+                <div className="space-y-1">
                   <p className="text-sm font-medium">Выгода:</p>
                   <p className="text-sm text-muted-foreground">{selectedCreative.profits}</p>
                 </div>
