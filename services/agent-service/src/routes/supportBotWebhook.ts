@@ -12,6 +12,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { notifyAdminGroup, APP_BASE_URL } from '../lib/notificationService.js';
+import { uploadTelegramMediaToStorage } from '../lib/chatMediaHandler.js';
 
 const log = createLogger({ module: 'supportBotWebhook' });
 
@@ -28,11 +29,30 @@ interface TelegramUser {
   language_code?: string;
 }
 
+interface TelegramVoice {
+  file_id: string;
+  file_unique_id: string;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
+interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
   date: number;
   text?: string;
+  voice?: TelegramVoice;
+  photo?: TelegramPhotoSize[];
+  caption?: string;
   chat: {
     id: number;
     type: string;
@@ -72,19 +92,14 @@ export default async function supportBotWebhook(app: FastifyInstance) {
       const message = update.message;
       const telegramId = String(message.from!.id);
       const telegramMessageId = message.message_id;
-      const messageText = message.text || '[Медиа]';
 
       log.info({
         telegramId,
         hasText: !!message.text,
+        hasVoice: !!message.voice,
+        hasPhoto: !!message.photo,
         messageId: telegramMessageId
       }, 'Received message from Support bot');
-
-      // Только текстовые сообщения
-      if (!message.text) {
-        log.debug({ telegramId }, 'Non-text message, ignoring');
-        return res.send({ ok: true });
-      }
 
       // Ищем пользователя по telegram_id
       const { data: users } = await supabase
@@ -95,30 +110,99 @@ export default async function supportBotWebhook(app: FastifyInstance) {
       const user = users?.[0];
 
       if (!user) {
-        log.warn({ telegramId }, 'User not found for support message');
-        // Все равно сохраняем сообщение по telegram_id
-        await supabase.from('admin_user_chats').insert({
-          user_account_id: null,
-          telegram_id: telegramId,
-          direction: 'from_user',
-          message: messageText,
-          source: 'support',
-          telegram_message_id: telegramMessageId,
-          delivered: true
-        });
+        log.warn({ telegramId }, 'User not found for support message - skipping');
+        return res.send({ ok: true });
+      }
+
+      let messageText = '';
+      let chatData: any = {
+        user_account_id: user.id,
+        telegram_id: telegramId,
+        direction: 'from_user',
+        source: 'support',
+        telegram_message_id: telegramMessageId,
+        delivered: true
+      };
+
+      // VOICE MESSAGE
+      if (message.voice) {
+        log.info({ telegramId, duration: message.voice.duration }, 'Processing voice message');
+
+        const result = await uploadTelegramMediaToStorage(
+          message.voice.file_id,
+          user.id,
+          'voice'
+        );
+
+        if (!result) {
+          log.error({ telegramId, fileId: message.voice.file_id }, 'Failed to upload voice to storage');
+          return res.send({ ok: true }); // Не падаем
+        }
+
+        chatData = {
+          ...chatData,
+          message: null,
+          media_type: 'voice',
+          media_url: result.url,
+          media_metadata: {
+            duration: message.voice.duration,
+            file_size: message.voice.file_size,
+            original_telegram_file_id: message.voice.file_id
+          }
+        };
+
+        messageText = `🎤 Голосовое сообщение (${message.voice.duration}с)`;
+      }
+      // PHOTO MESSAGE
+      else if (message.photo && message.photo.length > 0) {
+        // Берём наибольшее фото
+        const largestPhoto = message.photo[message.photo.length - 1];
+        log.info({ telegramId, photoCount: message.photo.length, size: `${largestPhoto.width}x${largestPhoto.height}` }, 'Processing photo message');
+
+        const result = await uploadTelegramMediaToStorage(
+          largestPhoto.file_id,
+          user.id,
+          'photo'
+        );
+
+        if (!result) {
+          log.error({ telegramId, fileId: largestPhoto.file_id }, 'Failed to upload photo to storage');
+          return res.send({ ok: true }); // Не падаем
+        }
+
+        chatData = {
+          ...chatData,
+          message: message.caption || null,
+          media_type: 'photo',
+          media_url: result.url,
+          media_metadata: {
+            width: largestPhoto.width,
+            height: largestPhoto.height,
+            file_size: largestPhoto.file_size,
+            original_telegram_file_id: largestPhoto.file_id
+          }
+        };
+
+        messageText = '📷 Фото' + (message.caption ? `: ${message.caption}` : '');
+      }
+      // TEXT MESSAGE
+      else if (message.text) {
+        chatData = {
+          ...chatData,
+          message: message.text,
+          media_type: 'text'
+        };
+
+        messageText = message.text;
+      }
+      // UNSUPPORTED MESSAGE TYPE
+      else {
+        log.debug({ telegramId }, 'Unsupported message type, ignoring');
         return res.send({ ok: true });
       }
 
       // Сохраняем сообщение в БД
-      const { error: insertError } = await supabase.from('admin_user_chats').insert({
-        user_account_id: user.id,
-        telegram_id: telegramId,
-        direction: 'from_user',
-        message: messageText,
-        source: 'support',
-        telegram_message_id: telegramMessageId,
-        delivered: true
-      });
+      const { error: insertError } = await supabase.from('admin_user_chats').insert(chatData);
 
       if (insertError) {
         log.error({ error: insertError.message, telegramId }, 'Failed to save support message');
@@ -139,7 +223,7 @@ export default async function supportBotWebhook(app: FastifyInstance) {
         log.error({ error: String(notifyErr) }, 'Failed to notify admin group about support message');
       }
 
-      log.info({ telegramId, userId: user.id, username: user.username }, 'Support message saved');
+      log.info({ telegramId, userId: user.id, username: user.username, mediaType: chatData.media_type }, 'Support message saved');
 
       return res.send({ ok: true });
 

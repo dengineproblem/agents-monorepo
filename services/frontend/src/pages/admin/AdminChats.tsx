@@ -16,6 +16,7 @@ import {
   Circle,
   CheckCheck,
   MessageSquare,
+  Mic,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -42,7 +43,15 @@ interface ChatMessage {
   id: string;
   user_account_id: string;
   direction: 'to_user' | 'from_user';
-  message: string;
+  message: string | null;
+  media_type?: 'voice' | 'photo' | 'text';
+  media_url?: string;
+  media_metadata?: {
+    duration?: number;
+    file_size?: number;
+    width?: number;
+    height?: number;
+  };
   delivered: boolean;
   read_at: string | null;
   created_at: string;
@@ -327,9 +336,55 @@ const AdminChats: React.FC = () => {
                           : 'mr-auto bg-muted'
                       )}
                     >
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {msg.message}
-                      </p>
+                      {/* VOICE MESSAGE */}
+                      {msg.media_type === 'voice' && msg.media_url && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm">
+                            <Mic className="h-4 w-4" />
+                            <span>Голосовое сообщение</span>
+                            {msg.media_metadata?.duration && (
+                              <span className="text-xs opacity-70">
+                                {Math.floor(msg.media_metadata.duration)}с
+                              </span>
+                            )}
+                          </div>
+                          <audio controls className="w-full max-w-xs" preload="metadata">
+                            <source src={msg.media_url} type="audio/ogg" />
+                            Ваш браузер не поддерживает аудио
+                          </audio>
+                        </div>
+                      )}
+
+                      {/* PHOTO MESSAGE */}
+                      {msg.media_type === 'photo' && msg.media_url && (
+                        <div className="space-y-2">
+                          <img
+                            src={msg.media_url}
+                            alt="Фото от пользователя"
+                            className="rounded-lg max-w-sm cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => window.open(msg.media_url, '_blank')}
+                            loading="lazy"
+                          />
+                          {msg.message && (
+                            <p className="text-sm whitespace-pre-wrap break-words mt-2">
+                              {msg.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* TEXT MESSAGE */}
+                      {(!msg.media_type || msg.media_type === 'text') && msg.message && (
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {msg.message}
+                        </p>
+                      )}
+
+                      {/* ERROR FALLBACK */}
+                      {!msg.message && !msg.media_url && (
+                        <p className="text-sm opacity-50 italic">[Медиа не загружено]</p>
+                      )}
+
                       <div
                         className={cn(
                           'flex items-center gap-1 mt-1',
@@ -662,9 +717,55 @@ const MoltbotChat: React.FC = () => {
                           : 'mr-auto bg-muted'
                       )}
                     >
-                      <p className="text-sm whitespace-pre-wrap break-words">
-                        {msg.message}
-                      </p>
+                      {/* VOICE MESSAGE */}
+                      {msg.media_type === 'voice' && msg.media_url && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm">
+                            <Mic className="h-4 w-4" />
+                            <span>Голосовое сообщение</span>
+                            {msg.media_metadata?.duration && (
+                              <span className="text-xs opacity-70">
+                                {Math.floor(msg.media_metadata.duration)}с
+                              </span>
+                            )}
+                          </div>
+                          <audio controls className="w-full max-w-xs" preload="metadata">
+                            <source src={msg.media_url} type="audio/ogg" />
+                            Ваш браузер не поддерживает аудио
+                          </audio>
+                        </div>
+                      )}
+
+                      {/* PHOTO MESSAGE */}
+                      {msg.media_type === 'photo' && msg.media_url && (
+                        <div className="space-y-2">
+                          <img
+                            src={msg.media_url}
+                            alt="Фото от пользователя"
+                            className="rounded-lg max-w-sm cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => window.open(msg.media_url, '_blank')}
+                            loading="lazy"
+                          />
+                          {msg.message && (
+                            <p className="text-sm whitespace-pre-wrap break-words mt-2">
+                              {msg.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* TEXT MESSAGE */}
+                      {(!msg.media_type || msg.media_type === 'text') && msg.message && (
+                        <p className="text-sm whitespace-pre-wrap break-words">
+                          {msg.message}
+                        </p>
+                      )}
+
+                      {/* ERROR FALLBACK */}
+                      {!msg.message && !msg.media_url && (
+                        <p className="text-sm opacity-50 italic">[Медиа не загружено]</p>
+                      )}
+
                       <div
                         className={cn(
                           'flex items-center gap-1 mt-1',
