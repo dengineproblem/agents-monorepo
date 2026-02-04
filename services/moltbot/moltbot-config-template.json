@@ -1,10 +1,4 @@
 {
-  "gateway": {
-    "mode": "local",
-    "auth": {
-      "token": "moltbot-prod-token-2026"
-    }
-  },
   "agents": {
     "defaults": {
       "model": {

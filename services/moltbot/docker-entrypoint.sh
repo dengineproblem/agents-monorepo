@@ -27,4 +27,4 @@ echo "  ✓ Auth profile configured for router agent"
 
 # Start Moltbot Gateway with embedded router agent
 echo "Starting Moltbot Gateway with embedded router agent..."
-exec moltbot gateway --bind lan --token "moltbot-prod-token-2026" --verbose
+exec moltbot gateway --bind lan --token "moltbot-prod-token-2026" --allow-unconfigured --verbose
