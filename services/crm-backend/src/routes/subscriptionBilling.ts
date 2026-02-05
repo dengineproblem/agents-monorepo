@@ -135,6 +135,7 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
       const status = query?.status as string | undefined;
       const search = query?.search as string | undefined;
       const saleKind = query?.sale_kind as string | undefined;
+      const includeUser = (query?.include_user as string | undefined) === 'true';
       const limit = Math.min(parseInt(query?.limit || '50', 10), 200);
       const offset = Math.max(parseInt(query?.offset || '0', 10), 0);
 
@@ -143,9 +144,13 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: 'Consultant profile not found' });
       }
 
+      const selectClause = includeUser
+        ? '*, user_accounts(id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, tarif, tarif_expires, is_active)'
+        : '*';
+
       let dbQuery = supabase
         .from('crm_subscription_sales')
-        .select('*')
+        .select(selectClause)
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1);
 
@@ -405,6 +410,52 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true, sale: updatedSale, applyResult });
+    } catch (error: any) {
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  app.post('/subscription/sales/:saleId/cancel', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      if (!(await requireTechAdmin(request, reply))) {
+        return;
+      }
+
+      const { saleId } = request.params as { saleId: string };
+
+      const { data: sale, error: saleError } = await supabase
+        .from('crm_subscription_sales')
+        .select('id, status')
+        .eq('id', saleId)
+        .single();
+
+      if (saleError || !sale) {
+        return reply.status(404).send({ error: 'Sale not found' });
+      }
+
+      if (sale.status === 'cancelled') {
+        return reply.send({ success: true, sale, message: 'Sale already cancelled' });
+      }
+
+      const { data: updatedSale, error: updateError } = await supabase
+        .from('crm_subscription_sales')
+        .update({
+          status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', saleId)
+        .select('*')
+        .single();
+
+      if (updateError || !updatedSale) {
+        return reply.status(500).send({ error: updateError?.message || 'Failed to cancel sale' });
+      }
+
+      return reply.send({
+        success: true,
+        sale: updatedSale,
+        warning: 'Subscription changes are not reverted автоматически. При необходимости скорректируйте срок вручную.'
+      });
     } catch (error: any) {
       return reply.status(500).send({ error: error.message });
     }

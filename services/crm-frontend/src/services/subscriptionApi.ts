@@ -46,6 +46,7 @@ export const subscriptionApi = {
     status?: string;
     search?: string;
     sale_kind?: string;
+    include_user?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<{ sales: SubscriptionSale[]; limit: number; offset: number }> {
@@ -91,6 +92,12 @@ export const subscriptionApi = {
 
   applySale(saleId: string): Promise<{ success: boolean; sale: SubscriptionSale }> {
     return fetchWithAuth(`/subscription/sales/${saleId}/apply`, {
+      method: 'POST'
+    });
+  },
+
+  cancelSale(saleId: string): Promise<{ success: boolean; sale: SubscriptionSale; warning?: string }> {
+    return fetchWithAuth(`/subscription/sales/${saleId}/cancel`, {
       method: 'POST'
     });
   },

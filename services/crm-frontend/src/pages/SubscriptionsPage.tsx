@@ -69,9 +69,11 @@ export function SubscriptionsPage() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRunningJob, setIsRunningJob] = useState(false);
+  const [cancelingSaleId, setCancelingSaleId] = useState<string | null>(null);
 
   const [products, setProducts] = useState<SubscriptionProduct[]>([]);
   const [sales, setSales] = useState<SubscriptionSale[]>([]);
+  const [appliedSubscriptions, setAppliedSubscriptions] = useState<SubscriptionSale[]>([]);
   const [consultants, setConsultants] = useState<ConsultantOption[]>([]);
 
   const [search, setSearch] = useState('');
@@ -128,14 +130,21 @@ export function SubscriptionsPage() {
 
     try {
       setLoading(true);
-      const [productsData, salesData, consultantsData] = await Promise.all([
+      const [productsData, salesData, consultantsData, appliedData] = await Promise.all([
         subscriptionApi.getProducts(false),
         subscriptionApi.getSales(),
-        consultationService.getConsultants(user.id)
+        consultationService.getConsultants(user.id),
+        subscriptionApi.getSales({
+          status: 'applied',
+          sale_kind: 'subscription',
+          include_user: true,
+          limit: 200
+        })
       ]);
 
       setProducts(productsData);
       setSales(salesData.sales);
+      setAppliedSubscriptions(appliedData.sales);
       setConsultants(
         consultantsData.map((consultant) => ({
           id: consultant.id,
@@ -164,6 +173,20 @@ export function SubscriptionsPage() {
       setSales(response.sales);
     } catch (error: any) {
       toast.error(error.message || 'Не удалось загрузить продажи подписок');
+    }
+  };
+
+  const loadAppliedSubscriptions = async () => {
+    try {
+      const response = await subscriptionApi.getSales({
+        status: 'applied',
+        sale_kind: 'subscription',
+        include_user: true,
+        limit: 200
+      });
+      setAppliedSubscriptions(response.sales);
+    } catch (error: any) {
+      toast.error(error.message || 'Не удалось загрузить список подписок');
     }
   };
 
@@ -278,6 +301,7 @@ export function SubscriptionsPage() {
       setLinkDialogOpen(false);
       setSaleToLink(null);
       await loadSales();
+      await loadAppliedSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось привязать продажу');
     } finally {
@@ -291,10 +315,36 @@ export function SubscriptionsPage() {
       await subscriptionApi.applySale(sale.id);
       toast.success('Подписка применена к пользователю');
       await loadSales();
+      await loadAppliedSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось применить подписку');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const cancelSale = async (sale: SubscriptionSale) => {
+    if (!isTechAdmin) return;
+    const confirmed = window.confirm(
+      sale.status === 'applied'
+        ? 'Отменить продажу? Это не откатит срок подписки автоматически. При необходимости скорректируйте срок вручную.'
+        : 'Отменить продажу?'
+    );
+    if (!confirmed) return;
+
+    try {
+      setCancelingSaleId(sale.id);
+      const result = await subscriptionApi.cancelSale(sale.id);
+      toast.success('Продажа отменена');
+      if (result.warning) {
+        toast.message(result.warning);
+      }
+      await loadSales();
+      await loadAppliedSubscriptions();
+    } catch (error: any) {
+      toast.error(error.message || 'Не удалось отменить продажу');
+    } finally {
+      setCancelingSaleId(null);
     }
   };
 
@@ -306,6 +356,7 @@ export function SubscriptionsPage() {
         `Sweep завершен: напомн. ${response.stats.remindersSent}, отключено ${response.stats.deactivatedUsers}`
       );
       await loadSales();
+      await loadAppliedSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось запустить sweep');
     } finally {
@@ -375,6 +426,7 @@ export function SubscriptionsPage() {
       toast.success('Подписка установлена вручную');
       setManualComment('');
       await loadSales();
+      await loadAppliedSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось установить подписку');
     } finally {
@@ -411,7 +463,13 @@ export function SubscriptionsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void loadSales()}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              void loadSales();
+              void loadAppliedSubscriptions();
+            }}
+          >
             <RefreshCw className="h-4 w-4 mr-2" />
             Обновить
           </Button>
@@ -569,6 +627,69 @@ export function SubscriptionsPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Подписки пользователей</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Пользователь</TableHead>
+                  <TableHead>Телефон</TableHead>
+                  <TableHead>Месяцы</TableHead>
+                  <TableHead>Дата применения</TableHead>
+                  <TableHead>Срок до</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead className="text-right">Действия</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {appliedSubscriptions.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      Активные подписки не найдены
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {appliedSubscriptions.map((sale) => (
+                  <TableRow key={sale.id}>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>{sale.user_accounts?.username || sale.user_account_id || '—'}</div>
+                        <div className="text-muted-foreground text-xs font-mono">{sale.user_account_id || '—'}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{sale.client_phone}</TableCell>
+                    <TableCell>{sale.months || '-'}</TableCell>
+                    <TableCell>{sale.applied_at ? sale.applied_at.slice(0, 10) : '-'}</TableCell>
+                    <TableCell>{sale.user_accounts?.tarif_expires || '-'}</TableCell>
+                    <TableCell>{statusBadge(sale.status)}</TableCell>
+                    <TableCell className="text-right">
+                      {isTechAdmin && sale.status !== 'cancelled' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void cancelSale(sale)}
+                          disabled={cancelingSaleId === sale.id}
+                        >
+                          {cancelingSaleId === sale.id ? 'Отмена...' : 'Отменить'}
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Отмена продажи не откатывает срок подписки автоматически. Для корректировки используйте «Ручную установку подписки».
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Продажи подписок</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -609,7 +730,13 @@ export function SubscriptionsPage() {
               </SelectContent>
             </Select>
 
-            <Button variant="outline" onClick={() => void loadSales()}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void loadSales();
+                void loadAppliedSubscriptions();
+              }}
+            >
               Обновить список
             </Button>
           </div>
@@ -675,6 +802,17 @@ export function SubscriptionsPage() {
                             disabled={isSaving}
                           >
                             Применить
+                          </Button>
+                        )}
+
+                        {isTechAdmin && sale.status !== 'cancelled' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void cancelSale(sale)}
+                            disabled={cancelingSaleId === sale.id}
+                          >
+                            {cancelingSaleId === sale.id ? 'Отмена...' : 'Отменить'}
                           </Button>
                         )}
                       </div>

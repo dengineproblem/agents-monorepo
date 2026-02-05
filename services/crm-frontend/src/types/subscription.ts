@@ -36,6 +36,19 @@ export interface SubscriptionSale {
   source: string;
   created_at: string;
   updated_at: string;
+  user_accounts?: SubscriptionSaleUser | null;
+}
+
+export interface SubscriptionSaleUser {
+  id: string;
+  username: string;
+  telegram_id: string | null;
+  telegram_id_2: string | null;
+  telegram_id_3: string | null;
+  telegram_id_4: string | null;
+  tarif: string | null;
+  tarif_expires: string | null;
+  is_active: boolean | null;
 }
 
 export interface SubscriptionUserSearchItem {
