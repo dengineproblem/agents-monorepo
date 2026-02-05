@@ -14,7 +14,7 @@ import { ProfileTab } from '@/components/consultant/ProfileTab';
 import { ScheduleTab } from '@/components/consultant/ScheduleTab';
 import { SalesTab } from '@/components/consultant/SalesTab';
 import { TasksTab } from '@/components/consultant/TasksTab';
-import { addMonths, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns';
+import { addMonths, addWeeks, differenceInCalendarDays, endOfMonth, endOfWeek, format, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
 import {
   Users,
   Calendar,
@@ -190,6 +190,10 @@ export function ConsultantPage() {
     target === null ? '—' : `${target}%`
   );
 
+  const formatPlanPercent = (value: number | null) => (
+    value === null ? '—' : `${value}%`
+  );
+
   const leadRate = stats?.lead_to_booked_rate ?? 0;
   const bookedRate = stats?.booked_to_completed_rate ?? 0;
   const completedRate = stats?.completed_to_sales_rate ?? 0;
@@ -208,6 +212,23 @@ export function ConsultantPage() {
   const targetSalesCount = stats?.target_sales_count ?? null;
   const salesAmountDelta = getDelta(salesAmount, targetSalesAmount);
   const salesCountDelta = getDelta(salesCount, targetSalesCount);
+
+  const today = startOfDay(new Date());
+  const periodStartDay = startOfDay(periodStartDate);
+  const periodEndDay = startOfDay(periodEndDate);
+  const totalDaysInPeriod = Math.max(differenceInCalendarDays(periodEndDay, periodStartDay) + 1, 0);
+  const effectiveEnd = today < periodStartDay ? periodStartDay : (today > periodEndDay ? periodEndDay : today);
+  const daysElapsed = today < periodStartDay ? 0 : Math.max(differenceInCalendarDays(effectiveEnd, periodStartDay) + 1, 0);
+  const targetSalesAmountToDate = targetSalesAmount !== null && totalDaysInPeriod > 0
+    ? (targetSalesAmount * daysElapsed) / totalDaysInPeriod
+    : null;
+  const salesAmountToDateDelta = getDelta(salesAmount, targetSalesAmountToDate);
+  const planPercent = targetSalesAmount && targetSalesAmount > 0
+    ? Math.round((salesAmount / targetSalesAmount) * 100 * 10) / 10
+    : null;
+  const planToDatePercent = targetSalesAmountToDate && targetSalesAmountToDate > 0
+    ? Math.round((salesAmount / targetSalesAmountToDate) * 100 * 10) / 10
+    : null;
 
   if (loading) {
     return (
@@ -338,12 +359,47 @@ export function ConsultantPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{formatCurrency(salesAmount)} ₸</div>
-              <p className="text-xs text-muted-foreground mt-1">
-                План: {targetSalesAmount !== null ? `${formatCurrency(targetSalesAmount)} ₸` : '—'} | Δ: <span className={deltaClass(salesAmountDelta)}>{formatCurrencyDelta(salesAmountDelta)}</span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Продаж: {salesCount} / {targetSalesCount ?? '—'} {targetSalesCount !== null ? `(${formatDelta(salesCountDelta, '')})` : ''}
-              </p>
+              <div className="mt-3 space-y-3 text-xs">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-muted-foreground">План месяца</span>
+                  <div className="text-right">
+                    <div className="font-medium">
+                      {targetSalesAmount !== null ? `${formatCurrency(targetSalesAmount)} ₸` : '—'}
+                    </div>
+                    <div className={deltaClass(salesAmountDelta)}>
+                      Δ {formatCurrencyDelta(salesAmountDelta)}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Выполнение: {formatPlanPercent(planPercent)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-muted-foreground">План к дате</span>
+                  <div className="text-right">
+                    <div className="font-medium">
+                      {targetSalesAmountToDate !== null ? `${formatCurrency(targetSalesAmountToDate)} ₸` : '—'}
+                    </div>
+                    <div className={deltaClass(salesAmountToDateDelta)}>
+                      Δ {formatCurrencyDelta(salesAmountToDateDelta)}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Выполнение: {formatPlanPercent(planToDatePercent)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-muted-foreground">Продажи</span>
+                  <div className="text-right">
+                    <div className="font-medium">
+                      {salesCount} / {targetSalesCount ?? '—'}
+                    </div>
+                    <div className={deltaClass(salesCountDelta)}>
+                      Δ {targetSalesCount !== null ? formatDelta(salesCountDelta, '') : '—'}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
