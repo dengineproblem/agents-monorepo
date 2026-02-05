@@ -171,15 +171,18 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         ? queryConsultantId
         : consultantId;
 
+      // ВСЕГДА требуем consultantId для фильтрации
+      if (!targetConsultantId) {
+        return reply.status(400).send({
+          error: 'Consultant ID required. Leads must be filtered by consultant.'
+        });
+      }
+
       let query = supabase
         .from('dialog_analysis')
         .select('*', { count: 'exact' })
+        .eq('assigned_consultant_id', targetConsultantId) // ВСЕГДА фильтруем по консультанту
         .order('last_message', { ascending: false });
-
-      // Фильтруем по консультанту (если указан)
-      if (targetConsultantId) {
-        query = query.eq('assigned_consultant_id', targetConsultantId);
-      }
 
       if (status) {
         query = query.eq('funnel_stage', status);

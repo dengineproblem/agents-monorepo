@@ -103,4 +103,17 @@ export const whatsappApi = {
       throw new Error('Failed to reset connection');
     }
   },
+
+  /**
+   * Удалить WABA номер
+   */
+  async deleteWabaNumber(phoneNumberId: string, userAccountId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp-numbers/${phoneNumberId}?userAccountId=${userAccountId}`,
+      { method: 'DELETE' }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to delete WABA number');
+    }
+  },
 };

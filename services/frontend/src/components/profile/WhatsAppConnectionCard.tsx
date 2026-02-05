@@ -60,6 +60,22 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
     }
   };
 
+  const handleDeleteWaba = async (numberId: string) => {
+    if (!confirm('Вы уверены, что хотите удалить этот WABA номер? Все связанные данные будут удалены.')) {
+      return;
+    }
+
+    if (!userAccountId) return;
+
+    try {
+      await whatsappApi.deleteWabaNumber(numberId, userAccountId);
+      refresh(); // Обновить список после удаления
+    } catch (error) {
+      console.error('Failed to delete WABA number:', error);
+      alert('Не удалось удалить WABA номер. Попробуйте позже.');
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -167,8 +183,18 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                       </div>
                     </div>
 
-                    {/* Для WABA не показываем кнопки подключения - они работают через webhook */}
-                    {!isWaba && (
+                    {/* Кнопки управления номерами */}
+                    {isWaba ? (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeleteWaba(number.id)}
+                        className="px-2 sm:px-4"
+                      >
+                        <X className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Удалить</span>
+                      </Button>
+                    ) : (
                       <Button
                         variant={isConnected || isConnecting ? 'outline' : 'default'}
                         size="sm"
