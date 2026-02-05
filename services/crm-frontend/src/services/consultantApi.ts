@@ -58,6 +58,7 @@ export interface DashboardStats {
   completion_rate: number;
   // Продажи и конверсии
   sales_count?: number;
+  sales_amount?: number;
   lead_to_booked_rate?: number;
   booked_to_completed_rate?: number;
   completed_to_sales_rate?: number;

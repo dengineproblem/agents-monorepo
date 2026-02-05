@@ -93,22 +93,25 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const tasks_overdue = overdueResult?.count || 0;
       const tasks_today = todayResult?.count || 0;
 
-      // Получить количество продаж
+      // Получить количество и сумму продаж
       const salesQueryStart = Date.now();
-      const { count: salesCount, error: salesError } = await supabase
+
+      // Получить все продажи для подсчёта количества и суммы
+      const { data: salesData, error: salesError } = await supabase
         .from('purchases')
-        .select('id', { count: 'exact', head: true })
+        .select('amount')
         .eq('consultant_id', targetConsultantId);
 
       const salesQueryDuration = Date.now() - salesQueryStart;
-      const sales_count = salesCount || 0;
+      const sales_count = salesData?.length || 0;
+      const sales_amount = (salesData || []).reduce((sum, sale) => sum + (sale.amount || 0), 0);
 
       if (salesError) {
         app.log.error({
           error: salesError,
           consultantId: targetConsultantId,
           duration: salesQueryDuration
-        }, 'GET /consultant/dashboard: Failed to fetch sales count');
+        }, 'GET /consultant/dashboard: Failed to fetch sales');
       }
 
       // Получить количество уникальных лидов с консультациями
@@ -165,7 +168,8 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
           leads_with_consultations: unique_leads_with_consultations,
           consultations: data?.total_consultations || 0,
           tasks: tasks_total,
-          sales: sales_count
+          sales: sales_count,
+          sales_amount: sales_amount
         },
         dashboardQueryDuration,
         tasksQueryDuration,
@@ -199,6 +203,7 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         tasks_today,
         // Добавляем продажи и конверсии
         sales_count,
+        sales_amount,
         lead_to_booked_rate,
         booked_to_completed_rate,
         completed_to_sales_rate

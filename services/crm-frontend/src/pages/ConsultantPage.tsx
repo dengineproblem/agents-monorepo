@@ -191,9 +191,9 @@ export function ConsultantPage() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats?.total_revenue?.toLocaleString() || 0} ₽</div>
+              <div className="text-2xl font-bold">{stats?.sales_amount?.toLocaleString() || 0} ₸</div>
               <p className="text-xs text-muted-foreground mt-1">
-                Общий доход за все время
+                Сумма продаж ({stats?.sales_count || 0} шт.)
               </p>
             </CardContent>
           </Card>
