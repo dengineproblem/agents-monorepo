@@ -184,8 +184,9 @@ export function SubscriptionsPage() {
 
   const loadActiveSubscriptions = async (searchTerm?: string) => {
     try {
+      const resolvedSearch = searchTerm !== undefined ? searchTerm : activeSearch;
       const response = await subscriptionApi.getActiveSubscriptions({
-        search: searchTerm ?? activeSearch || undefined,
+        search: resolvedSearch || undefined,
         limit: 200
       });
       setActiveSubscriptions(response.users);
