@@ -68,7 +68,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
 
       return reply.send({ numbers: data || [] });
     } catch (error: any) {
-      app.log.error('Error fetching WhatsApp numbers:', error);
+      app.log.error({ error }, 'Error fetching WhatsApp numbers');
 
       logErrorToAdmin({
         user_account_id: (request.query as any)?.userAccountId,
@@ -124,7 +124,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: error.errors[0].message });
       }
-      app.log.error('Error creating WhatsApp number:', error);
+      app.log.error({ error }, 'Error creating WhatsApp number');
 
       logErrorToAdmin({
         user_account_id: (request.body as any)?.userAccountId,
@@ -171,7 +171,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: error.errors[0].message });
       }
-      app.log.error('Error updating WhatsApp number:', error);
+      app.log.error({ error }, 'Error updating WhatsApp number');
 
       logErrorToAdmin({
         user_account_id: (request.query as any)?.userAccountId,
@@ -222,7 +222,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       
       return reply.send({ success: true });
     } catch (error: any) {
-      app.log.error('Error deleting WhatsApp number:', error);
+      app.log.error({ error }, 'Error deleting WhatsApp number');
 
       logErrorToAdmin({
         user_account_id: (request.query as any)?.userAccountId,
@@ -269,7 +269,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
 
       return reply.send({ success: true, number: data });
     } catch (error: any) {
-      app.log.error('Error resetting WhatsApp connection:', error);
+      app.log.error({ error }, 'Error resetting WhatsApp connection');
 
       logErrorToAdmin({
         user_account_id: userAccountId,
@@ -327,7 +327,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       // 3. Нет номера
       return reply.send({ phone_number: null, source: null });
     } catch (error: any) {
-      app.log.error('Error fetching default WhatsApp number:', error);
+      app.log.error({ error }, 'Error fetching default WhatsApp number');
 
       logErrorToAdmin({
         user_account_id: (request.query as any)?.userAccountId,
@@ -366,16 +366,15 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
           .eq('user_account_id', userAccountId);
 
         if (error) {
-          app.log.error('Error deleting WhatsApp number:', error);
+          app.log.error({ error }, 'Error deleting WhatsApp number');
           return reply.status(500).send({ error: error.message });
         }
 
         return reply.send({ success: true });
       } catch (error: any) {
-        app.log.error('Error deleting WhatsApp number:', error);
+        app.log.error({ error }, 'Error deleting WhatsApp number');
         return reply.status(500).send({ error: error.message || 'Failed to delete number' });
       }
     }
   );
 }
-
