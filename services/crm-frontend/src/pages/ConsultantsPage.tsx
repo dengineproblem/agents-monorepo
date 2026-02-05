@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { consultationService } from '@/services/consultationService';
 import { salesApi } from '@/services/salesApi';
+import { consultantApi } from '@/services/consultantApi';
 import { Consultant, CreateConsultantData, WorkingSchedule, WorkingScheduleInput, ConsultationService } from '@/types/consultation';
 
 const DAYS_OF_WEEK = [
@@ -46,13 +47,19 @@ export function ConsultantsPage() {
   const [isSavingServices, setIsSavingServices] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Состояние для установки плана продаж
+  // Состояние для установки плановых показателей
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
   const [planConsultant, setPlanConsultant] = useState<Consultant | null>(null);
   const [planFormData, setPlanFormData] = useState({
+    period_type: 'month' as 'month' | 'week',
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear(),
-    plan_amount: ''
+    week_date: new Date().toISOString().split('T')[0],
+    target_sales_amount: '',
+    target_sales_count: '',
+    target_lead_to_booked_rate: '',
+    target_booked_to_completed_rate: '',
+    target_completed_to_sales_rate: ''
   });
 
   const [newConsultant, setNewConsultant] = useState<CreateConsultantData>({
@@ -315,60 +322,105 @@ export function ConsultantsPage() {
     }
   };
 
-  // Открыть модальное окно установки плана продаж
+  const getMonthStart = (year: number, month: number) => {
+    const paddedMonth = month.toString().padStart(2, '0');
+    return `${year}-${paddedMonth}-01`;
+  };
+
+  // Открыть модальное окно установки плановых показателей
   const openPlanModal = async (consultant: Consultant) => {
     setPlanConsultant(consultant);
     const now = new Date();
     const currentMonth = now.getMonth() + 1;
     const currentYear = now.getFullYear();
+    const monthStart = getMonthStart(currentYear, currentMonth);
 
     // Загружаем текущий план для консультанта
     try {
-      const stats = await salesApi.getStats({
+      const targets = await consultantApi.getTargets({
         consultantId: consultant.id,
-        month: currentMonth,
-        year: currentYear
+        period_type: 'month',
+        period_start: monthStart
       });
 
       setPlanFormData({
+        period_type: 'month',
         month: currentMonth,
         year: currentYear,
-        plan_amount: stats.plan_amount > 0 ? stats.plan_amount.toString() : ''
+        week_date: monthStart,
+        target_sales_amount: targets.target_sales_amount !== null && targets.target_sales_amount !== undefined
+          ? targets.target_sales_amount.toString()
+          : '',
+        target_sales_count: targets.target_sales_count !== null && targets.target_sales_count !== undefined
+          ? targets.target_sales_count.toString()
+          : '',
+        target_lead_to_booked_rate: targets.target_lead_to_booked_rate !== null && targets.target_lead_to_booked_rate !== undefined
+          ? targets.target_lead_to_booked_rate.toString()
+          : '',
+        target_booked_to_completed_rate: targets.target_booked_to_completed_rate !== null && targets.target_booked_to_completed_rate !== undefined
+          ? targets.target_booked_to_completed_rate.toString()
+          : '',
+        target_completed_to_sales_rate: targets.target_completed_to_sales_rate !== null && targets.target_completed_to_sales_rate !== undefined
+          ? targets.target_completed_to_sales_rate.toString()
+          : ''
       });
     } catch (error) {
       console.error('Failed to load current plan:', error);
       // Если не удалось загрузить план, используем значения по умолчанию
       setPlanFormData({
+        period_type: 'month',
         month: currentMonth,
         year: currentYear,
-        plan_amount: ''
+        week_date: monthStart,
+        target_sales_amount: '',
+        target_sales_count: '',
+        target_lead_to_booked_rate: '',
+        target_booked_to_completed_rate: '',
+        target_completed_to_sales_rate: ''
       });
     }
 
     setIsPlanModalOpen(true);
   };
 
-  // Установить план продаж
+  // Установить плановые показатели
   const handleSetSalesPlan = async () => {
-    if (!planConsultant || !planFormData.plan_amount) {
-      toast({
-        variant: 'destructive',
-        title: 'Ошибка',
-        description: 'Заполните сумму плана'
-      });
-      return;
-    }
+    if (!planConsultant) return;
 
     try {
-      const result = await salesApi.setSalesPlan(planConsultant.id, {
-        month: planFormData.month,
-        year: planFormData.year,
-        plan_amount: parseFloat(planFormData.plan_amount)
+      const periodStart = planFormData.period_type === 'month'
+        ? getMonthStart(planFormData.year, planFormData.month)
+        : (planFormData.week_date || new Date().toISOString().split('T')[0]);
+
+      const parseNullableNumber = (value: string) => {
+        if (value === '') return null;
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+      };
+
+      const result = await consultantApi.setTargets({
+        consultant_id: planConsultant.id,
+        period_type: planFormData.period_type,
+        period_start: periodStart,
+        target_sales_amount: parseNullableNumber(planFormData.target_sales_amount),
+        target_sales_count: parseNullableNumber(planFormData.target_sales_count),
+        target_lead_to_booked_rate: parseNullableNumber(planFormData.target_lead_to_booked_rate),
+        target_booked_to_completed_rate: parseNullableNumber(planFormData.target_booked_to_completed_rate),
+        target_completed_to_sales_rate: parseNullableNumber(planFormData.target_completed_to_sales_rate)
       });
+
+      // Сохраняем план продаж в старой таблице для совместимости (только для месячного плана)
+      if (planFormData.period_type === 'month' && planFormData.target_sales_amount) {
+        await salesApi.setSalesPlan(planConsultant.id, {
+          month: planFormData.month,
+          year: planFormData.year,
+          plan_amount: parseFloat(planFormData.target_sales_amount)
+        });
+      }
 
       toast({
         title: 'План установлен',
-        description: result.message
+        description: result.success ? 'Показатели сохранены' : 'Показатели сохранены'
       });
 
       setIsPlanModalOpen(false);
@@ -377,7 +429,7 @@ export function ConsultantsPage() {
       toast({
         variant: 'destructive',
         title: 'Ошибка',
-        description: error.message || 'Не удалось установить план продаж'
+        description: error.message || 'Не удалось установить плановые показатели'
       });
     }
   };
@@ -478,7 +530,7 @@ export function ConsultantsPage() {
                     <span className="truncate">{consultant.name}</span>
                   </div>
                   <div className="flex gap-0.5 flex-shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPlanModal(consultant)} title="План продаж">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPlanModal(consultant)} title="Плановые показатели">
                       <Target className="w-4 h-4" />
                     </Button>
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openServicesModal(consultant)} title="Услуги">
@@ -913,17 +965,34 @@ export function ConsultantsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Модальное окно установки плана продаж */}
+      {/* Модальное окно установки плановых показателей */}
       <Dialog open={isPlanModalOpen} onOpenChange={setIsPlanModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Установить план продаж</DialogTitle>
+            <DialogTitle>Установить плановые показатели</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
               <Label>Консультант</Label>
               <Input value={planConsultant?.name || ''} disabled />
             </div>
+            <div>
+              <Label>Период</Label>
+              <Select
+                value={planFormData.period_type}
+                onValueChange={(value: 'week' | 'month') => setPlanFormData({ ...planFormData, period_type: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="week">Неделя</SelectItem>
+                  <SelectItem value="month">Месяц</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {planFormData.period_type === 'month' ? (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="plan_month">Месяц</Label>
@@ -962,16 +1031,74 @@ export function ConsultantsPage() {
                 />
               </div>
             </div>
+            ) : (
+              <div>
+                <Label htmlFor="plan_week_date">Дата внутри недели</Label>
+                <Input
+                  id="plan_week_date"
+                  type="date"
+                  value={planFormData.week_date}
+                  onChange={(e) => setPlanFormData({ ...planFormData, week_date: e.target.value })}
+                />
+              </div>
+            )}
             <div>
-              <Label htmlFor="plan_amount">Сумма плана (KZT) *</Label>
+              <Label htmlFor="plan_amount">План продаж (KZT)</Label>
               <Input
                 id="plan_amount"
                 type="number"
-                value={planFormData.plan_amount}
-                onChange={(e) => setPlanFormData({ ...planFormData, plan_amount: e.target.value })}
+                value={planFormData.target_sales_amount}
+                onChange={(e) => setPlanFormData({ ...planFormData, target_sales_amount: e.target.value })}
                 placeholder="1000000"
-                required
               />
+            </div>
+            <div>
+              <Label htmlFor="plan_sales_count">План продаж (количество)</Label>
+              <Input
+                id="plan_sales_count"
+                type="number"
+                value={planFormData.target_sales_count}
+                onChange={(e) => setPlanFormData({ ...planFormData, target_sales_count: e.target.value })}
+                placeholder="10"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <Label htmlFor="plan_lead_to_booked">Лид → Запись (%)</Label>
+                <Input
+                  id="plan_lead_to_booked"
+                  type="number"
+                  value={planFormData.target_lead_to_booked_rate}
+                  onChange={(e) => setPlanFormData({ ...planFormData, target_lead_to_booked_rate: e.target.value })}
+                  placeholder="30"
+                  min="0"
+                  max="100"
+                />
+              </div>
+              <div>
+                <Label htmlFor="plan_booked_to_completed">Запись → Проведено (%)</Label>
+                <Input
+                  id="plan_booked_to_completed"
+                  type="number"
+                  value={planFormData.target_booked_to_completed_rate}
+                  onChange={(e) => setPlanFormData({ ...planFormData, target_booked_to_completed_rate: e.target.value })}
+                  placeholder="80"
+                  min="0"
+                  max="100"
+                />
+              </div>
+              <div>
+                <Label htmlFor="plan_completed_to_sales">Проведено → Продажа (%)</Label>
+                <Input
+                  id="plan_completed_to_sales"
+                  type="number"
+                  value={planFormData.target_completed_to_sales_rate}
+                  onChange={(e) => setPlanFormData({ ...planFormData, target_completed_to_sales_rate: e.target.value })}
+                  placeholder="40"
+                  min="0"
+                  max="100"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>

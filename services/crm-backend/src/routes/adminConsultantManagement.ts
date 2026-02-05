@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { notifyConsultantAboutNewLead } from '../lib/consultantNotifications.js';
+import { normalizePeriodInput } from '../lib/periodUtils.js';
 
 /**
  * Admin routes для управления консультантами и лидами
@@ -158,6 +159,115 @@ export async function adminConsultantManagementRoutes(app: FastifyInstance) {
       return reply.send(statsWithInfo);
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching consultant stats');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /admin/consultant-targets
+   * Установить/обновить плановые показатели консультанта (только для админа)
+   */
+  app.put('/admin/consultant-targets', async (request, reply) => {
+    try {
+      const userAccountId = request.headers['x-user-id'] as string;
+
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('role, is_tech_admin')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || (!userAccount?.is_tech_admin && userAccount?.role !== 'admin')) {
+        return reply.status(403).send({ error: 'Admin access required' });
+      }
+
+      const body = request.body as {
+        consultant_id?: string;
+        period_type?: 'week' | 'month';
+        period_start?: string;
+        target_lead_to_booked_rate?: number | string | null;
+        target_booked_to_completed_rate?: number | string | null;
+        target_completed_to_sales_rate?: number | string | null;
+        target_sales_amount?: number | string | null;
+        target_sales_count?: number | string | null;
+      };
+
+      if (!body?.consultant_id) {
+        return reply.status(400).send({ error: 'consultant_id is required' });
+      }
+
+      const { periodType, periodStart, periodEnd } = normalizePeriodInput(
+        body.period_type,
+        body.period_start
+      );
+
+      const toNullableNumber = (value?: number | string | null) => {
+        if (value === null || value === undefined || value === '') return null;
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+      };
+
+      const targetLeadToBooked = toNullableNumber(body.target_lead_to_booked_rate);
+      const targetBookedToCompleted = toNullableNumber(body.target_booked_to_completed_rate);
+      const targetCompletedToSales = toNullableNumber(body.target_completed_to_sales_rate);
+      const targetSalesAmount = toNullableNumber(body.target_sales_amount);
+      const targetSalesCount = toNullableNumber(body.target_sales_count);
+
+      const validatePercent = (value: number | null, field: string) => {
+        if (value === null) return null;
+        if (value < 0 || value > 100) {
+          return `${field} must be between 0 and 100`;
+        }
+        return null;
+      };
+
+      const errors = [
+        validatePercent(targetLeadToBooked, 'target_lead_to_booked_rate'),
+        validatePercent(targetBookedToCompleted, 'target_booked_to_completed_rate'),
+        validatePercent(targetCompletedToSales, 'target_completed_to_sales_rate')
+      ].filter(Boolean);
+
+      if (errors.length > 0) {
+        return reply.status(400).send({ error: errors.join(', ') });
+      }
+
+      if (targetSalesAmount !== null && targetSalesAmount < 0) {
+        return reply.status(400).send({ error: 'target_sales_amount must be >= 0' });
+      }
+
+      if (targetSalesCount !== null && targetSalesCount < 0) {
+        return reply.status(400).send({ error: 'target_sales_count must be >= 0' });
+      }
+
+      const { data: targets, error: targetsError } = await supabase
+        .from('consultant_targets')
+        .upsert({
+          consultant_id: body.consultant_id,
+          period_type: periodType,
+          period_start: periodStart,
+          period_end: periodEnd,
+          target_lead_to_booked_rate: targetLeadToBooked,
+          target_booked_to_completed_rate: targetBookedToCompleted,
+          target_completed_to_sales_rate: targetCompletedToSales,
+          target_sales_amount: targetSalesAmount,
+          target_sales_count: targetSalesCount
+        }, {
+          onConflict: 'consultant_id,period_type,period_start'
+        })
+        .select()
+        .single();
+
+      if (targetsError) {
+        app.log.error({ error: targetsError }, 'Failed to upsert consultant targets');
+        return reply.status(500).send({ error: targetsError.message });
+      }
+
+      return reply.send({
+        success: true,
+        targets
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error setting consultant targets');
       return reply.status(500).send({ error: error.message });
     }
   });

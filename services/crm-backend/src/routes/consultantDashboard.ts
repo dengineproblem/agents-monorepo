@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
+import { normalizePeriodInput } from '../lib/periodUtils.js';
 import { notifyConsultantAboutNewConsultation } from '../lib/consultantNotifications.js';
 
 /**
@@ -32,30 +33,19 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Consultant ID required' });
       }
 
+      const { periodType, periodStart, periodEnd, startIso, endIso } = normalizePeriodInput(
+        (request.query as any)?.period_type,
+        (request.query as any)?.period_start
+      );
+
       app.log.info({
         userId,
         consultantId: targetConsultantId,
-        isAdmin
+        isAdmin,
+        periodType,
+        periodStart,
+        periodEnd
       }, 'GET /consultant/dashboard: Starting query');
-
-      // Используем view из миграции
-      const dashboardQueryStart = Date.now();
-      const { data, error } = await supabase
-        .from('consultant_dashboard_stats')
-        .select('*')
-        .eq('consultant_id', targetConsultantId)
-        .single();
-      const dashboardQueryDuration = Date.now() - dashboardQueryStart;
-
-      if (error) {
-        app.log.error({
-          error,
-          consultantId: targetConsultantId,
-          userId,
-          duration: dashboardQueryDuration
-        }, 'GET /consultant/dashboard: Failed to fetch dashboard stats');
-        return reply.status(500).send({ error: error.message });
-      }
 
       // Получить статистику задач эффективно через SQL агрегацию
       const today = new Date().toISOString().split('T')[0];
@@ -93,14 +83,137 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const tasks_overdue = overdueResult?.count || 0;
       const tasks_today = todayResult?.count || 0;
 
-      // Получить количество и сумму продаж
-      const salesQueryStart = Date.now();
+      // Получить лиды за период
+      const leadsQueryStart = Date.now();
+      const countLeads = (interestLevel?: 'hot' | 'warm' | 'cold') => {
+        let query = supabase
+          .from('dialog_analysis')
+          .select('id', { count: 'exact', head: true })
+          .eq('assigned_consultant_id', targetConsultantId)
+          .gte('created_at', startIso)
+          .lte('created_at', endIso);
 
-      // Получить все продажи для подсчёта количества и суммы
+        if (interestLevel) {
+          query = query.eq('interest_level', interestLevel);
+        }
+
+        return query;
+      };
+
+      const [totalLeadsResult, hotLeadsResult, warmLeadsResult, coldLeadsResult] = await Promise.all([
+        countLeads(),
+        countLeads('hot'),
+        countLeads('warm'),
+        countLeads('cold')
+      ]);
+
+      const leadsQueryDuration = Date.now() - leadsQueryStart;
+
+      const leadsErrors = [
+        totalLeadsResult.error,
+        hotLeadsResult.error,
+        warmLeadsResult.error,
+        coldLeadsResult.error
+      ].filter(Boolean);
+
+      if (leadsErrors.length > 0) {
+        app.log.error({ errors: leadsErrors }, 'GET /consultant/dashboard: Failed to fetch leads stats');
+        return reply.status(500).send({ error: 'Failed to fetch leads stats' });
+      }
+
+      const total_leads = totalLeadsResult.count || 0;
+      const hot_leads = hotLeadsResult.count || 0;
+      const warm_leads = warmLeadsResult.count || 0;
+      const cold_leads = coldLeadsResult.count || 0;
+
+      // Получить консультации за период
+      const consultationsQueryStart = Date.now();
+      const countConsultations = (status?: string) => {
+        let query = supabase
+          .from('consultations')
+          .select('id', { count: 'exact', head: true })
+          .eq('consultant_id', targetConsultantId)
+          .gte('date', periodStart)
+          .lte('date', periodEnd);
+
+        if (status) {
+          query = query.eq('status', status);
+        }
+
+        return query;
+      };
+
+      const [
+        totalConsultationsResult,
+        scheduledResult,
+        confirmedResult,
+        completedResult,
+        cancelledResult,
+        noShowResult
+      ] = await Promise.all([
+        countConsultations(),
+        countConsultations('scheduled'),
+        countConsultations('confirmed'),
+        countConsultations('completed'),
+        countConsultations('cancelled'),
+        countConsultations('no_show')
+      ]);
+
+      const consultationsQueryDuration = Date.now() - consultationsQueryStart;
+
+      const consultationsErrors = [
+        totalConsultationsResult.error,
+        scheduledResult.error,
+        confirmedResult.error,
+        completedResult.error,
+        cancelledResult.error,
+        noShowResult.error
+      ].filter(Boolean);
+
+      if (consultationsErrors.length > 0) {
+        app.log.error({ errors: consultationsErrors }, 'GET /consultant/dashboard: Failed to fetch consultations stats');
+        return reply.status(500).send({ error: 'Failed to fetch consultations stats' });
+      }
+
+      const total_consultations = totalConsultationsResult.count || 0;
+      const scheduled = scheduledResult.count || 0;
+      const confirmed = confirmedResult.count || 0;
+      const completed = completedResult.count || 0;
+      const cancelled = cancelledResult.count || 0;
+      const no_show = noShowResult.count || 0;
+
+      // Получить количество уникальных лидов с консультациями
+      const bookedLeadsQueryStart = Date.now();
+      const { data: consultationsWithLeads, error: consultationsLeadsError } = await supabase
+        .from('consultations')
+        .select('dialog_analysis_id')
+        .eq('consultant_id', targetConsultantId)
+        .gte('date', periodStart)
+        .lte('date', periodEnd)
+        .not('dialog_analysis_id', 'is', null);
+
+      const bookedLeadsQueryDuration = Date.now() - bookedLeadsQueryStart;
+
+      if (consultationsLeadsError) {
+        app.log.error({
+          error: consultationsLeadsError,
+          consultantId: targetConsultantId,
+          duration: bookedLeadsQueryDuration
+        }, 'GET /consultant/dashboard: Failed to fetch booked leads count');
+      }
+
+      const unique_leads_with_consultations = new Set(
+        (consultationsWithLeads || []).map(c => c.dialog_analysis_id).filter(Boolean)
+      ).size;
+
+      // Получить количество и сумму продаж за период
+      const salesQueryStart = Date.now();
       const { data: salesData, error: salesError } = await supabase
         .from('purchases')
         .select('amount')
-        .eq('consultant_id', targetConsultantId);
+        .eq('consultant_id', targetConsultantId)
+        .gte('purchase_date', startIso)
+        .lte('purchase_date', endIso);
 
       const salesQueryDuration = Date.now() - salesQueryStart;
       const sales_count = salesData?.length || 0;
@@ -114,46 +227,17 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         }, 'GET /consultant/dashboard: Failed to fetch sales');
       }
 
-      // Получить количество уникальных лидов с консультациями
-      const bookedLeadsQueryStart = Date.now();
-      const { data: consultationsWithLeads, error: consultationsError } = await supabase
-        .from('consultations')
-        .select('dialog_analysis_id')
-        .eq('consultant_id', targetConsultantId)
-        .not('dialog_analysis_id', 'is', null);
-
-      const bookedLeadsQueryDuration = Date.now() - bookedLeadsQueryStart;
-
-      // Подсчитываем уникальные лиды
-      const unique_leads_with_consultations = new Set(
-        (consultationsWithLeads || []).map(c => c.dialog_analysis_id).filter(Boolean)
-      ).size;
-
-      if (consultationsError) {
-        app.log.error({
-          error: consultationsError,
-          consultantId: targetConsultantId,
-          duration: bookedLeadsQueryDuration
-        }, 'GET /consultant/dashboard: Failed to fetch booked leads count');
-      }
+      const completion_rate = total_consultations > 0
+        ? Math.round((completed / total_consultations) * 100)
+        : 0;
 
       // Рассчитать конверсии
-      const total_leads = data?.total_leads || 0;
-      const booked_leads = data?.booked_leads || 0;
-      const completed = data?.completed || 0;
-      const total_consultations = data?.total_consultations || 0;
-
-      // 1. Лид → Запись: % лидов, которые записались на консультацию
-      // Используем реальное количество уникальных лидов с консультациями
       const lead_to_booked_rate = total_leads > 0
         ? Math.round((unique_leads_with_consultations / total_leads) * 100)
         : 0;
 
-      // 2. Запись → Проведено: % консультаций, которые были проведены
-      // Используем completion_rate из view (уже правильно считается)
-      const booked_to_completed_rate = Math.round(data?.completion_rate || 0);
+      const booked_to_completed_rate = completion_rate;
 
-      // 3. Проведено → Продажа: % проведённых консультаций, которые привели к продаже
       const completed_to_sales_rate = completed > 0
         ? Math.round((sales_count / completed) * 100)
         : 0;
@@ -166,37 +250,56 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         stats: {
           leads: total_leads,
           leads_with_consultations: unique_leads_with_consultations,
-          consultations: data?.total_consultations || 0,
+          consultations: total_consultations,
           tasks: tasks_total,
           sales: sales_count,
           sales_amount: sales_amount
         },
-        dashboardQueryDuration,
+        leadsQueryDuration,
+        consultationsQueryDuration,
         tasksQueryDuration,
         salesQueryDuration,
         bookedLeadsQueryDuration,
         totalDuration
       }, 'GET /consultant/dashboard: Success');
 
+      // Получить плановые показатели для периода
+      const { data: targets, error: targetsError } = await supabase
+        .from('consultant_targets')
+        .select(`
+          target_lead_to_booked_rate,
+          target_booked_to_completed_rate,
+          target_completed_to_sales_rate,
+          target_sales_amount,
+          target_sales_count
+        `)
+        .eq('consultant_id', targetConsultantId)
+        .eq('period_type', periodType)
+        .eq('period_start', periodStart)
+        .maybeSingle();
+
+      if (targetsError) {
+        app.log.error({ error: targetsError }, 'GET /consultant/dashboard: Failed to fetch targets');
+      }
+
       return reply.send({
-        ...(data || {
-          consultant_id: targetConsultantId,
-          total_leads: 0,
-          hot_leads: 0,
-          warm_leads: 0,
-          cold_leads: 0,
-          booked_leads: 0,
-          total_consultations: 0,
-          scheduled: 0,
-          confirmed: 0,
-          completed: 0,
-          cancelled: 0,
-          no_show: 0,
-          total_revenue: 0,
-          completion_rate: 0
-        }),
-        // Переопределяем booked_leads правильным значением
+        consultant_id: targetConsultantId,
+        period_type: periodType,
+        period_start: periodStart,
+        period_end: periodEnd,
+        total_leads,
+        hot_leads,
+        warm_leads,
+        cold_leads,
         booked_leads: unique_leads_with_consultations,
+        total_consultations,
+        scheduled,
+        confirmed,
+        completed,
+        cancelled,
+        no_show,
+        total_revenue: 0,
+        completion_rate,
         // Добавляем статистику задач
         tasks_total,
         tasks_overdue,
@@ -206,7 +309,13 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         sales_amount,
         lead_to_booked_rate,
         booked_to_completed_rate,
-        completed_to_sales_rate
+        completed_to_sales_rate,
+        // Плановые показатели
+        target_lead_to_booked_rate: targets?.target_lead_to_booked_rate ?? null,
+        target_booked_to_completed_rate: targets?.target_booked_to_completed_rate ?? null,
+        target_completed_to_sales_rate: targets?.target_completed_to_sales_rate ?? null,
+        target_sales_amount: targets?.target_sales_amount ?? null,
+        target_sales_count: targets?.target_sales_count ?? null
       });
     } catch (error: any) {
       const totalDuration = Date.now() - startTime;
@@ -216,6 +325,64 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         userId: request.userAccountId,
         duration: totalDuration
       }, 'GET /consultant/dashboard: Unexpected error');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /consultant/targets
+   * Получить плановые показатели консультанта на период
+   */
+  app.get('/consultant/targets', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const consultantId = request.consultant?.id;
+      const isAdmin = request.userRole === 'admin';
+
+      const targetConsultantId = isAdmin
+        ? (request.query as any).consultantId || consultantId
+        : consultantId;
+
+      if (!targetConsultantId) {
+        return reply.status(400).send({ error: 'Consultant ID required' });
+      }
+
+      const { periodType, periodStart, periodEnd } = normalizePeriodInput(
+        (request.query as any)?.period_type,
+        (request.query as any)?.period_start
+      );
+
+      const { data: targets, error } = await supabase
+        .from('consultant_targets')
+        .select(`
+          target_lead_to_booked_rate,
+          target_booked_to_completed_rate,
+          target_completed_to_sales_rate,
+          target_sales_amount,
+          target_sales_count
+        `)
+        .eq('consultant_id', targetConsultantId)
+        .eq('period_type', periodType)
+        .eq('period_start', periodStart)
+        .maybeSingle();
+
+      if (error) {
+        app.log.error({ error }, 'GET /consultant/targets: Failed to fetch targets');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send({
+        consultant_id: targetConsultantId,
+        period_type: periodType,
+        period_start: periodStart,
+        period_end: periodEnd,
+        target_lead_to_booked_rate: targets?.target_lead_to_booked_rate ?? null,
+        target_booked_to_completed_rate: targets?.target_booked_to_completed_rate ?? null,
+        target_completed_to_sales_rate: targets?.target_completed_to_sales_rate ?? null,
+        target_sales_amount: targets?.target_sales_amount ?? null,
+        target_sales_count: targets?.target_sales_count ?? null
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'GET /consultant/targets: Unexpected error');
       return reply.status(500).send({ error: error.message });
     }
   });

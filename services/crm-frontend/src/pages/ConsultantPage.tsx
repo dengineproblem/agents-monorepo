@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { LeadsTab } from '@/components/consultant/LeadsTab';
 import { CalendarTab } from '@/components/consultant/CalendarTab';
@@ -13,6 +14,7 @@ import { ProfileTab } from '@/components/consultant/ProfileTab';
 import { ScheduleTab } from '@/components/consultant/ScheduleTab';
 import { SalesTab } from '@/components/consultant/SalesTab';
 import { TasksTab } from '@/components/consultant/TasksTab';
+import { addMonths, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns';
 import {
   Users,
   Calendar,
@@ -25,6 +27,8 @@ import {
   MessageSquare,
   Briefcase,
   CheckSquare,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 export function ConsultantPage() {
@@ -37,6 +41,22 @@ export function ConsultantPage() {
   const [activeTab, setActiveTab] = useState('calendar');
   const [unreadCount, setUnreadCount] = useState(0);
   const [prevUnreadCount, setPrevUnreadCount] = useState(0);
+  const [periodType, setPeriodType] = useState<'week' | 'month'>('month');
+  const [periodStart, setPeriodStart] = useState<Date>(() => startOfMonth(new Date()));
+
+  const getPeriodStart = (date: Date, type: 'week' | 'month') => (
+    type === 'week' ? startOfWeek(date, { weekStartsOn: 1 }) : startOfMonth(date)
+  );
+
+  const getPeriodEnd = (date: Date, type: 'week' | 'month') => (
+    type === 'week' ? endOfWeek(date, { weekStartsOn: 1 }) : endOfMonth(date)
+  );
+
+  const formatPeriodLabel = (start: Date, end: Date) => {
+    const startLabel = start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    const endLabel = end.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric' });
+    return `${startLabel} — ${endLabel}`;
+  };
 
   // Проверка доступа
   useEffect(() => {
@@ -51,7 +71,13 @@ export function ConsultantPage() {
     const loadStats = async () => {
       try {
         setLoading(true);
-        const data = await consultantApi.getDashboard(consultantId);
+        const normalizedStart = getPeriodStart(periodStart, periodType);
+        const periodStartStr = format(normalizedStart, 'yyyy-MM-dd');
+        const data = await consultantApi.getDashboard({
+          consultantId,
+          period_type: periodType,
+          period_start: periodStartStr
+        });
         setStats(data);
       } catch (error: any) {
         console.error('Failed to load dashboard:', error);
@@ -76,7 +102,7 @@ export function ConsultantPage() {
 
     loadStats();
     loadProfile();
-  }, [consultantId, toast]);
+  }, [consultantId, toast, periodType, periodStart]);
 
   // Загрузка счетчика непрочитанных с polling и toast уведомлениями
   useEffect(() => {
@@ -115,6 +141,74 @@ export function ConsultantPage() {
     window.location.href = '/login';
   };
 
+  const handlePeriodTypeChange = (value: 'week' | 'month') => {
+    setPeriodType(value);
+    setPeriodStart(getPeriodStart(new Date(), value));
+  };
+
+  const shiftPeriod = (direction: 'prev' | 'next') => {
+    setPeriodStart((current) => {
+      const base = getPeriodStart(current, periodType);
+      const shifted = periodType === 'week'
+        ? addWeeks(base, direction === 'prev' ? -1 : 1)
+        : addMonths(base, direction === 'prev' ? -1 : 1);
+      return getPeriodStart(shifted, periodType);
+    });
+  };
+
+  const periodStartDate = getPeriodStart(periodStart, periodType);
+  const periodEndDate = getPeriodEnd(periodStart, periodType);
+  const periodLabel = formatPeriodLabel(periodStartDate, periodEndDate);
+
+  const getDelta = (actual?: number, target?: number | null) => {
+    if (target === null || target === undefined || actual === undefined) return null;
+    return actual - target;
+  };
+
+  const deltaClass = (delta: number | null) => {
+    if (delta === null) return 'text-muted-foreground';
+    if (delta >= 0) return 'text-green-600';
+    if (delta >= -5) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  const formatDelta = (delta: number | null, suffix: string) => {
+    if (delta === null) return '—';
+    const sign = delta > 0 ? '+' : '';
+    return `${sign}${delta}${suffix}`;
+  };
+
+  const formatCurrency = (value: number) => value.toLocaleString('ru-RU');
+
+  const formatCurrencyDelta = (delta: number | null) => {
+    if (delta === null) return '—';
+    const sign = delta > 0 ? '+' : '';
+    return `${sign}${formatCurrency(delta)} ₸`;
+  };
+
+  const formatTargetPercent = (target: number | null) => (
+    target === null ? '—' : `${target}%`
+  );
+
+  const leadRate = stats?.lead_to_booked_rate ?? 0;
+  const bookedRate = stats?.booked_to_completed_rate ?? 0;
+  const completedRate = stats?.completed_to_sales_rate ?? 0;
+
+  const leadTarget = stats?.target_lead_to_booked_rate ?? null;
+  const bookedTarget = stats?.target_booked_to_completed_rate ?? null;
+  const completedTarget = stats?.target_completed_to_sales_rate ?? null;
+
+  const leadDelta = getDelta(leadRate, leadTarget);
+  const bookedDelta = getDelta(bookedRate, bookedTarget);
+  const completedDelta = getDelta(completedRate, completedTarget);
+
+  const salesAmount = stats?.sales_amount ?? 0;
+  const salesCount = stats?.sales_count ?? 0;
+  const targetSalesAmount = stats?.target_sales_amount ?? null;
+  const targetSalesCount = stats?.target_sales_count ?? null;
+  const salesAmountDelta = getDelta(salesAmount, targetSalesAmount);
+  const salesCountDelta = getDelta(salesCount, targetSalesCount);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -145,6 +239,29 @@ export function ConsultantPage() {
       </header>
 
       <div className="container mx-auto px-4 py-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={() => shiftPeriod('prev')}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <div className="text-sm font-medium">{periodLabel}</div>
+            <Button variant="outline" size="icon" onClick={() => shiftPeriod('next')}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Период:</span>
+            <Select value={periodType} onValueChange={handlePeriodTypeChange}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="week">Неделя</SelectItem>
+                <SelectItem value="month">Месяц</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <Card>
@@ -179,18 +296,36 @@ export function ConsultantPage() {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">Лид → Запись</span>
-                  <span className="text-sm font-bold">{stats?.lead_to_booked_rate || 0}%</span>
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Лид → Запись</span>
+                    <span className="text-sm font-bold">{leadRate}%</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs mt-1">
+                    <span className="text-muted-foreground">План: {formatTargetPercent(leadTarget)}</span>
+                    <span className={deltaClass(leadDelta)}>{formatDelta(leadDelta, ' п.п.')}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">Запись → Проведено</span>
-                  <span className="text-sm font-bold">{stats?.booked_to_completed_rate || 0}%</span>
+                <div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Запись → Проведено</span>
+                    <span className="text-sm font-bold">{bookedRate}%</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs mt-1">
+                    <span className="text-muted-foreground">План: {formatTargetPercent(bookedTarget)}</span>
+                    <span className={deltaClass(bookedDelta)}>{formatDelta(bookedDelta, ' п.п.')}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-muted-foreground">Проведено → Продажа</span>
-                  <span className="text-sm font-bold">{stats?.completed_to_sales_rate || 0}%</span>
+                <div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-muted-foreground">Проведено → Продажа</span>
+                    <span className="text-sm font-bold">{completedRate}%</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs mt-1">
+                    <span className="text-muted-foreground">План: {formatTargetPercent(completedTarget)}</span>
+                    <span className={deltaClass(completedDelta)}>{formatDelta(completedDelta, ' п.п.')}</span>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -202,9 +337,12 @@ export function ConsultantPage() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats?.sales_amount?.toLocaleString() || 0} ₸</div>
+              <div className="text-2xl font-bold">{formatCurrency(salesAmount)} ₸</div>
               <p className="text-xs text-muted-foreground mt-1">
-                Сумма продаж ({stats?.sales_count || 0} шт.)
+                План: {targetSalesAmount !== null ? `${formatCurrency(targetSalesAmount)} ₸` : '—'} | Δ: <span className={deltaClass(salesAmountDelta)}>{formatCurrencyDelta(salesAmountDelta)}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Продаж: {salesCount} / {targetSalesCount ?? '—'} {targetSalesCount !== null ? `(${formatDelta(salesCountDelta, '')})` : ''}
               </p>
             </CardContent>
           </Card>

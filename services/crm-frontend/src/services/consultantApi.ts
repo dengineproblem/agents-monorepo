@@ -39,6 +39,9 @@ import type { Task, CreateTaskData, UpdateTaskData } from '@/types/task';
 // Типы данных
 export interface DashboardStats {
   consultant_id: string;
+  period_type?: 'week' | 'month';
+  period_start?: string;
+  period_end?: string;
   total_leads: number;
   hot_leads: number;
   warm_leads: number;
@@ -62,6 +65,24 @@ export interface DashboardStats {
   lead_to_booked_rate?: number;
   booked_to_completed_rate?: number;
   completed_to_sales_rate?: number;
+  // Плановые показатели
+  target_lead_to_booked_rate?: number | null;
+  target_booked_to_completed_rate?: number | null;
+  target_completed_to_sales_rate?: number | null;
+  target_sales_amount?: number | null;
+  target_sales_count?: number | null;
+}
+
+export interface ConsultantTargets {
+  consultant_id: string;
+  period_type: 'week' | 'month';
+  period_start: string;
+  period_end: string;
+  target_lead_to_booked_rate: number | null;
+  target_booked_to_completed_rate: number | null;
+  target_completed_to_sales_rate: number | null;
+  target_sales_amount: number | null;
+  target_sales_count: number | null;
 }
 
 export interface Lead {
@@ -152,9 +173,47 @@ export interface Sale {
 
 export const consultantApi = {
   // Dashboard
-  getDashboard: async (consultantId?: string): Promise<DashboardStats> => {
-    const query = consultantId ? `?consultantId=${consultantId}` : '';
-    return fetchWithAuth(`/consultant/dashboard${query}`);
+  getDashboard: async (params?: {
+    consultantId?: string;
+    period_type?: 'week' | 'month';
+    period_start?: string;
+  }): Promise<DashboardStats> => {
+    const query = new URLSearchParams();
+    if (params?.consultantId) query.append('consultantId', params.consultantId);
+    if (params?.period_type) query.append('period_type', params.period_type);
+    if (params?.period_start) query.append('period_start', params.period_start);
+    const queryString = query.toString();
+    return fetchWithAuth(`/consultant/dashboard${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Targets
+  getTargets: async (params?: {
+    consultantId?: string;
+    period_type?: 'week' | 'month';
+    period_start?: string;
+  }): Promise<ConsultantTargets> => {
+    const query = new URLSearchParams();
+    if (params?.consultantId) query.append('consultantId', params.consultantId);
+    if (params?.period_type) query.append('period_type', params.period_type);
+    if (params?.period_start) query.append('period_start', params.period_start);
+    const queryString = query.toString();
+    return fetchWithAuth(`/consultant/targets${queryString ? `?${queryString}` : ''}`);
+  },
+
+  setTargets: async (data: {
+    consultant_id: string;
+    period_type: 'week' | 'month';
+    period_start: string;
+    target_lead_to_booked_rate?: number | null;
+    target_booked_to_completed_rate?: number | null;
+    target_completed_to_sales_rate?: number | null;
+    target_sales_amount?: number | null;
+    target_sales_count?: number | null;
+  }): Promise<{ success: boolean; targets: ConsultantTargets }> => {
+    return fetchWithAuth('/admin/consultant-targets', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
   },
 
   // Leads
