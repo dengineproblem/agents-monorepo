@@ -517,6 +517,65 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
   });
 
   /**
+   * PATCH /consultant/leads/:leadId/notes
+   * Обновить примечание по лиду (консультант или админ)
+   */
+  app.patch('/consultant/leads/:leadId/notes', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      const { leadId } = request.params as { leadId: string };
+      const { notes } = request.body as { notes?: string | null };
+
+      if (notes === undefined) {
+        return reply.status(400).send({ error: 'notes field is required' });
+      }
+
+      const isAdmin = request.userRole === 'admin';
+      const consultantId = request.consultant?.id;
+      const userAccountId = request.userAccountId;
+
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('id, assigned_consultant_id, user_account_id')
+        .eq('id', leadId)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      if (!isAdmin) {
+        if (!consultantId || lead.assigned_consultant_id !== consultantId) {
+          return reply.status(403).send({ error: 'Access denied' });
+        }
+      } else if (userAccountId && lead.user_account_id !== userAccountId) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      if (typeof notes === 'string' && notes.length > 5000) {
+        return reply.status(400).send({ error: 'notes is too длинное (max 5000)' });
+      }
+
+      const { error: updateError } = await supabase
+        .from('dialog_analysis')
+        .update({
+          manual_notes: notes,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', leadId);
+
+      if (updateError) {
+        app.log.error({ error: updateError }, 'Failed to update lead notes');
+        return reply.status(500).send({ error: updateError.message });
+      }
+
+      return reply.send({ success: true });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating lead notes');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
    * GET /consultant/consultations
    * Получить консультации консультанта
    */

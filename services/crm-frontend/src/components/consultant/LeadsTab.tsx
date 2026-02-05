@@ -32,6 +32,8 @@ export function LeadsTab() {
 
   // Модальное окно для лида
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [leadNotes, setLeadNotes] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   // Модальное окно добавления продажи
   const [addSaleDialogOpen, setAddSaleDialogOpen] = useState(false);
@@ -113,6 +115,31 @@ export function LeadsTab() {
   // Открыть модальное окно лида
   const handleOpenLead = (lead: Lead) => {
     setSelectedLead(lead);
+    setLeadNotes(lead.manual_notes || '');
+  };
+
+  const handleSaveNotes = async () => {
+    if (!selectedLead) return;
+    try {
+      setSavingNotes(true);
+      await consultantApi.updateLeadNotes(selectedLead.id, leadNotes, consultantId);
+      setSelectedLead({ ...selectedLead, manual_notes: leadNotes });
+      setLeads(prev => prev.map(lead => (
+        lead.id === selectedLead.id ? { ...lead, manual_notes: leadNotes } : lead
+      )));
+      toast({
+        title: 'Сохранено',
+        description: 'Примечание обновлено'
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось сохранить примечание',
+        variant: 'destructive'
+      });
+    } finally {
+      setSavingNotes(false);
+    }
   };
 
   // Открыть модальное окно добавления продажи
@@ -547,6 +574,21 @@ export function LeadsTab() {
 
           {selectedLead && (
             <>
+              <div className="border rounded-lg p-4 bg-muted/30">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-sm">Примечания по клиенту</h3>
+                  <Button size="sm" onClick={handleSaveNotes} disabled={savingNotes}>
+                    {savingNotes ? 'Сохранение...' : 'Сохранить'}
+                  </Button>
+                </div>
+                <Textarea
+                  value={leadNotes}
+                  onChange={(e) => setLeadNotes(e.target.value)}
+                  placeholder="Добавьте примечание по клиенту..."
+                  rows={4}
+                />
+              </div>
+
               <ChatSection
                 leadId={selectedLead.id}
                 clientName={selectedLead.contact_name}

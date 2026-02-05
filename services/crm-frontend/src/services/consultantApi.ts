@@ -96,6 +96,7 @@ export interface Lead {
   has_unread?: boolean; // Флаг наличия непрочитанных сообщений
   consultation_status?: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show' | null; // Статус консультации
   has_sale?: boolean; // Есть ли продажа по клиенту
+  manual_notes?: string | null;
 }
 
 export interface Consultation {
@@ -249,6 +250,15 @@ export const consultantApi = {
       });
     }
     return fetchWithAuth(`/consultant/consultations?${query}`);
+  },
+
+  // Lead notes
+  updateLeadNotes: async (leadId: string, notes: string | null, consultantId?: string): Promise<{ success: boolean }> => {
+    const query = consultantId ? `?consultantId=${consultantId}` : '';
+    return fetchWithAuth(`/consultant/leads/${leadId}/notes${query}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes })
+    });
   },
 
   // Schedule
