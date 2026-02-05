@@ -38,6 +38,7 @@ export interface ApplySubscriptionParams {
   sourceSaleId?: string;
   comment?: string;
   startDate?: string;
+  forceStartDate?: boolean;
 }
 
 export interface ApplySubscriptionResult {
@@ -147,10 +148,11 @@ function resolveSubscriptionStartDate(args: {
   userCreatedAt: string | null;
   explicitStartDate?: string;
   today: string;
+  forceStartDate?: boolean;
 }): string {
-  const { currentTarifExpires, userCreatedAt, explicitStartDate, today } = args;
+  const { currentTarifExpires, userCreatedAt, explicitStartDate, today, forceStartDate } = args;
 
-  if (currentTarifExpires) {
+  if (!forceStartDate && currentTarifExpires) {
     const currentExpiry = toDateString(currentTarifExpires);
 
     // Продление только если текущий срок в будущем (по ТЗ)
@@ -401,7 +403,8 @@ export async function applySubscriptionToUserAccount(
     currentTarifExpires: user.tarif_expires,
     userCreatedAt: user.created_at,
     explicitStartDate: params.startDate,
-    today: todayAlmaty
+    today: todayAlmaty,
+    forceStartDate: params.forceStartDate
   });
 
   const newTarifExpires = addMonthsToDateString(startDate, params.months);

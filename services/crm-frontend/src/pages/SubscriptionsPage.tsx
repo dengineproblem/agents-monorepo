@@ -37,7 +37,8 @@ import {
   SubscriptionProduct,
   SubscriptionSale,
   SubscriptionUserSearchItem,
-  PhoneUserLink
+  PhoneUserLink,
+  ActiveSubscriptionUser
 } from '@/types/subscription';
 import { toast } from 'sonner';
 
@@ -70,10 +71,13 @@ export function SubscriptionsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isRunningJob, setIsRunningJob] = useState(false);
   const [cancelingSaleId, setCancelingSaleId] = useState<string | null>(null);
+  const [deactivatingUserId, setDeactivatingUserId] = useState<string | null>(null);
 
   const [products, setProducts] = useState<SubscriptionProduct[]>([]);
   const [sales, setSales] = useState<SubscriptionSale[]>([]);
-  const [appliedSubscriptions, setAppliedSubscriptions] = useState<SubscriptionSale[]>([]);
+  const [activeSubscriptions, setActiveSubscriptions] = useState<ActiveSubscriptionUser[]>([]);
+  const [activeSearch, setActiveSearch] = useState('');
+  const [activeLoading, setActiveLoading] = useState(false);
   const [consultants, setConsultants] = useState<ConsultantOption[]>([]);
 
   const [search, setSearch] = useState('');
@@ -112,6 +116,13 @@ export function SubscriptionsPage() {
   const [manualStartDate, setManualStartDate] = useState('');
   const [manualComment, setManualComment] = useState('');
 
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editUser, setEditUser] = useState<ActiveSubscriptionUser | null>(null);
+  const [editMonths, setEditMonths] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editComment, setEditComment] = useState('');
+
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === productId) || null,
     [products, productId]
@@ -130,21 +141,16 @@ export function SubscriptionsPage() {
 
     try {
       setLoading(true);
-      const [productsData, salesData, consultantsData, appliedData] = await Promise.all([
+      const [productsData, salesData, consultantsData, activeData] = await Promise.all([
         subscriptionApi.getProducts(false),
         subscriptionApi.getSales(),
         consultationService.getConsultants(user.id),
-        subscriptionApi.getSales({
-          status: 'applied',
-          sale_kind: 'subscription',
-          include_user: true,
-          limit: 200
-        })
+        subscriptionApi.getActiveSubscriptions({ limit: 200 })
       ]);
 
       setProducts(productsData);
       setSales(salesData.sales);
-      setAppliedSubscriptions(appliedData.sales);
+      setActiveSubscriptions(activeData.users);
       setConsultants(
         consultantsData.map((consultant) => ({
           id: consultant.id,
@@ -176,15 +182,13 @@ export function SubscriptionsPage() {
     }
   };
 
-  const loadAppliedSubscriptions = async () => {
+  const loadActiveSubscriptions = async (searchTerm?: string) => {
     try {
-      const response = await subscriptionApi.getSales({
-        status: 'applied',
-        sale_kind: 'subscription',
-        include_user: true,
+      const response = await subscriptionApi.getActiveSubscriptions({
+        search: searchTerm ?? activeSearch || undefined,
         limit: 200
       });
-      setAppliedSubscriptions(response.sales);
+      setActiveSubscriptions(response.users);
     } catch (error: any) {
       toast.error(error.message || 'Не удалось загрузить список подписок');
     }
@@ -301,7 +305,7 @@ export function SubscriptionsPage() {
       setLinkDialogOpen(false);
       setSaleToLink(null);
       await loadSales();
-      await loadAppliedSubscriptions();
+      await loadActiveSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось привязать продажу');
     } finally {
@@ -315,7 +319,7 @@ export function SubscriptionsPage() {
       await subscriptionApi.applySale(sale.id);
       toast.success('Подписка применена к пользователю');
       await loadSales();
-      await loadAppliedSubscriptions();
+      await loadActiveSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось применить подписку');
     } finally {
@@ -340,7 +344,7 @@ export function SubscriptionsPage() {
         toast.message(result.warning);
       }
       await loadSales();
-      await loadAppliedSubscriptions();
+      await loadActiveSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось отменить продажу');
     } finally {
@@ -356,11 +360,79 @@ export function SubscriptionsPage() {
         `Sweep завершен: напомн. ${response.stats.remindersSent}, отключено ${response.stats.deactivatedUsers}`
       );
       await loadSales();
-      await loadAppliedSubscriptions();
+      await loadActiveSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось запустить sweep');
     } finally {
       setIsRunningJob(false);
+    }
+  };
+
+  const handleActiveSearch = async () => {
+    try {
+      setActiveLoading(true);
+      await loadActiveSubscriptions(activeSearch.trim());
+    } finally {
+      setActiveLoading(false);
+    }
+  };
+
+  const openEditDialog = (user: ActiveSubscriptionUser) => {
+    setEditUser(user);
+    setEditMonths(parseMonthsFromTarif(user.tarif) || '');
+    setEditAmount(user.tarif_renewal_cost !== null && user.tarif_renewal_cost !== undefined ? String(user.tarif_renewal_cost) : '');
+    setEditStartDate(new Date().toISOString().slice(0, 10));
+    setEditComment('');
+    setEditDialogOpen(true);
+  };
+
+  const saveSubscriptionEdit = async () => {
+    if (!editUser) return;
+
+    if (!editMonths || Number(editMonths) <= 0) {
+      toast.error('Укажите количество месяцев');
+      return;
+    }
+
+    if (editAmount === '' || Number(editAmount) < 0) {
+      toast.error('Укажите сумму');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await subscriptionApi.setUserSubscription(editUser.id, {
+        months: Number(editMonths),
+        amount: Number(editAmount),
+        comment: editComment.trim() || undefined,
+        start_date: editStartDate || undefined,
+        override: true
+      });
+      toast.success('Подписка обновлена');
+      setEditDialogOpen(false);
+      setEditUser(null);
+      await loadActiveSubscriptions();
+    } catch (error: any) {
+      toast.error(error.message || 'Не удалось обновить подписку');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deactivateSubscription = async (user: ActiveSubscriptionUser) => {
+    if (!isTechAdmin) return;
+    const confirmed = window.confirm('Отключить подписку для пользователя? Доступ будет заблокирован.');
+    if (!confirmed) return;
+
+    try {
+      setDeactivatingUserId(user.id);
+      await subscriptionApi.deactivateUserSubscription(user.id);
+      toast.success('Подписка отключена');
+      await loadActiveSubscriptions();
+    } catch (error: any) {
+      toast.error(error.message || 'Не удалось отключить подписку');
+    } finally {
+      setDeactivatingUserId(null);
     }
   };
 
@@ -426,7 +498,7 @@ export function SubscriptionsPage() {
       toast.success('Подписка установлена вручную');
       setManualComment('');
       await loadSales();
-      await loadAppliedSubscriptions();
+      await loadActiveSubscriptions();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось установить подписку');
     } finally {
@@ -444,6 +516,19 @@ export function SubscriptionsPage() {
   const kindBadge = (kind: string) => {
     if (kind === 'subscription') return <Badge>Подписка</Badge>;
     return <Badge variant="outline">Кастом</Badge>;
+  };
+
+  const parseMonthsFromTarif = (tarif: string | null): string => {
+    if (!tarif) return '';
+    const match = tarif.match(/subscription_(\d+)m/i);
+    return match ? match[1] : '';
+  };
+
+  const formatTelegramIds = (user: ActiveSubscriptionUser) => {
+    const ids = [user.telegram_id, user.telegram_id_2, user.telegram_id_3, user.telegram_id_4]
+      .map((value) => (value || '').trim())
+      .filter((value) => value.length > 0);
+    return ids.join(', ');
   };
 
   if (loading) {
@@ -467,7 +552,7 @@ export function SubscriptionsPage() {
             variant="outline"
             onClick={() => {
               void loadSales();
-              void loadAppliedSubscriptions();
+              void loadActiveSubscriptions();
             }}
           >
             <RefreshCw className="h-4 w-4 mr-2" />
@@ -630,21 +715,41 @@ export function SubscriptionsPage() {
           <CardTitle>Подписки пользователей</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <Input
+              value={activeSearch}
+              onChange={(event) => setActiveSearch(event.target.value)}
+              placeholder="Поиск по username / telegram / id"
+            />
+            <Button variant="outline" onClick={() => void handleActiveSearch()} disabled={activeLoading}>
+              {activeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Найти'}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setActiveSearch('');
+                void loadActiveSubscriptions('');
+              }}
+            >
+              Сброс
+            </Button>
+          </div>
+
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Пользователь</TableHead>
-                  <TableHead>Телефон</TableHead>
-                  <TableHead>Месяцы</TableHead>
-                  <TableHead>Дата применения</TableHead>
+                  <TableHead>Telegram</TableHead>
+                  <TableHead>Тариф</TableHead>
                   <TableHead>Срок до</TableHead>
+                  <TableHead>Стоимость</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {appliedSubscriptions.length === 0 && (
+                {activeSubscriptions.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="text-center text-muted-foreground">
                       Активные подписки не найдены
@@ -652,29 +757,45 @@ export function SubscriptionsPage() {
                   </TableRow>
                 )}
 
-                {appliedSubscriptions.map((sale) => (
-                  <TableRow key={sale.id}>
+                {activeSubscriptions.map((userItem) => (
+                  <TableRow key={userItem.id}>
                     <TableCell>
                       <div className="text-sm">
-                        <div>{sale.user_accounts?.username || sale.user_account_id || '—'}</div>
-                        <div className="text-muted-foreground text-xs font-mono">{sale.user_account_id || '—'}</div>
+                        <div>{userItem.username || '—'}</div>
+                        <div className="text-muted-foreground text-xs font-mono">{userItem.id}</div>
                       </div>
                     </TableCell>
-                    <TableCell>{sale.client_phone}</TableCell>
-                    <TableCell>{sale.months || '-'}</TableCell>
-                    <TableCell>{sale.applied_at ? sale.applied_at.slice(0, 10) : '-'}</TableCell>
-                    <TableCell>{sale.user_accounts?.tarif_expires || '-'}</TableCell>
-                    <TableCell>{statusBadge(sale.status)}</TableCell>
+                    <TableCell>{formatTelegramIds(userItem) || '-'}</TableCell>
+                    <TableCell>
+                      {userItem.tarif || '-'}
+                      {parseMonthsFromTarif(userItem.tarif) ? ` (${parseMonthsFromTarif(userItem.tarif)} мес)` : ''}
+                    </TableCell>
+                    <TableCell>{userItem.tarif_expires || '-'}</TableCell>
+                    <TableCell>
+                      {userItem.tarif_renewal_cost !== null && userItem.tarif_renewal_cost !== undefined
+                        ? `${Number(userItem.tarif_renewal_cost).toLocaleString('ru-RU')}`
+                        : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={userItem.is_active ? 'default' : 'destructive'}>
+                        {userItem.is_active ? 'active' : 'inactive'}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-right">
-                      {isTechAdmin && sale.status !== 'cancelled' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void cancelSale(sale)}
-                          disabled={cancelingSaleId === sale.id}
-                        >
-                          {cancelingSaleId === sale.id ? 'Отмена...' : 'Отменить'}
-                        </Button>
+                      {isTechAdmin && (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button size="sm" variant="outline" onClick={() => openEditDialog(userItem)}>
+                            Редактировать
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => void deactivateSubscription(userItem)}
+                            disabled={deactivatingUserId === userItem.id}
+                          >
+                            {deactivatingUserId === userItem.id ? 'Отключение...' : 'Отключить'}
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -683,7 +804,7 @@ export function SubscriptionsPage() {
             </Table>
           </div>
           <p className="text-xs text-muted-foreground">
-            Отмена продажи не откатывает срок подписки автоматически. Для корректировки используйте «Ручную установку подписки».
+            Здесь отображаются активные подписки из user_accounts, независимо от продаж. Редактирование пересчитает срок с указанной даты.
           </p>
         </CardContent>
       </Card>
@@ -734,7 +855,7 @@ export function SubscriptionsPage() {
               variant="outline"
               onClick={() => {
                 void loadSales();
-                void loadAppliedSubscriptions();
+                void loadActiveSubscriptions();
               }}
             >
               Обновить список
@@ -996,6 +1117,66 @@ export function SubscriptionsPage() {
             <Button onClick={() => void confirmLinkSale()} disabled={isSaving || !selectedUserId}>
               {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Привязать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Редактировать подписку</DialogTitle>
+            <DialogDescription>
+              {editUser ? `${editUser.username} (${editUser.id})` : 'Выберите пользователя'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label>Месяцев</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={editMonths}
+                  onChange={(event) => setEditMonths(event.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Сумма</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editAmount}
+                  onChange={(event) => setEditAmount(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label>Старт (опционально)</Label>
+              <Input
+                type="date"
+                value={editStartDate}
+                onChange={(event) => setEditStartDate(event.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label>Комментарий</Label>
+              <Textarea value={editComment} onChange={(event) => setEditComment(event.target.value)} rows={2} />
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Изменение пересчитает срок подписки от выбранной даты и заменит текущий срок.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Отмена</Button>
+            <Button onClick={() => void saveSubscriptionEdit()} disabled={isSaving || !editUser}>
+              {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Сохранить
             </Button>
           </DialogFooter>
         </DialogContent>

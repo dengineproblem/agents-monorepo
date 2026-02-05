@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import {
   applySubscriptionToUserAccount,
+  getAlmatyTodayDateString,
   isTechAdminUser,
   normalizePhone,
   processSubscriptionBillingSweep
@@ -58,7 +59,8 @@ const manualSubscriptionSetSchema = z.object({
   amount: z.number().min(0),
   comment: z.string().max(2000).optional(),
   source_sale_id: z.string().uuid().optional(),
-  start_date: dateSchema.optional()
+  start_date: dateSchema.optional(),
+  override: z.boolean().optional()
 });
 
 const createPhoneLinkSchema = z.object({
@@ -70,6 +72,10 @@ const createPhoneLinkSchema = z.object({
 
 function sanitizeSearchTerm(input: string): string {
   return input.replace(/[%_\\]/g, '\\$&').trim();
+}
+
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 async function requireTechAdmin(request: ConsultantAuthRequest, reply: FastifyReply): Promise<boolean> {
@@ -183,6 +189,56 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ sales: data || [], limit, offset });
+    } catch (error: any) {
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  app.get('/admin/subscriptions/active-users', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      if (!(await requireTechAdmin(request, reply))) {
+        return;
+      }
+
+      const query = request.query as any;
+      const q = (query?.search as string | undefined)?.trim();
+      const includeInactive = (query?.include_inactive as string | undefined) === 'true';
+      const limit = Math.min(parseInt(query?.limit || '50', 10), 200);
+      const offset = Math.max(parseInt(query?.offset || '0', 10), 0);
+      const todayAlmaty = getAlmatyTodayDateString();
+
+      let dbQuery = supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, tarif, tarif_expires, tarif_renewal_cost, is_active, created_at')
+        .ilike('tarif', 'subscription_%')
+        .order('tarif_expires', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (!includeInactive) {
+        dbQuery = dbQuery.eq('is_active', true).gte('tarif_expires', todayAlmaty);
+      }
+
+      if (q && q.length > 0) {
+        const term = sanitizeSearchTerm(q);
+        const orFilters = [
+          `username.ilike.%${term}%`,
+          `telegram_id.ilike.%${term}%`,
+          `telegram_id_2.ilike.%${term}%`,
+          `telegram_id_3.ilike.%${term}%`,
+          `telegram_id_4.ilike.%${term}%`
+        ];
+        if (isUuidLike(term)) {
+          orFilters.push(`id.eq.${term}`);
+        }
+        dbQuery = dbQuery.or(orFilters.join(','));
+      }
+
+      const { data, error } = await dbQuery;
+      if (error) {
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send({ users: data || [], limit, offset });
     } catch (error: any) {
       return reply.status(500).send({ error: error.message });
     }
@@ -478,7 +534,8 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
         source: 'manual_admin',
         sourceSaleId: body.source_sale_id,
         comment: body.comment,
-        startDate: body.start_date
+        startDate: body.start_date,
+        forceStartDate: body.override === true
       });
 
       return reply.send({ success: true, result });
@@ -486,6 +543,32 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: error.errors });
       }
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  app.post('/admin/subscriptions/users/:userAccountId/deactivate', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      if (!(await requireTechAdmin(request, reply))) {
+        return;
+      }
+
+      const { userAccountId } = request.params as { userAccountId: string };
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({
+          is_active: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userAccountId);
+
+      if (error) {
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send({ success: true });
+    } catch (error: any) {
       return reply.status(500).send({ error: error.message });
     }
   });

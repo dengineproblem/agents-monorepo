@@ -3,7 +3,8 @@ import {
   SubscriptionSale,
   SubscriptionSweepStats,
   SubscriptionUserSearchItem,
-  PhoneUserLink
+  PhoneUserLink,
+  ActiveSubscriptionUser
 } from '@/types/subscription';
 
 const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
@@ -108,10 +109,34 @@ export const subscriptionApi = {
     comment?: string;
     source_sale_id?: string;
     start_date?: string;
+    override?: boolean;
   }): Promise<{ success: boolean }> {
     return fetchWithAuth(`/admin/subscriptions/users/${userAccountId}/set`, {
       method: 'POST',
       body: JSON.stringify(payload)
+    });
+  },
+
+  getActiveSubscriptions(params?: {
+    search?: string;
+    include_inactive?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ users: ActiveSubscriptionUser[]; limit: number; offset: number }> {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          query.append(key, String(value));
+        }
+      });
+    }
+    return fetchWithAuth(`/admin/subscriptions/active-users${query.toString() ? `?${query}` : ''}`);
+  },
+
+  deactivateUserSubscription(userAccountId: string): Promise<{ success: boolean }> {
+    return fetchWithAuth(`/admin/subscriptions/users/${userAccountId}/deactivate`, {
+      method: 'POST'
     });
   },
 

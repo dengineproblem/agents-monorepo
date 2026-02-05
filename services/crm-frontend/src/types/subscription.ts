@@ -75,6 +75,20 @@ export interface PhoneUserLink {
   updated_at: string;
 }
 
+export interface ActiveSubscriptionUser {
+  id: string;
+  username: string;
+  telegram_id: string | null;
+  telegram_id_2: string | null;
+  telegram_id_3: string | null;
+  telegram_id_4: string | null;
+  tarif: string | null;
+  tarif_expires: string | null;
+  tarif_renewal_cost: number | null;
+  is_active: boolean | null;
+  created_at: string | null;
+}
+
 export interface SubscriptionSweepStats {
   scannedUsers: number;
   remindersSent: number;
