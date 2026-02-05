@@ -480,7 +480,7 @@ export function SubscriptionsPage() {
               ) : (
                 <PlayCircle className="h-4 w-4 mr-2" />
               )}
-              Run Sweep
+              Запустить проверку
             </Button>
           )}
         </div>
