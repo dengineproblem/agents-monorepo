@@ -32,6 +32,7 @@ export function ConsultantPage() {
   const { user, logout, isConsultant } = useAuth();
   const { toast } = useToast();
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [consultantName, setConsultantName] = useState<string>('Консультант');
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('calendar');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -45,7 +46,7 @@ export function ConsultantPage() {
     }
   }, [isConsultant, user, consultantId]);
 
-  // Загрузка статистики
+  // Загрузка статистики и профиля
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -64,7 +65,17 @@ export function ConsultantPage() {
       }
     };
 
+    const loadProfile = async () => {
+      try {
+        const profile = await consultantApi.getProfile(consultantId);
+        setConsultantName(profile.name || 'Консультант');
+      } catch (error: any) {
+        console.error('Failed to load consultant profile:', error);
+      }
+    };
+
     loadStats();
+    loadProfile();
   }, [consultantId, toast]);
 
   // Загрузка счетчика непрочитанных с polling и toast уведомлениями
@@ -121,7 +132,7 @@ export function ConsultantPage() {
             <div className="flex items-center space-x-4">
               <UserCircle className="h-10 w-10 text-primary" />
               <div>
-                <h1 className="text-2xl font-bold">{user?.consultantName || 'Консультант'}</h1>
+                <h1 className="text-2xl font-bold">{consultantName}</h1>
                 <p className="text-sm text-muted-foreground">Личный кабинет</p>
               </div>
             </div>
