@@ -116,7 +116,7 @@ export interface Consultation {
   end_time: string; // формат HH:MM
   status: ConsultationStatus;
   notes?: string;
-  consultation_type: string;
+  consultation_type: 'from_bot' | 'from_lead' | 'general';
   actual_duration_minutes?: number;
   is_sale_closed?: boolean;
   price?: number;

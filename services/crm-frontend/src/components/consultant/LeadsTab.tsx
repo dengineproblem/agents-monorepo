@@ -65,17 +65,36 @@ export function LeadsTab() {
     lead_id: undefined,
   });
 
+  // Пагинация
+  const [pageSize] = useState(50);
+  const [hasMore, setHasMore] = useState(true);
+
   // Загрузка лидов
-  const loadLeads = async () => {
+  const loadLeads = async (append = false) => {
     try {
       setLoading(true);
-      const params: any = {};
-      if (filters.is_booked && filters.is_booked !== 'all') params.is_booked = filters.is_booked;
-      if (consultantId) params.consultantId = consultantId;
+      const params: any = {
+        limit: pageSize,
+        offset: append ? leads.length : 0
+      };
+
+      if (filters.is_booked && filters.is_booked !== 'all') {
+        params.is_booked = filters.is_booked;
+      }
+      if (consultantId) {
+        params.consultantId = consultantId;
+      }
 
       const data = await consultantApi.getLeads(params);
-      setLeads(data.leads);
+
+      if (append) {
+        setLeads(prev => [...prev, ...data.leads]);
+      } else {
+        setLeads(data.leads);
+      }
+
       setTotal(data.total);
+      setHasMore((append ? leads.length + data.leads.length : data.leads.length) < data.total);
     } catch (error: any) {
       toast({
         title: 'Ошибка',
@@ -88,7 +107,7 @@ export function LeadsTab() {
   };
 
   useEffect(() => {
-    loadLeads();
+    loadLeads(false); // false = сбросить пагинацию
   }, [filters, consultantId]);
 
   // Открыть модальное окно лида
@@ -487,8 +506,32 @@ export function LeadsTab() {
             </div>
           )}
 
-          <div className="mt-4 text-sm text-muted-foreground">
-            Всего лидов: {total}
+          <div className="mt-4 space-y-2">
+            <div className="text-sm text-muted-foreground flex items-center justify-between">
+              <span>Показано {filteredLeads.length} из {total} лидов</span>
+              {filteredLeads.length < total && (
+                <span className="text-xs text-blue-600">
+                  ({total - filteredLeads.length} еще доступно)
+                </span>
+              )}
+            </div>
+
+            {hasMore && !loading && (
+              <Button
+                variant="outline"
+                onClick={() => loadLeads(true)}
+                className="w-full"
+              >
+                Загрузить еще
+              </Button>
+            )}
+
+            {loading && (
+              <div className="flex items-center justify-center py-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                <span className="text-sm text-muted-foreground">Загрузка...</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

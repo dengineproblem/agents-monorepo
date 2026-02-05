@@ -16,6 +16,49 @@ import { useToast } from '@/hooks/use-toast';
 import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare, ShoppingBag } from 'lucide-react';
 import { ChatSection } from './ChatSection';
 
+// Типы консультаций и их отображение
+const CONSULTATION_TYPE_CONFIG: Record<string, {
+  label: string;
+  icon: string;
+  className: string;
+  description: string;
+}> = {
+  from_bot: {
+    label: 'Бот',
+    icon: '🤖',
+    className: 'bg-purple-100 text-purple-800 border-purple-300',
+    description: 'Создана ботом автоматически'
+  },
+  from_lead: {
+    label: 'Лид',
+    icon: '👤',
+    className: 'bg-blue-100 text-blue-800 border-blue-300',
+    description: 'Создана из лида'
+  },
+  general: {
+    label: 'Вручную',
+    icon: '✍️',
+    className: 'bg-gray-100 text-gray-800 border-gray-300',
+    description: 'Создана вручную консультантом'
+  }
+};
+
+// Helper функция для отображения badge
+const getConsultationTypeBadge = (consultationType: string) => {
+  const config = CONSULTATION_TYPE_CONFIG[consultationType] || CONSULTATION_TYPE_CONFIG.general;
+
+  return (
+    <Badge
+      variant="outline"
+      className={`${config.className} text-xs`}
+      title={config.description}
+    >
+      <span className="mr-1">{config.icon}</span>
+      {config.label}
+    </Badge>
+  );
+};
+
 export function CalendarTab() {
   const { consultantId } = useParams<{ consultantId: string }>();
   const { toast } = useToast();
@@ -714,11 +757,16 @@ export function CalendarTab() {
                           `}
                           title="Перетащите для переноса на другое время"
                         >
-                          <div className="font-medium truncate">
-                            {consultation.client_name || 'Клиент'}
-                          </div>
-                          <div className="opacity-90 truncate">
-                            {consultation.client_phone}
+                          <div className="space-y-1">
+                            <div className="font-medium truncate">
+                              {consultation.client_name || 'Клиент'}
+                            </div>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <span className="opacity-90 text-xs">
+                                {consultation.client_phone}
+                              </span>
+                              {getConsultationTypeBadge(consultation.consultation_type || 'general')}
+                            </div>
                           </div>
                         </button>
                       ) : isBlocked && blockedSlotItem ? (
@@ -988,6 +1036,13 @@ export function CalendarTab() {
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <Label className="text-muted-foreground">Источник</Label>
+                  <div className="mt-1">
+                    {getConsultationTypeBadge(selectedConsultation.consultation_type || 'general')}
+                  </div>
+                </div>
 
                 <div>
                   <Label className="text-muted-foreground">Статус</Label>
