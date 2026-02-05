@@ -115,15 +115,18 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const total_leads = data?.total_leads || 0;
       const booked_leads = data?.booked_leads || 0;
       const completed = data?.completed || 0;
+      const total_consultations = data?.total_consultations || 0;
 
+      // 1. Лид → Запись: % лидов, которые записались на консультацию
       const lead_to_booked_rate = total_leads > 0
         ? Math.round((booked_leads / total_leads) * 100)
         : 0;
 
-      const booked_to_completed_rate = booked_leads > 0
-        ? Math.round((completed / booked_leads) * 100)
-        : 0;
+      // 2. Запись → Проведено: % консультаций, которые были проведены
+      // Используем completion_rate из view (уже правильно считается)
+      const booked_to_completed_rate = Math.round(data?.completion_rate || 0);
 
+      // 3. Проведено → Продажа: % проведённых консультаций, которые привели к продаже
       const completed_to_sales_rate = completed > 0
         ? Math.round((sales_count / completed) * 100)
         : 0;
