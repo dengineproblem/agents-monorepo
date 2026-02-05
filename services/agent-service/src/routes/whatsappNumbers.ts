@@ -343,38 +343,4 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
 
-  /**
-   * DELETE /whatsapp-numbers/:id
-   * Удалить WhatsApp номер (WABA)
-   */
-  app.delete<{ Params: { id: string }; Querystring: { userAccountId: string } }>(
-    '/whatsapp-numbers/:id',
-    async (request, reply) => {
-      try {
-        const { id } = request.params;
-        const { userAccountId } = request.query;
-
-        if (!userAccountId) {
-          return reply.status(400).send({ error: 'userAccountId is required' });
-        }
-
-        // Удаляем номер (проверяем ownership через user_account_id)
-        const { error } = await supabase
-          .from('whatsapp_phone_numbers')
-          .delete()
-          .eq('id', id)
-          .eq('user_account_id', userAccountId);
-
-        if (error) {
-          app.log.error({ error }, 'Error deleting WhatsApp number');
-          return reply.status(500).send({ error: error.message });
-        }
-
-        return reply.send({ success: true });
-      } catch (error: any) {
-        app.log.error({ error }, 'Error deleting WhatsApp number');
-        return reply.status(500).send({ error: error.message || 'Failed to delete number' });
-      }
-    }
-  );
 }
