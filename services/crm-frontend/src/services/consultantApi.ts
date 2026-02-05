@@ -56,6 +56,11 @@ export interface DashboardStats {
   tasks_overdue?: number;
   tasks_today?: number;
   completion_rate: number;
+  // Продажи и конверсии
+  sales_count?: number;
+  lead_to_booked_rate?: number;
+  booked_to_completed_rate?: number;
+  completed_to_sales_rate?: number;
 }
 
 export interface Lead {

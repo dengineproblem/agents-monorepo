@@ -93,18 +93,55 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const tasks_overdue = overdueResult?.count || 0;
       const tasks_today = todayResult?.count || 0;
 
+      // Получить количество продаж
+      const salesQueryStart = Date.now();
+      const { count: salesCount, error: salesError } = await supabase
+        .from('purchases')
+        .select('id', { count: 'exact', head: true })
+        .eq('consultant_id', targetConsultantId);
+
+      const salesQueryDuration = Date.now() - salesQueryStart;
+      const sales_count = salesCount || 0;
+
+      if (salesError) {
+        app.log.error({
+          error: salesError,
+          consultantId: targetConsultantId,
+          duration: salesQueryDuration
+        }, 'GET /consultant/dashboard: Failed to fetch sales count');
+      }
+
+      // Рассчитать конверсии
+      const total_leads = data?.total_leads || 0;
+      const booked_leads = data?.booked_leads || 0;
+      const completed = data?.completed || 0;
+
+      const lead_to_booked_rate = total_leads > 0
+        ? Math.round((booked_leads / total_leads) * 100)
+        : 0;
+
+      const booked_to_completed_rate = booked_leads > 0
+        ? Math.round((completed / booked_leads) * 100)
+        : 0;
+
+      const completed_to_sales_rate = completed > 0
+        ? Math.round((sales_count / completed) * 100)
+        : 0;
+
       const totalDuration = Date.now() - startTime;
 
       app.log.info({
         userId,
         consultantId: targetConsultantId,
         stats: {
-          leads: data?.total_leads || 0,
+          leads: total_leads,
           consultations: data?.total_consultations || 0,
-          tasks: tasks_total
+          tasks: tasks_total,
+          sales: sales_count
         },
         dashboardQueryDuration,
         tasksQueryDuration,
+        salesQueryDuration,
         totalDuration
       }, 'GET /consultant/dashboard: Success');
 
@@ -128,7 +165,12 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         // Добавляем статистику задач
         tasks_total,
         tasks_overdue,
-        tasks_today
+        tasks_today,
+        // Добавляем продажи и конверсии
+        sales_count,
+        lead_to_booked_rate,
+        booked_to_completed_rate,
+        completed_to_sales_rate
       });
     } catch (error: any) {
       const totalDuration = Date.now() - startTime;
