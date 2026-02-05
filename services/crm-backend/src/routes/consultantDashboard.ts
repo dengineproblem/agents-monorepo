@@ -111,6 +111,29 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         }, 'GET /consultant/dashboard: Failed to fetch sales count');
       }
 
+      // Получить количество уникальных лидов с консультациями
+      const bookedLeadsQueryStart = Date.now();
+      const { data: consultationsWithLeads, error: consultationsError } = await supabase
+        .from('consultations')
+        .select('dialog_analysis_id')
+        .eq('consultant_id', targetConsultantId)
+        .not('dialog_analysis_id', 'is', null);
+
+      const bookedLeadsQueryDuration = Date.now() - bookedLeadsQueryStart;
+
+      // Подсчитываем уникальные лиды
+      const unique_leads_with_consultations = new Set(
+        (consultationsWithLeads || []).map(c => c.dialog_analysis_id).filter(Boolean)
+      ).size;
+
+      if (consultationsError) {
+        app.log.error({
+          error: consultationsError,
+          consultantId: targetConsultantId,
+          duration: bookedLeadsQueryDuration
+        }, 'GET /consultant/dashboard: Failed to fetch booked leads count');
+      }
+
       // Рассчитать конверсии
       const total_leads = data?.total_leads || 0;
       const booked_leads = data?.booked_leads || 0;
@@ -118,8 +141,9 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
       const total_consultations = data?.total_consultations || 0;
 
       // 1. Лид → Запись: % лидов, которые записались на консультацию
+      // Используем реальное количество уникальных лидов с консультациями
       const lead_to_booked_rate = total_leads > 0
-        ? Math.round((booked_leads / total_leads) * 100)
+        ? Math.round((unique_leads_with_consultations / total_leads) * 100)
         : 0;
 
       // 2. Запись → Проведено: % консультаций, которые были проведены
@@ -138,6 +162,7 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         consultantId: targetConsultantId,
         stats: {
           leads: total_leads,
+          leads_with_consultations: unique_leads_with_consultations,
           consultations: data?.total_consultations || 0,
           tasks: tasks_total,
           sales: sales_count
@@ -145,6 +170,7 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         dashboardQueryDuration,
         tasksQueryDuration,
         salesQueryDuration,
+        bookedLeadsQueryDuration,
         totalDuration
       }, 'GET /consultant/dashboard: Success');
 
@@ -165,6 +191,8 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
           total_revenue: 0,
           completion_rate: 0
         }),
+        // Переопределяем booked_leads правильным значением
+        booked_leads: unique_leads_with_consultations,
         // Добавляем статистику задач
         tasks_total,
         tasks_overdue,
