@@ -622,9 +622,9 @@ const AdminNotificationsCenter: React.FC = () => {
         method: 'DELETE',
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error('Не удалось сбросить overrides');
+      if (!res.ok) throw new Error('Не удалось сбросить переопределения');
 
-      toast.success('Переопределения сброшены к системным дефолтам');
+      toast.success('Переопределения сброшены к системным значениям');
       await fetchConfig();
     } catch (err: any) {
       toast.error(err?.message || 'Ошибка сброса шаблона');
@@ -664,7 +664,7 @@ const AdminNotificationsCenter: React.FC = () => {
       return;
     }
     if (broadcastForm.segment === 'custom' && selectedRecipientIds.length === 0) {
-      toast.error('Выберите получателей для custom-сегмента');
+      toast.error('Выберите получателей для произвольного сегмента');
       return;
     }
 
@@ -688,7 +688,7 @@ const AdminNotificationsCenter: React.FC = () => {
       }
 
       toast.success(
-        `Рассылка отправлена: ${data.recipients || 0} пользователей, in-app ${data.in_app_created || 0}, Telegram ${data.telegram_sent || 0}`
+        `Рассылка отправлена: ${data.recipients || 0} пользователей, в приложении ${data.in_app_created || 0}, Telegram ${data.telegram_sent || 0}`
       );
 
       setBroadcastForm(DEFAULT_BROADCAST_FORM);
@@ -730,7 +730,7 @@ const AdminNotificationsCenter: React.FC = () => {
     if (!campaignForm.message.trim()) return 'Введите текст кампании';
     if (campaignForm.channels.length === 0) return 'Выберите минимум один канал';
     if (campaignForm.segment === 'custom' && campaignForm.user_ids.length === 0) {
-      return 'Для custom кампании выберите получателей';
+      return 'Для произвольной кампании выберите получателей';
     }
     if (campaignForm.schedule_mode === 'once' && !campaignForm.scheduled_at.trim()) {
       return 'Для одноразовой кампании укажите дату/время запуска';
@@ -742,20 +742,20 @@ const AdminNotificationsCenter: React.FC = () => {
       }
     }
     if (campaignForm.schedule_mode !== 'once' && campaignForm.send_hour_utc.trim() === '') {
-      return 'Для регулярной кампании укажите send hour (UTC)';
+      return 'Для регулярной кампании укажите час отправки (UTC)';
     }
     if (campaignForm.schedule_mode !== 'once') {
       const hour = Number(campaignForm.send_hour_utc);
       const minute = Number(campaignForm.send_minute_utc);
       if (!Number.isFinite(hour) || hour < 0 || hour > 23) {
-        return 'send hour (UTC) должен быть от 0 до 23';
+        return 'Час отправки (UTC) должен быть от 0 до 23';
       }
       if (!Number.isFinite(minute) || minute < 0 || minute > 59) {
-        return 'send minute (UTC) должен быть от 0 до 59';
+        return 'Минута отправки (UTC) должна быть от 0 до 59';
       }
     }
     if (campaignForm.schedule_mode === 'weekly' && campaignForm.weekly_day.trim() === '') {
-      return 'Для weekly кампании укажите день недели';
+      return 'Для еженедельной кампании укажите день недели';
     }
     if (campaignForm.schedule_mode === 'weekly') {
       const weeklyDay = Number(campaignForm.weekly_day);
@@ -846,7 +846,7 @@ const AdminNotificationsCenter: React.FC = () => {
       if (!res.ok) throw new Error(data?.error || 'Не удалось запустить кампанию');
 
       toast.success(
-        `Кампания отправлена: ${data?.result?.recipients || 0}, in-app ${data?.result?.in_app_created || 0}, Telegram ${data?.result?.telegram_sent || 0}`
+        `Кампания отправлена: ${data?.result?.recipients || 0}, в приложении ${data?.result?.in_app_created || 0}, Telegram ${data?.result?.telegram_sent || 0}`
       );
       await Promise.all([fetchCampaigns(), fetchHistory()]);
     } catch (err: any) {
@@ -899,7 +899,7 @@ const AdminNotificationsCenter: React.FC = () => {
     if (broadcastForm.segment === 'subscription_expiring_7d') {
       return `Истекает <= 7 дней: ${segments.subscription_expiring_7d_users}`;
     }
-    return `Custom выбор: ${selectedRecipientIds.length}`;
+    return `Произвольный выбор: ${selectedRecipientIds.length}`;
   };
 
   const renderCampaignSegmentHint = () => {
@@ -921,19 +921,19 @@ const AdminNotificationsCenter: React.FC = () => {
     if (campaignForm.segment === 'subscription_expiring_7d') {
       return `Истекает <= 7 дней: ${segments.subscription_expiring_7d_users}`;
     }
-    return `Custom выбор: ${campaignForm.user_ids.length}`;
+    return `Произвольный выбор: ${campaignForm.user_ids.length}`;
   };
 
   const formatCampaignSchedule = (campaign: NotificationCampaign) => {
     if (campaign.schedule_mode === 'once') {
       return campaign.scheduled_at
-        ? `Once: ${formatDateTime(campaign.scheduled_at)}`
-        : 'Once: не задано';
+        ? `Один раз: ${formatDateTime(campaign.scheduled_at)}`
+        : 'Один раз: не задано';
     }
     if (campaign.schedule_mode === 'daily') {
       const hour = campaign.send_hour_utc ?? 0;
       const minute = campaign.send_minute_utc ?? 0;
-      return `Daily: ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`;
+      return `Каждый день: ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`;
     }
 
     const weekDays = ['Вск', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -942,7 +942,7 @@ const AdminNotificationsCenter: React.FC = () => {
       : 'не задано';
     const hour = campaign.send_hour_utc ?? 0;
     const minute = campaign.send_minute_utc ?? 0;
-    return `Weekly (${day}): ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`;
+    return `Еженедельно (${day}): ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`;
   };
 
   return (
@@ -981,7 +981,7 @@ const AdminNotificationsCenter: React.FC = () => {
             <CardHeader>
               <CardTitle>Глобальные настройки</CardTitle>
               <CardDescription>
-                Эти настройки применяются ко всей системе engagement-уведомлений
+                Эти настройки применяются ко всей системе уведомлений
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1099,10 +1099,10 @@ const AdminNotificationsCenter: React.FC = () => {
                 {templateDraft && (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline">type: {templateDraft.type}</Badge>
-                      <Badge variant="outline">cooldown: {templateDraft.cooldown_days} дн</Badge>
+                      <Badge variant="outline">Тип: {templateDraft.type}</Badge>
+                      <Badge variant="outline">Пауза: {templateDraft.cooldown_days} дн</Badge>
                       <Badge variant="outline">
-                        channels: {templateDraft.channels.join(', ')}
+                        Каналы: {templateDraft.channels.join(', ')}
                       </Badge>
                     </div>
 
@@ -1126,7 +1126,7 @@ const AdminNotificationsCenter: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Cooldown (дни)</Label>
+                        <Label>Пауза между отправками (дни)</Label>
                         <Input
                           type="number"
                           min={0}
@@ -1138,7 +1138,7 @@ const AdminNotificationsCenter: React.FC = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Текст in-app</Label>
+                      <Label>Текст в приложении</Label>
                       <Textarea
                         rows={4}
                         value={templateDraft.message}
@@ -1157,7 +1157,7 @@ const AdminNotificationsCenter: React.FC = () => {
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label>CTA URL</Label>
+                        <Label>Ссылка кнопки</Label>
                         <Input
                           placeholder="https://app.performanteaiagency.com/profile"
                           value={templateDraft.cta_url || ''}
@@ -1165,7 +1165,7 @@ const AdminNotificationsCenter: React.FC = () => {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>CTA Label</Label>
+                        <Label>Текст кнопки</Label>
                         <Input
                           placeholder="Открыть"
                           value={templateDraft.cta_label || ''}
@@ -1188,7 +1188,7 @@ const AdminNotificationsCenter: React.FC = () => {
                             });
                           }}
                         />
-                        <Label>In-app</Label>
+                        <Label>В приложении</Label>
                       </div>
                       <div className="flex items-center gap-2">
                         <Checkbox
@@ -1223,7 +1223,7 @@ const AdminNotificationsCenter: React.FC = () => {
                       </Button>
                       <Button variant="outline" onClick={resetTemplate} disabled={savingTemplate}>
                         <RotateCcw className="h-4 w-4 mr-2" />
-                        Сбросить overrides
+                        Сбросить переопределения
                       </Button>
                     </div>
                   </>
@@ -1327,7 +1327,7 @@ const AdminNotificationsCenter: React.FC = () => {
                       <SelectItem value="with_telegram">Пользователи с Telegram</SelectItem>
                       <SelectItem value="without_subscription">Пользователи без подписки</SelectItem>
                       <SelectItem value="subscription_expiring_7d">{"Подписка истекает <= 7 дней"}</SelectItem>
-                      <SelectItem value="custom">Custom (выбрать вручную)</SelectItem>
+                      <SelectItem value="custom">Произвольный (выбрать вручную)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1355,7 +1355,7 @@ const AdminNotificationsCenter: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <Label>Текст in-app</Label>
+                <Label>Текст в приложении</Label>
                 <Textarea
                   rows={4}
                   value={broadcastForm.message}
@@ -1375,7 +1375,7 @@ const AdminNotificationsCenter: React.FC = () => {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>CTA URL</Label>
+                  <Label>Ссылка кнопки</Label>
                   <Input
                     value={broadcastForm.cta_url}
                     onChange={(e) => setBroadcastForm((prev) => ({ ...prev, cta_url: e.target.value }))}
@@ -1383,7 +1383,7 @@ const AdminNotificationsCenter: React.FC = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>CTA Label</Label>
+                  <Label>Текст кнопки</Label>
                   <Input
                     value={broadcastForm.cta_label}
                     onChange={(e) => setBroadcastForm((prev) => ({ ...prev, cta_label: e.target.value }))}
@@ -1398,7 +1398,7 @@ const AdminNotificationsCenter: React.FC = () => {
                     checked={broadcastForm.channels.includes('in_app')}
                     onCheckedChange={() => toggleChannel('in_app')}
                   />
-                  <Label>Отправлять in-app</Label>
+                  <Label>Отправлять в приложении</Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -1597,7 +1597,7 @@ const AdminNotificationsCenter: React.FC = () => {
                         <SelectItem value="with_telegram">Пользователи с Telegram</SelectItem>
                         <SelectItem value="without_subscription">Пользователи без подписки</SelectItem>
                         <SelectItem value="subscription_expiring_7d">{"Подписка истекает <= 7 дней"}</SelectItem>
-                        <SelectItem value="custom">Custom (выбрать вручную)</SelectItem>
+                        <SelectItem value="custom">Произвольный (выбрать вручную)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1633,7 +1633,7 @@ const AdminNotificationsCenter: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Текст in-app</Label>
+                  <Label>Текст в приложении</Label>
                   <Textarea
                     rows={4}
                     value={campaignForm.message}
@@ -1653,7 +1653,7 @@ const AdminNotificationsCenter: React.FC = () => {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>CTA URL</Label>
+                    <Label>Ссылка кнопки</Label>
                     <Input
                       value={campaignForm.cta_url}
                       onChange={(e) => setCampaignForm((prev) => ({ ...prev, cta_url: e.target.value }))}
@@ -1661,7 +1661,7 @@ const AdminNotificationsCenter: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>CTA Label</Label>
+                    <Label>Текст кнопки</Label>
                     <Input
                       value={campaignForm.cta_label}
                       onChange={(e) => setCampaignForm((prev) => ({ ...prev, cta_label: e.target.value }))}
@@ -1676,7 +1676,7 @@ const AdminNotificationsCenter: React.FC = () => {
                       checked={campaignForm.channels.includes('in_app')}
                       onCheckedChange={() => toggleCampaignChannel('in_app')}
                     />
-                    <Label>Отправлять in-app</Label>
+                    <Label>Отправлять в приложении</Label>
                   </div>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -1916,10 +1916,10 @@ const AdminNotificationsCenter: React.FC = () => {
                             <TableCell>
                               <div className="text-xs">{formatCampaignSchedule(campaign)}</div>
                               <div className="text-[11px] text-muted-foreground">
-                                next: {formatDateTime(campaign.next_run_at)}
+                                Следующий: {formatDateTime(campaign.next_run_at)}
                               </div>
                               <div className="text-[11px] text-muted-foreground">
-                                last: {formatDateTime(campaign.last_run_at)}
+                                Последний: {formatDateTime(campaign.last_run_at)}
                               </div>
                             </TableCell>
                             <TableCell>
@@ -1927,10 +1927,10 @@ const AdminNotificationsCenter: React.FC = () => {
                                 {campaign.is_active ? 'Активна' : 'Пауза'}
                               </Badge>
                               {wasSuccessful && (
-                                <div className="text-[11px] text-emerald-600 mt-1">Последний запуск: success</div>
+                                <div className="text-[11px] text-emerald-600 mt-1">Последний запуск: успешно</div>
                               )}
                               {hadError && (
-                                <div className="text-[11px] text-red-600 mt-1">Последний запуск: error</div>
+                                <div className="text-[11px] text-red-600 mt-1">Последний запуск: ошибка</div>
                               )}
                             </TableCell>
                             <TableCell>
@@ -1948,7 +1948,7 @@ const AdminNotificationsCenter: React.FC = () => {
                                   onClick={() => runCampaignNow(campaign.id)}
                                   disabled={runningCampaignId === campaign.id}
                                 >
-                                  {runningCampaignId === campaign.id ? 'Запуск...' : 'Run now'}
+                                  {runningCampaignId === campaign.id ? 'Запуск...' : 'Запустить сейчас'}
                                 </Button>
                                 <Button
                                   variant="outline"
@@ -2012,14 +2012,14 @@ const AdminNotificationsCenter: React.FC = () => {
 
           <Tabs value={historyView} onValueChange={(value) => setHistoryView(value as 'user' | 'delivery')}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="user">User notifications</TabsTrigger>
-              <TabsTrigger value="delivery">Delivery history</TabsTrigger>
+              <TabsTrigger value="user">Уведомления в приложении</TabsTrigger>
+              <TabsTrigger value="delivery">История доставок</TabsTrigger>
             </TabsList>
 
             <TabsContent value="user">
               <Card>
                 <CardHeader>
-                  <CardTitle>Фактические уведомления (in-app)</CardTitle>
+                  <CardTitle>Фактические уведомления (в приложении)</CardTitle>
                   <CardDescription>
                     Таблица `user_notifications` — что реально увидит пользователь в приложении
                   </CardDescription>
@@ -2037,7 +2037,7 @@ const AdminNotificationsCenter: React.FC = () => {
                             <TableHead>Тип</TableHead>
                             <TableHead>Заголовок</TableHead>
                             <TableHead>Telegram</TableHead>
-                            <TableHead>Read</TableHead>
+                            <TableHead>Прочитано</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2055,12 +2055,12 @@ const AdminNotificationsCenter: React.FC = () => {
                               </TableCell>
                               <TableCell>
                                 <Badge variant={item.telegram_sent ? 'default' : 'outline'}>
-                                  {item.telegram_sent ? 'sent' : 'no'}
+                                  {item.telegram_sent ? 'Отправлено' : 'Нет'}
                                 </Badge>
                               </TableCell>
                               <TableCell>
                                 <Badge variant={item.is_read ? 'default' : 'secondary'}>
-                                  {item.is_read ? 'read' : 'unread'}
+                                  {item.is_read ? 'Прочитано' : 'Не прочитано'}
                                 </Badge>
                               </TableCell>
                             </TableRow>
@@ -2100,9 +2100,9 @@ const AdminNotificationsCenter: React.FC = () => {
                             <TableHead>Пользователь</TableHead>
                             <TableHead>Тип</TableHead>
                             <TableHead>Канал</TableHead>
-                            <TableHead>in-app</TableHead>
+                            <TableHead>В приложении</TableHead>
                             <TableHead>tg</TableHead>
-                            <TableHead>Preview</TableHead>
+                            <TableHead>Превью</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2117,12 +2117,12 @@ const AdminNotificationsCenter: React.FC = () => {
                               <TableCell>{item.channel}</TableCell>
                               <TableCell>
                                 <Badge variant={item.in_app_created ? 'default' : 'outline'}>
-                                  {item.in_app_created ? 'yes' : 'no'}
+                                  {item.in_app_created ? 'Да' : 'Нет'}
                                 </Badge>
                               </TableCell>
                               <TableCell>
                                 <Badge variant={item.telegram_sent ? 'default' : 'outline'}>
-                                  {item.telegram_sent ? 'yes' : 'no'}
+                                  {item.telegram_sent ? 'Да' : 'Нет'}
                                 </Badge>
                               </TableCell>
                               <TableCell className="max-w-[320px]">
