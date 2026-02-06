@@ -49,15 +49,19 @@ import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
 import { useAppContext } from '@/context/AppContext';
+import { buildPaymentRedirectUrl } from '@/utils/paymentLinks';
 
 
-type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
+type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | 'subscription_1m' | 'subscription_3m' | 'subscription_12m' | null;
 
 const tarifName: Record<Exclude<Tarif, null>, string> = {
   ai_target: 'AI Target',
   target: 'Target',
   ai_manager: 'AI Manager',
   complex: 'Complex',
+  subscription_1m: 'Подписка 1 мес',
+  subscription_3m: 'Подписка 3 мес',
+  subscription_12m: 'Подписка 12 мес',
 };
 
 const tarifColor: Record<Exclude<Tarif, null>, string> = {
@@ -65,6 +69,9 @@ const tarifColor: Record<Exclude<Tarif, null>, string> = {
   target: 'bg-emerald-100 text-emerald-700',
   ai_manager: 'bg-violet-100 text-violet-700',
   complex: 'bg-amber-100 text-amber-700',
+  subscription_1m: 'bg-slate-100 text-slate-700',
+  subscription_3m: 'bg-slate-100 text-slate-700',
+  subscription_12m: 'bg-slate-100 text-slate-700',
 };
 
 const Profile: React.FC = () => {
@@ -87,6 +94,7 @@ const Profile: React.FC = () => {
 
   const [tarif, setTarif] = useState<Tarif>(null);
   const [tarifExpires, setTarifExpires] = useState<string | null>(null);
+  const [tarifRenewalCost, setTarifRenewalCost] = useState<number | null>(null);
   const [passwordModal, setPasswordModal] = useState(false);
   const [telegramIdModal, setTelegramIdModal] = useState(false);
   const [usernameModal, setUsernameModal] = useState(false);
@@ -297,7 +305,7 @@ const Profile: React.FC = () => {
         // Загружаем актуальные данные из Supabase
         const { data, error } = await (supabase
           .from('user_accounts')
-          .select('tarif, tarif_expires, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id, tilda_utm_field')
+          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id, tilda_utm_field')
           .eq('id', user.id)
           .single() as any);
 
@@ -306,6 +314,7 @@ const Profile: React.FC = () => {
           // Используем данные из localStorage как fallback
           setTarif((user.tarif as Tarif) ?? null);
           setTarifExpires(user.tarif_expires ?? null);
+          setTarifRenewalCost((user as any).tarif_renewal_cost ?? null);
           setTelegramIds([
             user.telegram_id || '',
             (user as any).telegram_id_2 || null,
@@ -320,6 +329,7 @@ const Profile: React.FC = () => {
         if (data) {
           setTarif((data.tarif as Tarif) ?? null);
           setTarifExpires(data.tarif_expires ?? null);
+          setTarifRenewalCost(data.tarif_renewal_cost ?? null);
           setTelegramIds([
             data.telegram_id || '',
             data.telegram_id_2 || null,
@@ -339,8 +349,9 @@ const Profile: React.FC = () => {
       } catch (error) {
         console.error('Ошибка при загрузке данных:', error);
         // Используем данные из localStorage как fallback
-      setTarif((user.tarif as Tarif) ?? null);
-      setTarifExpires(user.tarif_expires ?? null);
+        setTarif((user.tarif as Tarif) ?? null);
+        setTarifExpires(user.tarif_expires ?? null);
+        setTarifRenewalCost((user as any).tarif_renewal_cost ?? null);
         setTelegramIds([
           user.telegram_id || '',
           (user as any).telegram_id_2 || null,
@@ -446,6 +457,24 @@ const Profile: React.FC = () => {
     if (isNaN(d.getTime())) return t('profile.notSpecified');
     return format(d, 'dd.MM.yyyy');
   }, [tarifExpires, t]);
+
+  const paymentPath = useMemo(() => {
+    const apiBaseUrl = (() => {
+      if (typeof window === 'undefined') return API_BASE_URL;
+      const host = window.location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return 'http://localhost:8082';
+      }
+      return API_BASE_URL;
+    })();
+
+    return buildPaymentRedirectUrl({
+      tarif,
+      renewalCost: tarifRenewalCost,
+      userId: user?.id,
+      apiBaseUrl,
+    });
+  }, [tarif, tarifRenewalCost, user?.id]);
 
   const handlePasswordSave = async () => {
     // Валидация
@@ -1277,6 +1306,8 @@ const Profile: React.FC = () => {
               username={user?.username || '—'}
               tarif={tarif || undefined as any}
               expiry={formattedExpiry}
+              paymentUrl={paymentPath}
+              paymentLabel="Оплатить"
               onChangePassword={() => setPasswordModal(true)}
               onChangeUsername={() => {
                 setNewUsername(user?.username || '');

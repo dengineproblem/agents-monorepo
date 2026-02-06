@@ -25,6 +25,9 @@ import AdSettings from './pages/AdSettings';
 import WhatsAppAnalysis from './pages/WhatsAppAnalysis';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import PaymentPage from './pages/PaymentPage';
+import PaymentSuccess from './pages/PaymentSuccess';
+import PaymentFail from './pages/PaymentFail';
 import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
@@ -60,7 +63,7 @@ initSafeStorage();
 
 const queryClient = new QueryClient();
 
-const PUBLIC_PATHS = ['/login', '/signup', '/privacy', '/terms'];
+const PUBLIC_PATHS = ['/login', '/signup', '/privacy', '/terms', '/pay'];
 
 /**
  * Компонент для корневого роута "/" с мгновенным редиректом для мультиаккаунта.
@@ -91,7 +94,9 @@ const HomeRoute = () => {
 
 const AppRoutes = () => {
   const location = useLocation();
-  const isPublic = PUBLIC_PATHS.includes(location.pathname);
+  const isPublic = PUBLIC_PATHS.some(
+    (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
+  );
   const { t } = useTranslation();
   const { adAccounts, multiAccountEnabled } = useAppContext();
 
@@ -394,6 +399,10 @@ const AppRoutes = () => {
           <Route path="/signup" element={<Signup />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/pay/success" element={<PaymentSuccess />} />
+          <Route path="/pay/fail" element={<PaymentFail />} />
+          <Route path="/pay" element={<PaymentPage />} />
+          <Route path="/pay/:plan" element={<PaymentPage />} />
           <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="/oauth/tiktok/callback" element={<OAuthCallback />} />
           <Route path="*" element={<Navigate to="/login" replace />} />

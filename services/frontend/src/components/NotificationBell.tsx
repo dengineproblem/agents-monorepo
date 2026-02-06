@@ -260,6 +260,13 @@ const NotificationBell: React.FC = () => {
               {notifications.map((notification) => {
                 const isClickable = notification.type === 'brain_proposals';
                 const isBrainProposal = notification.type === 'brain_proposals';
+                const metadata = notification.metadata || {};
+                const paymentUrlRaw = typeof (metadata as any).payment_url === 'string' ? (metadata as any).payment_url : '';
+                const paymentUrl = paymentUrlRaw.trim().length > 0 ? paymentUrlRaw.trim() : '';
+                const paymentLabel =
+                  typeof (metadata as any).payment_label === 'string' && (metadata as any).payment_label
+                    ? (metadata as any).payment_label
+                    : 'Оплатить';
                 return (
                 <div
                   key={notification.id}
@@ -287,6 +294,19 @@ const NotificationBell: React.FC = () => {
                       <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
                         {notification.message}
                       </p>
+                      {paymentUrl && (
+                        <Button
+                          asChild
+                          variant="link"
+                          size="sm"
+                          className="h-auto px-0 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <a href={paymentUrl} target="_blank" rel="noreferrer">
+                            {paymentLabel}
+                          </a>
+                        </Button>
+                      )}
                       {isBrainProposal && (
                         <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1">
                           Нажмите для просмотра

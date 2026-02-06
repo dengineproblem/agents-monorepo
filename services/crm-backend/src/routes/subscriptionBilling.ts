@@ -210,7 +210,8 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
       let dbQuery = supabase
         .from('user_accounts')
         .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, tarif, tarif_expires, tarif_renewal_cost, is_active, created_at')
-        .ilike('tarif', 'subscription_%')
+        .not('tarif_expires', 'is', null)
+        .eq('is_tech_admin', false)
         .order('tarif_expires', { ascending: true })
         .range(offset, offset + limit - 1);
 

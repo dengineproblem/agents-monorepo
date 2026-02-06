@@ -1,19 +1,21 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CalendarDays, Lock, User } from 'lucide-react';
+import { CalendarDays, CreditCard, Lock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '../../i18n/LanguageContext';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 
-type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex';
+type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | 'subscription_1m' | 'subscription_3m' | 'subscription_12m';
 
 export interface TariffInfoCardProps {
   username?: string | null;
   email?: string | null;
   tarif?: Tarif; // может быть не указан
   expiry?: string | null; // формат уже подготовлен
+  paymentUrl?: string | null;
+  paymentLabel?: string;
   onChangePassword: () => void;
   onChangeUsername?: () => void;
   className?: string;
@@ -24,6 +26,9 @@ const TARIF_LABELS: Record<Tarif, string> = {
   target: 'Target',
   ai_manager: 'AI Manager',
   complex: 'Complex',
+  subscription_1m: 'Подписка 1 мес',
+  subscription_3m: 'Подписка 3 мес',
+  subscription_12m: 'Подписка 12 мес',
 };
 
 const TARIF_BADGE_COLORS: Record<Tarif, string> = {
@@ -35,6 +40,12 @@ const TARIF_BADGE_COLORS: Record<Tarif, string> = {
     'bg-gradient-to-r from-gray-600/10 to-gray-500/10 text-foreground ring-1 ring-inset ring-gray-500/20',
   complex:
     'bg-gradient-to-r from-gray-600/10 to-gray-500/10 text-foreground ring-1 ring-inset ring-gray-500/20',
+  subscription_1m:
+    'bg-gradient-to-r from-slate-600/10 to-slate-500/10 text-foreground ring-1 ring-inset ring-slate-500/20',
+  subscription_3m:
+    'bg-gradient-to-r from-slate-600/10 to-slate-500/10 text-foreground ring-1 ring-inset ring-slate-500/20',
+  subscription_12m:
+    'bg-gradient-to-r from-slate-600/10 to-slate-500/10 text-foreground ring-1 ring-inset ring-slate-500/20',
 };
 
 const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
@@ -42,6 +53,8 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
   email,
   tarif,
   expiry,
+  paymentUrl,
+  paymentLabel,
   onChangePassword,
   onChangeUsername,
   className,
@@ -87,6 +100,13 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
             </div>
           </div>
           <div className="flex md:justify-end items-start gap-2 flex-wrap">
+            {paymentUrl && (
+              <Button asChild variant="outline" className="gap-2">
+                <a href={paymentUrl} target="_blank" rel="noreferrer">
+                  <CreditCard className="h-4 w-4" /> {paymentLabel || 'Оплатить'}
+                </a>
+              </Button>
+            )}
             {onChangeUsername && (
               <Button onClick={onChangeUsername} variant="outline" className="gap-2">
                 <User className="h-4 w-4" /> {t('profile.changeUsername')}
@@ -103,4 +123,3 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
 };
 
 export default TariffInfoCard;
-

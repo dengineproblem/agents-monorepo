@@ -5,6 +5,10 @@ const log = createLogger({ module: 'subscriptionBilling' });
 
 const ALMATY_OFFSET_HOURS = 5;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const PAYMENT_BASE_URL = (process.env.APP_FRONTEND_URL || 'https://app.performanteaiagency.com').replace(/\/$/, '');
+const PAYMENT_API_BASE_URL = (process.env.APP_API_BASE_URL || `${PAYMENT_BASE_URL}/api`).replace(/\/$/, '');
+
+type PaymentPlanSlug = '1m-49k' | '3m-99k' | '1m-35k';
 
 interface UserAccountSubscriptionRow {
   id: string;
@@ -20,6 +24,7 @@ interface UserForSubscriptionSweep extends UserAccountSubscriptionRow {
   telegram_id_2: string | null;
   telegram_id_3: string | null;
   telegram_id_4: string | null;
+  tarif_renewal_cost: number | null;
 }
 
 interface NotificationDispatchResult {
@@ -88,6 +93,34 @@ export function getAlmatyTodayDateString(now: Date = new Date()): string {
   const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
   const day = String(shifted.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function resolvePaymentPlanSlug(user: {
+  tarif: string | null;
+  tarif_renewal_cost: number | null;
+}): PaymentPlanSlug | null {
+  const cost = user.tarif_renewal_cost !== null && user.tarif_renewal_cost !== undefined
+    ? Number(user.tarif_renewal_cost)
+    : null;
+
+  if (cost === 35000) return '1m-35k';
+  if (cost === 49000) return '1m-49k';
+  if (cost === 99000) return '3m-99k';
+
+  if (user.tarif === 'subscription_1m') return '1m-49k';
+  if (user.tarif === 'subscription_3m') return '3m-99k';
+
+  return null;
+}
+
+function buildPaymentUrl(user: {
+  id: string;
+  tarif: string | null;
+  tarif_renewal_cost: number | null;
+}): string | null {
+  const slug = resolvePaymentPlanSlug(user);
+  if (!slug) return null;
+  return `${PAYMENT_API_BASE_URL}/robokassa/redirect?plan=${slug}&user_id=${user.id}`;
 }
 
 export function getAlmatyDayStartUtcIso(dateString: string): string {
@@ -203,7 +236,19 @@ async function createInAppNotification(params: {
   return data.id;
 }
 
-async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
+function escapeTelegramHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildTelegramPaymentLink(url: string): string {
+  return `<a href="${escapeTelegramHtml(url)}">Оплатить</a>`;
+}
+
+async function sendTelegramMessage(chatId: string, text: string, parseMode?: 'HTML'): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN) {
     return false;
   }
@@ -215,6 +260,7 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<boolea
       body: JSON.stringify({
         chat_id: chatId,
         text,
+        parse_mode: parseMode,
         disable_web_page_preview: true
       })
     });
@@ -253,6 +299,7 @@ async function dispatchUserNotification(params: {
   title: string;
   message: string;
   telegramMessage: string;
+  telegramParseMode?: 'HTML';
   metadata?: Record<string, unknown>;
 }): Promise<NotificationDispatchResult> {
   const notificationId = await createInAppNotification({
@@ -266,7 +313,7 @@ async function dispatchUserNotification(params: {
   let telegramSent = false;
   const telegramIds = extractTelegramIds(params.user);
   for (const telegramId of telegramIds) {
-    const sent = await sendTelegramMessage(telegramId, params.telegramMessage);
+    const sent = await sendTelegramMessage(telegramId, params.telegramMessage, params.telegramParseMode);
     telegramSent = telegramSent || sent;
   }
 
@@ -499,8 +546,13 @@ async function sendExpiryReminderNotification(
   }
 
   const title = 'Подписка скоро закончится';
-  const message = `До окончания подписки осталось ${daysLeft} дн. Дата окончания: ${user.tarif_expires}.`;
-  const telegramMessage = `Напоминание: до окончания подписки осталось ${daysLeft} дн.\nДата окончания: ${user.tarif_expires}.`;
+  const paymentUrl = buildPaymentUrl(user);
+  const baseMessage = `До окончания подписки осталось ${daysLeft} дн. Дата окончания: ${user.tarif_expires}.`;
+  const message = paymentUrl ? `${baseMessage}\nОплатить: ${paymentUrl}` : baseMessage;
+  const telegramBase = `Напоминание: до окончания подписки осталось ${daysLeft} дн.\nДата окончания: ${user.tarif_expires}.`;
+  const telegramMessage = paymentUrl
+    ? `${telegramBase}\n${buildTelegramPaymentLink(paymentUrl)}`
+    : telegramBase;
 
   const dispatch = await dispatchUserNotification({
     user,
@@ -508,10 +560,13 @@ async function sendExpiryReminderNotification(
     title,
     message,
     telegramMessage,
+    telegramParseMode: paymentUrl ? 'HTML' : undefined,
     metadata: {
       days_left: daysLeft,
       tarif_expires: user.tarif_expires,
-      tarif: user.tarif
+      tarif: user.tarif,
+      payment_url: paymentUrl,
+      payment_label: paymentUrl ? 'Оплатить' : null
     }
   });
 
@@ -526,7 +581,9 @@ async function sendExpiryReminderNotification(
     metadata: {
       days_left: daysLeft,
       tarif_expires: user.tarif_expires,
-      tarif: user.tarif
+      tarif: user.tarif,
+      payment_url: paymentUrl,
+      payment_label: paymentUrl ? 'Оплатить' : null
     }
   });
 
@@ -566,8 +623,13 @@ async function deactivateExpiredAccount(user: UserForSubscriptionSweep, todayAlm
 
   if (!alreadySent) {
     const title = 'Подписка истекла';
-    const message = `Подписка истекла ${user.tarif_expires}. Доступ переведен в read-only режим.`;
-    const telegramMessage = `Подписка истекла ${user.tarif_expires}.\nДоступ переведен в read-only режим.`;
+    const paymentUrl = buildPaymentUrl(user);
+    const baseMessage = `Подписка истекла ${user.tarif_expires}. Доступ переведен в read-only режим.`;
+    const message = paymentUrl ? `${baseMessage}\nОплатить: ${paymentUrl}` : baseMessage;
+    const telegramBase = `Подписка истекла ${user.tarif_expires}.\nДоступ переведен в read-only режим.`;
+    const telegramMessage = paymentUrl
+      ? `${telegramBase}\n${buildTelegramPaymentLink(paymentUrl)}`
+      : telegramBase;
 
     const dispatch = await dispatchUserNotification({
       user,
@@ -575,9 +637,12 @@ async function deactivateExpiredAccount(user: UserForSubscriptionSweep, todayAlm
       title,
       message,
       telegramMessage,
+      telegramParseMode: paymentUrl ? 'HTML' : undefined,
       metadata: {
         tarif_expires: user.tarif_expires,
-        read_only: true
+        read_only: true,
+        payment_url: paymentUrl,
+        payment_label: paymentUrl ? 'Оплатить' : null
       }
     });
 
@@ -591,7 +656,9 @@ async function deactivateExpiredAccount(user: UserForSubscriptionSweep, todayAlm
       messagePreview: message,
       metadata: {
         tarif_expires: user.tarif_expires,
-        read_only: true
+        read_only: true,
+        payment_url: paymentUrl,
+        payment_label: paymentUrl ? 'Оплатить' : null
       }
     });
   }
@@ -612,7 +679,7 @@ export async function processSubscriptionBillingSweep(): Promise<SubscriptionBil
 
   const { data: users, error } = await supabase
     .from('user_accounts')
-    .select('id, username, created_at, tarif, tarif_expires, is_active, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4')
+    .select('id, username, created_at, tarif, tarif_expires, tarif_renewal_cost, is_active, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4')
     .eq('is_tech_admin', false)
     .not('tarif_expires', 'is', null);
 
