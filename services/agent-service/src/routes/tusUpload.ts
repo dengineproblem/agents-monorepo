@@ -474,7 +474,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let ACCESS_TOKEN: string;
     let fbAdAccountId: string;
     let pageId: string;
-    let instagramId: string;
+    let instagramId: string | null;
     let instagramUsername: string | null = null;
     let whatsappPhoneNumber: string | null = null;
 
@@ -494,29 +494,29 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         throw new Error(`Ad account not found: ${adError?.message}`);
       }
 
-      if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+      if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
         throw new Error('Ad account incomplete');
       }
 
       ACCESS_TOKEN = adAccount.access_token;
       fbAdAccountId = adAccount.ad_account_id;
       pageId = adAccount.page_id;
-      instagramId = adAccount.instagram_id;
+      instagramId = adAccount.instagram_id || null;
       instagramUsername = adAccount.instagram_username;
       whatsappPhoneNumber = adAccount.whatsapp_phone_number;
-      log.info({ uploadId, adAccountId: fbAdAccountId }, '[TUS] Using multi-account credentials');
+      log.info({ uploadId, adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[TUS] Using multi-account credentials');
     } else {
-      if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+      if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
         throw new Error('User account incomplete');
       }
 
       ACCESS_TOKEN = userAccount.access_token;
       fbAdAccountId = userAccount.ad_account_id;
       pageId = userAccount.page_id;
-      instagramId = userAccount.instagram_id;
+      instagramId = userAccount.instagram_id || null;
       instagramUsername = userAccount.instagram_username;
       whatsappPhoneNumber = userAccount.whatsapp_phone_number;
-      log.info({ uploadId, adAccountId: fbAdAccountId }, '[TUS] Using single account credentials');
+      log.info({ uploadId, adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[TUS] Using single account credentials');
     }
 
     const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
@@ -641,7 +641,13 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         useInstagram = direction.use_instagram;
       }
 
-      log.info({ directionId, objective, useInstagram, directionData: direction }, '[TUS] Direction settings loaded');
+      // Конфликт: use_instagram=true, но instagram_id отсутствует
+      if (useInstagram && !instagramId) {
+        log.warn({ directionId, objective }, '[TUS] Direction has use_instagram=true but account has no instagram_id — disabling Instagram placement');
+        useInstagram = false;
+      }
+
+      log.info({ directionId, objective, useInstagram, hasInstagramId: !!instagramId }, '[TUS] Direction settings loaded');
 
       const { data: defaultSettings } = await supabase
         .from('default_ad_settings')
@@ -658,6 +664,20 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       }
     }
 
+    // Логируем состояние перед созданием креатива
+    log.info({
+      uploadId,
+      objective,
+      useInstagram,
+      hasInstagramId: !!instagramId,
+      hasSiteUrl: !!siteUrl,
+      hasLeadFormId: !!leadFormId
+    }, '[TUS] Creating FB creative');
+
+    if (!instagramId) {
+      log.info({ uploadId, objective }, '[TUS] No instagram_id — creative will only show on Facebook feed');
+    }
+
     // Создаём креатив в Facebook
     let fbCreativeId = '';
 
@@ -665,7 +685,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,
         pageId: pageId,
-        instagramId: useInstagram ? instagramId : undefined, // Передаём Instagram только если use_instagram = true
+        instagramId: useInstagram ? (instagramId || undefined) : undefined, // Передаём Instagram только если use_instagram = true
         message: description,
         clientQuestion: clientQuestion,
         whatsappPhoneNumber: whatsappPhoneNumber || undefined,
@@ -673,6 +693,9 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       });
       fbCreativeId = whatsappCreative.id;
     } else if (objective === 'instagram_traffic') {
+      if (!instagramId) {
+        throw new Error('Instagram Traffic requires instagram_id. Please connect an Instagram account.');
+      }
       const instagramCreative = await createInstagramCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,
         pageId: pageId,

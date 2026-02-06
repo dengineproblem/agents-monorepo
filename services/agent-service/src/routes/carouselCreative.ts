@@ -131,7 +131,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       let ACCESS_TOKEN: string;
       let fbAdAccountId: string;
       let pageId: string;
-      let instagramId: string;
+      let instagramId: string | null;
       let instagramUsername: string | null = null;
 
       if (userAccount.multi_account_enabled) {
@@ -158,36 +158,57 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'Ad account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = adAccount.access_token;
         fbAdAccountId = adAccount.ad_account_id;
         pageId = adAccount.page_id;
-        instagramId = adAccount.instagram_id;
+        instagramId = adAccount.instagram_id || null;
         instagramUsername = adAccount.instagram_username;
       } else {
         // Мультиаккаунт выключен — используем user_accounts
-        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
           return reply.status(400).send({
             success: false,
-            error: 'User account incomplete (missing access_token, ad_account_id, page_id, or instagram_id)'
+            error: 'User account incomplete (missing access_token, ad_account_id, or page_id)'
           });
         }
 
         ACCESS_TOKEN = userAccount.access_token;
         fbAdAccountId = userAccount.ad_account_id;
         pageId = userAccount.page_id;
-        instagramId = userAccount.instagram_id;
+        instagramId = userAccount.instagram_id || null;
         instagramUsername = userAccount.instagram_username;
       }
 
       const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
+
+      // 4.5. Ранняя проверка instagram_traffic ДО загрузки карточек
+      if (objective === 'instagram_traffic' && !instagramId) {
+        app.log.warn({ user_id, objective }, '[Carousel] instagram_traffic requires instagram_id but account has none — aborting before card upload');
+        return reply.status(400).send({
+          success: false,
+          error: 'Instagram Traffic requires instagram_id. Please connect an Instagram account.'
+        });
+      }
+
+      app.log.info({
+        user_id,
+        objective,
+        hasInstagramId: !!instagramId,
+        adAccountId: normalizedAdAccountId,
+        cardsCount: carouselData.length
+      }, '[Carousel] Credentials loaded, starting card upload');
+
+      if (!instagramId) {
+        app.log.info({ user_id, objective }, '[Carousel] Operating without instagram_id — creative will only appear on Facebook feed');
+      }
 
       // 5. Для каждой карточки: скачиваем изображение и загружаем в Facebook
       app.log.info({ cardsCount: carouselData.length }, 'Uploading carousel images to Facebook');
@@ -248,10 +269,11 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
         fbCreativeId = result.id;
       } else if (objective === 'instagram_traffic') {
+        // instagramId гарантированно существует — проверено в шаге 4.5 перед загрузкой карточек
         const result = await createInstagramCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           cards: cardParams,
           pageId: pageId,
-          instagramId: instagramId,
+          instagramId: instagramId!,
           instagramUsername: instagramUsername || '',
           message: description
         });

@@ -707,6 +707,7 @@ export async function createWhatsAppCreative(
   if (params.instagramId) {
     objectStorySpecWithWelcome.instagram_user_id = params.instagramId;
   }
+  log.info({ fn: 'createWhatsAppCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId }, '[FB Creative] Building WhatsApp video creative');
 
   try {
     return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -805,7 +806,7 @@ export async function createWebsiteLeadsCreative(
   params: {
     videoId: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     siteUrl: string;
     utm?: string;
@@ -813,17 +814,14 @@ export async function createWebsiteLeadsCreative(
     imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
-  console.log('[createWebsiteLeadsCreative] Входные параметры:', {
+  log.info({
+    fn: 'createWebsiteLeadsCreative',
     adAccountId,
-    videoId: params.videoId,
     pageId: params.pageId,
-    instagramId: params.instagramId,
-    message: params.message,
+    hasInstagramId: !!params.instagramId,
     siteUrl: params.siteUrl,
-    utm: params.utm,
-    thumbnailHash: params.thumbnailHash,
-    imageUrl: params.imageUrl
-  });
+    hasUtm: !!params.utm
+  }, '[FB Creative] Building Website Leads video creative');
 
   const videoData: any = {
     video_id: params.videoId,
@@ -843,14 +841,18 @@ export async function createWebsiteLeadsCreative(
     videoData.image_url = params.imageUrl;
   }
 
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    video_data: videoData
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
   const payload: any = {
     name: "Website Leads Creative",
     url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId,
-      video_data: videoData
-    }
+    object_story_spec: objectStorySpec
   };
 
   console.log('[createWebsiteLeadsCreative] Payload перед отправкой:');
@@ -876,13 +878,15 @@ export async function createLeadFormVideoCreative(
   params: {
     videoId: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     leadFormId: string;
     thumbnailHash?: string;
     imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createLeadFormVideoCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form video creative');
+
   const videoData: any = {
     video_id: params.videoId,
     message: params.message,
@@ -900,13 +904,17 @@ export async function createLeadFormVideoCreative(
     videoData.image_url = params.imageUrl;
   }
 
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    video_data: videoData
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
   const payload: any = {
     name: "Lead Form Video Creative",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId,
-      video_data: videoData
-    }
+    object_story_spec: objectStorySpec
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
@@ -994,11 +1002,13 @@ export async function createWhatsAppImageCreative(
   params: {
     imageHash: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createWhatsAppImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId }, '[FB Creative] Building WhatsApp image creative');
+
   const pageWelcomeMessage = JSON.stringify({
     type: "VISUAL_EDITOR",
     version: 2,
@@ -1020,9 +1030,8 @@ export async function createWhatsAppImageCreative(
   log.debug({ adAccountId, callToAction }, 'WhatsApp image creative callToAction');
 
   // Пробуем сначала с page_welcome_message
-  const objectStorySpecWithWelcome = {
+  const objectStorySpecWithWelcome: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash,
       link: "https://www.facebook.com/",
@@ -1031,6 +1040,9 @@ export async function createWhatsAppImageCreative(
       page_welcome_message: pageWelcomeMessage
     }
   };
+  if (params.instagramId) {
+    objectStorySpecWithWelcome.instagram_user_id = params.instagramId;
+  }
 
   try {
     return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -1047,9 +1059,8 @@ export async function createWhatsAppImageCreative(
         msg: 'page_welcome_message not supported, retrying without it'
       }, 'WhatsApp creative: page_welcome_message не поддерживается для этого аккаунта, создаем без него');
 
-      const objectStorySpecWithoutWelcome = {
+      const objectStorySpecWithoutWelcome: any = {
         page_id: params.pageId,
-        instagram_user_id: params.instagramId,
         link_data: {
           image_hash: params.imageHash,
           link: "https://www.facebook.com/",
@@ -1058,6 +1069,9 @@ export async function createWhatsAppImageCreative(
           // page_welcome_message убран
         }
       };
+      if (params.instagramId) {
+        objectStorySpecWithoutWelcome.instagram_user_id = params.instagramId;
+      }
 
       try {
         return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -1141,30 +1155,36 @@ export async function createWebsiteLeadsImageCreative(
   params: {
     imageHash: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     siteUrl: string;
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const payload: any = {
-    name: "Website Leads Image Creative",
-    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId,
-      link_data: {
-        image_hash: params.imageHash,
-        message: params.message,
-        link: params.siteUrl,
-        call_to_action: {
-          type: "SIGN_UP",
-          value: {
-            link: params.siteUrl
-          }
+  log.info({ fn: 'createWebsiteLeadsImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads image creative');
+
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    link_data: {
+      image_hash: params.imageHash,
+      message: params.message,
+      link: params.siteUrl,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: {
+          link: params.siteUrl
         }
       }
     }
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
+  const payload: any = {
+    name: "Website Leads Image Creative",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
+    object_story_spec: objectStorySpec
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
@@ -1180,12 +1200,14 @@ export async function createLeadFormImageCreative(
   params: {
     imageHash: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     leadFormId: string;
     link: string;  // Required by Facebook API for link_data structure
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createLeadFormImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form image creative');
+
   // Note: link is required for image creatives with lead forms (link_data structure)
   // For video creatives, link is not required (video_data structure)
 
@@ -1201,13 +1223,17 @@ export async function createLeadFormImageCreative(
     }
   };
 
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    link_data: linkData
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
   const payload: any = {
     name: "Lead Form Image Creative",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId,
-      link_data: linkData
-    }
+    object_story_spec: objectStorySpec
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
@@ -1233,11 +1259,12 @@ export async function createWhatsAppImageCreativeMultiFormat(
     imageHash9x16: string;  // для Stories/Reels (не используется для CTWA)
     imageHash4x5: string;   // для Feed (используется как основной)
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createWhatsAppImageCreativeMultiFormat', pageId: params.pageId, hasInstagramId: !!params.instagramId }, '[FB Creative] Building WhatsApp multi-format image creative');
   // Для CTWA используем стандартный подход без asset_feed_spec
   // 4:5 формат работает во всех плейсментах (хоть и не оптимально для Stories)
   log.warn('WhatsApp CTWA не поддерживает multi-format (asset_feed_spec), используем 4:5 формат для всех плейсментов');
@@ -1325,15 +1352,16 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
     imageHash9x16: string;
     imageHash4x5: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     siteUrl: string;
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const objectStorySpec = {
+  log.info({ fn: 'createWebsiteLeadsImageCreativeMultiFormat', pageId: params.pageId, hasInstagramId: !!params.instagramId, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads multi-format image creative');
+
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash4x5,
       link: params.siteUrl,
@@ -1344,6 +1372,9 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
       }
     }
   };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   const payload: any = {
     name: "Website Leads Image Creative (Multi-Format)",
@@ -1403,11 +1434,12 @@ export async function createWhatsAppCarouselCreative(
   params: {
     cards: CarouselCardParams[];
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createWhatsAppCarouselCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, cardsCount: params.cards.length }, '[FB Creative] Building WhatsApp carousel creative');
   // Для CTWA карусели используем WhatsApp API link
   const whatsappLink = "https://api.whatsapp.com/send";
 
@@ -1441,9 +1473,8 @@ export async function createWhatsAppCarouselCreative(
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating WhatsApp carousel creative');
 
   // Пробуем сначала с page_welcome_message
-  const objectStorySpecWithWelcome = {
+  const objectStorySpecWithWelcome: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       message: params.message,
       link: whatsappLink,
@@ -1456,6 +1487,9 @@ export async function createWhatsAppCarouselCreative(
       page_welcome_message: pageWelcomeMessage
     }
   };
+  if (params.instagramId) {
+    objectStorySpecWithWelcome.instagram_user_id = params.instagramId;
+  }
 
   try {
     return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -1471,9 +1505,8 @@ export async function createWhatsAppCarouselCreative(
         msg: 'page_welcome_message not supported, retrying without it'
       }, 'WhatsApp carousel creative: page_welcome_message не поддерживается для этого аккаунта, создаем без него');
 
-      const objectStorySpecWithoutWelcome = {
+      const objectStorySpecWithoutWelcome: any = {
         page_id: params.pageId,
-        instagram_user_id: params.instagramId,
         link_data: {
           message: params.message,
           link: whatsappLink,
@@ -1486,6 +1519,9 @@ export async function createWhatsAppCarouselCreative(
           // page_welcome_message убран
         }
       };
+      if (params.instagramId) {
+        objectStorySpecWithoutWelcome.instagram_user_id = params.instagramId;
+      }
 
       return await graph('POST', `${adAccountId}/adcreatives`, token, {
         name: "Carousel CTWA – WhatsApp",
@@ -1560,12 +1596,14 @@ export async function createWebsiteLeadsCarouselCreative(
   params: {
     cards: CarouselCardParams[];
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     siteUrl: string;
     utm?: string;
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createWebsiteLeadsCarouselCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, cardsCount: params.cards.length, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads carousel creative');
+
   const childAttachments = params.cards.map((card) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50),
@@ -1577,9 +1615,8 @@ export async function createWebsiteLeadsCarouselCreative(
     }
   }));
 
-  const objectStorySpec = {
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       message: params.message,
       link: params.siteUrl,
@@ -1591,6 +1628,9 @@ export async function createWebsiteLeadsCarouselCreative(
       }
     }
   };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   const payload: any = {
     name: "Website Leads Carousel Creative",
@@ -1612,11 +1652,13 @@ export async function createLeadFormCarouselCreative(
   params: {
     cards: CarouselCardParams[];
     pageId: string;
-    instagramId: string;
+    instagramId?: string | null;
     message: string;
     leadFormId: string;
   }
 ): Promise<{ id: string }> {
+  log.info({ fn: 'createLeadFormCarouselCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, cardsCount: params.cards.length, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form carousel creative');
+
   const childAttachments = params.cards.map((card) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50),
@@ -1629,9 +1671,8 @@ export async function createLeadFormCarouselCreative(
     }
   }));
 
-  const objectStorySpec = {
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       message: params.message,
       multi_share_optimized: true,
@@ -1644,6 +1685,9 @@ export async function createLeadFormCarouselCreative(
       }
     }
   };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   const payload: any = {
     name: "Lead Form Carousel Creative",

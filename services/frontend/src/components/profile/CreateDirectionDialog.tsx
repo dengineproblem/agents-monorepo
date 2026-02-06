@@ -267,6 +267,7 @@ interface CreateDirectionDialogProps {
   userAccountId: string;
   accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
   defaultPlatform?: DirectionPlatform;
+  hasInstagramId?: boolean; // Есть ли Instagram Account ID у текущего аккаунта
 }
 
 export interface CreateDirectionFormData {
@@ -297,6 +298,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   userAccountId,
   accountId,
   defaultPlatform = 'facebook',
+  hasInstagramId = true,
 }) => {
   // Ref для порталинга Popover внутрь Dialog
   const dialogContentRef = React.useRef<HTMLDivElement>(null);
@@ -306,7 +308,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [directionPlatform, setDirectionPlatform] = useState<DirectionPlatform>(defaultPlatform);
   const [objective, setObjective] = useState<DirectionObjective>('whatsapp');
   const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
-  const [useInstagram, setUseInstagram] = useState(true);
+  const [useInstagram, setUseInstagram] = useState(hasInstagramId !== false);
   const [dailyBudget, setDailyBudget] = useState('50');
   const [targetCpl, setTargetCpl] = useState('2.00');
   const [tiktokObjective, setTiktokObjective] = useState<TikTokObjective>('traffic');
@@ -1063,18 +1065,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       {OBJECTIVE_DESCRIPTIONS.whatsapp}
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="whatsapp_conversions" id="obj-whatsapp-conv" />
-                    <Label htmlFor="obj-whatsapp-conv" className="font-normal cursor-pointer">
-                      {OBJECTIVE_DESCRIPTIONS.whatsapp_conversions}
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
-                    <Label htmlFor="obj-instagram" className="font-normal cursor-pointer">
-                      {OBJECTIVE_DESCRIPTIONS.instagram_traffic}
-                    </Label>
-                  </div>
+                  {/* TODO: whatsapp_conversions скрыт — функция требует доработки */}
+                  {hasInstagramId && (
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
+                      <Label htmlFor="obj-instagram" className="font-normal cursor-pointer">
+                        {OBJECTIVE_DESCRIPTIONS.instagram_traffic}
+                      </Label>
+                    </div>
+                  )}
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="site_leads" id="obj-site" />
                     <Label htmlFor="obj-site" className="font-normal cursor-pointer">
@@ -1147,19 +1146,21 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <input
                   type="checkbox"
                   id="use-instagram"
-                  checked={useInstagram}
+                  checked={hasInstagramId ? useInstagram : false}
                   onChange={(e) => setUseInstagram(e.target.checked)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !hasInstagramId}
                   className="h-4 w-4 rounded border-gray-300"
                 />
-                <Label htmlFor="use-instagram" className="font-normal cursor-pointer">
+                <Label htmlFor="use-instagram" className={`font-normal ${hasInstagramId ? 'cursor-pointer' : 'cursor-not-allowed text-muted-foreground'}`}>
                   Использовать Instagram аккаунт
                 </Label>
               </div>
             )}
-            {needsFacebook && !useInstagram && (
+            {needsFacebook && (!useInstagram || !hasInstagramId) && (
               <p className="text-xs text-muted-foreground">
-                Реклама будет показываться от имени Facebook страницы без привязки к Instagram
+                {!hasInstagramId
+                  ? 'Instagram аккаунт не привязан — реклама будет показываться только на Facebook'
+                  : 'Реклама будет показываться от имени Facebook страницы без привязки к Instagram'}
               </p>
             )}
 
@@ -2138,8 +2139,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {/* СЕКЦИЯ: Meta CAPI - расширенная конфигурация */}
-          {needsFacebook && objective !== 'site_leads' && (
+          {/* СЕКЦИЯ: Meta CAPI - скрыта, функция требует доработки */}
+          {false && needsFacebook && objective !== 'site_leads' && (
             <div className="space-y-4">
               <Separator />
               <div className="flex items-center justify-between">

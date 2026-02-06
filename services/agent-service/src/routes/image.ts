@@ -109,7 +109,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       let ACCESS_TOKEN: string;
       let fbAdAccountId: string;
       let pageId: string;
-      let instagramId: string;
+      let instagramId: string | null;
       let instagramUsername: string | null = null;
 
       if (userAccount.multi_account_enabled) {
@@ -138,39 +138,47 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'Ad account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = body.page_access_token || adAccount.access_token;
         fbAdAccountId = adAccount.ad_account_id;
         pageId = adAccount.page_id;
-        instagramId = adAccount.instagram_id;
+        instagramId = adAccount.instagram_id || null;
         instagramUsername = adAccount.instagram_username;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[Image] Multi-account credentials loaded');
       } else {
         // Мультиаккаунт выключен — используем user_accounts
         app.log.info('Single-account mode: using user_accounts credentials');
 
-        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'User account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = body.page_access_token || userAccount.access_token;
         fbAdAccountId = userAccount.ad_account_id;
         pageId = userAccount.page_id;
-        instagramId = userAccount.instagram_id;
+        instagramId = userAccount.instagram_id || null;
         instagramUsername = userAccount.instagram_username;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[Image] Single-account credentials loaded');
       }
 
       const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
+
+      if (!instagramId) {
+        app.log.info({ user_id: body.user_id, direction_id: body.direction_id }, '[Image] No instagram_id — creative will only show on Facebook feed');
+      }
 
       app.log.info('Creating creative record in database...');
 
@@ -283,6 +291,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           });
           fbCreativeId = whatsappCreative.id;
         } else if (objective === 'instagram_traffic') {
+          if (!instagramId) {
+            throw new Error('Instagram Traffic requires instagram_id. Please connect an Instagram account.');
+          }
           const instagramCreative = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
             pageId: pageId,
@@ -569,7 +580,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       let ACCESS_TOKEN: string;
       let fbAdAccountId: string;
       let pageId: string;
-      let instagramId: string;
+      let instagramId: string | null;
       let instagramUsername: string | null = null;
 
       if (userAccount.multi_account_enabled) {
@@ -596,36 +607,44 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'Ad account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = adAccount.access_token;
         fbAdAccountId = adAccount.ad_account_id;
         pageId = adAccount.page_id;
-        instagramId = adAccount.instagram_id;
+        instagramId = adAccount.instagram_id || null;
         instagramUsername = adAccount.instagram_username;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[ImageCreative] Multi-account credentials loaded');
       } else {
         // Мультиаккаунт выключен — используем user_accounts
-        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
           return reply.status(400).send({
             success: false,
-            error: 'User account incomplete (missing access_token, ad_account_id, page_id, or instagram_id)'
+            error: 'User account incomplete (missing access_token, ad_account_id, or page_id)'
           });
         }
 
         ACCESS_TOKEN = userAccount.access_token;
         fbAdAccountId = userAccount.ad_account_id;
         pageId = userAccount.page_id;
-        instagramId = userAccount.instagram_id;
+        instagramId = userAccount.instagram_id || null;
         instagramUsername = userAccount.instagram_username;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[ImageCreative] Single-account credentials loaded');
       }
 
       const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
+
+      if (!instagramId) {
+        app.log.info({ user_id, direction_id, objective }, '[ImageCreative] No instagram_id — creative will only show on Facebook feed');
+      }
 
       // 6. Скачиваем и загружаем 9:16 изображение в Facebook
       // Meta сама кропнет 9:16 до 4:5 для Feed плейсментов (текст в центре сохранится)
@@ -656,6 +675,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
         fbCreativeId = result.id;
       } else if (objective === 'instagram_traffic') {
+        if (!instagramId) {
+          throw new Error('Instagram Traffic requires instagram_id. Please connect an Instagram account.');
+        }
         const result = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,
           pageId: pageId,

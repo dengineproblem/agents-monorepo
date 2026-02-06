@@ -923,7 +923,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         // Автоматически определяем connection_status на основе наличия всех обязательных полей
         const hasAllFbFields = !!(
           acc.fb_page_id &&
-          acc.fb_instagram_id &&
           acc.fb_access_token &&
           acc.fb_ad_account_id
         );
@@ -941,6 +940,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
           page_id: acc.fb_page_id,              // Бэкенд возвращает fb_page_id (для Lead Forms)
           fb_page_id: acc.fb_page_id,           // Для аватара (используется в компонентах)
+          fb_instagram_id: acc.fb_instagram_id || null, // Instagram Account ID (опционален)
           // TikTok
           tiktok_access_token: acc.tiktok_access_token,
           tiktok_business_id: acc.tiktok_business_id,

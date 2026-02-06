@@ -100,7 +100,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let ACCESS_TOKEN: string;
       let fbAdAccountId: string;
       let pageId: string;
-      let instagramId: string;
+      let instagramId: string | null;
       let instagramUsername: string | null = null;
       let whatsappPhoneNumber: string | null = null;
 
@@ -130,40 +130,48 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'Ad account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = adAccount.access_token;
         fbAdAccountId = adAccount.ad_account_id;
         pageId = adAccount.page_id;
-        instagramId = adAccount.instagram_id;
+        instagramId = adAccount.instagram_id || null;
         instagramUsername = adAccount.instagram_username;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[Video] Multi-account credentials loaded');
       } else {
         // Мультиаккаунт выключен — используем user_accounts
         app.log.info('Single-account mode: using user_accounts credentials');
 
-        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
           return reply.status(400).send({
             success: false,
             error: 'User account incomplete',
-            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+            message: 'Missing required fields: access_token, ad_account_id, or page_id'
           });
         }
 
         ACCESS_TOKEN = userAccount.access_token;
         fbAdAccountId = userAccount.ad_account_id;
         pageId = userAccount.page_id;
-        instagramId = userAccount.instagram_id;
+        instagramId = userAccount.instagram_id || null;
         instagramUsername = userAccount.instagram_username;
         whatsappPhoneNumber = userAccount.whatsapp_phone_number;
+
+        app.log.info({ adAccountId: fbAdAccountId, hasInstagramId: !!instagramId }, '[Video] Single-account credentials loaded');
       }
 
       const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
+
+      if (!instagramId) {
+        app.log.info({ user_id: body.user_id, direction_id: body.direction_id }, '[Video] No instagram_id — creative will only show on Facebook feed');
+      }
 
       app.log.info({
         user_id: body.user_id,
@@ -347,7 +355,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
             pageId: pageId,
-            instagramId: instagramId,
+            instagramId: instagramId || undefined,
             message: description,
             clientQuestion: clientQuestion,
             whatsappPhoneNumber: whatsappPhoneNumber || undefined,
@@ -355,6 +363,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           });
           fbCreativeId = whatsappCreative.id;
         } else if (objective === 'instagram_traffic') {
+          if (!instagramId) {
+            throw new Error('Instagram Traffic requires instagram_id. Please connect an Instagram account.');
+          }
           const instagramCreative = await createInstagramCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
             pageId: pageId,

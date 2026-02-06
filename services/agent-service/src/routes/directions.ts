@@ -560,7 +560,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Проверяем флаг multi_account_enabled у пользователя
       const { data: userAccountCheck, error: userCheckError } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled, ad_account_id, access_token, username, page_id, fb_page_access_token')
+        .select('multi_account_enabled, ad_account_id, access_token, username, page_id, fb_page_access_token, instagram_id')
         .eq('id', userAccountId)
         .single();
 
@@ -617,6 +617,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       let pageId: string | null = null;
       let pageAccessToken: string | null = null;
       let accountRecordId: string | null = null;
+      let instagramId: string | null = null;
 
       if (needsFacebook) {
         if (userAccountCheck.multi_account_enabled) {
@@ -625,7 +626,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
           const { data: adAccount, error: adAccountError } = await supabase
             .from('ad_accounts')
-            .select('ad_account_id, access_token, name, page_id, fb_page_access_token')
+            .select('ad_account_id, access_token, name, page_id, fb_page_access_token, instagram_id')
             .eq('id', accountIdToUse)
             .eq('user_account_id', userAccountId)
             .single();
@@ -648,6 +649,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           pageId = adAccount.page_id || null;
           pageAccessToken = adAccount.fb_page_access_token || null;
           accountRecordId = accountIdToUse;
+          instagramId = adAccount.instagram_id || null;
         } else {
           // Legacy режим: данные в user_accounts
           fbAdAccountId = userAccountCheck.ad_account_id;
@@ -655,6 +657,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           userAccountName = userAccountCheck.username || undefined;
           pageId = userAccountCheck.page_id || null;
           pageAccessToken = userAccountCheck.fb_page_access_token || null;
+          instagramId = userAccountCheck.instagram_id || null;
         }
       } else if (userAccountCheck.multi_account_enabled) {
         accountRecordId = input.accountId || null;
@@ -764,6 +767,14 @@ export async function directionsRoutes(app: FastifyInstance) {
         return reply.code(400).send({
           success: false,
           error: 'Facebook не подключен. Заполните данные рекламного кабинета.',
+        });
+      }
+
+      // Instagram Traffic требует instagram_id
+      if (needsFacebook && input.objective === 'instagram_traffic' && !instagramId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Instagram Traffic требует подключённый Instagram аккаунт. Добавьте Instagram Account ID в настройках.',
         });
       }
 

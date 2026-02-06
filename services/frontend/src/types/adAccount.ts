@@ -95,6 +95,7 @@ export interface AdAccountSummary {
   access_token: string | null;    // из fb_access_token
   page_id: string | null;         // из fb_page_id (для Lead Forms)
   fb_page_id: string | null;      // из fb_page_id (для аватара)
+  fb_instagram_id: string | null; // из fb_instagram_id (опционален, для Instagram Traffic)
 }
 
 export interface CreateAdAccountPayload {

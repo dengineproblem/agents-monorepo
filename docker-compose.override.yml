@@ -13,6 +13,17 @@ services:
   # moltbot:
   #   scale: 0  # ВРЕМЕННО ЗАКОММЕНТИРОВАНО для локального тестирования
 
+  # Frontend - локальная сборка с development API URLs (localhost:8082)
+  frontend:
+    build:
+      context: ./services/frontend
+      args:
+        BUILD_MODE: development
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    ports:
+      - "8081:80"
+
   # Nginx - используем локальную конфигурацию без SSL
   nginx:
     volumes:

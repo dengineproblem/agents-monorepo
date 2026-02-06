@@ -104,9 +104,7 @@ export function FacebookManualConnectModal({
       newErrors.ad_account_id = 'Ad Account ID обязателен';
     }
 
-    if (!formData.instagram_id.trim()) {
-      newErrors.instagram_id = 'Instagram ID обязателен';
-    }
+    // instagram_id необязателен — без него реклама не будет показываться в Instagram ленте
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -464,7 +462,7 @@ export function FacebookManualConnectModal({
 
               <div className="space-y-1.5 sm:space-y-2">
                 <Label htmlFor="instagram_id" className="text-sm">
-                  Instagram Account ID <span className="text-red-500">*</span>
+                  Instagram Account ID <span className="text-muted-foreground text-xs">(необязательно)</span>
                 </Label>
                 <Input
                   id="instagram_id"
@@ -480,7 +478,7 @@ export function FacebookManualConnectModal({
                   <p className="text-sm text-red-500">{errors.instagram_id}</p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  ID аккаунта Instagram из раздела "Аккаунты Instagram"
+                  ID аккаунта Instagram из раздела "Аккаунты Instagram". Без него реклама не будет показываться в Instagram ленте.
                 </p>
               </div>
             </div>

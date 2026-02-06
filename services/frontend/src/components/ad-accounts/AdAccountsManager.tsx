@@ -347,7 +347,6 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               // Автоматически вычисляем connection_status на основе полей
               const hasAllFbFields = !!(
                 account.fb_page_id &&
-                account.fb_instagram_id &&
                 account.fb_access_token &&
                 account.fb_ad_account_id
               );

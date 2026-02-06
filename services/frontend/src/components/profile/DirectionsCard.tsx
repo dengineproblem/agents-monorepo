@@ -24,7 +24,7 @@ interface DirectionsCardProps {
 }
 
 const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId }) => {
-  const { platform } = useAppContext();
+  const { platform, adAccounts, currentAdAccountId, multiAccountEnabled } = useAppContext();
   // В профиле показываем ВСЕ направления (без фильтра по платформе)
   const { directions, loading, createDirection, updateDirection, deleteDirection } =
     useDirections(userAccountId, accountId);
@@ -34,6 +34,17 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
   const [deleteAlertOpen, setDeleteAlertOpen] = useState(false);
   const [selectedDirection, setSelectedDirection] = useState<Direction | null>(null);
   const [adsetMode, setAdsetMode] = useState<'api_create' | 'use_existing'>('api_create');
+
+  // Определяем наличие Instagram ID для текущего аккаунта
+  const hasInstagramId = (() => {
+    if (multiAccountEnabled && currentAdAccountId) {
+      const currentAccount = adAccounts.find(acc => acc.id === currentAdAccountId);
+      return !!currentAccount?.fb_instagram_id;
+    }
+    // Legacy-режим: проверяем user из localStorage
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+    return !!storedUser.instagram_id;
+  })();
 
   // Загрузить режим ad set creation
   useEffect(() => {
@@ -373,6 +384,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         userAccountId={userAccountId || ''}
         accountId={accountId}
         defaultPlatform={platform === 'tiktok' ? 'tiktok' : 'facebook'}
+        hasInstagramId={hasInstagramId}
       />
 
       <EditDirectionDialog
