@@ -610,7 +610,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
             // Создаём Ads с креативами (максимум 5)
             const creativesToUse = creatives.slice(0, 5);
-            const ads = await createAdsInAdSet({
+            const adsResult = await createAdsInAdSet({
               adsetId,
               adAccountId: credentials.fbAdAccountId!,
               creatives: creativesToUse,
@@ -621,8 +621,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               campaignId: direction.fb_campaign_id,
               accountId: account_id, // UUID из ad_accounts для мультиаккаунтности
             });
+            const ads = adsResult.ads;
 
-            log.info({ directionId: direction.id, adsetId, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
+            log.info({ directionId: direction.id, adsetId, adsCount: ads.length, failedCount: adsResult.failedAds.length, userAccountId: user_account_id }, 'Ads created for direction');
 
             // Log business event for analytics
             await eventLogger.logBusinessEvent(
@@ -1005,7 +1006,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           created_at: c.created_at,
         }));
 
-        const ads = await createAdsInAdSet({
+        const adsResult = await createAdsInAdSet({
           adsetId,
           adAccountId: credentials.fbAdAccountId!,
           creatives: creativesForAds,
@@ -1017,7 +1018,36 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           accountId: account_id, // UUID из ad_accounts для мультиаккаунтности
         });
 
-        log.info({ adsCount: ads.length }, 'Manual launch ads created');
+        const { ads, failedAds } = adsResult;
+
+        log.info({ adsCount: ads.length, failedCount: failedAds.length }, 'Manual launch ads created');
+
+        // Если все объявления провалились — вернуть ошибку с расшифровкой
+        if (ads.length === 0 && failedAds.length > 0) {
+          const firstFailed = failedAds[0];
+          const resolution = resolveFacebookError(
+            firstFailed.errorCode !== undefined
+              ? { code: firstFailed.errorCode, error_subcode: firstFailed.errorSubcode }
+              : undefined
+          );
+
+          log.warn({
+            adsetId,
+            failedAds,
+            resolution,
+          }, 'Manual launch: all ads failed to create');
+
+          return reply.status(400).send({
+            success: false,
+            error: resolution.short,
+            error_hint: resolution.hint,
+            error_details: firstFailed.errorMessage,
+            direction_id: direction.id,
+            direction_name: direction.name,
+            campaign_id: direction.fb_campaign_id,
+            adset_id: adsetId,
+          });
+        }
 
         // Log business event for analytics
         await eventLogger.logBusinessEvent(
@@ -1079,17 +1109,39 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           severity: error?.fb?.code === 190 ? 'critical' : 'warning',
         }).catch(() => {});
 
-        // Парсим ошибку для понятного сообщения
+        // Используем resolveFacebookError для понятного сообщения
         let errorMessage = error.message;
-        if (error.message && error.message.includes('locations that are currently restricted')) {
+        let errorHint: string | undefined;
+
+        if (error?.fb) {
+          const resolution = resolveFacebookError(error.fb);
+          errorMessage = resolution.short;
+          errorHint = resolution.hint;
+        } else if (error.message && error.message.includes('locations that are currently restricted')) {
           errorMessage = 'Выбранные гео-локации заблокированы для вашего рекламного аккаунта';
-        } else if (error.message && error.message.includes('Invalid parameter')) {
-          errorMessage = 'Некорректные параметры таргетинга или настроек';
+          errorHint = 'Проверьте настройки гео-таргетинга в направлении.';
+        } else if (error.message && error.message.includes('Failed to create ad set')) {
+          // Пробуем извлечь FB ошибку из JSON в сообщении
+          try {
+            const jsonMatch = error.message.match(/\{.*\}/s);
+            if (jsonMatch) {
+              const fbErr = JSON.parse(jsonMatch[0]);
+              if (fbErr?.error?.code) {
+                const resolution = resolveFacebookError({
+                  code: fbErr.error.code,
+                  error_subcode: fbErr.error.error_subcode,
+                });
+                errorMessage = resolution.short;
+                errorHint = resolution.hint;
+              }
+            }
+          } catch { /* ignore parse errors */ }
         }
 
         return reply.status(500).send({
           success: false,
           error: errorMessage,
+          error_hint: errorHint,
           error_details: error.message,
         });
       }

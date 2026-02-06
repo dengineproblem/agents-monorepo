@@ -356,7 +356,10 @@ export async function graphBatch(
             code: r.code,
             errorCode: body?.error?.code,
             errorSubcode: body?.error?.error_subcode,
-            message: body?.error?.message?.substring(0, 100)
+            message: body?.error?.message?.substring(0, 200),
+            errorUserTitle: body?.error?.error_user_title,
+            errorUserMsg: body?.error?.error_user_msg?.substring(0, 300),
+            blameFieldSpecs: body?.error?.error_data?.blame_field_specs,
           };
         } catch {
           return { index: i, code: r.code, body: r.body.substring(0, 100) };

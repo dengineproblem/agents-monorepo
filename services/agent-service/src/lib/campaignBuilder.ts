@@ -2478,7 +2478,13 @@ export async function createAdsInAdSet(params: {
       objective,
       durationMs: Date.now() - startTime
     }, '[createAdsInAdSet] No valid creatives to create ads');
-    return [];
+    return { ads: [], failedAds: creatives.map(c => ({
+      user_creative_id: c.user_creative_id,
+      title: c.title,
+      errorCode: undefined as number | undefined,
+      errorSubcode: undefined as number | undefined,
+      errorMessage: `No Facebook creative ID for objective: ${objective}`,
+    })) };
   }
 
   // Формируем batch запросы
@@ -2510,6 +2516,14 @@ export async function createAdsInAdSet(params: {
     name: string;
     user_creative_id: string;
     creative_title: string;
+  }> = [];
+
+  const allFailedAds: Array<{
+    user_creative_id: string;
+    title: string;
+    errorCode?: number;
+    errorSubcode?: number;
+    errorMessage?: string;
   }> = [];
 
   try {
@@ -2569,6 +2583,8 @@ export async function createAdsInAdSet(params: {
         }
       } else {
         const errorCode = parsed.error?.code;
+        const errorSubcode = parsed.error?.error_subcode;
+        const errorMessage = parsed.error?.message;
         if (errorCode === 17 || errorCode === 4) {
           rateLimitErrors++;
         }
@@ -2577,13 +2593,21 @@ export async function createAdsInAdSet(params: {
           title: creative.title,
           errorCode
         });
+        allFailedAds.push({
+          user_creative_id: creative.user_creative_id,
+          title: creative.title,
+          errorCode,
+          errorSubcode,
+          errorMessage: errorMessage?.substring(0, 200),
+        });
         log.error({
           userCreativeId: creative.user_creative_id,
           creativeTitle: creative.title,
           fbCreativeId,
           adsetId,
           errorCode,
-          errorMessage: parsed.error?.message?.substring(0, 150)
+          errorSubcode,
+          errorMessage: errorMessage?.substring(0, 200)
         }, '[createAdsInAdSet] Failed to create ad (batch)');
       }
     }
@@ -2607,7 +2631,7 @@ export async function createAdsInAdSet(params: {
       adsCreated: ads.map(ad => ad.ad_id)
     }, '[createAdsInAdSet] Completed (batch)');
 
-    return ads;
+    return { ads, failedAds: allFailedAds };
   } catch (error: any) {
     const batchFailTime = Date.now() - startTime;
     log.error({
@@ -2691,6 +2715,23 @@ export async function createAdsInAdSet(params: {
               continue;
             }
 
+            // Парсим ошибку FB для возврата
+            try {
+              const errJson = JSON.parse(errorBody);
+              allFailedAds.push({
+                user_creative_id: creative.user_creative_id,
+                title: creative.title,
+                errorCode: errJson?.error?.code,
+                errorSubcode: errJson?.error?.error_subcode,
+                errorMessage: errJson?.error?.message?.substring(0, 200),
+              });
+            } catch {
+              allFailedAds.push({
+                user_creative_id: creative.user_creative_id,
+                title: creative.title,
+                errorMessage: errorBody.substring(0, 200),
+              });
+            }
             log.error({
               userCreativeId: creative.user_creative_id,
               status: response.status,
@@ -2731,7 +2772,7 @@ export async function createAdsInAdSet(params: {
       mode: 'fallback'
     }, '[createAdsInAdSet] Completed (fallback)');
 
-    return ads;
+    return { ads, failedAds: allFailedAds };
   }
 }
 

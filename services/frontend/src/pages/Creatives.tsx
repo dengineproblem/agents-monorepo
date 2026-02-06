@@ -1559,7 +1559,10 @@ const Creatives: React.FC = () => {
         setManualLaunchBudget(manualLaunchMinBudget);
         setManualStartMode('now');
       } else {
-        toast.error(result.error || 'Ошибка создания adset');
+        // Показываем ошибку с подсказкой
+        const errorMsg = result.error || 'Ошибка запуска рекламы';
+        const hintMsg = result.error_hint;
+        toast.error(hintMsg ? `${errorMsg}\n${hintMsg}` : errorMsg, { duration: 8000 });
       }
     } catch (error: any) {
       console.error('Ошибка создания adset:', error);
@@ -2407,9 +2410,13 @@ const Creatives: React.FC = () => {
         <Dialog open={resultDialogOpen} onOpenChange={setResultDialogOpen}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Реклама запущена!</DialogTitle>
+              <DialogTitle>
+                {launchResult?.ads_created === 0 ? 'Ошибка запуска' : 'Реклама запущена!'}
+              </DialogTitle>
               <DialogDescription>
-                {launchResult?.message || 'Реклама успешно запущена'}
+                {launchResult?.ads_created === 0
+                  ? (launchResult?.error || 'Не удалось создать объявления')
+                  : (launchResult?.message || 'Реклама успешно запущена')}
               </DialogDescription>
             </DialogHeader>
 

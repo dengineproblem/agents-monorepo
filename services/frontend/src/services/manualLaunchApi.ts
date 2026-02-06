@@ -40,6 +40,7 @@ export interface ManualLaunchResponse {
     name: string;
   }>;
   error?: string;
+  error_hint?: string;
   error_details?: string;
 }
 
@@ -84,6 +85,10 @@ export async function manualLaunchAds(
     const data = await response.json();
 
     if (!response.ok) {
+      // Возвращаем структурированный ответ ошибки от бэкенда (с error_hint и т.д.)
+      if (data && typeof data === 'object' && data.error) {
+        return { success: false, ...data };
+      }
       throw new Error(data.error || 'Failed to launch ads');
     }
 

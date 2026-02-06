@@ -84,6 +84,30 @@ const dictionary: Record<ErrorKey, FacebookErrorResolution> = {
     hint: 'Проверьте наличие кампании/adset/объявления по ID.',
     severity: 'error',
   },
+  '100:1359188': {
+    msgCode: 'fb_payment_method_missing',
+    short: 'Не настроен способ оплаты в рекламном кабинете.',
+    hint: 'Добавьте карту или другой способ оплаты в Facebook Ads Manager → Настройки оплаты.',
+    severity: 'error',
+  },
+  '100:2446885': {
+    msgCode: 'fb_whatsapp_number_invalid',
+    short: 'Некорректный номер WhatsApp привязан к аккаунту.',
+    hint: 'Проверьте привязку номера в WhatsApp Business Manager и убедитесь, что он подтверждён.',
+    severity: 'error',
+  },
+  '100:1487891': {
+    msgCode: 'fb_cta_incompatible',
+    short: 'Некорректный call-to-action для данного типа кампании.',
+    hint: 'Пересоздайте креатив — возможно нужно обновить тип CTA под цель кампании.',
+    severity: 'error',
+  },
+  '100:1815166': {
+    msgCode: 'fb_welcome_message_unsupported',
+    short: 'Аккаунт не поддерживает Welcome Message в креативе.',
+    hint: 'Креатив будет создан без приветственного сообщения. Попробуйте повторно.',
+    severity: 'warning',
+  },
   '100:2923012': {
     msgCode: 'fb_status_invalid',
     short: 'Невозможно изменить статус объекта (уже в этом статусе или недоступен для изменений).',
