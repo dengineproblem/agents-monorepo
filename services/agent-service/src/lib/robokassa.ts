@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-export type RobokassaPlanSlug = '1m-49k' | '3m-99k' | '1m-35k';
+export type RobokassaPlanSlug = '1m-49k' | '3m-99k' | '1m-35k' | 'test-500';
 
 export interface RobokassaPlanConfig {
   slug: RobokassaPlanSlug;
@@ -38,6 +38,13 @@ const PLAN_CONFIGS: Record<RobokassaPlanSlug, RobokassaPlanConfig> = {
     amount: 35000,
     title: 'Tariff 1 month (special)',
     description: 'Тариф 1 месяц',
+  },
+  'test-500': {
+    slug: 'test-500',
+    months: 1,
+    amount: 500,
+    title: 'Tariff test 500',
+    description: 'Тестовая оплата 500 KZT',
   },
 };
 

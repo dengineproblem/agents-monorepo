@@ -8,7 +8,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const PAYMENT_BASE_URL = (process.env.APP_FRONTEND_URL || 'https://app.performanteaiagency.com').replace(/\/$/, '');
 const PAYMENT_API_BASE_URL = (process.env.APP_API_BASE_URL || `${PAYMENT_BASE_URL}/api`).replace(/\/$/, '');
 
-type PaymentPlanSlug = '1m-49k' | '3m-99k' | '1m-35k';
+type PaymentPlanSlug = '1m-49k' | '3m-99k' | '1m-35k' | 'test-500';
 
 interface UserAccountSubscriptionRow {
   id: string;
@@ -106,6 +106,7 @@ function resolvePaymentPlanSlug(user: {
   if (cost === 35000) return '1m-35k';
   if (cost === 49000) return '1m-49k';
   if (cost === 99000) return '3m-99k';
+  if (cost === 500) return 'test-500';
 
   if (user.tarif === 'subscription_1m') return '1m-49k';
   if (user.tarif === 'subscription_3m') return '3m-99k';

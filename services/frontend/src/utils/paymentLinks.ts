@@ -1,9 +1,10 @@
-export type PaymentPlanSlug = '1m-49k' | '3m-99k' | '1m-35k';
+export type PaymentPlanSlug = '1m-49k' | '3m-99k' | '1m-35k' | 'test-500';
 
 const PAYMENT_PATHS: Record<PaymentPlanSlug, string> = {
   '1m-49k': '/pay/1m-49k',
   '3m-99k': '/pay/3m-99k',
   '1m-35k': '/pay/1m-35k',
+  'test-500': '/pay/test-500',
 };
 
 export function resolvePaymentPlanSlug(params: {
@@ -17,6 +18,7 @@ export function resolvePaymentPlanSlug(params: {
   if (cost === 35000) return '1m-35k';
   if (cost === 49000) return '1m-49k';
   if (cost === 99000) return '3m-99k';
+  if (cost === 500) return 'test-500';
 
   if (params.tarif === 'subscription_1m') return '1m-49k';
   if (params.tarif === 'subscription_3m') return '3m-99k';

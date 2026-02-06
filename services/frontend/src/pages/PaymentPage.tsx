@@ -29,6 +29,11 @@ const PAYMENT_PLANS: Record<
     description: 'Специальная стоимость для действующих клиентов.',
     amount: 35000,
   },
+  'test-500': {
+    title: 'Тестовый платеж',
+    description: 'Тестовая оплата через Robokassa (500 KZT).',
+    amount: 500,
+  },
 };
 
 const PaymentPage: React.FC = () => {
