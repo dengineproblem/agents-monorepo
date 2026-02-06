@@ -9,6 +9,12 @@ import { Readable } from 'stream';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import {
+  createWhatsAppCreative,
+  createInstagramCreative,
+  createWebsiteLeadsCreative,
+  createLeadFormVideoCreative
+} from '../adapters/facebook.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const MIN_LEADS = 5;
@@ -169,6 +175,78 @@ async function getCredentials(userId: string, accountId: string | undefined, log
       targetAccountId: null,
     };
   }
+}
+
+/**
+ * Получает полные credentials включая pageId, instagramId и т.д.
+ * Используется для создания Facebook Creatives при импорте
+ */
+async function getFullCredentials(
+  userId: string,
+  accountId: string | null,
+  log: Logger
+): Promise<{
+  accessToken: string;
+  adAccountId: string;
+  pageId: string;
+  instagramId: string;
+  instagramUsername: string | null;
+  whatsappPhoneNumber: string | null;
+} | null> {
+  const { data: userAccount, error: userError } = await supabase
+    .from('user_accounts')
+    .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number, multi_account_enabled')
+    .eq('id', userId)
+    .single();
+
+  if (userError || !userAccount) {
+    log.error({ userId, error: userError?.message }, 'Failed to fetch user account');
+    return null;
+  }
+
+  // Multi-account режим
+  if (userAccount.multi_account_enabled && accountId) {
+    const { data: adAccount, error: adError } = await supabase
+      .from('ad_accounts')
+      .select('access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number')
+      .eq('id', accountId)
+      .eq('user_account_id', userId)
+      .single();
+
+    if (adError || !adAccount) {
+      log.error({ userId, accountId, error: adError?.message }, 'Failed to fetch ad account');
+      return null;
+    }
+
+    if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+      log.warn({ userId, accountId }, 'Ad account has incomplete credentials');
+      return null;
+    }
+
+    return {
+      accessToken: adAccount.access_token,
+      adAccountId: adAccount.ad_account_id,
+      pageId: adAccount.page_id,
+      instagramId: adAccount.instagram_id,
+      instagramUsername: adAccount.instagram_username || null,
+      whatsappPhoneNumber: adAccount.whatsapp_phone_number || null
+    };
+  }
+
+  // Legacy режим (один аккаунт)
+  if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+    log.warn({ userId }, 'User account has incomplete credentials');
+    return null;
+  }
+
+  return {
+    accessToken: userAccount.access_token,
+    adAccountId: userAccount.ad_account_id,
+    pageId: userAccount.page_id,
+    instagramId: userAccount.instagram_id,
+    instagramUsername: userAccount.instagram_username || null,
+    whatsappPhoneNumber: userAccount.whatsapp_phone_number || null
+  };
 }
 
 /**
@@ -935,6 +1013,158 @@ async function importSingleCreative(
     if (insertError || !newCreative) {
       log.error({ adId: creative.ad_id, error: insertError?.message }, 'Failed to create creative record');
       return { success: false, error: 'Database error' };
+    }
+
+    // НОВЫЙ КОД: Создаём Facebook Creative если есть direction
+    log.info({
+      adId: creative.ad_id,
+      directionId: directionId || 'NOT_SET',
+      videoId: creative.video_id
+    }, '[IMPORT_DEBUG] Checking if need to create Facebook Creative');
+
+    if (directionId) {
+      try {
+        log.info({
+          adId: creative.ad_id,
+          directionId,
+          videoId: creative.video_id
+        }, '[IMPORT_DEBUG] ✅ DIRECTION IS SET - Creating Facebook Creative');
+
+        // Получаем полные credentials (pageId, instagramId и т.д.)
+        const fullCredentials = await getFullCredentials(userId, targetAccountId, log);
+
+        log.info({
+          hasCredentials: !!fullCredentials,
+          pageId: fullCredentials?.pageId,
+          instagramId: fullCredentials?.instagramId
+        }, '[IMPORT_DEBUG] Credentials fetched');
+
+        if (fullCredentials) {
+          // Загружаем настройки направления
+          const { data: direction } = await supabase
+            .from('account_directions')
+            .select('objective, use_instagram')
+            .eq('id', directionId)
+            .maybeSingle();
+
+          if (direction?.objective) {
+            const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+            const useInstagram = direction.use_instagram !== false;
+
+            // Загружаем default_ad_settings
+            const { data: defaultSettings } = await supabase
+              .from('default_ad_settings')
+              .select('*')
+              .eq('direction_id', directionId)
+              .maybeSingle();
+
+            const description = defaultSettings?.description || 'Напишите нам, чтобы узнать подробности';
+            const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
+            const siteUrl = defaultSettings?.site_url;
+            const utm = defaultSettings?.utm_tag;
+            const leadFormId = defaultSettings?.lead_form_id;
+
+            // Создаём креатив в зависимости от objective
+            let fbCreativeId = '';
+            const normalizedAdAccountId = fullCredentials.adAccountId.startsWith('act_')
+              ? fullCredentials.adAccountId
+              : `act_${fullCredentials.adAccountId}`;
+
+            if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+              const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, accessToken, {
+                videoId: creative.video_id!,
+                pageId: fullCredentials.pageId,
+                instagramId: useInstagram ? fullCredentials.instagramId : undefined,
+                message: description,
+                clientQuestion: clientQuestion,
+                whatsappPhoneNumber: fullCredentials.whatsappPhoneNumber || undefined,
+                imageUrl: creative.thumbnail_url || undefined // используем thumbnail_url из Facebook
+              });
+              fbCreativeId = whatsappCreative.id;
+            } else if (objective === 'instagram_traffic') {
+              const instagramCreative = await createInstagramCreative(normalizedAdAccountId, accessToken, {
+                videoId: creative.video_id!,
+                pageId: fullCredentials.pageId,
+                instagramId: fullCredentials.instagramId,
+                instagramUsername: fullCredentials.instagramUsername || '',
+                message: description,
+                imageUrl: creative.thumbnail_url || undefined
+              });
+              fbCreativeId = instagramCreative.id;
+            } else if (objective === 'site_leads') {
+              if (siteUrl) {
+                const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, accessToken, {
+                  videoId: creative.video_id!,
+                  pageId: fullCredentials.pageId,
+                  instagramId: fullCredentials.instagramId,
+                  message: description,
+                  siteUrl: siteUrl,
+                  utm: utm,
+                  imageUrl: creative.thumbnail_url || undefined
+                });
+                fbCreativeId = websiteCreative.id;
+              }
+            } else if (objective === 'lead_forms') {
+              if (leadFormId) {
+                const leadFormCreative = await createLeadFormVideoCreative(normalizedAdAccountId, accessToken, {
+                  videoId: creative.video_id!,
+                  pageId: fullCredentials.pageId,
+                  instagramId: fullCredentials.instagramId,
+                  message: description,
+                  leadFormId: leadFormId,
+                  imageUrl: creative.thumbnail_url || undefined
+                });
+                fbCreativeId = leadFormCreative.id;
+              }
+            }
+
+            // Обновляем запись креатива с fb_creative_id
+            if (fbCreativeId) {
+              const updateData: Record<string, string> = {
+                fb_creative_id: fbCreativeId
+              };
+
+              // Сохраняем в соответствующее поле по objective
+              if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+                updateData.fb_creative_id_whatsapp = fbCreativeId;
+              } else if (objective === 'instagram_traffic') {
+                updateData.fb_creative_id_instagram_traffic = fbCreativeId;
+              } else if (objective === 'site_leads') {
+                updateData.fb_creative_id_site_leads = fbCreativeId;
+              } else if (objective === 'lead_forms') {
+                updateData.fb_creative_id_lead_forms = fbCreativeId;
+              }
+
+              await supabase
+                .from('user_creatives')
+                .update(updateData)
+                .eq('id', newCreative.id);
+
+              log.info({
+                creativeId: newCreative.id,
+                fbCreativeId,
+                objective,
+                field: objective === 'whatsapp' || objective === 'whatsapp_conversions' ? 'fb_creative_id_whatsapp' :
+                       objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic' :
+                       objective === 'site_leads' ? 'fb_creative_id_site_leads' : 'fb_creative_id_lead_forms'
+              }, '[IMPORT_DEBUG] ✅✅✅ Facebook Creative created and SAVED to DB!');
+            }
+          }
+        }
+      } catch (creativeError: any) {
+        // Не фейлим весь импорт, только логируем
+        log.error({
+          adId: creative.ad_id,
+          error: creativeError.message,
+          stack: creativeError.stack,
+          name: creativeError.name
+        }, '[IMPORT_DEBUG] ❌❌❌ FAILED to create Facebook Creative');
+      }
+    } else {
+      log.warn({
+        adId: creative.ad_id,
+        directionIdValue: directionId
+      }, '[IMPORT_DEBUG] ⚠️⚠️⚠️ SKIPPING Creative creation - direction_id is NULL/undefined');
     }
 
     // Сохраняем транскрипцию

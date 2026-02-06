@@ -657,6 +657,7 @@ export async function createWhatsAppCreative(
     clientQuestion: string;
     whatsappPhoneNumber?: string;
     thumbnailHash?: string;
+    imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
   const pageWelcomeMessage = JSON.stringify({
@@ -690,9 +691,11 @@ export async function createWhatsAppCreative(
     page_welcome_message: pageWelcomeMessage
   };
 
-  // Добавляем image_hash если есть thumbnail
+  // Добавляем image_hash или image_url если есть thumbnail
   if (params.thumbnailHash) {
     videoDataWithWelcome.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoDataWithWelcome.image_url = params.imageUrl;
   }
 
   const objectStorySpecWithWelcome: any = {
@@ -729,6 +732,8 @@ export async function createWhatsAppCreative(
 
       if (params.thumbnailHash) {
         videoDataWithoutWelcome.image_hash = params.thumbnailHash;
+      } else if (params.imageUrl) {
+        videoDataWithoutWelcome.image_url = params.imageUrl;
       }
 
       const objectStorySpecWithoutWelcome: any = {
@@ -761,6 +766,7 @@ export async function createInstagramCreative(
     instagramUsername: string;
     message: string;
     thumbnailHash?: string;
+    imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
   const videoData: any = {
@@ -773,10 +779,12 @@ export async function createInstagramCreative(
       }
     }
   };
-  
-  // Добавляем image_hash если есть thumbnail
+
+  // Добавляем image_hash или image_url если есть thumbnail
   if (params.thumbnailHash) {
     videoData.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoData.image_url = params.imageUrl;
   }
   
   const objectStorySpec = {
@@ -802,6 +810,7 @@ export async function createWebsiteLeadsCreative(
     siteUrl: string;
     utm?: string;
     thumbnailHash?: string;
+    imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
   console.log('[createWebsiteLeadsCreative] Входные параметры:', {
@@ -812,7 +821,8 @@ export async function createWebsiteLeadsCreative(
     message: params.message,
     siteUrl: params.siteUrl,
     utm: params.utm,
-    thumbnailHash: params.thumbnailHash
+    thumbnailHash: params.thumbnailHash,
+    imageUrl: params.imageUrl
   });
 
   const videoData: any = {
@@ -825,10 +835,12 @@ export async function createWebsiteLeadsCreative(
       }
     }
   };
-  
-  // Добавляем image_hash если есть thumbnail
+
+  // Добавляем image_hash или image_url если есть thumbnail
   if (params.thumbnailHash) {
     videoData.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoData.image_url = params.imageUrl;
   }
 
   const payload: any = {
@@ -868,6 +880,7 @@ export async function createLeadFormVideoCreative(
     message: string;
     leadFormId: string;
     thumbnailHash?: string;
+    imageUrl?: string; // Для импортированных видео
   }
 ): Promise<{ id: string }> {
   const videoData: any = {
@@ -883,6 +896,8 @@ export async function createLeadFormVideoCreative(
 
   if (params.thumbnailHash) {
     videoData.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoData.image_url = params.imageUrl;
   }
 
   const payload: any = {
