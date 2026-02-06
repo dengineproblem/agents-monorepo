@@ -1076,10 +1076,10 @@ async function handleSmartMatching(
     timestamp
   }, app);
 
-  // Отправить уведомление в Telegram только для НОВЫХ лидов
-  if (isNew) {
-    await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
-  }
+  // Уведомление о привязке креатива отключено (слишком частое, не несёт ценности)
+  // if (isNew) {
+  //   await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
+  // }
 
   // Вернуть instanceData - dialog_analysis уже создан в createLeadWithoutCreative
   return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
