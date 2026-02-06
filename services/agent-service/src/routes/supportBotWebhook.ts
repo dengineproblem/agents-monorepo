@@ -215,7 +215,7 @@ export default async function supportBotWebhook(app: FastifyInstance) {
       // Уведомляем админов о новом сообщении
       try {
         const username = user.username || 'Unknown';
-        const chatUrl = `${APP_BASE_URL}/admin/chats/${user.id}`;
+        const chatUrl = `${APP_BASE_URL}/admin/chats?tab=moltbot`;
 
         await notifyAdminGroup(
           `📩 <b>Новое сообщение техподдержки</b>\n\n` +

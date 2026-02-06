@@ -244,7 +244,7 @@ export default async function adminMoltbotRoutes(app: FastifyInstance) {
         .from('admin_user_chats')
         .select('*')
         .eq('user_account_id', userId)
-        .in('source', ['support', 'admin'])
+        .eq('source', 'support')
         .order('created_at', { ascending: true })
         .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
