@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Users,
+  CreditCard,
   Kanban,
   BarChart3,
   Target,
@@ -57,6 +58,11 @@ const menuItems: MenuItem[] = [
     path: '/admin/users',
     label: 'Пользователи',
     icon: Users,
+  },
+  {
+    path: '/admin/subscriptions',
+    label: 'Подписки',
+    icon: CreditCard,
   },
   {
     path: '/admin/onboarding',

@@ -89,10 +89,13 @@ const ONBOARDING_STAGES = [
 ];
 
 const TARIFS = [
-  { value: 'free', label: 'Бесплатный' },
-  { value: 'basic', label: 'Базовый' },
-  { value: 'pro', label: 'Профессиональный' },
-  { value: 'enterprise', label: 'Корпоративный' },
+  { value: 'ai_target', label: 'AI Target' },
+  { value: 'target', label: 'Target' },
+  { value: 'ai_manager', label: 'AI Manager' },
+  { value: 'complex', label: 'Complex' },
+  { value: 'subscription_1m', label: 'Подписка 1 мес (49 000 KZT)' },
+  { value: 'subscription_3m', label: 'Подписка 3 мес (99 000 KZT)' },
+  { value: 'subscription_12m', label: 'Подписка 12 мес (299 000 KZT)' },
 ];
 
 export function UserAccountEditModal({
@@ -202,7 +205,7 @@ export function UserAccountEditModal({
               <TabsTrigger value="facebook">Facebook</TabsTrigger>
               <TabsTrigger value="telegram">Telegram</TabsTrigger>
               <TabsTrigger value="tiktok">TikTok</TabsTrigger>
-              <TabsTrigger value="tarif">Тариф</TabsTrigger>
+              <TabsTrigger value="tarif">Подписка</TabsTrigger>
               <TabsTrigger value="other">Прочее</TabsTrigger>
             </TabsList>
 
@@ -354,7 +357,7 @@ export function UserAccountEditModal({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="tarif_expires">Дата окончания тарифа</Label>
+                  <Label htmlFor="tarif_expires">Дата окончания подписки</Label>
                   <Input
                     id="tarif_expires"
                     type="date"
@@ -364,7 +367,7 @@ export function UserAccountEditModal({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="tarif_renewal_cost">Стоимость продления (₽)</Label>
+                  <Label htmlFor="tarif_renewal_cost">Стоимость продления (KZT)</Label>
                   <Input
                     id="tarif_renewal_cost"
                     type="number"

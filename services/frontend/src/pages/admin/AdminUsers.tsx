@@ -19,10 +19,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings,
+  CreditCard,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -60,6 +62,17 @@ interface User {
   directions_count: number;
   creatives_count: number;
   leads_count: number;
+  is_active?: boolean | null;
+  tarif?: string | null;
+  tarif_expires?: string | null;
+  tarif_renewal_cost?: number | null;
+}
+
+interface SubscriptionSummary {
+  total: number;
+  active: number;
+  expiringSoon: number;
+  expiredOrDisabled: number;
 }
 
 const ONBOARDING_STAGES = [
@@ -74,6 +87,16 @@ const ONBOARDING_STAGES = [
   { value: 'inactive', label: 'Неактивен' },
 ];
 
+const TARIF_LABELS: Record<string, string> = {
+  ai_target: 'AI Target',
+  target: 'Target',
+  ai_manager: 'AI Manager',
+  complex: 'Complex',
+  subscription_1m: 'Подписка 1 мес',
+  subscription_3m: 'Подписка 3 мес',
+  subscription_12m: 'Подписка 12 мес',
+};
+
 const AdminUsers: React.FC = () => {
   const navigate = useNavigate();
 
@@ -84,6 +107,12 @@ const AdminUsers: React.FC = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [subscriptionSummary, setSubscriptionSummary] = useState<SubscriptionSummary>({
+    total: 0,
+    active: 0,
+    expiringSoon: 0,
+    expiredOrDisabled: 0,
+  });
 
   // Chat modal
   const [chatUser, setChatUser] = useState<{ id: string; username: string } | null>(null);
@@ -115,6 +144,12 @@ const AdminUsers: React.FC = () => {
         setUsers(data.users || []);
         setTotalPages(data.totalPages || 1);
         setTotal(data.total || 0);
+        setSubscriptionSummary({
+          total: data.subscriptionSummary?.total || 0,
+          active: data.subscriptionSummary?.active || 0,
+          expiringSoon: data.subscriptionSummary?.expiringSoon || 0,
+          expiredOrDisabled: data.subscriptionSummary?.expiredOrDisabled || 0,
+        });
       }
     } catch (err) {
       console.error('Error fetching users:', err);
@@ -171,6 +206,51 @@ const AdminUsers: React.FC = () => {
     }
   };
 
+  const getTarifLabel = (tarif?: string | null) => {
+    if (!tarif) return '—';
+    return TARIF_LABELS[tarif] || tarif;
+  };
+
+  const formatTarifExpiry = (tarifExpires?: string | null) => {
+    if (!tarifExpires) return '—';
+    const date = new Date(`${tarifExpires}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return tarifExpires;
+    return format(date, 'd MMM yyyy', { locale: ru });
+  };
+
+  const getSubscriptionStatus = (user: User) => {
+    if (!user.tarif || !user.tarif.startsWith('subscription_')) {
+      return { label: 'Нет подписки', variant: 'outline' as const };
+    }
+
+    if (!user.is_active) {
+      return { label: 'Отключена', variant: 'destructive' as const };
+    }
+
+    if (!user.tarif_expires) {
+      return { label: 'Нет даты', variant: 'secondary' as const };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiry = new Date(`${user.tarif_expires}T00:00:00`);
+    if (Number.isNaN(expiry.getTime())) {
+      return { label: 'Некорректная дата', variant: 'secondary' as const };
+    }
+
+    if (expiry < today) {
+      return { label: 'Просрочена', variant: 'destructive' as const };
+    }
+
+    const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
+    if (diffDays <= 7) {
+      return { label: `Истекает через ${diffDays} дн`, variant: 'secondary' as const };
+    }
+
+    return { label: 'Активна', variant: 'default' as const };
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -178,6 +258,42 @@ const AdminUsers: React.FC = () => {
         <p className="text-muted-foreground">
           Всего {total} пользователей
         </p>
+      </div>
+
+      {/* Subscription summary */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Подписок всего</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{subscriptionSummary.total}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Активные</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{subscriptionSummary.active}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Истекают за 7 дней</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{subscriptionSummary.expiringSoon}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Просрочены/отключены</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{subscriptionSummary.expiredOrDisabled}</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
@@ -219,6 +335,9 @@ const AdminUsers: React.FC = () => {
             <TableRow>
               <TableHead>Пользователь</TableHead>
               <TableHead>Этап</TableHead>
+              <TableHead>Подписка</TableHead>
+              <TableHead>Окончание</TableHead>
+              <TableHead>Статус подписки</TableHead>
               <TableHead>Регистрация</TableHead>
               <TableHead>Активность</TableHead>
               <TableHead className="text-center">Направления</TableHead>
@@ -230,13 +349,13 @@ const AdminUsers: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={11} className="text-center py-8">
                   <RefreshCw className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                   Нет пользователей
                 </TableCell>
               </TableRow>
@@ -263,6 +382,21 @@ const AdminUsers: React.FC = () => {
                       <div className={`w-2 h-2 rounded-full ${getStageColor(user.onboarding_stage)}`} />
                       {user.onboarding_stage}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm">{getTarifLabel(user.tarif)}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-sm">{formatTarifExpiry(user.tarif_expires)}</p>
+                  </TableCell>
+                  <TableCell>
+                    {(() => {
+                      const status = getSubscriptionStatus(user);
+                      return <Badge variant={status.variant}>{status.label}</Badge>;
+                    })()}
                   </TableCell>
                   <TableCell>
                     <p className="text-sm">

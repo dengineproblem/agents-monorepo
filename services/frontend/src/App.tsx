@@ -43,6 +43,7 @@ import {
   AdminDashboard,
   AdminChats,
   AdminUsers,
+  AdminSubscriptions,
   AdminAds,
   AdminLeads,
   AdminErrors,
@@ -342,6 +343,7 @@ const AppRoutes = () => {
                 <Route path="chats" element={<AdminChats />} />
                 <Route path="chats/:userId" element={<AdminChats />} />
                 <Route path="users" element={<AdminUsers />} />
+                <Route path="subscriptions" element={<AdminSubscriptions />} />
                 <Route path="onboarding" element={<AdminOnboarding />} />
                 <Route path="ads" element={<AdminAds />} />
                 <Route path="leads" element={<AdminLeads />} />

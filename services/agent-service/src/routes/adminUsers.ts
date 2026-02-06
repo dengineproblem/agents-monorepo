@@ -27,11 +27,18 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
         limit = '20',
         search = '',
         stage = '',
+        subscriptions_only = 'false',
       } = req.query as Record<string, string>;
 
       const pageNum = parseInt(page);
       const limitNum = parseInt(limit);
       const offset = (pageNum - 1) * limitNum;
+      const subscriptionsOnly = subscriptions_only === 'true' || subscriptions_only === '1';
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const sevenDaysLater = new Date(today);
+      sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+      const sevenDaysLaterStr = sevenDaysLater.toISOString().split('T')[0];
 
       // Build query for count
       let countQuery = supabase
@@ -47,6 +54,9 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
       if (stage) {
         countQuery = countQuery.eq('onboarding_stage', stage);
       }
+      if (subscriptionsOnly) {
+        countQuery = countQuery.like('tarif', 'subscription_%');
+      }
 
       // Get total count
       const { count: total } = await countQuery;
@@ -59,7 +69,11 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
           username,
           telegram_id,
           onboarding_stage,
-          created_at
+          created_at,
+          is_active,
+          tarif,
+          tarif_expires,
+          tarif_renewal_cost
         `)
         .order('created_at', { ascending: false })
         .range(offset, offset + limitNum - 1);
@@ -71,10 +85,57 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
       if (stage) {
         dataQuery = dataQuery.eq('onboarding_stage', stage);
       }
+      if (subscriptionsOnly) {
+        dataQuery = dataQuery.like('tarif', 'subscription_%');
+      }
 
       const { data: users, error } = await dataQuery;
 
       if (error) throw new Error(error.message);
+
+      const [
+        { count: totalSubscriptions },
+        { count: activeSubscriptions },
+        { count: expiringSoonSubscriptions },
+        { count: expiredOrDisabledSubscriptions },
+      ] = await Promise.all([
+        supabase
+          .from('user_accounts')
+          .select('id', { count: 'exact', head: true })
+          .like('tarif', 'subscription_%')
+          .not('tarif_expires', 'is', null),
+
+        supabase
+          .from('user_accounts')
+          .select('id', { count: 'exact', head: true })
+          .like('tarif', 'subscription_%')
+          .eq('is_active', true)
+          .not('tarif_expires', 'is', null)
+          .gte('tarif_expires', todayStr),
+
+        supabase
+          .from('user_accounts')
+          .select('id', { count: 'exact', head: true })
+          .like('tarif', 'subscription_%')
+          .eq('is_active', true)
+          .not('tarif_expires', 'is', null)
+          .gte('tarif_expires', todayStr)
+          .lte('tarif_expires', sevenDaysLaterStr),
+
+        supabase
+          .from('user_accounts')
+          .select('id', { count: 'exact', head: true })
+          .like('tarif', 'subscription_%')
+          .not('tarif_expires', 'is', null)
+          .or(`tarif_expires.lt.${todayStr},is_active.eq.false`),
+      ]);
+
+      const subscriptionSummary = {
+        total: totalSubscriptions || 0,
+        active: activeSubscriptions || 0,
+        expiringSoon: expiringSoonSubscriptions || 0,
+        expiredOrDisabled: expiredOrDisabledSubscriptions || 0,
+      };
 
       if (!users || users.length === 0) {
         return res.send({
@@ -82,6 +143,7 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
           total: total || 0,
           page: pageNum,
           totalPages: Math.ceil((total || 0) / limitNum),
+          subscriptionSummary,
         });
       }
 
@@ -156,6 +218,7 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
         total: total || 0,
         page: pageNum,
         totalPages: Math.ceil((total || 0) / limitNum),
+        subscriptionSummary,
       });
     } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users');
