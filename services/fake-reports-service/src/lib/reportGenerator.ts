@@ -62,7 +62,7 @@ export async function generateFakeReport(
 
   // 6. Собираем финальный отчет
   const report: FakeReport = {
-    date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+    date: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // YYYY-MM-DD (вчера)
     userId: generateUserId(),
     username: generateUsername(niche),
     adAccountId: generateAdAccountId(),
