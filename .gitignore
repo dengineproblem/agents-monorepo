@@ -16,7 +16,7 @@ build/
 
 # Docker
 .docker/
-# docker-compose.override.yml - теперь в git для единого local dev environment
+docker-compose.override.yml
 
 # Logs
 *.log
