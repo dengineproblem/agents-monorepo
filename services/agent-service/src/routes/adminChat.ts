@@ -315,85 +315,41 @@ export default async function adminChatRoutes(app: FastifyInstance) {
    */
   app.get('/admin/chats/users-with-messages', async (req, res) => {
     try {
-      const { limit = '20' } = req.query as { limit?: string };
-      const limitNum = parseInt(limit);
+      const { limit = '20', offset = '0', search = '' } = req.query as {
+        limit?: string;
+        offset?: string;
+        search?: string;
+      };
 
-      // Получаем последние сообщения (без FK join, только source='bot' или 'admin')
-      const { data: chats, error } = await supabase
-        .from('admin_user_chats')
-        .select(`
-          user_account_id,
-          message,
-          direction,
-          created_at,
-          read_at
-        `)
-        .in('source', ['bot', 'admin'])
-        .order('created_at', { ascending: false })
-        .limit(500); // Берём больше для корректной группировки
+      const { data, error } = await supabase.rpc('get_chat_users_with_last_message', {
+        p_source_filter: ['bot', 'admin'],
+        p_search: search.trim() || null,
+        p_limit: parseInt(limit),
+        p_offset: parseInt(offset),
+      });
 
       if (error) {
         log.error({ error: error.message }, 'Failed to fetch users with messages');
         return res.status(500).send({ error: 'Failed to fetch data' });
       }
 
-      if (!chats || chats.length === 0) {
-        return res.send({ users: [] });
-      }
+      const totalUsers = (data as any)?.[0]?.total_users || 0;
 
-      // Один проход: группируем и считаем unread
-      const userMap = new Map<string, {
-        lastMessage: string;
-        lastMessageTime: string;
-        unreadCount: number;
-      }>();
+      const users = ((data as any[]) || []).map((row) => ({
+        id: row.user_id,
+        username: row.username || 'Unknown',
+        telegram_id: row.telegram_id || null,
+        last_message: row.last_message,
+        last_message_time: row.last_message_time,
+        unread_count: Number(row.unread_count),
+        is_online: false,
+      }));
 
-      for (const chat of chats) {
-        const userId = chat.user_account_id;
-        const existing = userMap.get(userId);
-
-        if (!existing) {
-          // Первое (самое новое) сообщение для пользователя
-          userMap.set(userId, {
-            lastMessage: chat.message,
-            lastMessageTime: chat.created_at,
-            unreadCount: chat.direction === 'from_user' && !chat.read_at ? 1 : 0
-          });
-        } else {
-          // Только добавляем к счётчику непрочитанных
-          if (chat.direction === 'from_user' && !chat.read_at) {
-            existing.unreadCount++;
-          }
-        }
-      }
-
-      // Загружаем usernames одним запросом (фильтруем null)
-      const userIds = Array.from(userMap.keys()).filter((id): id is string => id != null);
-      const { data: usersData } = await supabase
-        .from('user_accounts')
-        .select('id, username, telegram_id')
-        .in('id', userIds);
-
-      const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
-
-      // Собираем результат
-      const users = Array.from(userMap.entries())
-        .map(([userId, data]) => {
-          const userData = usersMap.get(userId);
-          return {
-            id: userId,
-            username: userData?.username || 'Unknown',
-            telegram_id: userData?.telegram_id || null,
-            last_message: data.lastMessage,
-            last_message_time: data.lastMessageTime,
-            unread_count: data.unreadCount,
-            is_online: false
-          };
-        })
-        .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime())
-        .slice(0, limitNum);
-
-      return res.send({ users });
+      return res.send({
+        users,
+        totalUsers: Number(totalUsers),
+        hasMore: parseInt(offset) + users.length < Number(totalUsers),
+      });
     } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users with messages');
 

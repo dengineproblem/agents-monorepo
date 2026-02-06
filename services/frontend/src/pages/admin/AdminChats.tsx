@@ -66,36 +66,110 @@ const AdminChats: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<ChatUser | null>(null);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const PAGE_SIZE = 20;
 
-
-  // Fetch users with messages
-  const fetchUsers = useCallback(async () => {
+  // Fetch user by ID (for direct URL navigation to users not in list)
+  const fetchUserById = useCallback(async (uId: string) => {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages`, {
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=1`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          const chatUser: ChatUser = {
+            id: data.user.id,
+            username: data.user.username || 'Unknown',
+            telegram_id: data.user.telegram_id || undefined,
+            last_message: undefined,
+            last_message_time: undefined,
+            unread_count: 0,
+            is_online: false,
+          };
+          setUsers((prev) => {
+            if (prev.some((u) => u.id === uId)) return prev;
+            return [chatUser, ...prev];
+          });
+          setSelectedUser(chatUser);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching user by id:', err);
+    }
+  }, []);
+
+  // Fetch users with messages (supports server search and pagination)
+  const fetchUsers = useCallback(async (search: string = '', isPolling = false) => {
+    if (!isPolling) setLoadingUsers(true);
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    try {
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: '0',
+        ...(search && { search }),
+      });
+      const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages?${params}`, {
         headers: { 'x-user-id': currentUser.id || '' },
       });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
+        setTotalUsers(data.totalUsers || 0);
+        setCurrentOffset(0);
 
         // If userId from URL, select that user
-        if (userId) {
-          const user = data.users.find((u: ChatUser) => u.id === userId);
+        if (userId && !isPolling) {
+          const user = (data.users || []).find((u: ChatUser) => u.id === userId);
           if (user) {
             setSelectedUser(user);
+          } else {
+            // User not in list — fetch separately
+            await fetchUserById(userId);
           }
         }
       }
     } catch (err) {
       console.error('Error fetching users:', err);
     } finally {
-      setLoadingUsers(false);
+      if (!isPolling) setLoadingUsers(false);
     }
-  }, [userId]);
+  }, [userId, fetchUserById]);
+
+  // Load more users (pagination)
+  const loadMoreUsers = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const newOffset = currentOffset + PAGE_SIZE;
+    try {
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(newOffset),
+        ...(debouncedSearch && { search: debouncedSearch }),
+      });
+      const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages?${params}`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUsers((prev) => [...prev, ...(data.users || [])]);
+        setCurrentOffset(newOffset);
+        setTotalUsers(data.totalUsers || 0);
+      }
+    } catch (err) {
+      console.error('Error loading more users:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentOffset, loadingMore, debouncedSearch]);
 
   // Fetch messages for selected user
   const fetchMessages = useCallback(async (uId: string) => {
@@ -126,10 +200,18 @@ const AdminChats: React.FC = () => {
     }
   }, []);
 
-  // Initial load
+  // Debounce search (300ms)
   useEffect(() => {
-    fetchUsers();
-  }, [fetchUsers]);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Initial load and reload on search change
+  useEffect(() => {
+    fetchUsers(debouncedSearch);
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load messages when user selected
   useEffect(() => {
@@ -139,15 +221,14 @@ const AdminChats: React.FC = () => {
     }
   }, [selectedUser, fetchMessages, navigate]);
 
-
   // Polling for users list only (every 30 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchUsers();
+      fetchUsers(debouncedSearch, true);
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [fetchUsers]);
+  }, [fetchUsers, debouncedSearch]);
 
   // Send message
   const handleSendMessage = async () => {
@@ -186,23 +267,6 @@ const AdminChats: React.FC = () => {
     }
   };
 
-  // Filter users by search
-  const filteredUsers = users.filter(
-    (u) =>
-      u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.telegram_id?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // Sort: unread first, then by last message time
-  const sortedUsers = [...filteredUsers].sort((a, b) => {
-    if (a.unread_count > 0 && b.unread_count === 0) return -1;
-    if (b.unread_count > 0 && a.unread_count === 0) return 1;
-    if (a.last_message_time && b.last_message_time) {
-      return new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime();
-    }
-    return 0;
-  });
-
   return (
     <Tabs defaultValue="user-chats" className="w-full">
       <TabsList className="mb-4">
@@ -231,52 +295,67 @@ const AdminChats: React.FC = () => {
             <div className="flex items-center justify-center py-8">
               <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : sortedUsers.length === 0 ? (
+          ) : users.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
               <MessageSquare className="h-8 w-8 mb-2 opacity-50" />
               <p className="text-sm">Нет чатов</p>
             </div>
           ) : (
-            sortedUsers.map((user) => (
-              <div
-                key={user.id}
-                className={cn(
-                  'flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 border-b',
-                  selectedUser?.id === user.id && 'bg-muted'
-                )}
-                onClick={() => setSelectedUser(user)}
-              >
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                    <User className="h-5 w-5" />
-                  </div>
-                  {user.is_online && (
-                    <Circle className="absolute bottom-0 right-0 h-3 w-3 fill-green-500 text-green-500" />
+            <>
+              {users.map((user) => (
+                <div
+                  key={user.id}
+                  className={cn(
+                    'flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 border-b',
+                    selectedUser?.id === user.id && 'bg-muted'
                   )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium truncate">{user.username}</p>
-                    {user.last_message_time && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(user.last_message_time), {
-                          addSuffix: false,
-                          locale: ru,
-                        })}
-                      </span>
+                  onClick={() => setSelectedUser(user)}
+                >
+                  <div className="relative">
+                    <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                      <User className="h-5 w-5" />
+                    </div>
+                    {user.is_online && (
+                      <Circle className="absolute bottom-0 right-0 h-3 w-3 fill-green-500 text-green-500" />
                     )}
                   </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-muted-foreground truncate">
-                      {user.last_message || 'Нет сообщений'}
-                    </p>
-                    {user.unread_count > 0 && (
-                      <Badge className="ml-2">{user.unread_count}</Badge>
-                    )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium truncate">{user.username}</p>
+                      {user.last_message_time && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(user.last_message_time), {
+                            addSuffix: false,
+                            locale: ru,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground truncate">
+                        {user.last_message || 'Нет сообщений'}
+                      </p>
+                      {user.unread_count > 0 && (
+                        <Badge className="ml-2">{user.unread_count}</Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              ))}
+              {users.length < totalUsers && (
+                <div className="flex justify-center p-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={loadMoreUsers}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore && <RefreshCw className="h-4 w-4 animate-spin mr-2" />}
+                    Загрузить ещё
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </ScrollArea>
       </div>
