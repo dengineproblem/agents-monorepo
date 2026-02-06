@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
   Send,
@@ -60,8 +60,6 @@ interface ChatMessage {
 const AdminChats: React.FC = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const defaultTab = searchParams.get('tab') === 'moltbot' ? 'moltbot' : 'user-chats';
 
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -206,9 +204,7 @@ const AdminChats: React.FC = () => {
   });
 
   return (
-    <Tabs defaultValue={defaultTab} className="w-full" onValueChange={(value) => {
-      setSearchParams(value === 'moltbot' ? { tab: 'moltbot' } : {}, { replace: true });
-    }}>
+    <Tabs defaultValue="user-chats" className="w-full">
       <TabsList className="mb-4">
         <TabsTrigger value="user-chats">AI-чат</TabsTrigger>
         <TabsTrigger value="moltbot">Техподдержка</TabsTrigger>
