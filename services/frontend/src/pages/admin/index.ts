@@ -13,3 +13,4 @@ export { default as AdminLeads } from './AdminLeads';
 export { default as AdminErrors } from './AdminErrors';
 export { default as AdminSettings } from './AdminSettings';
 export { default as AdminAdInsights } from './AdminAdInsights';
+export { default as AdminNotificationsCenter } from './AdminNotificationsCenter';

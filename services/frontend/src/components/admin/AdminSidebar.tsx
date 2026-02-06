@@ -17,6 +17,7 @@ import {
   BarChart3,
   Target,
   AlertTriangle,
+  Bell,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -83,6 +84,11 @@ const menuItems: MenuItem[] = [
     path: '/admin/errors',
     label: 'Ошибки',
     icon: AlertTriangle,
+  },
+  {
+    path: '/admin/notifications',
+    label: 'Уведомления',
+    icon: Bell,
   },
   {
     path: '/admin/settings',

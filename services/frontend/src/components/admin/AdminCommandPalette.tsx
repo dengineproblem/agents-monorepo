@@ -27,6 +27,7 @@ import {
   BarChart3,
   Target,
   AlertTriangle,
+  Bell,
   Settings,
   Search,
   User,
@@ -54,6 +55,7 @@ const pages = [
   { title: 'Реклама', icon: BarChart3, path: '/admin/ads' },
   { title: 'Лиды', icon: Target, path: '/admin/leads' },
   { title: 'Ошибки', icon: AlertTriangle, path: '/admin/errors' },
+  { title: 'Уведомления', icon: Bell, path: '/admin/notifications' },
   { title: 'Настройки', icon: Settings, path: '/admin/settings' },
 ];
 

@@ -63,7 +63,7 @@ export const INACTIVE_14D: NotificationTemplate = {
 // =====================================================
 
 export const ONBOARDING_REGISTERED: NotificationTemplate = {
-  type: 'onboarding_reminder',
+  type: 'onboarding_registered',
   title: 'Без Facebook — нет рекламы',
   message: 'Первый шаг — подключить бизнес-аккаунт Facebook. Займёт пару минут.',
   telegramMessage: `<b>Без Facebook — нет рекламы</b>
@@ -93,7 +93,7 @@ export const ONBOARDING_FB_PENDING: NotificationTemplate = {
 };
 
 export const ONBOARDING_FB_CONNECTED: NotificationTemplate = {
-  type: 'onboarding_reminder',
+  type: 'onboarding_fb_connected',
   title: 'Facebook есть. Куда лить трафик?',
   message: 'Направление — это ваша аудитория и бюджет. Создайте его.',
   telegramMessage: `<b>Facebook есть. Куда лить трафик?</b>
@@ -108,7 +108,7 @@ export const ONBOARDING_FB_CONNECTED: NotificationTemplate = {
 };
 
 export const ONBOARDING_DIRECTION_CREATED: NotificationTemplate = {
-  type: 'onboarding_reminder',
+  type: 'onboarding_direction_created',
   title: 'Направление готово. Где креативы?',
   message: 'Без контента реклама не запустится. Загрузите или сгенерируйте креативы.',
   telegramMessage: `<b>Направление готово. Где креативы?</b>
@@ -123,7 +123,7 @@ export const ONBOARDING_DIRECTION_CREATED: NotificationTemplate = {
 };
 
 export const ONBOARDING_CREATIVE_CREATED: NotificationTemplate = {
-  type: 'onboarding_reminder',
+  type: 'onboarding_creative_created',
   title: 'Креативы пылятся. Запустите их.',
   message: 'Всё готово, осталось нажать кнопку. Запустите рекламу.',
   telegramMessage: `<b>Креативы пылятся. Запустите их.</b>
@@ -138,7 +138,7 @@ export const ONBOARDING_CREATIVE_CREATED: NotificationTemplate = {
 };
 
 export const ONBOARDING_ADS_LAUNCHED: NotificationTemplate = {
-  type: 'onboarding_reminder',
+  type: 'onboarding_ads_launched',
   title: 'Реклама крутится. А окупается?',
   message: 'Без ROI аналитики — работаете вслепую. Настройте и видьте реальную отдачу.',
   telegramMessage: `<b>Реклама крутится. А окупается?</b>

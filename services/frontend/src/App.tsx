@@ -49,6 +49,7 @@ import {
   AdminErrors,
   AdminSettings,
   AdminAdInsights,
+  AdminNotificationsCenter,
 } from './pages/admin';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
@@ -348,6 +349,7 @@ const AppRoutes = () => {
                 <Route path="ads" element={<AdminAds />} />
                 <Route path="leads" element={<AdminLeads />} />
                 <Route path="errors" element={<AdminErrors />} />
+                <Route path="notifications" element={<AdminNotificationsCenter />} />
                 <Route path="settings" element={<AdminSettings />} />
                 <Route path="analytics" element={<AdminAnalytics />} />
                 <Route path="ad-insights" element={<AdminAdInsights />} />

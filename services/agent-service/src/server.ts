@@ -66,6 +66,7 @@ import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
 import { startUserScoringCron } from './cron/userScoringCron.js';
 import { startEngagementNotificationCron } from './cron/engagementNotificationCron.js';
+import { startNotificationCampaignCron } from './cron/notificationCampaignCron.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -238,6 +239,9 @@ startUserScoringCron(app as any);
 
 // Запускаем cron для engagement уведомлений (в 10:00 по Алматы)
 startEngagementNotificationCron(app as any);
+
+// Запускаем cron для scheduled кампаний уведомлений (каждую минуту)
+startNotificationCampaignCron(app as any);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);
