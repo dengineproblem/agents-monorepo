@@ -417,12 +417,13 @@ class SalesApiService {
       const creativeIds = creatives.map((c: any) => c.id);
 
       // ШАГ 2: Загружаем метрики из creative_metrics_history для всех креативов
+      const metricsSource = effectivePlatform === 'tiktok' ? 'tiktok_batch' : 'production';
       let metricsQuery = (supabase as any)
         .from('creative_metrics_history')
         .select('user_creative_id, impressions, reach, clicks, leads, spend, date')
         .in('user_creative_id', creativeIds)
         .eq('user_account_id', userAccountId)
-        .eq('source', 'production');
+        .eq('source', metricsSource);
 
       if (since) {
         metricsQuery = metricsQuery.gte('date', since);
@@ -876,7 +877,7 @@ class SalesApiService {
 
   // Получение метрик креатива из creative_metrics_history
   // Агрегирует метрики всех ads креатива через ad_creative_mapping
-  async getCreativeMetrics(creativeId: string, userAccountId: string, limit: number = 30): Promise<{ data: any[]; error: any }> {
+  async getCreativeMetrics(creativeId: string, userAccountId: string, limit: number = 30, platform?: 'instagram' | 'tiktok'): Promise<{ data: any[]; error: any }> {
     try {
       // Шаг 1: Получить все ad_id для этого креатива через ad_creative_mapping
       const { data: mappings, error: mappingError } = await (supabase as any)
@@ -900,12 +901,13 @@ class SalesApiService {
       const dateCutoff = new Date();
       dateCutoff.setDate(dateCutoff.getDate() - limit);
 
+      const creativeMetricsSource = platform === 'tiktok' ? 'tiktok_batch' : 'production';
       const { data, error } = await (supabase as any)
         .from('creative_metrics_history')
         .select('*')
         .in('ad_id', adIds)
         .eq('user_account_id', userAccountId)
-        .eq('source', 'production')
+        .eq('source', creativeMetricsSource)
         .gte('date', dateCutoff.toISOString().split('T')[0])
         .order('date', { ascending: false });
 

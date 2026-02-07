@@ -546,7 +546,7 @@ const ROIAnalytics: React.FC = () => {
     try {
       // Параллельная загрузка метрик, анализа и текста/транскрипции
       const [metricsResult, analysisResult, textData] = await Promise.all([
-        salesApi.getCreativeMetrics(creativeId, userAccountId, 30),
+        salesApi.getCreativeMetrics(creativeId, userAccountId, 30, platform),
         salesApi.getCreativeAnalysis(creativeId, userAccountId),
         // Используем универсальный метод: для video - транскрипция, для image/carousel - текст
         creativesApi.getCreativeText(creativeId, mediaType, campaign?.carousel_data).catch(() => ({ text: null }))
@@ -615,7 +615,7 @@ const ROIAnalytics: React.FC = () => {
       
       // Перезагружаем метрики и анализ
       const [metricsResult, analysisResult] = await Promise.all([
-        salesApi.getCreativeMetrics(creativeId, userAccountId, 30),
+        salesApi.getCreativeMetrics(creativeId, userAccountId, 30, platform),
         salesApi.getCreativeAnalysis(creativeId, userAccountId)
       ]);
       

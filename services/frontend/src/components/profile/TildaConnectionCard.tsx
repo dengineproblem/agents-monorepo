@@ -121,7 +121,8 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
     : null;
 
   // Generate UTM parameter based on selected field
-  const utmParameter = `${selectedUtmField}={{ad.id}}`;
+  const utmParameterFb = `${selectedUtmField}={{ad.id}}`;
+  const utmParameterTikTok = `${selectedUtmField}=__CID__`;
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
@@ -230,33 +231,56 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
           </div>
 
           {/* UTM для привязки к креативам */}
-          <div className="border rounded-lg p-4 space-y-3">
+          <div className="border rounded-lg p-4 space-y-4">
             <div className="flex items-start gap-2">
               <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <div>
                 <div className="font-medium">Привязка заявок к креативам</div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Добавьте в Facebook Ads параметр (скопируйте и вставьте):
+                  Добавьте UTM-параметр в рекламный кабинет (скопируйте и вставьте):
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 ml-7">
-              <code className="flex-1 p-2 bg-muted rounded text-sm font-mono">
-                {utmParameter}
-              </code>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => copyToClipboard(utmParameter, 'UTM параметр')}
-              >
-                <Copy className="h-3 w-3" />
-              </Button>
-            </div>
+            <div className="ml-7 space-y-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Для Facebook / Instagram Ads:</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 p-2 bg-muted rounded text-sm font-mono">
+                    {utmParameterFb}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyToClipboard(utmParameterFb, 'UTM параметр (Facebook)')}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Facebook Ads Manager &rarr; Объявление &rarr; Tracking &rarr; URL Parameters
+                </p>
+              </div>
 
-            <p className="text-xs text-muted-foreground ml-7">
-              Facebook Ads Manager → Объявление → Tracking → URL Parameters
-            </p>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Для TikTok Ads:</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 p-2 bg-muted rounded text-sm font-mono">
+                    {utmParameterTikTok}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => copyToClipboard(utmParameterTikTok, 'UTM параметр (TikTok)')}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  TikTok Ads Manager &rarr; Объявление &rarr; Destination URL
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Обязательные поля */}
