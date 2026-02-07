@@ -298,7 +298,7 @@ export default async function brainProposalsRoutes(app: FastifyInstance) {
           executed_indices
         `)
         .eq('user_account_id', userId)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'partial'])
         .order('created_at', { ascending: false });
 
       if (accountId) {
@@ -720,7 +720,7 @@ export default async function brainProposalsRoutes(app: FastifyInstance) {
   /**
    * GET /brain-proposals/count
    *
-   * Количество pending proposals для пользователя (для badge)
+   * Количество pending/partial proposals для пользователя (для badge)
    */
   app.get('/brain-proposals/count', async (request: FastifyRequest, reply: FastifyReply) => {
     const startTime = Date.now();
@@ -735,7 +735,7 @@ export default async function brainProposalsRoutes(app: FastifyInstance) {
         .from('pending_brain_proposals')
         .select('*', { count: 'exact', head: true })
         .eq('user_account_id', userId)
-        .eq('status', 'pending');
+        .in('status', ['pending', 'partial']);
 
       if (error) {
         logger.error({ error: error.message, userId }, '[GET /count] DB error');

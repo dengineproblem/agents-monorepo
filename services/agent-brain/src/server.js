@@ -473,7 +473,7 @@ fastify.post('/api/brain/test-save-metrics', async (request, reply) => {
     if (accountId) {
       const { data: account, error: accountError } = await supabase
         .from('ad_accounts')
-        .select('user_account_id, ad_account_id, fb_ad_account_id, access_token, user_accounts(access_token)')
+        .select('user_account_id, ad_account_id, access_token, user_accounts(access_token)')
         .eq('id', accountId)
         .single();
 
@@ -482,7 +482,7 @@ fastify.post('/api/brain/test-save-metrics', async (request, reply) => {
       }
 
       user_account_id = account.user_account_id;
-      adAccountId = account.fb_ad_account_id || account.ad_account_id;
+      adAccountId = account.ad_account_id;
       accessToken = account.access_token || account.user_accounts?.access_token;
     } else {
       // Legacy: загружаем из user_accounts
@@ -585,7 +585,7 @@ fastify.post('/api/brain/test-restore-metrics', async (request, reply) => {
     if (accountId) {
       const { data: account, error: accountError } = await supabase
         .from('ad_accounts')
-        .select('user_account_id, ad_account_id, fb_ad_account_id, access_token, user_accounts(access_token)')
+        .select('user_account_id, ad_account_id, access_token, user_accounts(access_token)')
         .eq('id', accountId)
         .single();
 
@@ -594,7 +594,7 @@ fastify.post('/api/brain/test-restore-metrics', async (request, reply) => {
       }
 
       user_account_id = account.user_account_id;
-      adAccountId = account.fb_ad_account_id || account.ad_account_id;
+      adAccountId = account.ad_account_id;
       accessToken = account.access_token || account.user_accounts?.access_token;
     } else {
       // Legacy: загружаем из user_accounts
@@ -5421,7 +5421,9 @@ async function getAccountsForCurrentHour(utcHour) {
         id, username, access_token, multi_account_enabled, optimization, is_active
       )
     `)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .eq('user_accounts.multi_account_enabled', true)
+    .eq('user_accounts.is_active', true);
 
   if (error) {
     fastify.log.error({
@@ -5576,7 +5578,17 @@ async function getTikTokAccountsForCurrentHour(utcHour) {
  * Сохранить proposals в pending_brain_proposals и создать уведомление
  */
 async function savePendingProposals(brainResult, account) {
-  if (!supabase) return;
+  if (!supabase) {
+    return {
+      proposalSaved: false,
+      notificationSaved: false,
+      proposalId: null,
+      notificationId: null,
+      skipped: false,
+      error: 'supabase_not_initialized',
+      notificationError: null
+    };
+  }
 
   const { proposals, summary, adset_analysis } = brainResult;
 
@@ -5587,7 +5599,15 @@ async function savePendingProposals(brainResult, account) {
       accountName: account.name,
       message: 'Нет proposals для сохранения'
     });
-    return;
+    return {
+      proposalSaved: false,
+      notificationSaved: false,
+      proposalId: null,
+      notificationId: null,
+      skipped: true,
+      error: null,
+      notificationError: null
+    };
   }
 
   try {
@@ -5617,14 +5637,22 @@ async function savePendingProposals(brainResult, account) {
       .select('id')
       .single();
 
-    if (proposalError) {
+    if (proposalError || !savedProposal?.id) {
       fastify.log.error({
         where: 'savePendingProposals',
         phase: 'save_proposals',
         accountId: account.id,
-        error: String(proposalError)
+        error: String(proposalError || 'saved_proposal_missing_id')
       });
-      return;
+      return {
+        proposalSaved: false,
+        notificationSaved: false,
+        proposalId: null,
+        notificationId: null,
+        skipped: false,
+        error: String(proposalError || 'saved_proposal_missing_id'),
+        notificationError: null
+      };
     }
 
     // 3. Создаём уведомление с proposal_id в metadata
@@ -5652,6 +5680,8 @@ async function savePendingProposals(brainResult, account) {
       .select('id')
       .single();
 
+    let notificationError = null;
+
     if (notifError) {
       fastify.log.error({
         where: 'savePendingProposals',
@@ -5659,14 +5689,27 @@ async function savePendingProposals(brainResult, account) {
         accountId: account.id,
         error: String(notifError)
       });
+      notificationError = String(notifError);
     }
 
     // 4. Обновляем proposal с notification_id
     if (notification?.id) {
-      await supabase
+      const { error: linkError } = await supabase
         .from('pending_brain_proposals')
         .update({ notification_id: notification.id })
         .eq('id', savedProposal.id);
+
+      if (linkError) {
+        fastify.log.error({
+          where: 'savePendingProposals',
+          phase: 'link_notification_to_proposal',
+          accountId: account.id,
+          proposalId: savedProposal.id,
+          notificationId: notification.id,
+          error: String(linkError)
+        });
+        notificationError = notificationError || String(linkError);
+      }
     }
 
     fastify.log.info({
@@ -5680,12 +5723,31 @@ async function savePendingProposals(brainResult, account) {
       status: 'saved'
     });
 
+    return {
+      proposalSaved: true,
+      notificationSaved: !!notification?.id,
+      proposalId: savedProposal.id,
+      notificationId: notification?.id || null,
+      skipped: false,
+      error: null,
+      notificationError
+    };
+
   } catch (err) {
     fastify.log.error({
       where: 'savePendingProposals',
       accountId: account.id,
       error: String(err)
     });
+    return {
+      proposalSaved: false,
+      notificationSaved: false,
+      proposalId: null,
+      notificationId: null,
+      skipped: false,
+      error: String(err),
+      notificationError: null
+    };
   }
 }
 
@@ -5920,7 +5982,9 @@ async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId,
     let checkQuery = supabase
       .from('creative_metrics_history')
       .select('id')
-      .eq('date', yesterdayStr);
+      .eq('date', yesterdayStr)
+      .eq('user_account_id', userAccountId)
+      .eq('platform', 'facebook');
 
     if (accountId) {
       checkQuery = checkQuery.eq('account_id', accountId);
@@ -5971,6 +6035,7 @@ async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId,
 
     // Преобразуем в формат для saveCreativeMetricsToHistory
     const readyCreatives = userCreatives.map(uc => ({
+      id: uc.id,
       user_creative_id: uc.id
     }));
 
@@ -5980,7 +6045,7 @@ async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId,
       accountId,
       date: yesterdayStr,
       creativesCount: readyCreatives.length,
-      creativeIds: readyCreatives.slice(0, 5).map(c => c.user_creative_id)
+      creativeIds: readyCreatives.slice(0, 5).map(c => c.id)
     });
 
     // Сохраняем метрики
@@ -6283,6 +6348,9 @@ async function processAccountBrain(account) {
   const userAccount = account.user_accounts;
   const startTime = Date.now();
   const details = {}; // Собираем детали для финального лога
+  let shouldFailAccount = false;
+  let accountError = null;
+  let hasPartialIssues = false;
 
   fastify.log.info({
     where: 'processAccountBrain',
@@ -6563,6 +6631,10 @@ async function processAccountBrain(account) {
         );
         details.metricsSaved = metricsResult?.saved || false;
         details.metricsCreativesCount = metricsResult?.creativesCount || 0;
+        if (metricsResult?.error) {
+          details.metricsError = metricsResult.error;
+          hasPartialIssues = true;
+        }
       } catch (metricsErr) {
         fastify.log.error({
           where: 'processAccountBrain',
@@ -6571,12 +6643,30 @@ async function processAccountBrain(account) {
           error: String(metricsErr)
         });
         details.metricsError = String(metricsErr);
+        hasPartialIssues = true;
       }
 
       // Шаг 2: Сохраняем proposals (изолировано от ошибок)
       try {
-        await savePendingProposals(result, account);
-        details.proposalsSaved = true;
+        const proposalsSaveResult = await savePendingProposals(result, account);
+        details.proposalsSaved = proposalsSaveResult?.proposalSaved || false;
+        details.proposalId = proposalsSaveResult?.proposalId || null;
+        details.notificationSaved = proposalsSaveResult?.notificationSaved || false;
+        details.notificationId = proposalsSaveResult?.notificationId || null;
+        details.proposalsSkipped = proposalsSaveResult?.skipped || false;
+
+        if (proposalsSaveResult?.notificationError) {
+          details.notificationError = proposalsSaveResult.notificationError;
+          hasPartialIssues = true;
+        }
+
+        if (proposalsSaveResult?.error) {
+          shouldFailAccount = true;
+          details.proposalsError = proposalsSaveResult.error;
+          accountError = `failed_to_save_proposals: ${proposalsSaveResult.error}`;
+        } else if (details.proposalsSaved && !details.notificationSaved) {
+          hasPartialIssues = true;
+        }
       } catch (proposalsErr) {
         fastify.log.error({
           where: 'processAccountBrain',
@@ -6585,6 +6675,8 @@ async function processAccountBrain(account) {
           error: String(proposalsErr)
         });
         details.proposalsError = String(proposalsErr);
+        shouldFailAccount = true;
+        accountError = `failed_to_save_proposals: ${String(proposalsErr)}`;
       }
 
       // Шаг 2.5: Сохраняем в brain_executions для истории (изолировано от ошибок)
@@ -6706,6 +6798,8 @@ async function processAccountBrain(account) {
       .eq('id', accountId);
 
     const duration = Date.now() - startTime;
+    details.partial = hasPartialIssues;
+    details.accountFailed = shouldFailAccount;
 
     fastify.log.info({
       where: 'processAccountBrain',
@@ -6718,11 +6812,12 @@ async function processAccountBrain(account) {
     });
 
     return {
-      success: true,
+      success: !shouldFailAccount,
       accountId,
       accountName,
       brain_mode,
       duration,
+      ...(shouldFailAccount && { error: accountError || 'semi_auto_processing_failed' }),
       ...details
     };
 

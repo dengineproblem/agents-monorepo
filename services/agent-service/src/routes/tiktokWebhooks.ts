@@ -178,9 +178,15 @@ export default async function tiktokWebhooks(app: FastifyInstance) {
       data_keys: event?.data ? Object.keys(event.data) : []
     }, '[tiktokWebhooks] 📥 Received webhook event');
 
-    // Верификация подписи
+    // Верификация подписи (используем ОРИГИНАЛЬНЫЙ raw body, а не JSON.stringify)
+    // JSON.stringify(req.body) может изменить порядок ключей/пробелы → HMAC не совпадёт
     const signature = req.headers['x-tiktok-signature'] as string | undefined;
-    const rawBody = JSON.stringify(req.body);
+    const rawBodyBuffer = (req as any).rawBody as Buffer | undefined;
+    const rawBody = rawBodyBuffer ? rawBodyBuffer.toString('utf8') : JSON.stringify(req.body);
+
+    if (!rawBodyBuffer) {
+      log.warn({ correlationId }, '[tiktokWebhooks] rawBody not available from content parser, falling back to JSON.stringify');
+    }
 
     if (!verifyWebhookSignature(rawBody, signature)) {
       log.warn({
@@ -441,6 +447,81 @@ async function processLeadEvent(leadData: TikTokLeadData, correlationId: string)
       direction_id: direction.id
     }, '[tiktokWebhooks] ❌ Error inserting lead');
     throw insertError;
+  }
+
+  log.info({
+    correlationId,
+    lead_db_id: lead?.id,
+    lead_id: leadData.lead_id,
+    ad_id: leadData.ad_id || null,
+    direction_id: direction.id,
+    user_account_id: direction.user_account_id,
+    insert_duration_ms: Date.now() - insertStartTime
+  }, '[tiktokWebhooks] 💾 Lead inserted into DB');
+
+  // Привязка к креативу через ad_creative_mapping (для ROI аналитики)
+  if (lead?.id && leadData.ad_id) {
+    const mappingStartTime = Date.now();
+    try {
+      const { data: mapping, error: mappingError } = await supabase
+        .from('ad_creative_mapping')
+        .select('user_creative_id')
+        .eq('ad_id', leadData.ad_id)
+        .maybeSingle();
+
+      if (mappingError) {
+        log.warn({
+          correlationId,
+          error: mappingError.message,
+          error_code: mappingError.code,
+          ad_id: leadData.ad_id
+        }, '[tiktokWebhooks] ⚠️ Error querying ad_creative_mapping');
+      } else if (mapping?.user_creative_id) {
+        const { error: updateError } = await supabase
+          .from('leads')
+          .update({ creative_id: mapping.user_creative_id })
+          .eq('id', lead.id);
+
+        if (updateError) {
+          log.warn({
+            correlationId,
+            error: updateError.message,
+            lead_db_id: lead.id,
+            creative_id: mapping.user_creative_id
+          }, '[tiktokWebhooks] ⚠️ Failed to update lead with creative_id');
+        } else {
+          log.info({
+            correlationId,
+            lead_id: leadData.lead_id,
+            ad_id: leadData.ad_id,
+            creative_id: mapping.user_creative_id,
+            mapping_duration_ms: Date.now() - mappingStartTime
+          }, '[tiktokWebhooks] 🔗 Lead linked to creative via ad_creative_mapping');
+        }
+      } else {
+        log.warn({
+          correlationId,
+          ad_id: leadData.ad_id,
+          lead_id: leadData.lead_id
+        }, '[tiktokWebhooks] ⚠️ No creative mapping found for ad_id — lead will NOT appear in ROI analytics');
+      }
+    } catch (mappingErr: any) {
+      // Не критично — лид уже сохранён, привязка к креативу опциональна
+      log.warn({
+        correlationId,
+        error: mappingErr.message,
+        ad_id: leadData.ad_id,
+        mapping_duration_ms: Date.now() - mappingStartTime
+      }, '[tiktokWebhooks] ⚠️ Exception linking lead to creative');
+    }
+  } else if (lead?.id && !leadData.ad_id) {
+    log.warn({
+      correlationId,
+      lead_id: leadData.lead_id,
+      lead_db_id: lead.id,
+      has_campaign_id: !!leadData.campaign_id,
+      has_adgroup_id: !!leadData.adgroup_id
+    }, '[tiktokWebhooks] ⚠️ Lead has no ad_id — cannot link to creative for ROI analytics');
   }
 
   const totalDuration = Date.now() - processStartTime;
