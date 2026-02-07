@@ -125,6 +125,9 @@ const rateLimitStore = new Map();
 // MCP Secret (shared between agent-brain and MCP server)
 const MCP_SECRET = process.env.MCP_SECRET || null;
 
+// Service-to-service auth (Telegram bot → agent-brain)
+const BRAIN_SERVICE_SECRET = process.env.BRAIN_SERVICE_SECRET || null;
+
 /**
  * Simple rate limiter per session
  * @param {string} sessionId
@@ -336,17 +339,69 @@ export function registerMCPRoutes(fastify) {
   });
 
   /**
+   * Verify service-to-service auth header
+   */
+  function verifyServiceAuth(request) {
+    if (!BRAIN_SERVICE_SECRET) return true; // Не настроено — пропускаем
+    return request.headers['x-service-auth'] === BRAIN_SERVICE_SECRET;
+  }
+
+  /**
+   * POST /brain/resolve-user - Resolve telegram_id → userAccountId
+   *
+   * Used by Telegram bot to avoid storing Supabase Service Role Key.
+   */
+  fastify.post('/brain/resolve-user', async (request, reply) => {
+    if (!verifyServiceAuth(request)) {
+      return reply.code(401).send({ success: false, error: 'unauthorized' });
+    }
+
+    const { telegram_id } = request.body || {};
+    if (!telegram_id) {
+      return reply.code(400).send({ success: false, error: 'telegram_id is required' });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .eq('telegram_id', telegram_id)
+        .limit(1);
+
+      if (error) {
+        fastify.log.error({ error: error.message }, 'Failed to resolve user');
+        return reply.code(500).send({ success: false, error: 'internal_error' });
+      }
+
+      if (!data || data.length === 0) {
+        return reply.send({ success: false, error: 'user_not_found' });
+      }
+
+      return reply.send({ success: true, userAccountId: data[0].id });
+    } catch (err) {
+      fastify.log.error({ error: err.message }, 'resolve-user error');
+      return reply.code(500).send({ success: false, error: 'internal_error' });
+    }
+  });
+
+  /**
    * POST /brain/tools/:toolName - Direct tool execution for Moltbot
    *
    * Moltbot skills call this endpoint via curl to execute tools.
    * Context is passed in request body or headers.
    *
    * Security:
+   * - Service auth verification (X-Service-Auth header)
    * - Tool name validation (alphanumeric + underscore only)
    * - No tool list exposure on 404
    * - Timeout on execution
    */
   fastify.post('/brain/tools/:toolName', async (request, reply) => {
+    // Service auth
+    if (!verifyServiceAuth(request)) {
+      return reply.code(401).send({ success: false, error: 'unauthorized' });
+    }
+
     const { toolName } = request.params;
     const args = request.body || {};
     const startTime = Date.now();
