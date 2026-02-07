@@ -3,11 +3,16 @@ import fs from 'fs';
 import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 
+import axios from 'axios';
+import OpenAI from 'openai';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
   TELEGRAM_BOT_TOKEN,
   ANTHROPIC_API_KEY,
+  OPENAI_API_KEY,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   TIMEZONE,
@@ -30,11 +35,101 @@ import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
 import { tools, executeTool } from './tools.js';
 
+// Web Search tool — встроенный в Anthropic API, обрабатывается server-side
+const webSearchTool: Anthropic.Messages.WebSearchTool20250305 = {
+  type: 'web_search_20250305',
+  name: 'web_search',
+  max_uses: 5,
+  user_location: {
+    type: 'approximate',
+    country: 'KZ',
+    timezone: 'Asia/Almaty',
+  },
+};
+
 let bot: TelegramBot;
 let anthropic: Anthropic;
+let openai: OpenAI | null = null;
 let lastTimestamp = '';
 let sessions: Session = {};
 let lastAgentTimestamp: Record<string, string> = {};
+
+// Кэш telegram_id → userAccountId (UUID)
+const userAccountCache = new Map<number, string>();
+
+/**
+ * Резолв telegram_id → userAccountId через Supabase REST API
+ */
+async function resolveUserAccountId(telegramId: number): Promise<string | null> {
+  // Проверяем кэш
+  const cached = userAccountCache.get(telegramId);
+  if (cached) return cached;
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    logger.warn('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured — cannot resolve userAccountId');
+    return null;
+  }
+
+  try {
+    const response = await axios.get(
+      `${SUPABASE_URL}/rest/v1/user_accounts?telegram_id=eq.${telegramId}&select=id`,
+      {
+        headers: {
+          'apikey': SUPABASE_SERVICE_ROLE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      }
+    );
+
+    if (response.data && response.data.length > 0) {
+      const userId = response.data[0].id;
+      userAccountCache.set(telegramId, userId);
+      logger.info({ telegramId, userAccountId: userId }, 'Resolved userAccountId');
+      return userId;
+    }
+
+    logger.warn({ telegramId }, 'User not found in user_accounts');
+    return null;
+  } catch (error: any) {
+    logger.error({ error: error.message, telegramId }, 'Failed to resolve userAccountId');
+    return null;
+  }
+}
+
+/**
+ * Транскрибация голосового сообщения через OpenAI Whisper
+ */
+async function transcribeVoice(fileId: string): Promise<string | null> {
+  if (!openai) {
+    logger.warn('OpenAI not configured — cannot transcribe voice');
+    return null;
+  }
+
+  try {
+    // Получить URL файла от Telegram
+    const fileLink = await bot.getFileLink(fileId);
+
+    // Скачать файл
+    const response = await axios.get(fileLink, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data);
+
+    // Создать File объект для OpenAI
+    const file = new File([buffer], 'voice.ogg', { type: 'audio/ogg' });
+
+    // Транскрибация через Whisper
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file,
+      language: 'ru',
+    });
+
+    logger.info({ textLength: transcription.text.length }, 'Voice transcribed');
+    return transcription.text;
+  } catch (error: any) {
+    logger.error({ error: error.message }, 'Voice transcription failed');
+    return null;
+  }
+}
 
 // Проверка конфигурации
 if (!TELEGRAM_BOT_TOKEN) {
@@ -73,10 +168,42 @@ function saveState(): void {
 async function handleMessage(msg: TelegramBot.Message): Promise<void> {
   try {
     const chatId = msg.chat.id.toString();
-    const messageText = msg.text || '';
+    let messageText = msg.text || '';
     const messageId = msg.message_id.toString();
     const timestamp = new Date(msg.date * 1000).toISOString();
     const senderName = msg.from?.username || msg.from?.first_name || 'Unknown';
+
+    // Голосовые сообщения и видеосообщения (кружочки) → транскрибация
+    const voiceFileId = msg.voice?.file_id || msg.video_note?.file_id;
+    if (voiceFileId && !messageText) {
+      logger.info({ chatId, fileId: voiceFileId }, 'Voice message received, transcribing...');
+      const transcribed = await transcribeVoice(voiceFileId);
+      if (transcribed) {
+        messageText = transcribed;
+        logger.info({ chatId, text: transcribed.substring(0, 80) }, 'Voice transcribed');
+      } else {
+        await bot.sendMessage(chatId, 'Не удалось распознать голосовое сообщение.');
+        return;
+      }
+    }
+
+    // Фотографии → получить URL для использования как референс
+    let photoUrl: string | null = null;
+    if (msg.photo && msg.photo.length > 0) {
+      // Берём самое большое фото (последний элемент массива)
+      const largestPhoto = msg.photo[msg.photo.length - 1];
+      try {
+        photoUrl = await bot.getFileLink(largestPhoto.file_id);
+        logger.info({ chatId, photoUrl }, 'Photo received as reference');
+        // Добавить информацию о фото в текст сообщения
+        const photoCaption = msg.caption || '';
+        messageText = photoCaption
+          ? `${photoCaption}\n\n[Пользователь приложил референс-изображение: ${photoUrl}]`
+          : `[Пользователь отправил референс-изображение: ${photoUrl}]`;
+      } catch (err: any) {
+        logger.error({ error: err.message }, 'Failed to get photo link');
+      }
+    }
 
     logger.info({
       chatId,
@@ -99,21 +226,40 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       is_from_me: false,
     });
 
-    // Проверить, адресовано ли сообщение боту
+    // В личных чатах — отвечаем на всё, в группах — только по триггеру /bot или @Claude
+    const isPrivateChat = msg.chat.type === 'private';
     const isTrigger = TRIGGER_PATTERN.test(messageText);
 
-    if (!isTrigger) {
-      logger.debug({ chatId, messageText }, 'Message not triggered');
+    if (!isPrivateChat && !isTrigger) {
+      logger.debug({ chatId, messageText }, 'Message not triggered (group chat)');
       return;
     }
 
-    // Удалить триггер из сообщения
-    const cleanedMessage = messageText.replace(TRIGGER_PATTERN, '').trim();
+    // Удалить триггер из сообщения (если есть)
+    const cleanedMessage = isTrigger
+      ? messageText.replace(TRIGGER_PATTERN, '').trim()
+      : messageText.trim();
 
     logger.info({ chatId, cleanedMessage }, 'Processing agent request');
 
+    // Резолв telegram_id → userAccountId
+    const telegramId = msg.from?.id;
+    let userAccountId: string | null = null;
+    if (telegramId) {
+      userAccountId = await resolveUserAccountId(telegramId);
+    }
+
+    if (!userAccountId) {
+      await bot.sendMessage(chatId, 'Ваш Telegram аккаунт не привязан к системе. Обратитесь к администратору.');
+      return;
+    }
+
     // Показать "печатает..."
     await bot.sendChatAction(chatId, 'typing');
+
+    // Системный промпт с userAccountId
+    const baseSystemPrompt = fs.readFileSync(path.join(DATA_DIR, '..', 'groups', 'main', 'CLAUDE.md'), 'utf-8');
+    const systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.\n\n${baseSystemPrompt}`;
 
     // История сообщений для multi-turn разговора с tools
     const messages: Anthropic.MessageParam[] = [
@@ -133,10 +279,10 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       turnCount++;
 
       const response = await anthropic.messages.create({
-        model: 'claude-3-5-haiku-20241022', // Haiku 4.5
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 4096,
-        system: fs.readFileSync(path.join(DATA_DIR, '..', 'groups', 'main', 'CLAUDE.md'), 'utf-8'),
-        tools,
+        system: systemPrompt,
+        tools: [...tools, webSearchTool],
         messages,
       });
 
@@ -157,13 +303,16 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       if (response.stop_reason === 'tool_use') {
         await bot.sendChatAction(chatId, 'typing');
 
+        // Собираем только custom tool_use блоки (НЕ server_tool_use — web search обрабатывается server-side)
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
         for (const block of response.content) {
           if (block.type === 'tool_use') {
             logger.info({ toolName: block.name, toolId: block.id }, 'Executing tool');
 
-            const result = await executeTool(block.name, block.input as Record<string, any>);
+            // Всегда инжектим userAccountId в tool input
+            const toolInput = { ...(block.input as Record<string, any>), userAccountId };
+            const result = await executeTool(block.name, toolInput);
 
             toolResults.push({
               type: 'tool_result',
@@ -171,26 +320,55 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
               content: JSON.stringify(result),
             });
           }
+          // server_tool_use и web_search_tool_result пропускаем — они уже в response.content
         }
 
-        // Добавить результаты tools в историю
-        messages.push({
-          role: 'user',
-          content: toolResults,
-        });
+        if (toolResults.length > 0) {
+          // Добавить результаты tools в историю
+          messages.push({
+            role: 'user',
+            content: toolResults,
+          });
+        }
 
         // Продолжить цикл - отправить результаты обратно в Claude
         continue;
       }
 
+      // pause_turn — web search может вернуть для долгих запросов
+      if (response.stop_reason === 'pause_turn') {
+        await bot.sendChatAction(chatId, 'typing');
+        continue;
+      }
+
       // Если stop_reason === 'end_turn' - это финальный ответ
       if (response.stop_reason === 'end_turn') {
-        // Собрать текстовый ответ
+        // Собрать текстовый ответ + citations от web search
+        const citations: Array<{ url: string; title: string }> = [];
+
         for (const block of response.content) {
           if (block.type === 'text') {
             agentResponse += block.text;
+            // Собрать citations из web search результатов
+            if ('citations' in block && Array.isArray((block as any).citations)) {
+              for (const cite of (block as any).citations) {
+                if (cite.type === 'web_search_result_location' && cite.url && cite.title) {
+                  citations.push({ url: cite.url, title: cite.title });
+                }
+              }
+            }
           }
         }
+
+        // Добавить уникальные источники в конец ответа
+        if (citations.length > 0) {
+          const uniqueCitations = [...new Map(citations.map(c => [c.url, c])).values()];
+          agentResponse += '\n\n📎 Источники:\n';
+          for (const cite of uniqueCitations.slice(0, 5)) {
+            agentResponse += `• ${cite.title}: ${cite.url}\n`;
+          }
+        }
+
         continueLoop = false;
       } else {
         // Неожиданная причина остановки
@@ -205,11 +383,22 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       return;
     }
 
-    // Отправить ответ
-    await bot.sendMessage(chatId, agentResponse, {
-      parse_mode: 'Markdown',
-      reply_to_message_id: msg.message_id,
-    });
+    // Отправить ответ (с fallback если Markdown невалидный для Telegram)
+    try {
+      await bot.sendMessage(chatId, agentResponse, {
+        parse_mode: 'Markdown',
+        reply_to_message_id: msg.message_id,
+      });
+    } catch (sendError: any) {
+      if (sendError.message?.includes("can't parse entities")) {
+        logger.warn('Markdown parse failed, sending without formatting');
+        await bot.sendMessage(chatId, agentResponse, {
+          reply_to_message_id: msg.message_id,
+        });
+      } else {
+        throw sendError;
+      }
+    }
 
     // Сохранить ответ бота в БД
     storeMessage({
@@ -250,6 +439,14 @@ async function initBot(): Promise<void> {
 
   // Создать клиент Anthropic
   anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+  // Создать клиент OpenAI (для Whisper транскрибации голосовых)
+  if (OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+    logger.info('OpenAI client initialized (voice transcription enabled)');
+  } else {
+    logger.warn('OPENAI_API_KEY not set — voice messages will not be transcribed');
+  }
 
   // Создать бота
   bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
