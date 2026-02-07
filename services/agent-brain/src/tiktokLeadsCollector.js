@@ -9,7 +9,7 @@
  *
  * Features:
  * - Task-based API: POST page/lead/task/ → GET page/lead/task/download/
- * - Дедупликация по external_lead_id
+ * - Дедупликация по leadgen_id (unique index)
  * - Привязка к креативам через ad_creative_mapping
  * - Retry logic с exponential backoff
  * - Подробное логирование с correlation ID
@@ -216,11 +216,11 @@ async function processLeadsForDirection(direction, leads, correlationId) {
         continue;
       }
 
-      // Дедупликация по external_lead_id (паттерн из tiktokWebhooks.ts)
+      // Дедупликация по leadgen_id (unique index в БД)
       const { data: existing, error: dedupeError } = await supabase
         .from('leads')
         .select('id')
-        .eq('external_lead_id', String(leadId))
+        .eq('leadgen_id', String(leadId))
         .maybeSingle();
 
       if (dedupeError) {
@@ -240,32 +240,19 @@ async function processLeadsForDirection(direction, leads, correlationId) {
       // Парсинг полей
       const fields = parseLeadFields(lead.field_data || lead.fields);
 
-      // INSERT в leads (паттерн из tiktokWebhooks.ts строки 399-427)
+      // INSERT в leads — используем реальные колонки таблицы
       const { data: insertedLead, error: insertError } = await supabase
         .from('leads')
         .insert({
           user_account_id: direction.user_account_id,
           account_id: direction.account_id || null,
           direction_id: direction.id,
-          source: 'tiktok_instant_form',
-          external_lead_id: String(leadId),
+          conversion_source: 'tiktok_instant_form',
+          source_type: 'lead_form',
+          leadgen_id: String(leadId),
           name: fields.name || null,
           phone: fields.phone || null,
-          email: fields.email || null,
-          ad_id: lead.ad_id || null,
-          adgroup_id: lead.adgroup_id || null,
-          campaign_id: lead.campaign_id || null,
-          platform: 'tiktok',
-          raw_data: {
-            tiktok_lead_id: leadId,
-            tiktok_page_id: lead.page_id || null,
-            tiktok_advertiser_id: lead.advertiser_id || null,
-            field_names: (lead.field_data || lead.fields || []).map(f => f.field_name || f.name).filter(Boolean),
-            fields_count: (lead.field_data || lead.fields || []).length,
-            create_time: lead.create_time || lead.created_time || null,
-            collected_by: 'polling',
-            correlation_id: correlationId
-          }
+          email: fields.email || null
         })
         .select()
         .single();

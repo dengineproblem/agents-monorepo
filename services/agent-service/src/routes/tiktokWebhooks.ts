@@ -402,26 +402,12 @@ async function processLeadEvent(leadData: TikTokLeadData, correlationId: string)
       user_account_id: direction.user_account_id,
       account_id: direction.account_id,
       direction_id: direction.id,
-      source: 'tiktok_instant_form',
-      external_lead_id: leadData.lead_id,
+      conversion_source: 'tiktok_instant_form',
+      source_type: 'lead_form',
+      leadgen_id: leadData.lead_id,
       name: fields.name,
       phone: fields.phone,
-      email: fields.email,
-      ad_id: leadData.ad_id,
-      adgroup_id: leadData.adgroup_id,
-      campaign_id: leadData.campaign_id,
-      platform: 'tiktok',
-      raw_data: {
-        tiktok_lead_id: leadData.lead_id,
-        tiktok_page_id: leadData.page_id,
-        tiktok_advertiser_id: leadData.advertiser_id,
-        // Сохраняем только имена полей, не значения (для безопасности PII)
-        field_names: leadData.field_data?.map(f => f.field_name) || [],
-        fields_count: leadData.field_data?.length || 0,
-        create_time: leadData.create_time,
-        matched_by: matchedBy,
-        correlation_id: correlationId
-      }
+      email: fields.email
     })
     .select()
     .single();
