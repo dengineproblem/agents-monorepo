@@ -22,6 +22,7 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - **TikTok Video Upload via TUS**: Direct video upload to TikTok Ads when direction platform is TikTok.
 - **TikTok Instant Pages (Lead Forms)**: API endpoint to fetch Instant Pages for Lead Generation campaigns.
 - **TikTok Lead Webhooks**: Webhook handler for receiving leads from TikTok Instant Forms.
+- **TikTok Lead Collector**: Automated polling of leads via `page/lead/task/` API (since Developer Portal doesn't support lead webhooks).
 
 ### Phase 4: TikTok Video Upload & Lead Generation (Latest)
 
@@ -100,7 +101,7 @@ If `ad_id` is missing or no mapping found — a warning is logged.
 **Environment Variables**:
 - `TIKTOK_WEBHOOK_SECRET` - Webhook secret from TikTok Developer Portal
 
-**Setup**: See "TikTok Developer Portal — настройка webhook для лидов" section below.
+**Setup**: Webhook handler is ready. For automated lead collection (since Developer Portal doesn't support lead webhooks), see TikTok Lead Collector section below.
 
 ### Pending / not implemented yet
 - Cross-platform creative sync via `creative_group_id`: schema support added (video.ts, image.ts), full UI/API implementation postponed.
@@ -209,6 +210,8 @@ If `ad_id` is missing or no mapping found — a warning is logged.
   - `services/agent-brain/src/chatAssistant/shared/tikTokGraph.js`
 - TikTok metrics collector:
   - `services/agent-brain/src/tiktokMetricsCollector.js`
+- TikTok leads collector (polling via Lead API):
+  - `services/agent-brain/src/tiktokLeadsCollector.js`
 - Brain endpoint:
   - `services/agent-brain/src/server.js` (`POST /api/brain/run-tiktok`)
 - MCP tool schemas and handlers:
@@ -558,7 +561,7 @@ Platform support:
   → ROI: metrics (tiktok_batch) + leads.creative_id → выручка по креативам
 ```
 
-**Настройка**: одноразовая в TikTok Developer Portal (см. инструкцию ниже).
+**Настройка**: автоматическая — `tiktokLeadsCollector.js` собирает лиды в рамках batch-процесса.
 
 #### 2. TikTok Website (Tilda)
 ```
@@ -588,7 +591,7 @@ Platform support:
 |------|----------|--------|
 | Метрики (spend, clicks, impressions) | scoring.js → `source='production'` | tiktokMetricsCollector.js → `source='tiktok_batch'` |
 | Маппинг ad→creative | `ad_creative_mapping` | `ad_creative_mapping` (заполняется при создании объявлений) |
-| Лиды (Lead Forms) | subscribePageToLeadgen() → webhook | Developer Portal webhook → tiktokWebhooks.ts |
+| Лиды (Lead Forms) | subscribePageToLeadgen() → webhook | Polling: tiktokLeadsCollector.js → `page/lead/task/` API |
 | Лиды (Website/Tilda) | leads.ts → UTM `{{ad.id}}` | leads.ts → UTM `__CID__` |
 | creative_id на лидах | Автоматически через creativeResolver | Instant Forms: tiktokWebhooks.ts; Tilda: creativeResolver |
 | ROI расчёт | salesApi → `source='production'` | salesApi → `source='tiktok_batch'` |
@@ -599,49 +602,72 @@ Platform support:
 - `077_add_tilda_utm_field.sql` — настройка UTM-поля для Tilda
 - `197_backfill_tiktok_leads_creative_id.sql` — бэкфил creative_id для существующих TikTok лидов
 
-## TikTok Developer Portal — настройка webhook для лидов
+## TikTok Lead Collector — автоматический сбор лидов
 
-### Зачем это нужно
-TikTok **не имеет API для программной подписки** на лиды (в отличие от Facebook `subscribePageToLeadgen()`).
-Webhook настраивается **один раз** на уровне приложения в Developer Portal.
-После настройки лиды от **всех рекламодателей**, авторизованных через наше приложение, будут приходить автоматически.
+### Почему polling, а не webhook
 
-### Пошаговая инструкция
+TikTok Developer Portal **НЕ поддерживает webhook для лидов**. Доступны только 4 события:
+`authorization.removed`, `video.upload.failed`, `video.publish.completed`, `portability.download.ready`.
 
-1. Зайти на https://developers.tiktok.com
-2. **Manage Apps** → выбрать приложение (через которое OAuth авторизация)
-3. В настройках приложения найти раздел **Events** (или **Webhooks**)
-4. Добавить новый webhook:
-   - **Event type**: Lead Generation (или Lead)
-   - **Callback URL**: `https://performanteaiagency.com/api/tiktok/webhook`
-5. TikTok отправит **GET запрос с challenge** на callback URL
-   - Наш handler ([tiktokWebhooks.ts](../services/agent-service/src/routes/tiktokWebhooks.ts)) автоматически вернёт challenge → верификация пройдёт
-6. Скопировать **Webhook Secret** (или App Secret) из настроек
-7. Добавить в environment:
-   ```
-   TIKTOK_WEBHOOK_SECRET=<скопированный_secret>
-   ```
-8. Перезапустить agent-service
-9. Готово — лиды будут приходить на webhook
+В отличие от Facebook (где `subscribePageToLeadgen()` автоматически подписывает на лиды),
+TikTok требует **ручную настройку CRM Integration** для каждого рекламодателя.
 
-### Проверка работоспособности
-- Создать тестовую Lead Form кампанию в TikTok Ads Manager
-- Отправить тестовый лид
-- В логах agent-service должны появиться записи:
-  ```
-  [tiktokWebhooks] 📥 Received webhook event
-  [tiktokWebhooks] 🔍 Starting lead processing
-  [tiktokWebhooks] 🎯 Found direction for lead
-  [tiktokWebhooks] 💾 Lead inserted into DB
-  [tiktokWebhooks] 🔗 Lead linked to creative via ad_creative_mapping
-  [tiktokWebhooks] ✅ Lead created successfully
-  ```
+**Решение**: автоматический polling через TikTok Marketing API — `page/lead/task/` эндпоинт.
+
+### Как работает
+
+```
+Batch процесс (processUserTikTok / processAccountTikTok)
+    |
+    1. Brain run (AI agent)
+    2. collectTikTokMetricsForDays — метрики за 7 дней
+    3. collectTikTokLeads — лиды за 2 дня (НОВОЕ)
+    |
+    collectTikTokLeads:
+    ├── Запрос account_directions WHERE tiktok_objective='lead_generation'
+    ├── Для каждого направления с tiktok_instant_page_id:
+    │   ├── POST page/lead/task/ — создать задачу на скачивание
+    │   ├── Поллинг (3 сек x 20 попыток = макс 60 сек)
+    │   ├── GET page/lead/task/download/ — скачать лиды
+    │   └── Обработка каждого лида:
+    │       ├── Дедупликация по external_lead_id
+    │       ├── INSERT в leads (platform='tiktok', source='tiktok_instant_form')
+    │       └── Привязка creative через ad_creative_mapping
+    └── Return: { newLeads, duplicates, errors }
+```
+
+### Файлы
+
+| Файл | Роль |
+|------|------|
+| `services/agent-brain/src/tiktokLeadsCollector.js` | Основной модуль сбора лидов |
+| `services/agent-brain/src/chatAssistant/shared/tikTokGraph.js` | API helpers: `createTikTokLeadTask`, `downloadTikTokLeadTask` |
+| `services/agent-brain/src/server.js` | Интеграция в batch (после метрик) |
 
 ### Отличия от Facebook
 
 | | Facebook | TikTok |
 |---|---|---|
-| Подписка на лиды | `subscribePageToLeadgen()` — автоматически через API | Developer Portal — ручная одноразовая настройка |
-| Уровень подписки | На уровне Facebook Page | На уровне приложения (все advertiser'ы) |
-| Верификация | App Secret + challenge endpoint | Webhook Secret + HMAC-SHA256 + challenge |
-| Данные в payload | `leadgen_id` (нужен доп. GET запрос) | Полные данные лида сразу (field_data, ad_id, campaign_id) |
+| Модель | Push (webhook) | Pull (polling) |
+| Подписка на лиды | `subscribePageToLeadgen()` — автоматически | Не нужна — polling через API |
+| Задержка | ~5 сек (real-time) | ~30 мин (batch interval) |
+| Данные | `leadgen_id` → доп. GET запрос | Полные данные сразу (field_data, ad_id) |
+| Настройка | Автоматическая | Автоматическая (направления с `lead_generation`) |
+
+### Логирование
+
+Все события логируются с `where: 'tiktokLeadsCollector'` и `correlationId`:
+- `collection_started` — начало сбора
+- `directions_found` — найдены направления с lead_generation
+- `task_created` — задача на скачивание создана
+- `leads_downloaded` — лиды скачаны
+- `direction_processed` — направление обработано (newLeads, duplicates)
+- `collection_completed` — сбор завершён
+
+### Webhook handler (резервный канал)
+
+Webhook handler в [tiktokWebhooks.ts](../services/agent-service/src/routes/tiktokWebhooks.ts) **остаётся**.
+Если в будущем TikTok добавит поддержку lead webhooks в Developer Portal,
+handler готов принимать лиды в реальном времени.
+
+Env: `TIKTOK_WEBHOOK_SECRET` — для HMAC-SHA256 верификации подписи.

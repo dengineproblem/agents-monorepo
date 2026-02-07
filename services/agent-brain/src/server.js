@@ -19,6 +19,7 @@ import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
 import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
 import { collectTikTokMetricsForDays } from './tiktokMetricsCollector.js';
+import { collectTikTokLeads } from './tiktokLeadsCollector.js';
 import { uploadVideoToFacebook } from './lib/videoUpload.js';
 
 // Основной бот для отправки отчётов клиентам и в мониторинг
@@ -5302,6 +5303,45 @@ async function processUserTikTok(user) {
       }
     }
 
+    // Собираем TikTok лиды из Instant Forms за последние 2 дня
+    let leadsResult = null;
+    if (user.tiktok_business_id && user.tiktok_access_token) {
+      try {
+        fastify.log.info({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          action: 'collecting_leads'
+        }, 'Starting TikTok leads collection');
+
+        leadsResult = await collectTikTokLeads(
+          user.tiktok_business_id,
+          user.tiktok_access_token,
+          user.id,
+          accountId,
+          { days: 2 }
+        );
+
+        fastify.log.info({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          newLeads: leadsResult.newLeads,
+          duplicates: leadsResult.duplicates,
+          errorsCount: leadsResult.errors?.length || 0,
+          action: 'leads_collected'
+        }, 'TikTok leads collection completed');
+      } catch (leadsErr) {
+        fastify.log.warn({
+          where: 'processUserTikTok',
+          userId: user.id,
+          accountId: accountId || 'legacy',
+          error: leadsErr.message,
+          action: 'leads_collection_failed'
+        }, 'Failed to collect TikTok leads, continuing...');
+      }
+    }
+
     const duration = Date.now() - startTime;
 
     fastify.log.info({
@@ -5314,7 +5354,9 @@ async function processUserTikTok(user) {
       actionsCount: result.actions?.length || 0,
       dispatched: result.dispatched,
       telegramSent: result.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0
+      metricsCollected: metricsResult?.totalMetrics || 0,
+      leadsCollected: leadsResult?.newLeads || 0,
+      leadsDuplicates: leadsResult?.duplicates || 0
     });
 
     return {
@@ -5325,6 +5367,8 @@ async function processUserTikTok(user) {
       actionsCount: result.actions?.length || 0,
       telegramSent: result.telegramSent || false,
       metricsCollected: metricsResult?.totalMetrics || 0,
+      leadsCollected: leadsResult?.newLeads || 0,
+      leadsDuplicates: leadsResult?.duplicates || 0,
       duration
     };
   } catch (err) {
@@ -6916,6 +6960,42 @@ async function processAccountTikTok(account) {
       }
     }
 
+    // Собираем TikTok лиды из Instant Forms за последние 2 дня
+    let leadsResult = null;
+    if (account.tiktok_business_id && account.tiktok_access_token) {
+      try {
+        fastify.log.info({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          action: 'collecting_leads'
+        }, 'Starting TikTok leads collection');
+
+        leadsResult = await collectTikTokLeads(
+          account.tiktok_business_id,
+          account.tiktok_access_token,
+          account.user_account_id,
+          account.id,
+          { days: 2 }
+        );
+
+        fastify.log.info({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          newLeads: leadsResult.newLeads,
+          duplicates: leadsResult.duplicates,
+          errorsCount: leadsResult.errors?.length || 0,
+          action: 'leads_collected'
+        }, 'TikTok leads collection completed');
+      } catch (leadsErr) {
+        fastify.log.warn({
+          where: 'processAccountTikTok',
+          accountId: account.id,
+          error: leadsErr.message,
+          action: 'leads_collection_failed'
+        }, 'Failed to collect TikTok leads, continuing...');
+      }
+    }
+
     const duration = Date.now() - startTime;
 
     fastify.log.info({
@@ -6927,7 +7007,9 @@ async function processAccountTikTok(account) {
       actionsCount: runResult.actions?.length || 0,
       dispatched: runResult.dispatched,
       telegramSent: runResult.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0
+      metricsCollected: metricsResult?.totalMetrics || 0,
+      leadsCollected: leadsResult?.newLeads || 0,
+      leadsDuplicates: leadsResult?.duplicates || 0
     });
 
     return {
@@ -6937,7 +7019,9 @@ async function processAccountTikTok(account) {
       duration,
       actionsCount: runResult.actions?.length || 0,
       telegramSent: runResult.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0
+      metricsCollected: metricsResult?.totalMetrics || 0,
+      leadsCollected: leadsResult?.newLeads || 0,
+      leadsDuplicates: leadsResult?.duplicates || 0
     };
   } catch (err) {
     const duration = Date.now() - startTime;

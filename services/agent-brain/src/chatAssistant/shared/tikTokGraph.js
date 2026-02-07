@@ -280,4 +280,32 @@ export async function getTikTokReport(advertiserId, accessToken, options) {
   });
 }
 
+/**
+ * Helper: Create lead download task for TikTok Instant Forms
+ * POST page/lead/task/
+ */
+export async function createTikTokLeadTask(advertiserId, accessToken, options = {}) {
+  const params = {
+    advertiser_id: advertiserId,
+    begin_date: options.beginDate,
+    end_date: options.endDate,
+  };
+  if (options.pageId) params.page_id = options.pageId;
+
+  const result = await tikTokGraph('POST', 'page/lead/task/', accessToken, params);
+  return result.data?.task_id;
+}
+
+/**
+ * Helper: Download leads from completed task
+ * GET page/lead/task/download/
+ */
+export async function downloadTikTokLeadTask(advertiserId, accessToken, taskId) {
+  const result = await tikTokGraph('GET', 'page/lead/task/download/', accessToken, {
+    advertiser_id: advertiserId,
+    task_id: taskId
+  });
+  return result.data;
+}
+
 export default tikTokGraph;
