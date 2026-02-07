@@ -429,14 +429,15 @@ export async function createAdGroup(
     pacing: 'PACING_MODE_SMOOTH' | 'PACING_MODE_FAST';
     placement_type: 'PLACEMENT_TYPE_AUTOMATIC' | 'PLACEMENT_TYPE_NORMAL';
     placements?: string[];
-    location_ids: number[];
+    location_ids: (number | string)[];
     age_groups?: string[];
     gender?: 'GENDER_MALE' | 'GENDER_FEMALE' | 'GENDER_UNLIMITED';
     languages?: string[];
     operation_status?: 'ENABLE' | 'DISABLE';
+    promotion_type?: string;
     pixel_id?: string;
     identity_id?: string;
-    identity_type?: 'AUTH_CODE' | 'TT_USER';
+    identity_type?: 'AUTH_CODE' | 'TT_USER' | 'BC_AUTH_TT';
   }
 ): Promise<{ adgroup_id: string }> {
   log.info({
@@ -465,7 +466,7 @@ export async function createAdGroup(
     billing_event: params.billing_event,
     pacing: params.pacing,
     placement_type: params.placement_type,
-    location_ids: params.location_ids,
+    location_ids: params.location_ids.map(String),
     operation_status: params.operation_status || 'ENABLE'
   };
 
@@ -477,6 +478,7 @@ export async function createAdGroup(
   if (params.age_groups) body.age_groups = params.age_groups;
   if (params.gender) body.gender = params.gender;
   if (params.languages) body.languages = params.languages;
+  if (params.promotion_type) body.promotion_type = params.promotion_type;
   if (params.pixel_id) body.pixel_id = params.pixel_id;
   if (params.identity_id) body.identity_id = params.identity_id;
   if (params.identity_type) body.identity_type = params.identity_type;
@@ -615,7 +617,7 @@ export async function createAd(
     display_name?: string;
     avatar_icon_web_uri?: string;
     identity_id?: string;
-    identity_type?: 'AUTH_CODE' | 'TT_USER';
+    identity_type?: 'AUTH_CODE' | 'TT_USER' | 'BC_AUTH_TT';
     operation_status?: 'ENABLE' | 'DISABLE';
     page_id?: string;  // TikTok Instant Page ID for Lead Generation
   }
@@ -635,44 +637,53 @@ export async function createAd(
     operation_status: params.operation_status || 'ENABLE'
   }, '[TikTok:createAd] Создание Ad');
 
-  const body: any = {
-    advertiser_id: advertiserId,
-    adgroup_id: params.adgroup_id,
+  // TikTok v1.3 API requires creative fields inside `creatives` array
+  const creative: any = {
     ad_name: params.ad_name,
     ad_format: params.ad_format,
     ad_text: params.ad_text,
-    operation_status: params.operation_status || 'ENABLE'
   };
 
   // Video/Image
-  if (params.video_id) body.video_id = params.video_id;
-  if (params.image_ids) body.image_ids = params.image_ids;
+  if (params.video_id) creative.video_id = params.video_id;
+  if (params.image_ids) creative.image_ids = params.image_ids;
 
   // Call to action
-  if (params.call_to_action) body.call_to_action = params.call_to_action;
-  if (params.landing_page_url) body.landing_page_url = params.landing_page_url;
+  if (params.call_to_action) creative.call_to_action = params.call_to_action;
+  if (params.landing_page_url) creative.landing_page_url = params.landing_page_url;
 
   // Identity
-  if (params.display_name) body.display_name = params.display_name;
-  if (params.avatar_icon_web_uri) body.avatar_icon_web_uri = params.avatar_icon_web_uri;
-  if (params.identity_id) body.identity_id = params.identity_id;
-  if (params.identity_type) body.identity_type = params.identity_type;
+  if (params.display_name) creative.display_name = params.display_name;
+  if (params.avatar_icon_web_uri) creative.avatar_icon_web_uri = params.avatar_icon_web_uri;
+  if (params.identity_id) creative.identity_id = params.identity_id;
+  if (params.identity_type) creative.identity_type = params.identity_type;
 
   // Lead Generation: Instant Page
-  if (params.page_id) body.page_id = params.page_id;
+  if (params.page_id) creative.page_id = params.page_id;
+
+  const body: any = {
+    advertiser_id: advertiserId,
+    adgroup_id: params.adgroup_id,
+    creatives: [creative],
+    ...(params.operation_status && { operation_status: params.operation_status })
+  };
 
   const result = await tikTokGraph('POST', 'ad/create/', accessToken, body);
 
+  // v1.3 returns ad_ids array or ad_id
+  const ad_id = result.data?.ad_ids?.[0] || result.data?.ad_id;
+
   log.info({
     advertiserId,
-    ad_id: result.data.ad_id,
+    ad_id,
     ad_name: params.ad_name,
     adgroup_id: params.adgroup_id,
     page_id: params.page_id || null,
-    has_lead_form: !!params.page_id
+    has_lead_form: !!params.page_id,
+    response_data_keys: Object.keys(result.data || {})
   }, '[TikTok:createAd] ✅ Ad создан');
 
-  return { ad_id: result.data.ad_id };
+  return { ad_id };
 }
 
 /**
@@ -852,6 +863,73 @@ export async function uploadVideo(
 }
 
 /**
+ * Получить информацию об identity (display_name, identity_type)
+ */
+export async function getIdentityInfo(
+  advertiserId: string,
+  accessToken: string,
+  identityId: string
+): Promise<{ identity_id: string; identity_type: string; display_name: string } | null> {
+  log.info({ advertiserId, identityId }, '[TikTok:getIdentityInfo] Запрос информации об identity');
+
+  const result = await tikTokGraph('GET', 'identity/get/', accessToken, {
+    advertiser_id: advertiserId
+  });
+
+  const identities = result.data?.identity_list || [];
+  const found = identities.find((i: any) => i.identity_id === identityId);
+
+  if (found) {
+    log.info({ identity_id: found.identity_id, identity_type: found.identity_type, display_name: found.display_name }, '[TikTok:getIdentityInfo] ✅ Identity найден');
+    return {
+      identity_id: found.identity_id,
+      identity_type: found.identity_type,
+      display_name: found.display_name || ''
+    };
+  }
+
+  // Fallback: первый доступный identity
+  const available = identities.find((i: any) => i.available_status === 'AVAILABLE');
+  if (available) {
+    log.warn({ identityId, fallback_id: available.identity_id }, '[TikTok:getIdentityInfo] ⚠️ Исходный identity не найден, используем fallback');
+    return {
+      identity_id: available.identity_id,
+      identity_type: available.identity_type,
+      display_name: available.display_name || ''
+    };
+  }
+
+  log.warn({ advertiserId }, '[TikTok:getIdentityInfo] ⚠️ Нет доступных identity');
+  return null;
+}
+
+/**
+ * Получить информацию о видео (включая poster_url)
+ */
+export async function getVideoInfo(
+  advertiserId: string,
+  accessToken: string,
+  videoIds: string[]
+): Promise<Array<{ video_id: string; poster_url?: string; width?: number; height?: number }>> {
+  log.info({ advertiserId, videoIds }, '[TikTok:getVideoInfo] Запрос информации о видео');
+
+  const result = await tikTokGraph('GET', 'file/video/ad/info/', accessToken, {
+    advertiser_id: advertiserId,
+    video_ids: videoIds
+  });
+
+  const videos = result.data?.list || [];
+  log.info({ advertiserId, count: videos.length }, '[TikTok:getVideoInfo] ✅ Видео получены');
+
+  return videos.map((v: any) => ({
+    video_id: v.video_id,
+    poster_url: v.poster_url || v.video_cover_url,
+    width: v.width,
+    height: v.height
+  }));
+}
+
+/**
  * Загрузить изображение в TikTok Ads
  */
 export async function uploadImage(
@@ -860,58 +938,44 @@ export async function uploadImage(
   imageSource: string | Buffer
 ): Promise<{ image_id: string }> {
   const isUrl = typeof imageSource === 'string' && imageSource.startsWith('http');
-  const uploadType = isUrl ? 'UPLOAD_BY_URL' : 'UPLOAD_BY_FILE';
   const startTime = Date.now();
 
   log.info({
     advertiserId,
-    upload_type: uploadType,
     source_type: isUrl ? 'url' : 'buffer',
     source_url: isUrl ? (imageSource as string).substring(0, 100) : undefined,
     buffer_size: Buffer.isBuffer(imageSource) ? imageSource.length : undefined
   }, '[TikTok:uploadImage] Начало загрузки изображения');
 
-  // Если передан URL - используем upload по URL
-  if (isUrl) {
-    const result = await tikTokGraph('POST', 'file/image/ad/upload/', accessToken, {
-      advertiser_id: advertiserId,
-      upload_type: 'UPLOAD_BY_URL',
-      image_url: imageSource
-    });
-
-    const duration = Date.now() - startTime;
-    log.info({
-      advertiserId,
-      image_id: result.data.image_id,
-      upload_type: 'UPLOAD_BY_URL',
-      duration_ms: duration
-    }, '[TikTok:uploadImage] ✅ Изображение загружено по URL');
-
-    return { image_id: result.data.image_id };
-  }
-
-  // Загрузка файла
+  // Всегда скачиваем и загружаем файлом — UPLOAD_BY_URL не работает с signed TikTok CDN URLs
   const tmpPath = path.join(os.tmpdir(), `tt_image_${randomUUID()}.jpg`);
 
-  if (Buffer.isBuffer(imageSource)) {
-    fs.writeFileSync(tmpPath, imageSource);
-    log.debug({
-      advertiserId,
-      tmp_path: tmpPath,
-      file_size: imageSource.length
-    }, '[TikTok:uploadImage] Временный файл создан');
-  } else {
-    log.error({ advertiserId }, '[TikTok:uploadImage] ❌ Неверный источник изображения');
-    throw new Error('Invalid image source: must be URL or Buffer');
-  }
-
   try {
+    if (isUrl) {
+      // Скачиваем изображение по URL
+      const downloadResponse = await axios.get(imageSource as string, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+      fs.writeFileSync(tmpPath, Buffer.from(downloadResponse.data));
+      log.debug({ advertiserId, size: downloadResponse.data.byteLength }, '[TikTok:uploadImage] Изображение скачано по URL');
+    } else if (Buffer.isBuffer(imageSource)) {
+      fs.writeFileSync(tmpPath, imageSource);
+    } else {
+      throw new Error('Invalid image source: must be URL or Buffer');
+    }
+
+    // Вычисляем MD5 — TikTok требует image_signature
+    const fileBuffer = fs.readFileSync(tmpPath);
+    const md5Hash = createHash('md5').update(fileBuffer).digest('hex');
+
     const formData = new FormData();
     formData.append('advertiser_id', advertiserId);
     formData.append('upload_type', 'UPLOAD_BY_FILE');
     formData.append('image_file', fs.createReadStream(tmpPath));
+    formData.append('image_signature', md5Hash);
 
-    log.debug({ advertiserId }, '[TikTok:uploadImage] Отправка файла...');
+    log.debug({ advertiserId, md5: md5Hash }, '[TikTok:uploadImage] Отправка файла...');
 
     const response = await axios.post(
       `${TIKTOK_BASE_URL}/file/image/ad/upload/`,
@@ -939,16 +1003,14 @@ export async function uploadImage(
     log.info({
       advertiserId,
       image_id: response.data.data.image_id,
-      upload_type: 'UPLOAD_BY_FILE',
       duration_ms: duration
-    }, '[TikTok:uploadImage] ✅ Изображение загружено из файла');
+    }, '[TikTok:uploadImage] ✅ Изображение загружено');
 
     return { image_id: response.data.data.image_id };
 
   } finally {
     if (fs.existsSync(tmpPath)) {
       fs.unlinkSync(tmpPath);
-      log.debug({ advertiserId, tmp_path: tmpPath }, '[TikTok:uploadImage] Временный файл удалён');
     }
   }
 }
@@ -1173,10 +1235,10 @@ export async function getInstantPage(
       page_ids: [pageId]
     });
 
-    const pages = result.data?.page_info_list || [];
+    const pages = result.data?.list || result.data?.page_info_list || [];
 
     if (pages.length === 0) {
-      log.warn({ advertiserId, pageId }, '[TikTok:getInstantPage] Instant Page не найдена');
+      log.warn({ advertiserId, pageId, data_keys: Object.keys(result.data || {}) }, '[TikTok:getInstantPage] Instant Page не найдена');
       return null;
     }
 
@@ -1235,6 +1297,7 @@ export const tt = {
   // Media
   uploadVideo,
   uploadImage,
+  getVideoInfo,
 
   // Reports
   getReport,
@@ -1243,6 +1306,7 @@ export const tt = {
   getAdvertiserInfo,
   getPixels,
   getIdentities,
+  getIdentityInfo,
 
   // Instant Pages (Lead Forms)
   getInstantPages,

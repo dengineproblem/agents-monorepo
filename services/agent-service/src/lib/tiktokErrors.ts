@@ -33,13 +33,8 @@ const TIKTOK_ERROR_CODES: Record<number, TikTokErrorResolution> = {
     retryable: false,
     action: 'reconnect_tiktok'
   },
-  40002: {
-    msgCode: 'tiktok_auth_expired',
-    userMessage: 'Access token expired',
-    userMessageRu: 'Токен доступа истёк. Переподключите TikTok аккаунт.',
-    retryable: false,
-    action: 'reconnect_tiktok'
-  },
+  // 40002 is TikTok's generic validation error — NOT just auth expired!
+  // Actual message from API is used instead (see resolveTikTokError fallback)
   40100: {
     msgCode: 'tiktok_rate_limit',
     userMessage: 'Rate limit exceeded',
@@ -196,14 +191,13 @@ export function resolveTikTokError(meta: TikTokErrorMeta): TikTokErrorResolution
     return TIKTOK_ERROR_CODES[code];
   }
 
-  // Проверяем диапазоны кодов
+  // 40000-40999: Validation/auth errors — use actual TikTok message
   if (code >= 40000 && code < 41000) {
     return {
-      msgCode: 'tiktok_auth_error',
-      userMessage: meta.message || 'Authentication error',
-      userMessageRu: meta.message || 'Ошибка аутентификации.',
-      retryable: false,
-      action: 'reconnect_tiktok'
+      msgCode: 'tiktok_validation_error',
+      userMessage: meta.message || 'Validation error',
+      userMessageRu: meta.message || 'Ошибка валидации TikTok.',
+      retryable: false
     };
   }
 

@@ -17,137 +17,67 @@ const TIKTOK_MIN_DAILY_BUDGET = 2500;
  * Маппинг стран на TikTok location_ids
  * TikTok использует числовые ID вместо ISO кодов
  */
-export const COUNTRY_LOCATION_IDS: Record<string, number> = {
-  // СНГ
-  'KZ': 6251999, // Казахстан
-  'RU': 6251994, // Россия
-  'UA': 6256587, // Украина
-  'BY': 6251991, // Беларусь
-  'UZ': 6255147, // Узбекистан
-  'AZ': 6252002, // Азербайджан
-  'GE': 6254928, // Грузия
-  'AM': 6252004, // Армения
-  'KG': 6255012, // Кыргызстан
-  'TJ': 6252005, // Таджикистан
-  'TM': 6252007, // Туркменистан
-  'MD': 6256596, // Молдова
-
-  // Европа
-  'DE': 6252005, // Германия
-  'FR': 6252016, // Франция
-  'GB': 6269131, // Великобритания
-  'IT': 6252001, // Италия
-  'ES': 6252009, // Испания
-  'PL': 6252068, // Польша
-  'NL': 6252070, // Нидерланды
-  'BE': 6252071, // Бельгия
-  'CZ': 6252072, // Чехия
-  'AT': 6252073, // Австрия
-  'CH': 6252074, // Швейцария
-  'PT': 6252075, // Португалия
-
-  // Азия
-  'TR': 6252076, // Турция
-  'AE': 6252077, // ОАЭ
-  'SA': 6252078, // Саудовская Аравия
-  'IN': 6252079, // Индия
-  'ID': 6252080, // Индонезия
-  'MY': 6252081, // Малайзия
-  'SG': 6252082, // Сингапур
-  'TH': 6252083, // Таиланд
-  'VN': 6252084, // Вьетнам
-  'PH': 6252085, // Филиппины
-  'JP': 6252086, // Япония
-  'KR': 6252087, // Южная Корея
-
-  // Америка
-  'US': 6252001, // США
-  'CA': 6252002, // Канада
-  'MX': 6252003, // Мексика
-  'BR': 6252004, // Бразилия
-  'AR': 6252005, // Аргентина
+export const COUNTRY_LOCATION_IDS: Record<string, string> = {
+  // Проверенные TikTok location_ids (из TikTok API /tool/region/)
+  'KZ': '1522867', // Казахстан
+  // TODO: остальные страны верифицировать через TikTok API /tool/region/
 };
 
 /**
  * Маппинг городов Казахстана на TikTok location_ids
  */
-export const KZ_CITY_LOCATION_IDS: Record<string, number> = {
-  // Алматы и область
-  'Алматы': 6247480,
-  'Almaty': 6247480,
-  'алматы': 6247480,
+export const KZ_CITY_LOCATION_IDS: Record<string, string> = {
+  // Проверенные TikTok location_ids (из VideoUpload.tsx legacy + TikTok API)
+  'Алматы': '94600135',
+  'Almaty': '94600135',
+  'алматы': '94600135',
 
-  // Нур-Султан/Астана
-  'Астана': 6247481,
-  'Astana': 6247481,
-  'астана': 6247481,
-  'Нур-Султан': 6247481,
+  'Астана': '1526273',
+  'Astana': '1526273',
+  'астана': '1526273',
+  'Нур-Султан': '1526273',
 
-  // Шымкент
-  'Шымкент': 6247482,
-  'Shymkent': 6247482,
-  'шымкент': 6247482,
+  'Шымкент': '94600024',
+  'Shymkent': '94600024',
+  'шымкент': '94600024',
 
-  // Караганда
-  'Караганда': 6247483,
-  'Karaganda': 6247483,
-  'караганда': 6247483,
+  'Караганда': '609655',
+  'Karaganda': '609655',
+  'караганда': '609655',
 
-  // Актобе
-  'Актобе': 6247484,
-  'Aktobe': 6247484,
-  'актобе': 6247484,
+  'Актобе': '610611',
+  'Aktobe': '610611',
+  'актобе': '610611',
 
-  // Атырау
-  'Атырау': 6247485,
-  'Atyrau': 6247485,
-  'атырау': 6247485,
+  'Атырау': '610529',
+  'Atyrau': '610529',
+  'атырау': '610529',
 
-  // Павлодар
-  'Павлодар': 6247486,
-  'Pavlodar': 6247486,
-  'павлодар': 6247486,
+  'Павлодар': '94600073',
+  'Pavlodar': '94600073',
+  'павлодар': '94600073',
 
-  // Семей
-  'Семей': 6247487,
-  'Semey': 6247487,
-  'семей': 6247487,
+  'Семей': '1519422',
+  'Semey': '1519422',
+  'семей': '1519422',
 
-  // Усть-Каменогорск
-  'Усть-Каменогорск': 6247488,
-  'Ust-Kamenogorsk': 6247488,
+  'Усть-Каменогорск': '1520316',
+  'Ust-Kamenogorsk': '1520316',
 
-  // Тараз
-  'Тараз': 6247489,
-  'Taraz': 6247489,
-  'тараз': 6247489,
+  'Тараз': '1516905',
+  'Taraz': '1516905',
+  'тараз': '1516905',
 
-  // Костанай
-  'Костанай': 6247490,
-  'Kostanay': 6247490,
-  'костанай': 6247490,
+  'Костанай': '94600118',
+  'Kostanay': '94600118',
+  'костанай': '94600118',
 
-  // Петропавловск
-  'Петропавловск': 6247491,
-  'Petropavlovsk': 6247491,
+  'Кызылорда': '94600065',
+  'Kyzylorda': '94600065',
 
-  // Уральск
-  'Уральск': 6247492,
-  'Uralsk': 6247492,
-  'уральск': 6247492,
-
-  // Кызылорда
-  'Кызылорда': 6247493,
-  'Kyzylorda': 6247493,
-
-  // Туркестан
-  'Туркестан': 6247494,
-  'Turkestan': 6247494,
-
-  // Актау
-  'Актау': 6247495,
-  'Aktau': 6247495,
-  'актау': 6247495,
+  'Актау': '610612',
+  'Aktau': '610612',
+  'актау': '610612',
 };
 
 // ============================================================
@@ -197,31 +127,37 @@ export const OBJECTIVE_MAPPING: Record<string, {
   objective_type: TikTokObjective;
   optimization_goal: TikTokOptimizationGoal;
   billing_event: TikTokBillingEvent;
+  promotion_type: string;
 }> = {
   'traffic': {
     objective_type: 'TRAFFIC',
     optimization_goal: 'CLICK',
-    billing_event: 'CPC'
+    billing_event: 'CPC',
+    promotion_type: 'WEBSITE'
   },
   'conversions': {
     objective_type: 'CONVERSIONS',
     optimization_goal: 'CONVERT',
-    billing_event: 'OCPM'
+    billing_event: 'OCPM',
+    promotion_type: 'WEBSITE'
   },
   'reach': {
     objective_type: 'REACH',
     optimization_goal: 'REACH',
-    billing_event: 'CPM'
+    billing_event: 'CPM',
+    promotion_type: 'WEBSITE'
   },
   'video_views': {
     objective_type: 'VIDEO_VIEWS',
     optimization_goal: 'VIDEO_VIEW',
-    billing_event: 'CPM'
+    billing_event: 'CPM',
+    promotion_type: 'WEBSITE'
   },
   'lead_generation': {
     objective_type: 'LEAD_GENERATION',
     optimization_goal: 'LEAD_GENERATION',
-    billing_event: 'OCPM'
+    billing_event: 'OCPM',
+    promotion_type: 'LEAD_GENERATION'
   }
 };
 
@@ -242,7 +178,7 @@ export function getTikTokObjectiveConfig(objective: string) {
 // ============================================================
 
 export interface TikTokTargeting {
-  location_ids: number[];
+  location_ids: (string | number)[];
   age_groups?: string[];
   gender?: 'GENDER_MALE' | 'GENDER_FEMALE' | 'GENDER_UNLIMITED';
   languages?: string[];

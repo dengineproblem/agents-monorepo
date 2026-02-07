@@ -14,6 +14,57 @@ import {
 import { logger } from '../../lib/logger.js';
 import { saveAdCreativeMappingBatch } from '../../lib/adCreativeMapping.js';
 
+// Helper: получить identity info и poster images
+async function resolveIdentityAndPosters(
+  advertiserId: string,
+  accessToken: string,
+  identityId?: string,
+  videoIds?: string[]
+): Promise<{
+  identityType: string;
+  displayName: string;
+  resolvedIdentityId?: string;
+  videoPosters: Record<string, string>;
+}> {
+  let identityType = 'TT_USER';
+  let displayName = '';
+  let resolvedIdentityId = identityId;
+
+  // Identity info
+  if (identityId) {
+    try {
+      const info = await tt.getIdentityInfo(advertiserId, accessToken, identityId);
+      if (info) {
+        resolvedIdentityId = info.identity_id;
+        identityType = info.identity_type;
+        displayName = info.display_name;
+      }
+    } catch (e: any) {
+      logger.warn({ error: e.message }, '[TikTok:resolveIdentity] ⚠️ Не удалось получить identity info');
+    }
+  }
+
+  // Poster images
+  const videoPosters: Record<string, string> = {};
+  if (videoIds && videoIds.length > 0) {
+    try {
+      const videoInfos = await tt.getVideoInfo(advertiserId, accessToken, videoIds);
+      for (const vi of videoInfos) {
+        if (vi.poster_url && vi.video_id) {
+          const imageResult = await tt.uploadImage(advertiserId, accessToken, vi.poster_url);
+          videoPosters[vi.video_id] = imageResult.image_id;
+          logger.info({ video_id: vi.video_id, image_id: imageResult.image_id }, '[TikTok] ✅ Poster image загружен');
+        }
+      }
+    } catch (e: any) {
+      logger.error({ error: e.message }, '[TikTok] ❌ Ошибка загрузки poster images');
+      throw new Error(`Failed to upload poster images: ${e.message}`);
+    }
+  }
+
+  return { identityType, displayName, resolvedIdentityId, videoPosters };
+}
+
 // ============================================================
 // TYPES
 // ============================================================
@@ -458,7 +509,21 @@ export async function workflowCreateAdInDirection(
   }
 
   // ===================================================
-  // STEP 6: Активируем AdGroup если нужно
+  // STEP 6: Identity info + poster images
+  // ===================================================
+  const videoIds = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
+  const { identityType, displayName, resolvedIdentityId, videoPosters } = await resolveIdentityAndPosters(
+    advertiserId, accessToken, identityId, videoIds
+  );
+
+  logger.info({
+    identityType,
+    displayName,
+    postersCount: Object.keys(videoPosters).length
+  }, '[TIKTOK:CreateAdInDirection] Identity and posters resolved');
+
+  // ===================================================
+  // STEP 6.5: Активируем AdGroup если нужно
   // ===================================================
   if (auto_activate && adgroup.status === 'DISABLE') {
     await activateTikTokAdGroup(
@@ -479,6 +544,7 @@ export async function workflowCreateAdInDirection(
   }> = [];
 
   for (const creative of creative_data) {
+    const imageId = videoPosters[creative.tiktok_video_id];
     const adParams = {
       ad_name: creative.ad_name,
       adgroup_id: adgroup.tiktok_adgroup_id,
@@ -487,13 +553,19 @@ export async function workflowCreateAdInDirection(
       ad_text: creative.description || creative.title,
       call_to_action: 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
-      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
+      ...(imageId && { image_ids: [imageId] }),
+      ...(resolvedIdentityId && { identity_id: resolvedIdentityId, identity_type: identityType as any }),
+      ...(displayName && { display_name: displayName })
     };
 
     logger.info({
       ad_name: creative.ad_name,
       adgroup_id: adgroup.tiktok_adgroup_id,
-      video_id: creative.tiktok_video_id
+      video_id: creative.tiktok_video_id,
+      has_poster: !!imageId,
+      identity_type: identityType,
+      ad_index: created_ads.length + 1,
+      total_ads: creative_data.length
     }, '[TIKTOK:CreateAdInDirection] Creating ad');
 
     const adResult = await tt.createAd(advertiserId, accessToken, adParams);
@@ -606,8 +678,8 @@ export async function workflowCreateAdGroupWithCreatives(
   }
 
   const objective = direction.tiktok_objective || 'traffic';
-  const finalBudget = daily_budget || directionSettings.daily_budget || 20;
-  const finalAdGroupName = adgroup_name || `${direction.name || 'Direction'} - AdGroup ${new Date().toISOString().slice(0, 10)}`;
+  const finalBudget = daily_budget || directionSettings.daily_budget || 2500;
+  const finalAdGroupName = adgroup_name || `${direction.name || 'Direction'} - AdGroup ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`;
 
   const { data: creatives, error: creativesError } = await supabase
     .from('user_creatives')
@@ -671,6 +743,18 @@ export async function workflowCreateAdGroupWithCreatives(
 
   const scheduleStartTime = toTikTokTimestamp(new Date());
 
+  // Identity info + poster images
+  const videoIdsForPosters = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
+  const { identityType: idType, displayName: dName, resolvedIdentityId: resolvedId, videoPosters: posters } = await resolveIdentityAndPosters(
+    advertiserId, accessToken, identityId, videoIdsForPosters
+  );
+
+  logger.info({
+    identityType: idType,
+    displayName: dName,
+    postersCount: Object.keys(posters).length
+  }, '[TIKTOK:CreateAdGroupWithCreatives] Identity and posters resolved');
+
   const adGroupParams = {
     adgroup_name: finalAdGroupName,
     campaign_id: direction.tiktok_campaign_id,
@@ -685,19 +769,29 @@ export async function workflowCreateAdGroupWithCreatives(
     age_groups: directionSettings.targeting.age_groups,
     gender: directionSettings.targeting.gender,
     pacing: 'PACING_MODE_SMOOTH' as const,
-    placement_type: 'PLACEMENT_TYPE_AUTOMATIC' as const,
+    placement_type: 'PLACEMENT_TYPE_NORMAL' as const,
+    placements: ['PLACEMENT_TIKTOK'],
+    promotion_type: directionSettings.objective_config.promotion_type,
     operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
     ...(directionSettings.pixel_id && objective === 'conversions' && { pixel_id: directionSettings.pixel_id }),
-    ...(directionSettings.identity_id && { identity_id: directionSettings.identity_id, identity_type: 'TT_USER' as const }),
-    ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const }),
-    ...(direction.tiktok_identity_id && { identity_id: direction.tiktok_identity_id, identity_type: 'TT_USER' as const })
+    ...(resolvedId && { identity_id: resolvedId, identity_type: idType as any })
   };
+
+  logger.info({
+    adgroup_name: finalAdGroupName,
+    campaign_id: direction.tiktok_campaign_id,
+    placement_type: 'PLACEMENT_TYPE_NORMAL',
+    promotion_type: directionSettings.objective_config.promotion_type,
+    budget: finalBudget
+  }, '[TIKTOK:CreateAdGroupWithCreatives] Creating AdGroup');
 
   const adGroupResult = await tt.createAdGroup(advertiserId, accessToken, adGroupParams);
   const tiktok_adgroup_id = adGroupResult.adgroup_id;
   if (!tiktok_adgroup_id) {
     throw new Error('Failed to create TikTok ad group');
   }
+
+  logger.info({ tiktok_adgroup_id }, '[TIKTOK:CreateAdGroupWithCreatives] ✅ AdGroup создана');
 
   const created_ads: Array<{
     ad_id: string;
@@ -706,6 +800,7 @@ export async function workflowCreateAdGroupWithCreatives(
   }> = [];
 
   for (const creative of creative_data) {
+    const imageId = posters[creative.tiktok_video_id];
     const adParams = {
       ad_name: creative.ad_name,
       adgroup_id: tiktok_adgroup_id,
@@ -714,9 +809,18 @@ export async function workflowCreateAdGroupWithCreatives(
       ad_text: creative.description || creative.title,
       call_to_action: 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
-      ...(directionSettings.identity_id && { identity_id: directionSettings.identity_id, identity_type: 'TT_USER' as const }),
-      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
+      ...(imageId && { image_ids: [imageId] }),
+      ...(resolvedId && { identity_id: resolvedId, identity_type: idType as any }),
+      ...(dName && { display_name: dName })
     };
+
+    logger.info({
+      ad_name: creative.ad_name,
+      video_id: creative.tiktok_video_id,
+      has_poster: !!imageId,
+      ad_index: created_ads.length + 1,
+      total_ads: creative_data.length
+    }, '[TIKTOK:CreateAdGroupWithCreatives] Creating ad');
 
     const adResult = await tt.createAd(advertiserId, accessToken, adParams);
     const ad_id = adResult.ad_id;

@@ -444,7 +444,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             {
               user_creative_ids: creative_ids,
               objective: finalObjective as TikTokObjectiveType,
-              campaign_name: `${direction.name} - Manual ${new Date().toISOString().split('T')[0]}`,
+              campaign_name: `${direction.name} - Manual ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`,
               daily_budget: finalBudget,
               auto_activate: true,
               // Lead Generation: передаём Instant Page ID

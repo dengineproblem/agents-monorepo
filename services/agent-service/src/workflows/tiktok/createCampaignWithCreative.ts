@@ -102,7 +102,7 @@ function assertTikTokVideoCreatives(creatives: any[]) {
  */
 function getDefaultTikTokTargeting(): TikTokTargeting {
   return {
-    location_ids: [6251999],  // Казахстан
+    location_ids: ['1522867'],  // Казахстан (TikTok location_id)
     age_groups: ['AGE_18_24', 'AGE_25_34', 'AGE_35_44', 'AGE_45_54', 'AGE_55_100'],
     gender: 'GENDER_UNLIMITED'
   };
@@ -169,9 +169,28 @@ export async function workflowCreateTikTokCampaignWithCreative(
     identityId = identityId || creds.identityId;
   }
 
+  // Получаем identity info (display_name, identity_type)
+  let identityType: string = 'TT_USER';
+  let displayName: string = '';
+
+  if (identityId) {
+    try {
+      const identityInfo = await tt.getIdentityInfo(advertiserId!, accessToken!, identityId);
+      if (identityInfo) {
+        identityId = identityInfo.identity_id;
+        identityType = identityInfo.identity_type;
+        displayName = identityInfo.display_name;
+      }
+    } catch (e: any) {
+      log.warn({ error: e.message }, '[TikTok:Workflow:CreateCampaign] ⚠️ Не удалось получить identity info');
+    }
+  }
+
   log.info({
     advertiserId,
     hasIdentity: !!identityId,
+    identityType,
+    displayName,
     step: 'credentials_loaded'
   }, '[TikTok:Workflow:CreateCampaign] ✅ Credentials загружены');
 
@@ -409,12 +428,14 @@ export async function workflowCreateTikTokCampaignWithCreative(
     age_groups: finalTargeting.age_groups,
     gender: finalTargeting.gender,
     pacing: 'PACING_MODE_SMOOTH' as const,
-    placement_type: 'PLACEMENT_TYPE_AUTOMATIC' as const,
+    placement_type: 'PLACEMENT_TYPE_NORMAL' as const,
+    placements: ['PLACEMENT_TIKTOK'],
+    promotion_type: objectiveConfig.promotion_type,
     operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
     // Pixel для конверсий
     ...(context.pixel_id && objective === 'conversions' && { pixel_id: context.pixel_id }),
     // Identity для креативов
-    ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
+    ...(identityId && { identity_id: identityId, identity_type: identityType as any })
   };
 
   log.info({
@@ -447,7 +468,56 @@ export async function workflowCreateTikTokCampaignWithCreative(
   }, '[TikTok:Workflow:CreateCampaign] ✅ AdGroup создана');
 
   // ===================================================
-  // STEP 7: Создаем Ads
+  // STEP 7: Получаем poster images для видео
+  // ===================================================
+  const videoIds = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
+  let videoPosters: Record<string, string> = {};
+
+  if (videoIds.length > 0) {
+    log.info({ videoIds, count: videoIds.length }, '[TikTok:Workflow:CreateCampaign] 🖼️ Загрузка poster images для видео');
+
+    const videoInfos = await withStep(
+      'get_video_info',
+      { videoIds },
+      () => tt.getVideoInfo(advertiserId!, accessToken!, videoIds)
+    );
+
+    for (const info of videoInfos) {
+      if (info.poster_url && info.video_id) {
+        try {
+          const imageResult = await tt.uploadImage(advertiserId!, accessToken!, info.poster_url);
+          videoPosters[info.video_id] = imageResult.image_id;
+          log.info({
+            video_id: info.video_id,
+            image_id: imageResult.image_id,
+            poster_url: info.poster_url.substring(0, 80),
+            step: 'poster_uploaded'
+          }, '[TikTok:Workflow:CreateCampaign] ✅ Poster image загружен');
+        } catch (e: any) {
+          log.error({
+            video_id: info.video_id,
+            poster_url: info.poster_url.substring(0, 80),
+            error: e.message
+          }, '[TikTok:Workflow:CreateCampaign] ❌ Ошибка загрузки poster image');
+          throw new Error(`Failed to upload poster image for video ${info.video_id}: ${e.message}`);
+        }
+      } else {
+        log.warn({
+          video_id: info.video_id,
+          has_poster: !!info.poster_url
+        }, '[TikTok:Workflow:CreateCampaign] ⚠️ Видео без poster URL');
+      }
+    }
+
+    log.info({
+      total_videos: videoIds.length,
+      posters_uploaded: Object.keys(videoPosters).length,
+      step: 'posters_complete'
+    }, '[TikTok:Workflow:CreateCampaign] ✅ Poster images готовы');
+  }
+
+  // ===================================================
+  // STEP 8: Создаем Ads
   // ===================================================
   const created_ads: Array<{
     ad_id: string;
@@ -456,6 +526,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
   }> = [];
 
   for (const creative of creative_data) {
+    const imageId = videoPosters[creative.tiktok_video_id];
     const adParams = {
       ad_name: creative.ad_name,
       adgroup_id,
@@ -464,8 +535,12 @@ export async function workflowCreateTikTokCampaignWithCreative(
       ad_text: creative.description || creative.title,
       call_to_action: objective === 'lead_generation' ? 'SIGN_UP' : 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
+      // Thumbnail/cover image
+      ...(imageId && { image_ids: [imageId] }),
       // Identity
-      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const }),
+      ...(identityId && { identity_id: identityId, identity_type: identityType as any }),
+      // Display name from identity
+      ...(displayName && { display_name: displayName }),
       // Lead Generation: Instant Page
       ...(objective === 'lead_generation' && page_id && { page_id })
     };
