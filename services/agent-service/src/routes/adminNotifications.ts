@@ -409,7 +409,6 @@ async function fetchRecipientPool(args: { segment: BroadcastSegment; userIds?: s
       const { data, error } = await supabase
         .from('user_accounts')
         .select(fields)
-        .eq('is_tech_admin', false)
         .in('id', idsChunk);
 
       if (error) throw error;
@@ -427,7 +426,6 @@ async function fetchRecipientPool(args: { segment: BroadcastSegment; userIds?: s
     const { data, error } = await supabase
       .from('user_accounts')
       .select(fields)
-      .eq('is_tech_admin', false)
       .range(from, from + pageSize - 1);
 
     if (error) throw error;
@@ -1146,7 +1144,6 @@ export default async function adminNotificationsRoutes(app: FastifyInstance) {
       let query = supabase
         .from('user_accounts')
         .select('id, username, telegram_id, is_active, tarif, tarif_expires, created_at')
-        .eq('is_tech_admin', false)
         .order('created_at', { ascending: false })
         .limit(limit);
 

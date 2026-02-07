@@ -168,7 +168,6 @@ async function fetchSubscriptionUsers(): Promise<SubscriptionUserRow[]> {
     const { data, error } = await supabase
       .from('user_accounts')
       .select('id, username, telegram_id, is_active, tarif, tarif_expires, tarif_renewal_cost')
-      .eq('is_tech_admin', false)
       .eq('is_active', true)
       .like('tarif', 'subscription_%')
       .not('tarif_expires', 'is', null)
