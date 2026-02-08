@@ -39,6 +39,7 @@ import { eventLogger } from '../lib/eventLogger.js';
 import { onAdsLaunched } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
+import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -1143,6 +1144,206 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           error: errorMessage,
           error_hint: errorHint,
           error_details: error.message,
+        });
+      }
+    }
+  );
+
+  /**
+   * POST /api/campaign-builder/manual-launch-multi
+   *
+   * Ручной запуск рекламы с несколькими Ad Sets.
+   * Каждый адсет получает свой набор креативов и бюджет.
+   * Переиспользует workflowCreateAdSetInDirection для каждого адсета.
+   */
+  fastify.post(
+    '/manual-launch-multi',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['user_account_id', 'direction_id', 'adsets'],
+          properties: {
+            user_account_id: { type: 'string', format: 'uuid' },
+            account_id: {
+              oneOf: [
+                { type: 'string', format: 'uuid' },
+                { type: 'null' }
+              ]
+            },
+            direction_id: { type: 'string', format: 'uuid' },
+            start_mode: { type: 'string', enum: ['now', 'midnight_almaty'] },
+            adsets: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 10,
+              items: {
+                type: 'object',
+                required: ['creative_ids'],
+                properties: {
+                  creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
+                  daily_budget_cents: { type: 'number', minimum: 500 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request: any, reply: any) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'manualLaunchMulti');
+      const { user_account_id, account_id, direction_id, adsets, start_mode } = request.body;
+
+      log.info({
+        userAccountId: user_account_id,
+        directionId: direction_id,
+        adsetCount: adsets.length,
+      }, 'Manual launch multi request');
+
+      try {
+        // Получаем credentials
+        let credentials;
+        try {
+          credentials = await getCredentials(user_account_id, account_id);
+        } catch (credError: any) {
+          return reply.status(400).send({ success: false, error: credError.message });
+        }
+
+        if (!credentials.fbAccessToken || !credentials.fbAdAccountId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required Facebook credentials (access_token or ad_account_id)',
+          });
+        }
+
+        // Валидируем direction
+        const { data: direction, error: directionError } = await supabase
+          .from('account_directions')
+          .select('id, name, objective, fb_campaign_id')
+          .eq('id', direction_id)
+          .eq('user_account_id', user_account_id)
+          .or('platform.eq.facebook,platform.is.null')
+          .eq('is_active', true)
+          .single();
+
+        if (directionError || !direction) {
+          return reply.status(404).send({ success: false, error: 'Direction not found or inactive' });
+        }
+
+        if (!direction.fb_campaign_id) {
+          return reply.status(400).send({ success: false, error: 'Direction does not have associated Facebook Campaign' });
+        }
+
+        // Создаём каждый адсет
+        const results = [];
+        for (const adsetConfig of adsets) {
+          try {
+            const result = await workflowCreateAdSetInDirection(
+              {
+                direction_id,
+                user_creative_ids: adsetConfig.creative_ids,
+                daily_budget_cents: adsetConfig.daily_budget_cents,
+                source: 'Manual',
+                auto_activate: true,
+                start_mode: start_mode || 'now',
+              },
+              {
+                user_account_id,
+                ad_account_id: credentials.fbAdAccountId!,
+                account_id: account_id || undefined,
+                page_id: credentials.fbPageId || undefined,
+              },
+              credentials.fbAccessToken!,
+              { logger: log }
+            );
+
+            results.push({
+              success: true,
+              adset_id: result.adset_id,
+              adset_name: generateAdsetName({ directionName: direction.name, source: 'Manual', objective: direction.objective }),
+              ads_created: result.ads?.length || 0,
+              ads: result.ads?.map((ad: any) => ({ ad_id: ad.ad_id, name: ad.name })) || [],
+            });
+          } catch (error: any) {
+            log.warn({ err: error, creativeIds: adsetConfig.creative_ids }, 'Failed to create adset in multi-launch');
+
+            let errorMessage = error.message;
+            if (error?.fb) {
+              const resolution = resolveFacebookError(error.fb);
+              errorMessage = resolution.short;
+            }
+
+            results.push({
+              success: false,
+              error: errorMessage,
+            });
+          }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const failedCount = results.filter(r => !r.success).length;
+        const totalAds = results.reduce((sum, r) => sum + (r.ads_created || 0), 0);
+
+        if (successCount === 0) {
+          const firstError = results.find(r => r.error)?.error || 'All ad sets failed to create';
+          return reply.status(400).send({
+            success: false,
+            error: firstError,
+            total_adsets: results.length,
+            success_count: 0,
+            failed_count: failedCount,
+            adsets: results,
+          });
+        }
+
+        // Log business event
+        await eventLogger.logBusinessEvent(
+          user_account_id,
+          'creative_launched',
+          {
+            directionId: direction.id,
+            directionName: direction.name,
+            adsetsCount: successCount,
+            totalAds,
+            mode: 'manual_multi'
+          },
+          account_id
+        );
+
+        onAdsLaunched(user_account_id).catch(err => {
+          log.warn({ err, userId: user_account_id }, 'Failed to update onboarding stage');
+        });
+
+        return reply.send({
+          success: true,
+          message: `Реклама запущена: создано ${successCount} адсетов, ${totalAds} объявлений`,
+          direction_id: direction.id,
+          direction_name: direction.name,
+          campaign_id: direction.fb_campaign_id,
+          total_adsets: results.length,
+          total_ads: totalAds,
+          success_count: successCount,
+          failed_count: failedCount,
+          adsets: results,
+        });
+      } catch (error: any) {
+        log.error({ err: error }, 'Manual launch multi failed');
+
+        logErrorToAdmin({
+          user_account_id,
+          error_type: error?.fb ? 'facebook' : 'api',
+          error_code: error?.fb ? `${error.fb.code}:${error.fb.error_subcode || 0}` : undefined,
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'manual_launch_multi',
+          endpoint: '/manual-launch-multi',
+          request_data: { direction_id, adsets_count: adsets?.length },
+          severity: 'warning',
+        }).catch(() => {});
+
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Manual launch multi failed',
         });
       }
     }

@@ -6,7 +6,8 @@ import { useAppContext } from '@/context/AppContext';
 import { supabase } from '@/integrations/supabase/client';
 import { salesApi } from '@/services/salesApi';
 import { facebookApi } from '@/services/facebookApi';
-import { manualLaunchAds, ManualLaunchResponse } from '@/services/manualLaunchApi';
+import { type MultiAdSetLaunchResponse } from '@/services/manualLaunchApi';
+import { ManualLaunchDialog } from '@/components/ManualLaunchDialog';
 import CallbackRequest from './CallbackRequest';
 import { API_BASE_URL } from '@/config/api';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -219,41 +220,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   
   // Для ручного запуска
   const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
-  const [manualLaunchLoading, setManualLaunchLoading] = useState(false);
-  const [selectedManualDirection, setSelectedManualDirection] = useState<string>('');
-  const [selectedCreativeIds, setSelectedCreativeIds] = useState<string[]>([]);
-  const [availableCreatives, setAvailableCreatives] = useState<any[]>([]);
-  const [loadingCreatives, setLoadingCreatives] = useState(false);
-  const [launchResult, setLaunchResult] = useState<ManualLaunchResponse | null>(null);
+  const [launchResult, setLaunchResult] = useState<MultiAdSetLaunchResponse | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
 
   // Для результатов auto-launch
   const [autoLaunchResults, setAutoLaunchResults] = useState<any[] | null>(null);
   const [autoLaunchResultDialogOpen, setAutoLaunchResultDialogOpen] = useState(false);
-  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(
-    isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
-  );
-  const [launchedBudget, setLaunchedBudget] = useState<number>(
-    isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
-  );
-  const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now'); // По умолчанию "Сейчас"
-  const manualLaunchMinBudget = isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET;
-  const manualLaunchBudgetSymbol = isTikTokPlatform ? '₸' : '$';
-  const manualLaunchBudgetLabel = isTikTokPlatform ? 'KZT' : 'USD';
-  const manualLaunchMinBudgetText = isTikTokPlatform
-    ? `${manualLaunchMinBudget}₸`
-    : `${manualLaunchBudgetSymbol}${manualLaunchMinBudget}`;
-  const adGroupId =
-    launchResult?.adset_id || launchResult?.adgroup_id || launchResult?.tiktok_adgroup_id;
   const adGroupTitle = isTikTokPlatform ? 'Ad Group' : 'Ad Set';
-  const launchedBudgetLabel = isTikTokPlatform
-    ? `${launchedBudget.toLocaleString('ru-RU')} ₸`
-    : `${manualLaunchBudgetSymbol}${launchedBudget}`;
-
-  useEffect(() => {
-    setManualLaunchBudget(manualLaunchMinBudget);
-    setLaunchedBudget(manualLaunchMinBudget);
-  }, [manualLaunchMinBudget]);
 
   useEffect(() => {
     async function fetchUserData() {
@@ -372,110 +345,10 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     loadDefaultSettings();
   }, [campaignGoal, userData?.id]);
 
-  // Загрузка креативов при выборе направления для ручного запуска
-  useEffect(() => {
-    const loadCreatives = async () => {
-      if (!selectedManualDirection || !userData?.id) {
-        setAvailableCreatives([]);
-        return;
-      }
-
-      setLoadingCreatives(true);
-      try {
-        const { data, error } = await supabase
-          .from('user_creatives')
-          .select('*')
-          .eq('user_id', userData.id)
-          .eq('direction_id', selectedManualDirection)
-          .eq('is_active', true)
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false });
-
-        if (error) {
-          console.error('Ошибка загрузки креативов:', error);
-          toast.error('Не удалось загрузить креативы');
-          setAvailableCreatives([]);
-        } else {
-          setAvailableCreatives(data || []);
-        }
-      } catch (error) {
-        console.error('Ошибка при загрузке креативов:', error);
-        setAvailableCreatives([]);
-      } finally {
-        setLoadingCreatives(false);
-      }
-    };
-
-    loadCreatives();
-  }, [selectedManualDirection, userData?.id]);
-
-  // Обработчик ручного запуска рекламы
-  const handleManualLaunch = async () => {
-    if (!userData?.id) {
-      toast.error('Пользователь не авторизован');
-      return;
-    }
-
-    if (!selectedManualDirection) {
-      toast.error('Выберите направление');
-      return;
-    }
-
-    if (selectedCreativeIds.length === 0) {
-      toast.error('Выберите хотя бы один креатив');
-      return;
-    }
-
-    if (manualLaunchBudget < manualLaunchMinBudget) {
-      toast.error(`Минимальный бюджет - ${manualLaunchMinBudgetText}`);
-      return;
-    }
-
-    setManualLaunchLoading(true);
-
-    try {
-      // Сохраняем бюджет для показа в результате
-      setLaunchedBudget(manualLaunchBudget);
-      
-      const direction = directions.find(d => d.id === selectedManualDirection);
-      const result = await manualLaunchAds({
-        platform: isTikTokPlatform ? 'tiktok' : 'facebook',
-        user_account_id: userData.id,
-        account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
-        direction_id: selectedManualDirection,
-        creative_ids: selectedCreativeIds,
-        ...(isTikTokPlatform
-          ? {
-              daily_budget: manualLaunchBudget,
-              objective: direction?.tiktok_objective || undefined,
-            }
-          : {
-              start_mode: manualStartMode,
-              daily_budget_cents: Math.round(manualLaunchBudget * 100), // Конвертируем в центы
-            }),
-      });
-
-      if (result.success) {
-        setLaunchResult(result);
-        setManualLaunchDialogOpen(false);
-        setResultDialogOpen(true);
-        toast.success(result.message || 'Реклама успешно запущена!');
-        
-        // Сброс формы
-        setSelectedManualDirection('');
-        setSelectedCreativeIds([]);
-        setAvailableCreatives([]);
-        setManualLaunchBudget(manualLaunchMinBudget);
-        setManualStartMode('now'); // Сбрасываем на "Сейчас"
-      } else {
-        toast.error(result.error || 'Ошибка запуска рекламы');
-      }
-    } catch (error: any) {
-      console.error('Ошибка запуска рекламы:', error);
-      toast.error(error.message || 'Ошибка запуска рекламы');
-    } finally {
-      setManualLaunchLoading(false);
-    }
+  // Callback после успешного запуска рекламы
+  const handleLaunchSuccess = (result: MultiAdSetLaunchResponse) => {
+    setLaunchResult(result);
+    setResultDialogOpen(true);
   };
 
   // Функция для определения типа ошибки
@@ -2925,211 +2798,37 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           </div>
         )}
 
-        {/* Модальное окно для ручного запуска */}
-        <Dialog open={manualLaunchDialogOpen} onOpenChange={setManualLaunchDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Ручной запуск рекламы</DialogTitle>
-              <DialogDescription>
-                Выберите направление и креативы для запуска рекламы
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-6 py-4">
-              {/* Выбор направления */}
-              <div className="space-y-2">
-                <Label>Направление</Label>
-                <Select
-                  value={selectedManualDirection}
-                  onValueChange={(value) => {
-                    setSelectedManualDirection(value);
-                    setSelectedCreativeIds([]);
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Выберите направление" className="truncate" />
-                  </SelectTrigger>
-                  <SelectContent className="max-w-[calc(100vw-4rem)]">
-                    {directions.length === 0 ? (
-                      <div className="p-2 text-sm text-muted-foreground">
-                        Нет доступных направлений
-                      </div>
-                    ) : (
-                      directions
-                        .filter((d) => d.is_active)
-                        .map((direction) => (
-                          <SelectItem key={direction.id} value={direction.id}>
-                            <span className="block truncate max-w-[350px]" title={`${direction.name} (${getDirectionObjectiveLabel(direction)})`}>
-                              {direction.name} ({getDirectionObjectiveLabel(direction)})
-                            </span>
-                          </SelectItem>
-                        ))
-                    )}
-                  </SelectContent>
-                </Select>
-                {directions.length === 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    <Button
-                      variant="link"
-                      size="sm"
-                      className="h-auto p-0"
-                      onClick={() => {
-                        setManualLaunchDialogOpen(false);
-                        navigate('/profile');
-                      }}
-                    >
-                      Создать направление
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* Дневной бюджет */}
-              <div className="space-y-2">
-                <Label htmlFor="manual-budget">Дневной бюджет ({manualLaunchBudgetLabel})</Label>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{manualLaunchBudgetSymbol}</span>
-                  <input
-                    id="manual-budget"
-                    type="number"
-                    min={manualLaunchMinBudget}
-                    step="1"
-                    value={manualLaunchBudget}
-                    onChange={(e) => setManualLaunchBudget(Number(e.target.value))}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={manualLaunchLoading}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Минимальный бюджет: {manualLaunchMinBudgetText} в день
-                </p>
-              </div>
-
-              {/* Время запуска */}
-              {!isTikTokPlatform && (
-                <div className="space-y-2">
-                  <Label>Время запуска</Label>
-                  <RadioGroup
-                    value={manualStartMode}
-                    onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
-                    className="grid grid-cols-1 gap-2"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="midnight_almaty" id="start-midnight" />
-                      <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="now" id="start-now" />
-                      <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-              )}
-
-              {/* Выбор креативов */}
-              {selectedManualDirection && (
-                <div className="space-y-2">
-                  <Label>
-                    Креативы {selectedCreativeIds.length > 0 && `(выбрано: ${selectedCreativeIds.length})`}
-                  </Label>
-                  {loadingCreatives ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : availableCreatives.length === 0 ? (
-                    <div className="p-4 border border-dashed rounded-lg text-center text-sm text-muted-foreground">
-                      Нет активных креативов в этом направлении
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto border rounded-lg p-3">
-                      {availableCreatives.map((creative) => (
-                        <div
-                          key={creative.id}
-                          className="flex items-center space-x-3 p-2 hover:bg-muted/50 rounded transition-colors"
-                        >
-                          <Checkbox
-                            id={`creative-${creative.id}`}
-                            checked={selectedCreativeIds.includes(creative.id)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedCreativeIds([...selectedCreativeIds, creative.id]);
-                              } else {
-                                setSelectedCreativeIds(
-                                  selectedCreativeIds.filter((id) => id !== creative.id)
-                                );
-                              }
-                            }}
-                          />
-                          <label
-                            htmlFor={`creative-${creative.id}`}
-                            className="flex-1 min-w-0 cursor-pointer text-sm"
-                          >
-                            <div className="font-medium truncate" title={creative.title}>{creative.title}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {new Date(creative.created_at).toLocaleDateString('ru-RU')}
-                            </div>
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 pt-4 border-t">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setManualLaunchDialogOpen(false);
-                  setSelectedManualDirection('');
-                  setSelectedCreativeIds([]);
-                  setManualLaunchBudget(manualLaunchMinBudget);
-                }}
-                disabled={manualLaunchLoading}
-              >
-                Отмена
-              </Button>
-              <Button
-                onClick={handleManualLaunch}
-                disabled={
-                  manualLaunchLoading ||
-                  !selectedManualDirection ||
-                  selectedCreativeIds.length === 0
-                }
-                variant="default"
-                className="dark:bg-gray-700 dark:hover:bg-gray-800"
-              >
-                {manualLaunchLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Запуск...
-                  </>
-                ) : (
-                  <>
-                    <Rocket className="h-4 w-4 mr-2" />
-                    Запустить
-                  </>
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        {/* Модальное окно для ручного запуска (multi-adset) */}
+        {userData?.id && (
+          <ManualLaunchDialog
+            mode="standalone"
+            open={manualLaunchDialogOpen}
+            onOpenChange={setManualLaunchDialogOpen}
+            directions={directions}
+            userId={userData.id}
+            platform={isTikTokPlatform ? 'tiktok' : 'facebook'}
+            currentAdAccountId={currentAdAccountId}
+            onSuccess={handleLaunchSuccess}
+          />
+        )}
 
         {/* Модальное окно с результатом запуска */}
         <Dialog open={resultDialogOpen} onOpenChange={setResultDialogOpen}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Реклама запущена!</DialogTitle>
+              <DialogTitle>
+                {launchResult?.total_ads === 0 ? 'Ошибка запуска' : 'Реклама запущена!'}
+              </DialogTitle>
               <DialogDescription>
-                {launchResult?.message || 'Реклама успешно запущена'}
+                {launchResult?.total_ads === 0
+                  ? (launchResult?.error || 'Не удалось создать объявления')
+                  : (launchResult?.message || 'Реклама успешно запущена')}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
               {launchResult && (
                 <>
-                  {/* Информация о направлении */}
                   <div className="space-y-2">
                     <div className="text-sm flex items-baseline gap-1 min-w-0">
                       <span className="text-muted-foreground shrink-0">Направление:</span>{' '}
@@ -3141,48 +2840,54 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         <span className="font-mono text-xs">{launchResult.campaign_id}</span>
                       </div>
                     )}
-                  </div>
-
-                  {/* Информация об Ad Set */}
-                  <div className="p-4 bg-muted/30 rounded-lg space-y-2">
-                    <div className="text-sm font-medium">{adGroupTitle}</div>
-                    <div className="text-sm text-muted-foreground truncate" title={launchResult.adset_name}>
-                      {launchResult.adset_name || '—'}
-                    </div>
-                    {adGroupId && (
-                      <div className="text-xs text-muted-foreground font-mono">
-                        ID: {adGroupId}
+                    {(launchResult.total_adsets > 1 || launchResult.failed_count > 0) && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Адсетов:</span>{' '}
+                        <span className="font-medium">{launchResult.success_count}</span>
+                        {launchResult.failed_count > 0 && (
+                          <span className="text-destructive ml-1">({launchResult.failed_count} ошибок)</span>
+                        )}
                       </div>
                     )}
-                    <div className="text-sm pt-2 border-t border-border/50">
-                      <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                      <span className="font-medium">{launchedBudgetLabel}</span>
-                    </div>
                   </div>
 
-                  {/* Список созданных объявлений */}
-                  {launchResult.ads && launchResult.ads.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">
-                        Создано объявлений: {launchResult.ads_created}
-                      </div>
-                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                        {launchResult.ads.map((ad, index) => (
-                          <div
-                            key={ad.ad_id}
-                            className="p-3 border rounded-lg text-sm space-y-1"
-                          >
-                            <div className="font-medium truncate" title={ad.name}>
-                              {index + 1}. {ad.name}
-                            </div>
-                            <div className="text-xs text-muted-foreground font-mono">
-                              ID: {ad.ad_id}
-                            </div>
+                  <div className="space-y-3">
+                    {launchResult.adsets?.map((adsetResult, idx) => (
+                      <div key={adsetResult.adset_id || idx} className="p-4 bg-muted/30 rounded-lg space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm font-medium">
+                            {adGroupTitle} {launchResult.adsets.length > 1 ? idx + 1 : ''}
                           </div>
-                        ))}
+                          {!adsetResult.success && (
+                            <span className="text-xs text-destructive">Ошибка</span>
+                          )}
+                        </div>
+                        {adsetResult.success ? (
+                          <>
+                            {adsetResult.adset_name && (
+                              <div className="text-sm text-muted-foreground truncate">{adsetResult.adset_name}</div>
+                            )}
+                            {adsetResult.adset_id && (
+                              <div className="text-xs text-muted-foreground font-mono">ID: {adsetResult.adset_id}</div>
+                            )}
+                            {adsetResult.ads && adsetResult.ads.length > 0 && (
+                              <div className="space-y-1 pt-2 border-t border-border/50">
+                                <div className="text-xs text-muted-foreground">Объявлений: {adsetResult.ads_created}</div>
+                                {adsetResult.ads.map((ad, adIdx) => (
+                                  <div key={ad.ad_id} className="text-xs">
+                                    {adIdx + 1}. {ad.name}
+                                    <span className="text-muted-foreground font-mono ml-1">({ad.ad_id})</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-sm text-destructive">{adsetResult.error}</div>
+                        )}
                       </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </>
               )}
             </div>
