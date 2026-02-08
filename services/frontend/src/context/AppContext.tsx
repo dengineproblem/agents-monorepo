@@ -174,17 +174,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       if (urlSince && urlUntil) {
         setDateRange({ since: urlSince, until: urlUntil });
-      } else {
-        const savedRange = localStorage.getItem('app_date_range');
-        if (savedRange) {
-          try {
-            const parsed = JSON.parse(savedRange);
-            if (parsed?.since && parsed?.until) {
-              setDateRange({ since: parsed.since, until: parsed.until });
-            }
-          } catch {/* ignore */}
-        }
       }
+      // Без URL-параметров всегда используем "сегодня" (значение по умолчанию)
     } catch {/* ignore */}
   }, []);
 
@@ -192,7 +183,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   useEffect(() => {
     try {
       localStorage.setItem('app_platform', platform);
-      localStorage.setItem('app_date_range', JSON.stringify(dateRange));
 
       const url = new URL(window.location.href);
       url.searchParams.set('p', platform);
