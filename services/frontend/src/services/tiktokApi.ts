@@ -646,11 +646,9 @@ export const tiktokApi = {
         metrics: JSON.stringify(['spend', 'impressions', 'clicks', 'ctr', 'conversion']),
         start_date: dateRange.since,
         end_date: dateRange.until,
-        filtering: JSON.stringify([{
-          field_name: 'campaign_id',
-          filter_type: 'IN',
-          filter_value: JSON.stringify([campaignId])
-        }]),
+        filtering: JSON.stringify({
+          campaign_ids: [campaignId]
+        }),
         page: '1',
         page_size: '1000'
       };
@@ -807,11 +805,9 @@ export const tiktokApi = {
           data_level: 'AUCTION_ADGROUP',
           dimensions: ['adgroup_id', 'stat_time_day'],
           metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
-          filtering: [{
-            field_name: 'campaign_id',
-            filter_type: 'IN',
-            filter_value: JSON.stringify([campaignId])
-          }],
+          filtering: {
+            campaign_ids: [campaignId]
+          },
           start_date: format(windowStart, 'yyyy-MM-dd'),
           end_date: format(windowEnd, 'yyyy-MM-dd'),
           page: 1,
@@ -954,11 +950,9 @@ export const tiktokApi = {
           data_level: 'AUCTION_AD',
           dimensions: ['ad_id', 'stat_time_day'],
           metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
-          filtering: [{
-            field_name: 'adgroup_id',
-            filter_type: 'IN',
-            filter_value: JSON.stringify([adGroupId])
-          }],
+          filtering: {
+            adgroup_ids: [adGroupId]
+          },
           start_date: format(windowStart, 'yyyy-MM-dd'),
           end_date: format(windowEnd, 'yyyy-MM-dd'),
           page: 1,

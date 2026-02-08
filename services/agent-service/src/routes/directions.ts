@@ -24,6 +24,8 @@ const CapiFieldConfigSchema = z.object({
   enum_id: z.union([z.string(), z.number(), z.null()]).optional(),
   enum_value: z.string().nullable().optional(),
   entity_type: z.string().optional(), // for Bitrix24
+  pipeline_id: z.union([z.string(), z.number(), z.null()]).optional(),
+  status_id: z.union([z.string(), z.number(), z.null()]).optional(),
 });
 
 const DirectionPlatformSchema = z.enum(['facebook', 'tiktok', 'both']);

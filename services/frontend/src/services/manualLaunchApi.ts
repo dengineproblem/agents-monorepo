@@ -93,18 +93,34 @@ export async function manualLaunchMultiAdSets(
   request: MultiAdSetLaunchRequest
 ): Promise<MultiAdSetLaunchResponse> {
   try {
-    const payload = {
-      user_account_id: request.user_account_id,
-      account_id: request.account_id ?? null,
-      direction_id: request.direction_id,
-      start_mode: request.start_mode,
-      adsets: request.adsets.map(a => ({
-        creative_ids: a.creative_ids,
-        daily_budget_cents: a.daily_budget_cents,
-      })),
-    };
+    const isTikTok = request.platform === 'tiktok';
+    const endpoint = isTikTok
+      ? '/tiktok-campaign-builder/manual-launch-multi'
+      : '/campaign-builder/manual-launch-multi';
 
-    const response = await fetch(`${API_BASE_URL}/campaign-builder/manual-launch-multi`, {
+    const payload = isTikTok
+      ? {
+          user_account_id: request.user_account_id,
+          account_id: request.account_id ?? null,
+          direction_id: request.direction_id,
+          objective: request.objective,
+          adsets: request.adsets.map(a => ({
+            creative_ids: a.creative_ids,
+            daily_budget: a.daily_budget,
+          })),
+        }
+      : {
+          user_account_id: request.user_account_id,
+          account_id: request.account_id ?? null,
+          direction_id: request.direction_id,
+          start_mode: request.start_mode,
+          adsets: request.adsets.map(a => ({
+            creative_ids: a.creative_ids,
+            daily_budget_cents: a.daily_budget_cents,
+          })),
+        };
+
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

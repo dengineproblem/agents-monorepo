@@ -1501,7 +1501,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                             Level 1: Интерес
                           </Label>
                           <p className="text-xs text-muted-foreground">
-                            ViewContent — 3+ сообщения от клиента
+                            Contact — 3+ сообщения от клиента
                           </p>
                         </div>
                       </div>

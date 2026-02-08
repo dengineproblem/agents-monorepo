@@ -469,7 +469,7 @@ wait
 
 ## Контакты и ресурсы
 
-**Telegram бот:** @prfmntai_bot (8584683514:AAHzoE31UbNNCDexse9hYeJQLWT9Ay2pBhE)
+**Telegram бот:** @prfmntai_bot (8584683514:AAFxTNn33isfmJMKR82-KYxf_p1LED0hWTM)
 **Gateway URL:** ws://0.0.0.0:18789
 **Prod сервер:** ubuntu-s-2vcpu-4gb-120gb-intel-nyc1-01
 

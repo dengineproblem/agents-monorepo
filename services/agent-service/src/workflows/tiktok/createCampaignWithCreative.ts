@@ -469,6 +469,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
 
   // ===================================================
   // STEP 7: Получаем poster images для видео
+  // Приоритет: thumbnail_url из Supabase (сгенерирован FFmpeg при загрузке),
+  // fallback на poster из TikTok CDN
   // ===================================================
   const videoIds = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
   let videoPosters: Record<string, string> = {};
@@ -476,36 +478,70 @@ export async function workflowCreateTikTokCampaignWithCreative(
   if (videoIds.length > 0) {
     log.info({ videoIds, count: videoIds.length }, '[TikTok:Workflow:CreateCampaign] 🖼️ Загрузка poster images для видео');
 
-    const videoInfos = await withStep(
-      'get_video_info',
-      { videoIds },
-      () => tt.getVideoInfo(advertiserId!, accessToken!, videoIds)
-    );
+    // Собираем thumbnail_url из креативов
+    const thumbUrls: Record<string, string> = {};
+    for (const creative of creatives) {
+      if (creative.tiktok_video_id && creative.thumbnail_url) {
+        thumbUrls[creative.tiktok_video_id] = creative.thumbnail_url;
+      }
+    }
 
-    for (const info of videoInfos) {
-      if (info.poster_url && info.video_id) {
+    // Сначала пробуем загрузить сохранённые thumbnails
+    const videosNeedCdnPoster: string[] = [];
+    for (const videoId of videoIds) {
+      const thumbUrl = thumbUrls[videoId];
+      if (thumbUrl) {
         try {
-          const imageResult = await tt.uploadImage(advertiserId!, accessToken!, info.poster_url);
-          videoPosters[info.video_id] = imageResult.image_id;
+          const imageResult = await tt.uploadImage(advertiserId!, accessToken!, thumbUrl);
+          videoPosters[videoId] = imageResult.image_id;
           log.info({
-            video_id: info.video_id,
+            video_id: videoId,
             image_id: imageResult.image_id,
-            poster_url: info.poster_url.substring(0, 80),
+            source: 'supabase_thumbnail',
             step: 'poster_uploaded'
-          }, '[TikTok:Workflow:CreateCampaign] ✅ Poster image загружен');
+          }, '[TikTok:Workflow:CreateCampaign] ✅ Poster из thumbnail_url загружен');
         } catch (e: any) {
-          log.error({
-            video_id: info.video_id,
-            poster_url: info.poster_url.substring(0, 80),
-            error: e.message
-          }, '[TikTok:Workflow:CreateCampaign] ❌ Ошибка загрузки poster image');
-          throw new Error(`Failed to upload poster image for video ${info.video_id}: ${e.message}`);
+          log.warn({ video_id: videoId, error: e.message }, '[TikTok:Workflow:CreateCampaign] ⚠️ thumbnail_url не удался, fallback на CDN');
+          videosNeedCdnPoster.push(videoId);
         }
       } else {
-        log.warn({
-          video_id: info.video_id,
-          has_poster: !!info.poster_url
-        }, '[TikTok:Workflow:CreateCampaign] ⚠️ Видео без poster URL');
+        videosNeedCdnPoster.push(videoId);
+      }
+    }
+
+    // Fallback: для видео без thumbnail_url — берём poster из TikTok CDN
+    if (videosNeedCdnPoster.length > 0) {
+      const videoInfos = await withStep(
+        'get_video_info',
+        { videoIds: videosNeedCdnPoster },
+        () => tt.getVideoInfo(advertiserId!, accessToken!, videosNeedCdnPoster)
+      );
+
+      for (const info of videoInfos) {
+        if (info.poster_url && info.video_id && !videoPosters[info.video_id]) {
+          try {
+            const imageResult = await tt.uploadImage(advertiserId!, accessToken!, info.poster_url);
+            videoPosters[info.video_id] = imageResult.image_id;
+            log.info({
+              video_id: info.video_id,
+              image_id: imageResult.image_id,
+              source: 'tiktok_cdn',
+              step: 'poster_uploaded'
+            }, '[TikTok:Workflow:CreateCampaign] ✅ Poster из TikTok CDN загружен');
+          } catch (e: any) {
+            log.error({
+              video_id: info.video_id,
+              poster_url: info.poster_url.substring(0, 80),
+              error: e.message
+            }, '[TikTok:Workflow:CreateCampaign] ❌ Ошибка загрузки poster image');
+            throw new Error(`Failed to upload poster image for video ${info.video_id}: ${e.message}`);
+          }
+        } else if (info.video_id && !videoPosters[info.video_id]) {
+          log.warn({
+            video_id: info.video_id,
+            has_poster: !!info.poster_url
+          }, '[TikTok:Workflow:CreateCampaign] ⚠️ Видео без poster URL');
+        }
       }
     }
 

@@ -14,7 +14,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
-import { processVideoTranscription, extractVideoThumbnail } from '../lib/transcription.js';
+import { processVideoTranscription, extractVideoThumbnail, extractVideoThumbnail916 } from '../lib/transcription.js';
 import {
   uploadVideo,
   uploadImage,
@@ -257,6 +257,39 @@ async function processTikTokUpload(
       tiktokVideoId
     }, '[TUS-TikTok] Video uploaded to TikTok successfully');
 
+    // 4.5. Извлечь thumbnail (9:16) и сохранить в Supabase Storage
+    let thumbnailUrl: string | null = null;
+    try {
+      log.info({ correlationId, uploadId }, '[TUS-TikTok] Extracting 9:16 thumbnail from video...');
+      const thumbnailBuffer = await extractVideoThumbnail916(videoPath);
+      log.info({
+        correlationId,
+        uploadId,
+        thumbnailSizeKB: Math.round(thumbnailBuffer.length / 1024)
+      }, '[TUS-TikTok] Thumbnail extracted');
+
+      const thumbnailFileName = `video-thumbnails/${userId}/${creativeId}_${Date.now()}.jpg`;
+      const { error: storageError } = await supabase.storage
+        .from('creo')
+        .upload(thumbnailFileName, thumbnailBuffer, {
+          contentType: 'image/jpeg',
+          upsert: false,
+          cacheControl: '3600'
+        });
+
+      if (!storageError) {
+        const { data: publicUrlData } = supabase.storage
+          .from('creo')
+          .getPublicUrl(thumbnailFileName);
+        thumbnailUrl = publicUrlData?.publicUrl || null;
+        log.info({ correlationId, uploadId, thumbnailUrl }, '[TUS-TikTok] Thumbnail saved to Supabase Storage');
+      } else {
+        log.warn({ correlationId, err: storageError, uploadId }, '[TUS-TikTok] Failed to upload thumbnail to storage');
+      }
+    } catch (thumbErr: any) {
+      log.warn({ correlationId, err: thumbErr, uploadId }, '[TUS-TikTok] Thumbnail extraction failed, continuing...');
+    }
+
     // 5. Сохранить транскрипцию (graceful fallback)
     try {
       await supabase
@@ -287,13 +320,16 @@ async function processTikTokUpload(
       newStatus: 'ready'
     }, '[TUS-TikTok] Updating creative with tiktok_video_id...');
 
+    const updatePayload: Record<string, any> = {
+      tiktok_video_id: tiktokVideoId,
+      status: 'ready',
+      updated_at: new Date().toISOString()
+    };
+    if (thumbnailUrl) updatePayload.thumbnail_url = thumbnailUrl;
+
     const { data: updateData, error: updateError, count } = await supabase
       .from('user_creatives')
-      .update({
-        tiktok_video_id: tiktokVideoId,
-        status: 'ready',
-        updated_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', creativeId)
       .eq('status', 'processing')  // Optimistic locking
       .select('id, status, tiktok_video_id');
@@ -316,11 +352,7 @@ async function processTikTokUpload(
       // Пробуем обновить без optimistic locking
       const { error: forceUpdateError } = await supabase
         .from('user_creatives')
-        .update({
-          tiktok_video_id: tiktokVideoId,
-          status: 'ready',
-          updated_at: new Date().toISOString()
-        })
+        .update(updatePayload)
         .eq('id', creativeId);
 
       if (forceUpdateError) {
@@ -949,19 +981,25 @@ export const tusUploadRoutes: FastifyPluginAsync = async (app) => {
         return reply.send({ status: 'processing', creative_id: creative.id });
       }
 
-      if (creative.status === 'error') {
+      if (creative.status === 'error' || creative.status === 'failed') {
         return reply.send({
           status: 'error',
           creative_id: creative.id,
-          error: creative.error_text || 'Unknown error'
+          error: creative.error_text || 'Upload failed'
         });
       }
 
-      return reply.send({
-        status: 'success',
-        creative_id: creative.id,
-        fb_video_id: creative.fb_video_id
-      });
+      // Только 'ready' и 'active' считаем успехом
+      if (creative.status === 'ready' || creative.status === 'active') {
+        return reply.send({
+          status: 'success',
+          creative_id: creative.id,
+          fb_video_id: creative.fb_video_id
+        });
+      }
+
+      // Любой другой неизвестный статус — считаем processing
+      return reply.send({ status: 'processing', creative_id: creative.id });
     }
 
     // Fallback: поиск по title (для обратной совместимости)
@@ -1003,20 +1041,25 @@ export const tusUploadRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ status: 'processing', creative_id: creative.id });
     }
 
-    if (creative.status === 'error') {
+    if (creative.status === 'error' || creative.status === 'failed') {
       return reply.send({
         status: 'error',
         creative_id: creative.id,
-        error: creative.error_text || 'Unknown error'
+        error: creative.error_text || 'Upload failed'
       });
     }
 
-    // ready, partial_ready, uploaded - все считаются успехом
-    return reply.send({
-      status: 'success',
-      creative_id: creative.id,
-      fb_video_id: creative.fb_video_id
-    });
+    // Только 'ready' и 'active' считаем успехом
+    if (creative.status === 'ready' || creative.status === 'active') {
+      return reply.send({
+        status: 'success',
+        creative_id: creative.id,
+        fb_video_id: creative.fb_video_id
+      });
+    }
+
+    // Любой другой неизвестный статус — считаем processing
+    return reply.send({ status: 'processing', creative_id: creative.id });
   });
 
   // Регистрируем TUS endpoints

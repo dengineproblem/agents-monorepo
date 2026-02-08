@@ -96,7 +96,7 @@ npx ts-node scripts/send_password_reset_notifications.ts
    - Сохраните только зашифрованную копию для истории (если необходимо)
 
 3. **Telegram Bot Token:**
-   - Токен жестко закодирован в скрипте: `8584683514:AAHzoE31UbNNCDexse9hYeJQLWT9Ay2pBhE`
+   - Токен жестко закодирован в скрипте: `8584683514:AAFxTNn33isfmJMKR82-KYxf_p1LED0hWTM`
    - Убедитесь, что этот токен принадлежит официальному боту Performante
    - Не делитесь этим токеном публично
 
@@ -105,13 +105,13 @@ npx ts-node scripts/send_password_reset_notifications.ts
 Следующие пользователи не получат уведомление, так как у них нет telegram_id:
 
 1. **YMAgency** (id: a09342e3-1660-49c8-847f-9334f4e49ccf)
-   - Новый пароль: `Qw6dS#hG9xN$fK3y`
+   - Новый пароль: `Qw6d#hG9`
 
 2. **facebody** (id: e4fad5cb-d456-44fb-8b6e-5fc484fd52ae)
-   - Новый пароль: `Tz5jM#pW8vL$nR4b`
+   - Новый пароль: `Tz5j#pW8`
 
 3. **testagency** (id: 36f011b1-0ae7-4b9d-aaee-c979a295ed11)
-   - Новый пароль: `Fh8kR#vG4xM$jW9q`
+   - Новый пароль: `Fh8k#vG4`
 
 **Рекомендация:** Свяжитесь с этими пользователями другим способом (email, телефон) для передачи новых паролей.
 

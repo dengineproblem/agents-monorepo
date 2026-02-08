@@ -79,6 +79,67 @@ export async function extractVideoThumbnail(videoPath: string): Promise<Buffer> 
 }
 
 /**
+ * Извлекает первый кадр видео для TikTok cover image.
+ * TikTok принимает cover: 9:16, 1:1 или 16:9.
+ * Для нестандартных пропорций (например 4:5) кропаем до ближайшего 9:16
+ * с центрированием по высоте/ширине.
+ * Минимальное разрешение: 720x1280 (9:16).
+ */
+export async function extractVideoThumbnail916(videoPath: string): Promise<Buffer> {
+  const thumbnailPath = path.join('/var/tmp', `thumbnail_tiktok_${randomUUID()}.jpg`);
+
+  // Определяем размеры видео
+  const probe = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, data) => {
+      if (err) return reject(err);
+      const stream = data.streams.find(s => s.codec_type === 'video');
+      if (!stream || !stream.width || !stream.height) return reject(new Error('No video stream found'));
+      resolve({ width: stream.width, height: stream.height });
+    });
+  });
+
+  const ratio = probe.width / probe.height;
+
+  // Определяем target: 9:16 (<= 0.625), 1:1 (0.625..1.333), 16:9 (>= 1.333)
+  let targetW: number;
+  let targetH: number;
+
+  if (ratio <= 0.85) {
+    // Вертикальное (9:16, 4:5 и уже) → кроп/scale до 720x1280
+    targetW = 720; targetH = 1280;
+  } else if (ratio <= 1.2) {
+    // Квадратное → 640x640
+    targetW = 640; targetH = 640;
+  } else {
+    // Горизонтальное → 1280x720
+    targetW = 1280; targetH = 720;
+  }
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(videoPath)
+      .seekInput(0.001)
+      .frames(1)
+      .videoFilters([
+        // Масштабируем чтобы покрыть target (crop, не pad), потом кропаем по центру
+        `scale=${targetW}:${targetH}:force_original_aspect_ratio=increase`,
+        `crop=${targetW}:${targetH}`
+      ])
+      .output(thumbnailPath)
+      .on('end', async () => {
+        try {
+          const buffer = await fs.readFile(thumbnailPath);
+          await fs.unlink(thumbnailPath);
+          resolve(buffer);
+        } catch (err) {
+          reject(err);
+        }
+      })
+      .on('error', (err: Error) => reject(new Error(`FFmpeg TikTok thumbnail error: ${err.message}`)))
+      .run();
+  });
+}
+
+/**
  * Обрабатывает видео: извлекает аудио и транскрибирует его
  */
 export async function processVideoTranscription(

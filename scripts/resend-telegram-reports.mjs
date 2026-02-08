@@ -138,7 +138,9 @@ async function main() {
   let failCount = 0;
 
   for (const report of reports) {
-    const reportText = report.report_data?.text;
+    // report_data может быть объектом { text: "..." } или строкой напрямую
+    const rd = report.report_data;
+    const reportText = typeof rd === 'string' ? rd : rd?.text;
     if (!reportText) {
       console.log(`  Пропуск report ${report.id}: нет текста`);
       continue;

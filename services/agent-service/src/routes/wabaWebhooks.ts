@@ -325,12 +325,24 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
     }
   }
 
-  // 4. Reset CAPI counter for new ad click
-  await supabase
-    .from('dialog_analysis')
-    .update({ capi_msg_count: 0, capi_interest_sent: false })
-    .eq('instance_name', instanceName)
-    .eq('contact_phone', clientPhone);
+  // 4. Reset CAPI counter only for directions with whatsapp source
+  const capiSource = await getDirectionCapiSource(directionId || null);
+  const shouldTrackWhatsappCapi = capiSource !== 'crm';
+
+  if (shouldTrackWhatsappCapi) {
+    await supabase
+      .from('dialog_analysis')
+      .update({ capi_msg_count: 0, capi_interest_sent: false })
+      .eq('instance_name', instanceName)
+      .eq('contact_phone', clientPhone);
+  } else {
+    app.log.debug({
+      instanceName,
+      clientPhone,
+      directionId,
+      capiSource
+    }, 'WABA: Skip CAPI counter reset for CRM-sourced direction');
+  }
 
   // 5. Upsert dialog_analysis for CAPI tracking
   await upsertDialogAnalysis({
@@ -393,6 +405,40 @@ async function findWhatsAppNumber(
   return null;
 }
 
+async function getLeadAttribution(contactPhone: string, userAccountId: string): Promise<{
+  isFromAd: boolean;
+  directionId: string | null;
+}> {
+  const { data: lead } = await supabase
+    .from('leads')
+    .select('source_id, direction_id')
+    .eq('chat_id', contactPhone)
+    .eq('user_account_id', userAccountId)
+    .maybeSingle();
+
+  return {
+    isFromAd: !!lead?.source_id,
+    directionId: lead?.direction_id || null
+  };
+}
+
+async function getDirectionCapiSource(directionId: string | null | undefined): Promise<'whatsapp' | 'crm' | null> {
+  if (!directionId) return null;
+
+  const { data: direction } = await supabase
+    .from('account_directions')
+    .select('capi_source')
+    .eq('id', directionId)
+    .maybeSingle();
+
+  const source = direction?.capi_source;
+  if (source === 'crm' || source === 'whatsapp') {
+    return source;
+  }
+
+  return null;
+}
+
 // ============================================
 // Helper: Upsert Dialog Analysis
 // ============================================
@@ -421,22 +467,19 @@ async function upsertDialogAnalysis(params: {
     .eq('instance_name', instanceName)
     .maybeSingle();
 
-  // Check if this is an ad lead
-  const { data: lead } = await supabase
-    .from('leads')
-    .select('source_id')
-    .eq('chat_id', contactPhone)
-    .eq('user_account_id', userAccountId)
-    .not('source_id', 'is', null)
-    .maybeSingle();
-
-  const isFromAd = !!lead?.source_id;
+  const leadAttribution = await getLeadAttribution(contactPhone, userAccountId);
+  const isFromAd = leadAttribution.isFromAd;
+  const effectiveDirectionId = directionId || existing?.direction_id || leadAttribution.directionId || null;
+  const capiSource = isFromAd ? await getDirectionCapiSource(effectiveDirectionId) : null;
+  const isWhatsappCapiTrackingEnabled = capiSource !== 'crm';
 
   if (existing) {
     // Update existing record
     const finalCtwaClid = ctwaClid || existing.ctwa_clid;
-    const finalDirectionId = directionId || existing.direction_id;
-    const newCapiMsgCount = isFromAd ? (existing.capi_msg_count || 0) + 1 : (existing.capi_msg_count || 0);
+    const finalDirectionId = effectiveDirectionId;
+    const newCapiMsgCount = (isFromAd && isWhatsappCapiTrackingEnabled)
+      ? (existing.capi_msg_count || 0) + 1
+      : (existing.capi_msg_count || 0);
     const newIncomingCount = (existing.incoming_count || 0) + 1;
 
     await supabase
@@ -455,6 +498,7 @@ async function upsertDialogAnalysis(params: {
     // Check CAPI threshold
     if (
       isFromAd &&
+      isWhatsappCapiTrackingEnabled &&
       newCapiMsgCount >= CAPI_INTEREST_THRESHOLD &&
       !existing.capi_interest_sent &&
       finalDirectionId
@@ -463,15 +507,22 @@ async function upsertDialogAnalysis(params: {
         contactPhone,
         capiMsgCount: newCapiMsgCount,
         threshold: CAPI_INTEREST_THRESHOLD,
-        directionId: finalDirectionId
-      }, 'WABA: CAPI threshold reached, sending ViewContent');
+        directionId: finalDirectionId,
+        capiSource: capiSource || null
+      }, 'WABA: CAPI threshold reached, sending Contact');
 
       await sendCapiInterestEvent(instanceName, contactPhone, app);
+    } else if (isFromAd && !isWhatsappCapiTrackingEnabled) {
+      app.log.debug({
+        contactPhone,
+        directionId: finalDirectionId,
+        capiSource: capiSource || null
+      }, 'WABA: Skipping WhatsApp CAPI counter because capi_source=crm');
     }
 
   } else {
     // Create new record
-    const initialCapiMsgCount = isFromAd ? 1 : 0;
+    const initialCapiMsgCount = (isFromAd && isWhatsappCapiTrackingEnabled) ? 1 : 0;
 
     await supabase
       .from('dialog_analysis')
@@ -484,7 +535,7 @@ async function upsertDialogAnalysis(params: {
         first_message: timestamp.toISOString(),
         last_message: timestamp.toISOString(),
         ctwa_clid: ctwaClid || null,
-        direction_id: directionId || null,
+        direction_id: effectiveDirectionId,
         capi_msg_count: initialCapiMsgCount,
         incoming_count: 1,
         funnel_stage: 'new_lead',
@@ -514,21 +565,30 @@ async function sendCapiInterestEvent(
       body: JSON.stringify({ instanceName, contactPhone })
     });
 
-    if (response.ok) {
+    const responseData = await response.json().catch(() => null) as { success?: boolean; eventId?: string; error?: string } | null;
+    const isSuccess = response.ok && responseData?.success === true;
+
+    if (isSuccess) {
       await supabase
         .from('dialog_analysis')
         .update({ capi_interest_sent: true })
         .eq('instance_name', instanceName)
         .eq('contact_phone', contactPhone);
 
-      app.log.info({ correlationId, instanceName, contactPhone }, 'WABA: CAPI Interest event sent');
+      app.log.info({
+        correlationId,
+        instanceName,
+        contactPhone,
+        eventId: responseData?.eventId
+      }, 'WABA: CAPI Interest event sent');
     } else {
-      app.log.error({
+      app.log.warn({
         correlationId,
         status: response.status,
+        error: responseData?.error || 'CAPI response success=false or invalid payload',
         instanceName,
         contactPhone
-      }, 'WABA: CAPI Interest event failed');
+      }, 'WABA: CAPI Interest event not confirmed');
     }
   } catch (error: any) {
     app.log.error({

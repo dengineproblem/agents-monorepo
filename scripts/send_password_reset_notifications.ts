@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Telegram Bot Configuration
-const TELEGRAM_BOT_TOKEN = '8584683514:AAHzoE31UbNNCDexse9hYeJQLWT9Ay2pBhE';
+const TELEGRAM_BOT_TOKEN = '8584683514:AAFxTNn33isfmJMKR82-KYxf_p1LED0hWTM';
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 interface UserPasswordData {
@@ -53,7 +53,7 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<boolea
       }),
     });
 
-    const data = await response.json();
+    const data = await response.json() as { ok: boolean; description?: string };
 
     if (!data.ok) {
       console.error(`Failed to send message to ${chatId}:`, data.description);

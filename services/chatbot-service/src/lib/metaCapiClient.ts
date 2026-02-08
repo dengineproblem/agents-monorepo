@@ -65,7 +65,7 @@ const circuitBreaker = new MetaCircuitBreaker();
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  INTEREST: 'Contact',              // Level 1: 3+ inbound messages
+  INTEREST: 'Other',                // Level 1: 3+ inbound messages
   QUALIFIED: 'CompleteRegistration',// Level 2: Passed qualification
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
@@ -662,6 +662,7 @@ export async function sendCapiEventAtomic(params: CapiEventParams): Promise<Capi
   }[eventLevel];
 
   const flagAtColumn = `${flagColumn}_at`;
+  const flagEventIdColumn = `${flagColumn.replace('_sent', '_event_id')}`;
 
   // Atomic: SET flag = true WHERE flag = false (claim the send)
   const { data, error } = await supabase
@@ -691,19 +692,35 @@ export async function sendCapiEventAtomic(params: CapiEventParams): Promise<Capi
   // Successfully claimed - now send the event
   const response = await sendCapiEvent(params);
 
-  // If send failed, we should ideally rollback the flag
-  // But for simplicity, we keep it set (event is logged as error in capi_events_log)
   if (!response.success) {
-    log.warn({
-      dialogAnalysisId,
-      eventLevel,
-      error: response.error,
-    }, 'CAPI event claimed but send failed - flag remains set');
+    // Rollback claim to allow retry on next message/cron run
+    const { error: rollbackError } = await supabase
+      .from('dialog_analysis')
+      .update({
+        [flagColumn]: false,
+        [flagAtColumn]: null,
+        [flagEventIdColumn]: null,
+      })
+      .eq('id', dialogAnalysisId);
+
+    if (rollbackError) {
+      log.error({
+        dialogAnalysisId,
+        eventLevel,
+        error: rollbackError.message,
+      }, 'Failed to rollback CAPI claim after send failure');
+    } else {
+      log.warn({
+        dialogAnalysisId,
+        eventLevel,
+        error: response.error,
+      }, 'CAPI send failed, claim rolled back for retry');
+    }
   } else if (response.eventId) {
     // Update with event_id
     await supabase
       .from('dialog_analysis')
-      .update({ [`${flagColumn.replace('_sent', '_event_id')}`]: response.eventId })
+      .update({ [flagEventIdColumn]: response.eventId })
       .eq('id', dialogAnalysisId);
   }
 

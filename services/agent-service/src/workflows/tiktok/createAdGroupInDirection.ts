@@ -15,11 +15,13 @@ import { logger } from '../../lib/logger.js';
 import { saveAdCreativeMappingBatch } from '../../lib/adCreativeMapping.js';
 
 // Helper: получить identity info и poster images
+// thumbnailUrls: Record<tiktok_video_id, supabase_thumbnail_url> — из user_creatives.thumbnail_url
 async function resolveIdentityAndPosters(
   advertiserId: string,
   accessToken: string,
   identityId?: string,
-  videoIds?: string[]
+  videoIds?: string[],
+  thumbnailUrls?: Record<string, string>
 ): Promise<{
   identityType: string;
   displayName: string;
@@ -44,21 +46,46 @@ async function resolveIdentityAndPosters(
     }
   }
 
-  // Poster images
+  // Poster images — приоритет: thumbnail_url из Supabase, fallback на TikTok CDN poster
   const videoPosters: Record<string, string> = {};
   if (videoIds && videoIds.length > 0) {
-    try {
-      const videoInfos = await tt.getVideoInfo(advertiserId, accessToken, videoIds);
-      for (const vi of videoInfos) {
-        if (vi.poster_url && vi.video_id) {
-          const imageResult = await tt.uploadImage(advertiserId, accessToken, vi.poster_url);
-          videoPosters[vi.video_id] = imageResult.image_id;
-          logger.info({ video_id: vi.video_id, image_id: imageResult.image_id }, '[TikTok] ✅ Poster image загружен');
+    // Сначала пробуем загрузить сохранённые thumbnails из Supabase
+    const videosWithoutPoster: string[] = [];
+    if (thumbnailUrls) {
+      for (const videoId of videoIds) {
+        const thumbUrl = thumbnailUrls[videoId];
+        if (thumbUrl) {
+          try {
+            const imageResult = await tt.uploadImage(advertiserId, accessToken, thumbUrl);
+            videoPosters[videoId] = imageResult.image_id;
+            logger.info({ video_id: videoId, image_id: imageResult.image_id, source: 'supabase_thumbnail' }, '[TikTok] ✅ Poster из thumbnail_url загружен');
+          } catch (e: any) {
+            logger.warn({ video_id: videoId, error: e.message }, '[TikTok] ⚠️ Не удалось загрузить thumbnail_url, попробуем CDN');
+            videosWithoutPoster.push(videoId);
+          }
+        } else {
+          videosWithoutPoster.push(videoId);
         }
       }
-    } catch (e: any) {
-      logger.error({ error: e.message }, '[TikTok] ❌ Ошибка загрузки poster images');
-      throw new Error(`Failed to upload poster images: ${e.message}`);
+    } else {
+      videosWithoutPoster.push(...videoIds);
+    }
+
+    // Fallback: для видео без thumbnail_url — берём poster из TikTok CDN
+    if (videosWithoutPoster.length > 0) {
+      try {
+        const videoInfos = await tt.getVideoInfo(advertiserId, accessToken, videosWithoutPoster);
+        for (const vi of videoInfos) {
+          if (vi.poster_url && vi.video_id && !videoPosters[vi.video_id]) {
+            const imageResult = await tt.uploadImage(advertiserId, accessToken, vi.poster_url);
+            videoPosters[vi.video_id] = imageResult.image_id;
+            logger.info({ video_id: vi.video_id, image_id: imageResult.image_id, source: 'tiktok_cdn' }, '[TikTok] ✅ Poster из TikTok CDN загружен');
+          }
+        }
+      } catch (e: any) {
+        logger.error({ error: e.message }, '[TikTok] ❌ Ошибка загрузки poster images из TikTok CDN');
+        throw new Error(`Failed to upload poster images: ${e.message}`);
+      }
     }
   }
 
@@ -512,8 +539,15 @@ export async function workflowCreateAdInDirection(
   // STEP 6: Identity info + poster images
   // ===================================================
   const videoIds = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
+  // Собираем thumbnail_url из креативов для приоритетного использования
+  const thumbnailUrls: Record<string, string> = {};
+  for (const creative of creatives) {
+    if (creative.tiktok_video_id && creative.thumbnail_url) {
+      thumbnailUrls[creative.tiktok_video_id] = creative.thumbnail_url;
+    }
+  }
   const { identityType, displayName, resolvedIdentityId, videoPosters } = await resolveIdentityAndPosters(
-    advertiserId, accessToken, identityId, videoIds
+    advertiserId, accessToken, identityId, videoIds, thumbnailUrls
   );
 
   logger.info({
@@ -555,7 +589,8 @@ export async function workflowCreateAdInDirection(
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       ...(imageId && { image_ids: [imageId] }),
       ...(resolvedIdentityId && { identity_id: resolvedIdentityId, identity_type: identityType as any }),
-      ...(displayName && { display_name: displayName })
+      ...(displayName && { display_name: displayName }),
+      ...(directionSettings.page_id && { page_id: directionSettings.page_id })
     };
 
     logger.info({
@@ -563,6 +598,7 @@ export async function workflowCreateAdInDirection(
       adgroup_id: adgroup.tiktok_adgroup_id,
       video_id: creative.tiktok_video_id,
       has_poster: !!imageId,
+      has_page_id: !!directionSettings.page_id,
       identity_type: identityType,
       ad_index: created_ads.length + 1,
       total_ads: creative_data.length
@@ -664,7 +700,7 @@ export async function workflowCreateAdGroupWithCreatives(
 
   const { data: direction, error: directionError } = await supabase
     .from('account_directions')
-    .select('id, name, tiktok_campaign_id, tiktok_objective, tiktok_identity_id')
+    .select('id, name, tiktok_campaign_id, tiktok_objective, tiktok_identity_id, tiktok_instant_page_id')
     .eq('id', direction_id)
     .eq('user_account_id', user_account_id)
     .single();
@@ -745,8 +781,14 @@ export async function workflowCreateAdGroupWithCreatives(
 
   // Identity info + poster images
   const videoIdsForPosters = creative_data.map(c => c.tiktok_video_id).filter(Boolean);
+  const thumbUrls: Record<string, string> = {};
+  for (const creative of creatives) {
+    if (creative.tiktok_video_id && creative.thumbnail_url) {
+      thumbUrls[creative.tiktok_video_id] = creative.thumbnail_url;
+    }
+  }
   const { identityType: idType, displayName: dName, resolvedIdentityId: resolvedId, videoPosters: posters } = await resolveIdentityAndPosters(
-    advertiserId, accessToken, identityId, videoIdsForPosters
+    advertiserId, accessToken, identityId, videoIdsForPosters, thumbUrls
   );
 
   logger.info({
@@ -801,6 +843,7 @@ export async function workflowCreateAdGroupWithCreatives(
 
   for (const creative of creative_data) {
     const imageId = posters[creative.tiktok_video_id];
+    const pageId = direction.tiktok_instant_page_id;
     const adParams = {
       ad_name: creative.ad_name,
       adgroup_id: tiktok_adgroup_id,
@@ -811,13 +854,15 @@ export async function workflowCreateAdGroupWithCreatives(
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       ...(imageId && { image_ids: [imageId] }),
       ...(resolvedId && { identity_id: resolvedId, identity_type: idType as any }),
-      ...(dName && { display_name: dName })
+      ...(dName && { display_name: dName }),
+      ...(pageId && { page_id: pageId })
     };
 
     logger.info({
       ad_name: creative.ad_name,
       video_id: creative.tiktok_video_id,
       has_poster: !!imageId,
+      has_page_id: !!pageId,
       ad_index: created_ads.length + 1,
       total_ads: creative_data.length
     }, '[TIKTOK:CreateAdGroupWithCreatives] Creating ad');

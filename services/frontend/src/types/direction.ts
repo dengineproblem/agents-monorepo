@@ -17,6 +17,8 @@ export interface CapiFieldConfig {
   enum_id?: string | number | null;
   enum_value?: string | null;
   entity_type?: string; // for Bitrix24
+  pipeline_id?: string | number | null;
+  status_id?: string | number | null;
 }
 
 export interface Direction {

@@ -300,6 +300,322 @@ app.post('/capi/resend', async (request, reply) => {
   }
 });
 
+function buildPhoneCandidates(rawPhone: string): string[] {
+  const normalized = rawPhone.trim();
+  const withoutSuffix = normalized
+    .replace('@s.whatsapp.net', '')
+    .replace('@c.us', '')
+    .replace('@lid', '');
+  const digits = withoutSuffix.replace(/\D/g, '');
+
+  const candidates = new Set<string>();
+  if (normalized) candidates.add(normalized);
+  if (withoutSuffix) candidates.add(withoutSuffix);
+
+  if (digits) {
+    candidates.add(digits);
+    candidates.add(`+${digits}`);
+    candidates.add(`${digits}@s.whatsapp.net`);
+    candidates.add(`${digits}@c.us`);
+  }
+
+  if (digits.length === 11 && digits.startsWith('8')) {
+    const alt = `7${digits.slice(1)}`;
+    candidates.add(alt);
+    candidates.add(`+${alt}`);
+    candidates.add(`${alt}@s.whatsapp.net`);
+    candidates.add(`${alt}@c.us`);
+  }
+
+  if (digits.length === 11 && digits.startsWith('7')) {
+    const alt = `8${digits.slice(1)}`;
+    candidates.add(alt);
+    candidates.add(`+${alt}`);
+  }
+
+  return [...candidates];
+}
+
+// CRM-triggered CAPI events (near-real-time from Amo/Bitrix webhooks)
+app.post('/capi/crm-event', async (request, reply) => {
+  const correlationId = (request.headers['x-correlation-id'] as string) || randomUUID();
+  const startTime = Date.now();
+
+  try {
+    const { userAccountId, directionId, contactPhone, crmType, levels } = request.body as {
+      userAccountId: string;
+      directionId: string;
+      contactPhone: string;
+      crmType: 'amocrm' | 'bitrix24';
+      levels: {
+        interest?: boolean;
+        qualified?: boolean;
+        scheduled?: boolean;
+      };
+    };
+
+    if (!userAccountId || !directionId || !contactPhone || !crmType || !levels) {
+      return reply.status(400).send({
+        success: false,
+        error: 'Missing required fields: userAccountId, directionId, contactPhone, crmType, levels',
+        correlationId
+      });
+    }
+
+    const requestedLevels: Array<{ level: 1 | 2 | 3; key: 'interest' | 'qualified' | 'scheduled' }> = [];
+    if (levels.scheduled) requestedLevels.push({ level: 3, key: 'scheduled' });
+    if (levels.qualified) requestedLevels.push({ level: 2, key: 'qualified' });
+    if (levels.interest) requestedLevels.push({ level: 1, key: 'interest' });
+
+    if (requestedLevels.length === 0) {
+      return reply.status(400).send({
+        success: false,
+        error: 'At least one level must be true',
+        correlationId
+      });
+    }
+
+    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS } = await import('./lib/metaCapiClient.js');
+    const { supabase } = await import('./lib/supabase.js');
+
+    const { data: directionSettings, error: directionError } = await supabase
+      .from('account_directions')
+      .select('id, capi_enabled, capi_source, capi_crm_type')
+      .eq('id', directionId)
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    if (directionError || !directionSettings) {
+      return reply.status(404).send({
+        success: false,
+        error: 'Direction not found for user account',
+        correlationId
+      });
+    }
+
+    if (!directionSettings.capi_enabled) {
+      return reply.status(409).send({
+        success: false,
+        error: 'CAPI is disabled for direction',
+        correlationId
+      });
+    }
+
+    if (directionSettings.capi_source !== 'crm') {
+      return reply.status(409).send({
+        success: false,
+        error: 'Direction capi_source is not crm',
+        correlationId
+      });
+    }
+
+    if (directionSettings.capi_crm_type && directionSettings.capi_crm_type !== crmType) {
+      return reply.status(409).send({
+        success: false,
+        error: `Direction CRM type mismatch: expected ${directionSettings.capi_crm_type}`,
+        correlationId
+      });
+    }
+
+    const pixelInfo = await getDirectionPixelInfo(directionId);
+    if (!pixelInfo.pixelId || !pixelInfo.accessToken) {
+      return reply.status(400).send({
+        success: false,
+        error: 'No pixel or access_token configured for direction',
+        correlationId
+      });
+    }
+
+    const phoneCandidates = buildPhoneCandidates(contactPhone);
+    const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
+
+    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; ctwa_clid?: string | null } | null = null;
+    const { data: leadByChat } = await supabase
+      .from('leads')
+      .select('id, chat_id, phone, ctwa_clid')
+      .eq('user_account_id', userAccountId)
+      .eq('direction_id', directionId)
+      .in('chat_id', phoneCandidates)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    leadRecord = leadByChat || null;
+
+    if (!leadRecord) {
+      const { data: leadByPhone } = await supabase
+        .from('leads')
+        .select('id, chat_id, phone, ctwa_clid')
+        .eq('user_account_id', userAccountId)
+        .eq('direction_id', directionId)
+        .in('phone', phoneCandidates)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      leadRecord = leadByPhone || null;
+    }
+
+    if (!leadRecord && digitsCandidate) {
+      const { data: leadByLike } = await supabase
+        .from('leads')
+        .select('id, chat_id, phone, ctwa_clid')
+        .eq('user_account_id', userAccountId)
+        .eq('direction_id', directionId)
+        .ilike('chat_id', `%${digitsCandidate}%`)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      leadRecord = leadByLike || null;
+    }
+
+    let dialogRecord: { id: string; contact_phone?: string | null; ctwa_clid?: string | null } | null = null;
+    const { data: dialogByDirection } = await supabase
+      .from('dialog_analysis')
+      .select('id, contact_phone, ctwa_clid')
+      .eq('user_account_id', userAccountId)
+      .eq('direction_id', directionId)
+      .in('contact_phone', phoneCandidates)
+      .order('last_message', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    dialogRecord = dialogByDirection || null;
+
+    if (!dialogRecord && digitsCandidate) {
+      const { data: dialogByLike } = await supabase
+        .from('dialog_analysis')
+        .select('id, contact_phone, ctwa_clid')
+        .eq('user_account_id', userAccountId)
+        .eq('direction_id', directionId)
+        .ilike('contact_phone', `%${digitsCandidate}%`)
+        .order('last_message', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      dialogRecord = dialogByLike || null;
+    }
+
+    const resolvedPhone = dialogRecord?.contact_phone
+      || (digitsCandidate || contactPhone);
+
+    const ctwaClid = dialogRecord?.ctwa_clid || leadRecord?.ctwa_clid || undefined;
+    const leadId = leadRecord?.id ? String(leadRecord.id) : undefined;
+    const dialogAnalysisId = dialogRecord?.id;
+
+    const results: Array<{
+      level: 1 | 2 | 3;
+      eventName: string;
+      success: boolean;
+      alreadySent: boolean;
+      eventId?: string;
+      error?: string;
+    }> = [];
+
+    for (const requestedLevel of requestedLevels) {
+      const eventName = {
+        1: CAPI_EVENTS.INTEREST,
+        2: CAPI_EVENTS.QUALIFIED,
+        3: CAPI_EVENTS.SCHEDULED,
+      }[requestedLevel.level];
+
+      const response = await sendCapiEventAtomic({
+        pixelId: pixelInfo.pixelId,
+        accessToken: pixelInfo.accessToken,
+        eventName,
+        eventLevel: requestedLevel.level,
+        phone: resolvedPhone,
+        ctwaClid,
+        dialogAnalysisId,
+        leadId,
+        userAccountId,
+        directionId,
+        customData: {
+          channel: 'crm',
+          crm_source: crmType,
+          level: requestedLevel.key
+        },
+        correlationId
+      });
+
+      const alreadySent = !response.success && (response.error || '').toLowerCase().includes('already sent');
+      results.push({
+        level: requestedLevel.level,
+        eventName,
+        success: response.success,
+        alreadySent,
+        eventId: response.eventId,
+        error: response.error
+      });
+
+      if (response.success && dialogAnalysisId) {
+        const sourceUpdates: Record<string, string> = {};
+        if (requestedLevel.level === 2) sourceUpdates.capi_qualified_source = crmType;
+        if (requestedLevel.level === 3) sourceUpdates.capi_scheduled_source = crmType;
+
+        if (Object.keys(sourceUpdates).length > 0) {
+          await supabase
+            .from('dialog_analysis')
+            .update(sourceUpdates)
+            .eq('id', dialogAnalysisId);
+        }
+      }
+    }
+
+    const successCount = results.filter((result) => result.success).length;
+    const alreadySentCount = results.filter((result) => result.alreadySent).length;
+    const hardFailureCount = results.filter((result) => !result.success && !result.alreadySent).length;
+    const durationMs = Date.now() - startTime;
+
+    const responsePayload = {
+      success: hardFailureCount === 0,
+      correlationId,
+      resolvedPhone,
+      directionId,
+      crmType,
+      dialogFound: !!dialogRecord,
+      leadFound: !!leadRecord,
+      successCount,
+      alreadySentCount,
+      hardFailureCount,
+      durationMs,
+      results,
+    };
+
+    if (hardFailureCount > 0 && successCount === 0 && alreadySentCount === 0) {
+      app.log.warn({
+        correlationId,
+        directionId,
+        crmType,
+        resolvedPhone,
+        results,
+        durationMs
+      }, 'CRM CAPI event failed');
+      return reply.status(502).send(responsePayload);
+    }
+
+    app.log.info({
+      correlationId,
+      directionId,
+      crmType,
+      resolvedPhone,
+      successCount,
+      alreadySentCount,
+      hardFailureCount,
+      durationMs
+    }, 'CRM CAPI event processed');
+
+    return reply.send(responsePayload);
+  } catch (error: any) {
+    const durationMs = Date.now() - startTime;
+    app.log.error({
+      correlationId,
+      error: error.message,
+      stack: error.stack,
+      durationMs
+    }, 'Error processing CRM CAPI event');
+    return reply.status(500).send({ success: false, error: error.message, correlationId });
+  }
+});
+
 // Interest (Contact) событие по счётчику сообщений
 // Вызывается из agent-service когда лид достиг порога capi_msg_count
 // Qualified и Scheduled отправляются через AI анализ в processDialogForCapi
@@ -390,16 +706,20 @@ app.post('/capi/interest-event', async (request, reply) => {
 
       return reply.send({ success: true, event: 'Contact', eventId: response.eventId, correlationId });
     } else {
+      const normalizedError = (response.error || '').toLowerCase();
+      const statusCode = normalizedError.includes('already sent') ? 409 : 502;
+
       app.log.warn({
         correlationId,
         contactPhone,
         dialogId: dialog.id,
         error: response.error,
+        statusCode,
         durationMs,
         action: 'capi_interest_skipped'
       }, 'Interest CAPI event failed or already sent');
 
-      return reply.status(200).send({ success: false, error: response.error, correlationId });
+      return reply.status(statusCode).send({ success: false, error: response.error, correlationId });
     }
 
   } catch (error: any) {

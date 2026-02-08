@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { KBSidebar } from '../components/knowledge-base/KBSidebar';
@@ -6,44 +6,86 @@ import { KBArticle } from '../components/knowledge-base/KBArticle';
 import { KBBreadcrumbs } from '../components/knowledge-base/KBBreadcrumbs';
 import { KBSearch } from '../components/knowledge-base/KBSearch';
 import { KBTableOfContents } from '../components/knowledge-base/KBTableOfContents';
-import { knowledgeBaseContent, type Chapter } from '../content/knowledge-base';
+import { knowledgeBaseContent, type Chapter, type KBAudience } from '../content/knowledge-base';
 import { Input } from '../components/ui/input';
-import { Search, BookOpen, Menu, ChevronRight, GraduationCap } from 'lucide-react';
+import { Search, BookOpen, Menu, GraduationCap } from 'lucide-react';
 import { forceStartTour } from '@/hooks/useOnboardingTour';
 import { Button } from '../components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '../components/ui/sheet';
-import { ScrollArea } from '../components/ui/scroll-area';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '../components/ui/collapsible';
+import { useAppContext } from '../context/AppContext';
 
 const KnowledgeBase: React.FC = () => {
   const { chapterId, sectionId } = useParams<{ chapterId?: string; sectionId?: string }>();
   const navigate = useNavigate();
+  const { multiAccountEnabled } = useAppContext();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [expandedChapter, setExpandedChapter] = useState<string | null>(chapterId || null);
+  const audience: KBAudience = multiAccountEnabled ? 'multi' : 'legacy';
+
+  // Видимый контент зависит от режима аккаунта
+  const visibleChapters = useMemo(() => {
+    return knowledgeBaseContent
+      .map((chapter) => {
+        const chapterAudience = chapter.audience || 'all';
+        if (chapterAudience !== 'all' && chapterAudience !== audience) {
+          return null;
+        }
+
+        const visibleSections = chapter.sections.filter((section) => {
+          const sectionAudience = section.audience || 'all';
+          return sectionAudience === 'all' || sectionAudience === audience;
+        });
+
+        if (visibleSections.length === 0) {
+          return null;
+        }
+
+        return {
+          ...chapter,
+          sections: visibleSections,
+        };
+      })
+      .filter(Boolean) as Chapter[];
+  }, [audience]);
 
   // Находим текущую главу и раздел
   const currentChapter = useMemo(() => {
     if (!chapterId) return null;
-    return knowledgeBaseContent.find(ch => ch.id === chapterId) || null;
-  }, [chapterId]);
+    return visibleChapters.find(ch => ch.id === chapterId) || null;
+  }, [chapterId, visibleChapters]);
 
   const currentSection = useMemo(() => {
     if (!currentChapter || !sectionId) return null;
     return currentChapter.sections.find(s => s.id === sectionId) || null;
   }, [currentChapter, sectionId]);
 
+  // Защита от прямых ссылок на скрытые разделы
+  useEffect(() => {
+    if (!chapterId) return;
+
+    const chapter = visibleChapters.find(ch => ch.id === chapterId);
+    if (!chapter) {
+      navigate('/knowledge-base', { replace: true });
+      return;
+    }
+
+    if (sectionId && !chapter.sections.some(s => s.id === sectionId)) {
+      const firstSectionId = chapter.sections[0]?.id;
+      if (firstSectionId) {
+        navigate(`/knowledge-base/${chapter.id}/${firstSectionId}`, { replace: true });
+      } else {
+        navigate('/knowledge-base', { replace: true });
+      }
+    }
+  }, [chapterId, sectionId, visibleChapters, navigate]);
+
   // Фильтрация по поиску
   const filteredChapters = useMemo(() => {
-    if (!searchQuery.trim()) return knowledgeBaseContent;
+    if (!searchQuery.trim()) return visibleChapters;
 
     const query = searchQuery.toLowerCase();
-    return knowledgeBaseContent.map(chapter => {
+    return visibleChapters.map(chapter => {
       const matchingSections = chapter.sections.filter(section =>
         section.title.toLowerCase().includes(query) ||
         section.content.toLowerCase().includes(query)
@@ -59,7 +101,7 @@ const KnowledgeBase: React.FC = () => {
       }
       return null;
     }).filter(Boolean) as Chapter[];
-  }, [searchQuery]);
+  }, [searchQuery, visibleChapters]);
 
   const handleNavigate = (chapterId: string, sectionId?: string) => {
     setMobileSidebarOpen(false);
@@ -199,6 +241,7 @@ const KnowledgeBase: React.FC = () => {
                   <KBArticle
                     chapter={currentChapter}
                     section={currentSection}
+                    chapters={visibleChapters}
                     onNavigate={handleNavigate}
                   />
                 </>
@@ -213,6 +256,7 @@ const KnowledgeBase: React.FC = () => {
                     <KBArticle
                       chapter={currentChapter}
                       section={currentChapter.sections[0]}
+                      chapters={visibleChapters}
                       onNavigate={handleNavigate}
                     />
                   )}
@@ -226,7 +270,7 @@ const KnowledgeBase: React.FC = () => {
             {chapterId && (
               <aside className="hidden xl:block w-56 flex-shrink-0">
                 <KBTableOfContents
-                  chapters={knowledgeBaseContent}
+                  chapters={visibleChapters}
                   currentChapterId={chapterId}
                   currentSectionId={sectionId}
                   onNavigate={handleNavigate}

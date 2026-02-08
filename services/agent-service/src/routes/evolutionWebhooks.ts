@@ -15,6 +15,8 @@ const SMART_MATCH_SILENCE_DAYS = 7;
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
+const EVOLUTION_AD_SOURCE_FALLBACK_ENABLED =
+  process.env.EVOLUTION_AD_SOURCE_FALLBACK_ENABLED !== 'false';
 
 
 export default async function evolutionWebhooks(app: FastifyInstance) {
@@ -84,6 +86,22 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
 }
 
 /**
+ * Normalize source_id value from Evolution payload
+ */
+function normalizeSourceId(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return undefined;
+}
+
+/**
  * Handle incoming WhatsApp message
  */
 async function handleIncomingMessage(event: any, app: FastifyInstance) {
@@ -147,7 +165,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   
   // Извлекаем метаданные Facebook из externalAdReply
   const externalAdReply = contextInfo?.externalAdReply;
-  const sourceId = externalAdReply?.sourceId; // Ad ID из Facebook (например: "120236271994930134")
+  const sourceId = normalizeSourceId(externalAdReply?.sourceId); // Ad ID из Facebook (например: "120236271994930134")
+  const keySourceId = normalizeSourceId(message.key?.sourceId); // Fallback формат Evolution patch
   const sourceType = externalAdReply?.sourceType; // "ad" для рекламных сообщений
   const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
   const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
@@ -161,9 +180,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
                    externalAdReply?.ctwaClid ||  // В externalAdReply
                    data.ctwaClid;  // На верхнем уровне data
 
-  // ✅ ИСПОЛЬЗУЕМ ТОЛЬКО sourceId из externalAdReply (реальный Facebook Ad ID)
-  // ❌ НЕ используем stanzaId - это просто message ID, а не Ad ID!
-  const finalSourceId = sourceId;
+  // Приоритет: externalAdReply.sourceId -> fallback message.key.sourceId (под флагом)
+  const fallbackSourceId = EVOLUTION_AD_SOURCE_FALLBACK_ENABLED && !sourceId
+    ? keySourceId
+    : undefined;
+  const finalSourceId = sourceId || fallbackSourceId;
+  const sourceIdOrigin = sourceId ? 'external' : (fallbackSourceId ? 'key' : 'none');
 
   // Log message structure for debugging
   app.log.info({
@@ -171,6 +193,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     remoteJid,
     remoteJidAlt,
     sourceId: finalSourceId || null,
+    keySourceId: keySourceId || null,
+    sourceIdOrigin,
+    evolutionAdFallbackEnabled: EVOLUTION_AD_SOURCE_FALLBACK_ENABLED,
     sourceType: sourceType || null,
     sourceUrl: sourceUrl || null,
     ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: логируем ctwa_clid для CAPI
@@ -180,9 +205,20 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
 
-  // ✅ Проверка: сообщения с реальными данными рекламы обрабатываем напрямую
-  // Сообщения без externalAdReply пробуем сопоставить через client_question
-  if (!finalSourceId || !externalAdReply) {
+  const hasAdMetadata = !!finalSourceId;
+
+  if (sourceIdOrigin === 'key') {
+    app.log.info({
+      instance,
+      remoteJid,
+      sourceId: finalSourceId,
+      sourceIdOrigin,
+      hasExternalAdReply: !!externalAdReply
+    }, 'Evolution ad-id fallback applied from message.key.sourceId');
+  }
+
+  // Сообщения без ad-id обрабатываем как обычные входящие
+  if (!hasAdMetadata) {
     // Пропускаем групповые чаты
     if (remoteJid.endsWith('@g.us')) {
       app.log.debug({ instance, remoteJid }, 'Ignoring group chat message');
@@ -510,15 +546,27 @@ async function processAdLead(params: {
     }
   }
 
-  // Сбросить CAPI счётчик для нового клика на рекламу
-  // (чтобы повторный клик того же контакта снова запустил воронку)
-  await supabase
-    .from('dialog_analysis')
-    .update({ capi_msg_count: 0, capi_interest_sent: false })
-    .eq('instance_name', instanceName)
-    .eq('contact_phone', clientPhone);
+  // Сбрасываем CAPI-счётчик только для направлений с WhatsApp источником
+  // Для capi_source='crm' WhatsApp события не должны менять CAPI-флаги
+  const capiSource = await getDirectionCapiSource(directionId || null);
+  const shouldTrackWhatsappCapi = capiSource !== 'crm';
 
-  app.log.debug({ instanceName, clientPhone }, 'Reset CAPI counter for new ad click');
+  if (shouldTrackWhatsappCapi) {
+    await supabase
+      .from('dialog_analysis')
+      .update({ capi_msg_count: 0, capi_interest_sent: false })
+      .eq('instance_name', instanceName)
+      .eq('contact_phone', clientPhone);
+
+    app.log.debug({ instanceName, clientPhone }, 'Reset CAPI counter for new ad click');
+  } else {
+    app.log.debug({
+      instanceName,
+      clientPhone,
+      directionId,
+      capiSource
+    }, 'Skip CAPI counter reset for CRM-sourced direction');
+  }
 
   // НОВОЕ: Создать/обновить запись в dialog_analysis для чат-бота
   await upsertDialogAnalysis({
@@ -550,22 +598,47 @@ async function processAdLead(params: {
 }
 
 /**
- * Проверить, является ли контакт рекламным лидом (есть source_id в leads)
+ * Получить рекламную атрибуцию лида
  */
-async function isAdLead(contactPhone: string, userAccountId: string): Promise<boolean> {
+async function getLeadAttribution(contactPhone: string, userAccountId: string): Promise<{
+  isFromAd: boolean;
+  directionId: string | null;
+}> {
   const { data: lead } = await supabase
     .from('leads')
-    .select('source_id')
+    .select('source_id, direction_id')
     .eq('chat_id', contactPhone)
     .eq('user_account_id', userAccountId)
-    .not('source_id', 'is', null)
     .maybeSingle();
 
-  return !!lead?.source_id;
+  return {
+    isFromAd: !!lead?.source_id,
+    directionId: lead?.direction_id || null
+  };
 }
 
 /**
- * Отправить CAPI Interest (ViewContent) событие через chatbot-service
+ * Get capi_source for direction
+ */
+async function getDirectionCapiSource(directionId: string | null | undefined): Promise<'whatsapp' | 'crm' | null> {
+  if (!directionId) return null;
+
+  const { data: direction } = await supabase
+    .from('account_directions')
+    .select('capi_source')
+    .eq('id', directionId)
+    .maybeSingle();
+
+  const source = direction?.capi_source;
+  if (source === 'crm' || source === 'whatsapp') {
+    return source;
+  }
+
+  return null;
+}
+
+/**
+ * Отправить CAPI Interest (Contact) событие через chatbot-service
  */
 async function sendCapiInterestEvent(
   app: FastifyInstance,
@@ -595,10 +668,10 @@ async function sendCapiInterestEvent(
     });
 
     const durationMs = Date.now() - startTime;
+    const responseData = await response.json().catch(() => null) as { success?: boolean; eventId?: string; error?: string } | null;
+    const isSuccess = response.ok && responseData?.success === true;
 
-    if (response.ok) {
-      const responseData = await response.json() as { success: boolean; eventId?: string };
-
+    if (isSuccess) {
       // Пометить что отправили
       await supabase
         .from('dialog_analysis')
@@ -615,16 +688,15 @@ async function sendCapiInterestEvent(
         action: 'capi_interest_success'
       }, 'CAPI Interest event sent successfully');
     } else {
-      const errorText = await response.text();
-      app.log.error({
+      app.log.warn({
         correlationId,
         instanceName,
         contactPhone,
         status: response.status,
-        error: errorText,
+        error: responseData?.error || 'CAPI response success=false or invalid payload',
         durationMs,
-        action: 'capi_interest_failed'
-      }, 'CAPI Interest event failed');
+        action: 'capi_interest_not_confirmed'
+      }, 'CAPI Interest event was not confirmed by chatbot-service');
     }
   } catch (error: any) {
     const durationMs = Date.now() - startTime;
@@ -642,7 +714,7 @@ async function sendCapiInterestEvent(
 
 /**
  * Создать или обновить запись в dialog_analysis
- * С CAPI Interest (ViewContent) логикой по счётчику сообщений
+ * С CAPI Interest (Contact) логикой по счётчику сообщений
  */
 async function upsertDialogAnalysis(params: {
   userAccountId: string;
@@ -679,17 +751,22 @@ async function upsertDialogAnalysis(params: {
     .eq('instance_name', instanceName)
     .maybeSingle();
 
-  // Проверить, является ли это рекламным лидом (есть source_id в leads)
-  const isFromAd = await isAdLead(contactPhone, userAccountId);
+  // Проверить рекламную атрибуцию лида и источник CAPI
+  const leadAttribution = await getLeadAttribution(contactPhone, userAccountId);
+  const isFromAd = leadAttribution.isFromAd;
+  const effectiveDirectionId = directionId || existing?.direction_id || leadAttribution.directionId || null;
+  const capiSource = isFromAd ? await getDirectionCapiSource(effectiveDirectionId) : null;
+  const isWhatsappCapiTrackingEnabled = capiSource !== 'crm';
 
   if (existing) {
     // Обновить существующую запись
     const finalCtwaClid = ctwaClid || existing.ctwa_clid;
     // ✅ НОВОЕ: используем переданный direction_id или сохраняем существующий
-    const finalDirectionId = directionId || existing.direction_id;
+    const finalDirectionId = effectiveDirectionId;
 
     // CAPI: Инкрементируем счётчик только для входящих сообщений от рекламных лидов
-    const newCapiMsgCount = (isIncoming && isFromAd)
+    // и только когда источник CAPI = whatsapp (или не задан)
+    const newCapiMsgCount = (isIncoming && isFromAd && isWhatsappCapiTrackingEnabled)
       ? (existing.capi_msg_count || 0) + 1
       : (existing.capi_msg_count || 0);
 
@@ -721,12 +798,13 @@ async function upsertDialogAnalysis(params: {
       app.log.error({ error: updateError, existingId: existing.id }, 'Failed to update dialog_analysis');
     }
 
-    // CAPI: Проверить порог для ViewContent (Interest)
+    // CAPI: Проверить порог для Contact (Interest)
     const INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 
     // ✅ ИСПРАВЛЕНО: используем finalDirectionId (может быть передан явно)
     if (
       isFromAd &&                              // Рекламный лид
+      isWhatsappCapiTrackingEnabled &&         // Только для capi_source=whatsapp
       newCapiMsgCount >= INTEREST_THRESHOLD && // Достиг порога
       !existing.capi_interest_sent &&          // Ещё не отправляли
       finalDirectionId                         // Есть direction для CAPI
@@ -736,24 +814,33 @@ async function upsertDialogAnalysis(params: {
         capiMsgCount: newCapiMsgCount,
         incomingCount: newIncomingCount,
         threshold: INTEREST_THRESHOLD,
-        directionId: finalDirectionId
-      }, 'CAPI threshold reached, sending ViewContent');
+        directionId: finalDirectionId,
+        capiSource: capiSource || null
+      }, 'CAPI threshold reached, sending Contact');
 
       await sendCapiInterestEvent(app, instanceName, contactPhone);
+    } else if (isFromAd && !isWhatsappCapiTrackingEnabled) {
+      app.log.debug({
+        contactPhone,
+        directionId: finalDirectionId,
+        capiSource: capiSource || null
+      }, 'Skipping WhatsApp CAPI counter: direction capi_source is crm');
     }
 
   } else {
     // Создать новую запись
     // CAPI: Начинаем счёт с 1 только если это входящее сообщение от рекламного лида
-    const initialCapiMsgCount = (isIncoming && isFromAd) ? 1 : 0;
+    const initialCapiMsgCount = (isIncoming && isFromAd && isWhatsappCapiTrackingEnabled) ? 1 : 0;
     // ✅ НОВОЕ: incoming_count для processDialogForCapi
     const initialIncomingCount = isIncoming ? 1 : 0;
 
     app.log.debug({
       contactPhone,
       ctwaClid: ctwaClid || null,
-      directionId: directionId || null,
+      directionId: effectiveDirectionId,
       isFromAd,
+      capiSource: capiSource || null,
+      isWhatsappCapiTrackingEnabled,
       initialCapiMsgCount,
       initialIncomingCount
     }, 'upsertDialogAnalysis: creating new record');
@@ -769,7 +856,7 @@ async function upsertDialogAnalysis(params: {
         first_message: timestamp.toISOString(),
         last_message: timestamp.toISOString(),
         ctwa_clid: ctwaClid || null,
-        direction_id: directionId || null,  // ✅ НОВОЕ: direction_id для CAPI
+        direction_id: effectiveDirectionId,  // ✅ НОВОЕ: direction_id для CAPI
         capi_msg_count: initialCapiMsgCount,
         incoming_count: initialIncomingCount,  // ✅ НОВОЕ: incoming_count
         funnel_stage: 'new_lead',

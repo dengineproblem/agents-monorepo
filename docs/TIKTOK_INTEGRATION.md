@@ -37,6 +37,7 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - Creates `user_creatives` record with `tiktok_video_id`
 - MD5 signature calculation for UPLOAD_BY_FILE (required by TikTok API)
 - Dynamic timeout based on file size (min 5 min or 10sec/MB)
+- **Thumbnail extraction**: Extracts first frame from video via FFmpeg, crops to nearest standard ratio (9:16, 1:1, 16:9), saves to Supabase Storage (`creo/video-thumbnails/`), stores URL in `user_creatives.thumbnail_url`
 
 **Reliability & Error Handling**:
 - ✅ Retry logic с exponential backoff (3 attempts: 2s, 5s, 10s)
@@ -47,6 +48,8 @@ latest code (agent-service, agent-brain, frontend) and DB migrations.
 - ✅ Optimistic locking при обновлении статуса с fallback на force update
 - ✅ Graceful fallback для транскрипции
 - ✅ MD5 hash computed from buffer directly (no double file read)
+- ✅ Thumbnail extraction with FFmpeg (first frame, auto-crop to standard ratio)
+- ✅ Processing-status endpoint correctly handles `failed`/`error` statuses (prevents false "success" on re-upload)
 
 **Logging & Observability**:
 - ✅ Correlation ID для сквозного трейсинга
@@ -416,8 +419,9 @@ Backend logs all TikTok credential updates with action type (connect/disconnect)
 - Uses `tiktok_video_id` when present.
 - If missing, uploads video from `media_url` and stores `tiktok_video_id`.
 - **Resolves identity info** via `identity/get/` API to get correct `identity_type` (`TT_USER` or `BC_AUTH_TT`) and `display_name`.
-- **Uploads poster images** (video thumbnails) — required by TikTok for video ads. Downloads cover URL and uploads via `UPLOAD_BY_FILE` with MD5 signature.
-- Creates campaign → ad group → ads with `image_ids` (poster) and `display_name`.
+- **Uploads poster images** with priority: Supabase `thumbnail_url` (extracted during upload) → TikTok CDN `poster_url` fallback. Uploads via `UPLOAD_BY_FILE` with MD5 signature.
+- **Passes `page_id`** (Instant Page) for Lead Generation ads.
+- Creates campaign → ad group → ads with `image_ids` (poster), `display_name`, and `page_id`.
 - Persists campaign/adgroup mapping.
 
 ### Use existing ad groups
@@ -425,7 +429,9 @@ Backend logs all TikTok credential updates with action type (connect/disconnect)
 - Uses `direction_tiktok_adgroups` with `status = DISABLE` and `ads_count < 50`.
 - Enables ad group when needed.
 - **Resolves identity and uploads poster images** via shared `resolveIdentityAndPosters` helper.
-- Creates ad with `image_ids`, `display_name`, correct `identity_type`.
+  - Poster priority: Supabase `thumbnail_url` → TikTok CDN `poster_url`.
+- **Passes `page_id`** from `directionSettings.page_id` for Lead Generation ads.
+- Creates ad with `image_ids`, `display_name`, `page_id`, correct `identity_type`.
 - Increments `ads_count` after ad creation.
 
 ### Create ad group inside a direction
@@ -434,7 +440,9 @@ Backend logs all TikTok credential updates with action type (connect/disconnect)
 - Uses `placement_type: PLACEMENT_TYPE_NORMAL` + `placements: ['PLACEMENT_TIKTOK']` (not AUTOMATIC).
 - Includes `promotion_type` from direction objective config.
 - **Resolves identity and uploads poster images** via shared `resolveIdentityAndPosters` helper.
-- Creates ads with `image_ids`, `display_name`, correct `identity_type`.
+  - Poster priority: Supabase `thumbnail_url` → TikTok CDN `poster_url`.
+- **Passes `page_id`** from `direction.tiktok_instant_page_id` for Lead Generation ads.
+- Creates ads with `image_ids`, `display_name`, `page_id`, correct `identity_type`.
 - Stores adgroup in `direction_tiktok_adgroups`.
 
 ## Brain and batch
@@ -537,8 +545,18 @@ Platform support:
   - KZ = `'1522867'`, не `'6251999'`.
 - "You must upload an image":
   - Объявления для видео требуют `image_ids` (thumbnail/poster). Загрузить cover видео.
+- "Submission failed. Try again." (40002) на ad/create для Lead Gen:
+  - Проверить, что `direction.tiktok_instant_page_id` заполнен — для Lead Gen ads нужен `page_id`.
+  - Проверить, что видео `displayable: true` (длительность ≤ 60 секунд).
+  - "Unsupported image size" — **НЕ** проблема обложки, а проблема видео (displayable: false).
 - "Lead Generation agreement has not been signed":
   - Необходимо подписать соглашение в TikTok Ads Manager UI.
+- TUS upload "instant success" без фактической загрузки:
+  - Проверить `processing-status` endpoint — старый креатив со статусом `failed` мог возвращать `success`.
+  - Очистить старые TUS файлы: `rm -f /var/tmp/tus-uploads/{upload_id}*`.
+  - `processing-status` теперь корректно: `failed`/`error` → error, `ready`/`active` → success, остальное → processing.
+- TikTok video ≤ 60 секунд обязательно:
+  - Видео > 60 секунд получает `displayable: false` от TikTok, ad creation fails с вводящим в заблуждение "Unsupported image size".
 - Platform mismatch:
   - UI uses `instagram` but DB uses `facebook`. Confirm filters map correctly.
 - TikTok ROI shows 0 spend/metrics:

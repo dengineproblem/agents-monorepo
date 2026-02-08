@@ -3,17 +3,18 @@ import { ChevronLeft, ChevronRight, ImageIcon } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import type { Chapter, Section } from '../../content/knowledge-base';
-import { knowledgeBaseContent } from '../../content/knowledge-base';
 
 interface KBArticleProps {
   chapter: Chapter;
   section: Section;
+  chapters: Chapter[];
   onNavigate: (chapterId: string, sectionId?: string) => void;
 }
 
 export const KBArticle: React.FC<KBArticleProps> = ({
   chapter,
   section,
+  chapters,
   onNavigate,
 }) => {
   // Находим предыдущий и следующий разделы
@@ -24,12 +25,12 @@ export const KBArticle: React.FC<KBArticleProps> = ({
     : null;
 
   // Если нет следующего раздела в главе, ищем первый раздел следующей главы
-  const currentChapterIndex = knowledgeBaseContent.findIndex(ch => ch.id === chapter.id);
-  const nextChapter = currentChapterIndex < knowledgeBaseContent.length - 1
-    ? knowledgeBaseContent[currentChapterIndex + 1]
+  const currentChapterIndex = chapters.findIndex(ch => ch.id === chapter.id);
+  const nextChapter = currentChapterIndex < chapters.length - 1
+    ? chapters[currentChapterIndex + 1]
     : null;
   const prevChapter = currentChapterIndex > 0
-    ? knowledgeBaseContent[currentChapterIndex - 1]
+    ? chapters[currentChapterIndex - 1]
     : null;
 
   const handlePrev = () => {

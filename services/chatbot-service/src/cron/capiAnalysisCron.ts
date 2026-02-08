@@ -45,6 +45,10 @@ interface CronStats {
  * - No Qualified or Scheduled yet
  * - Had activity in the last hour
  * - Has direction_id with capi_enabled = true
+ * - Direction CAPI source = whatsapp
+ *
+ * CRM source is handled near-real-time from CRM webhooks
+ * via POST /capi/crm-event and is intentionally excluded here.
  */
 async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
   const activityThreshold = new Date(Date.now() - CAPI_CRON_ACTIVITY_WINDOW * 60 * 1000).toISOString();
@@ -77,6 +81,7 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
     .not('direction_id', 'is', null)
     .gte('last_message', activityThreshold)
     .eq('account_directions.capi_enabled', true)
+    .eq('account_directions.capi_source', 'whatsapp')
     .order('last_message', { ascending: false })
     .limit(CAPI_CRON_BATCH_SIZE);
 
@@ -111,7 +116,7 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
 
 /**
  * Process a single dialog for CAPI Level 2-3 events
- * Uses processDialogForCapi from qualificationAgent which handles both WhatsApp and CRM sources
+ * Uses processDialogForCapi from qualificationAgent for WhatsApp source dialogs.
  */
 async function processDialogForCapiCron(
   dialogInfo: DialogForAnalysis,
@@ -159,7 +164,7 @@ async function processDialogForCapiCron(
     // Use existing processDialogForCapi which handles:
     // - Direction CAPI settings check
     // - WhatsApp source: AI analysis via GPT-4o-mini
-    // - CRM source: field matching from leads table
+    // - CRM source is excluded from this cron and handled via /capi/crm-event
     // - Sending CAPI events atomically
     await processDialogForCapi(dialog, correlationId);
 

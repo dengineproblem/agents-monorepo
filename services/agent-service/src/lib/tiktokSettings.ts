@@ -259,6 +259,7 @@ export async function getTikTokDirectionSettings(
   objective_config: ReturnType<typeof getTikTokObjectiveConfig>;
   pixel_id?: string;
   identity_id?: string;
+  page_id?: string;
 } | null> {
   // Получаем direction
   const { data: direction, error: dirError } = await supabase
@@ -289,7 +290,8 @@ export async function getTikTokDirectionSettings(
     daily_budget,
     objective_config,
     pixel_id: settings.tiktok_pixel_id,
-    identity_id: direction.tiktok_identity_id
+    identity_id: direction.tiktok_identity_id,
+    page_id: direction.tiktok_instant_page_id
   };
 }
 

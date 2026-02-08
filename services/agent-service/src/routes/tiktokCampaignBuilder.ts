@@ -17,6 +17,7 @@ import {
 } from '../workflows/tiktok/createCampaignWithCreative.js';
 import {
   workflowCreateAdInDirection,
+  workflowCreateAdGroupWithCreatives,
   getAvailableTikTokAdGroup,
   hasAvailableTikTokAdGroups,
   activateTikTokAdGroup,
@@ -228,8 +229,35 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                 ads: result.ads
               });
 
+            } else if (direction.tiktok_campaign_id) {
+              // Создаём AdGroup в существующей кампании направления
+              const result = await workflowCreateAdGroupWithCreatives(
+                {
+                  user_creative_ids: eligibleCreatives.map(c => c.id),
+                  direction_id: direction.id,
+                  daily_budget: direction.tiktok_daily_budget || 2500,
+                  adgroup_name: `${direction.name} - Auto ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`,
+                  auto_activate: true
+                },
+                {
+                  user_account_id,
+                  ad_account_id: account_id
+                }
+              );
+
+              results.push({
+                direction_id: direction.id,
+                direction_name: direction.name,
+                success: true,
+                mode: 'create_adgroup',
+                adgroup_id: result.adgroup_id,
+                tiktok_adgroup_id: result.tiktok_adgroup_id,
+                ads_created: result.ads_count,
+                ads: result.ads
+              });
+
             } else {
-              // Режим создания новой кампании
+              // Нет кампании — создаём новую (первый запуск)
               const result = await workflowCreateTikTokCampaignWithCreative(
                 {
                   user_creative_ids: eligibleCreatives.map(c => c.id),
@@ -248,6 +276,17 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                   identity_id: creds.identityId
                 }
               );
+
+              // Сохраняем campaign_id в направление
+              await supabase
+                .from('account_directions')
+                .update({ tiktok_campaign_id: result.campaign_id })
+                .eq('id', direction.id);
+
+              log.info({
+                directionId: direction.id,
+                campaignId: result.campaign_id
+              }, 'Saved tiktok_campaign_id to direction for future launches');
 
               results.push({
                 direction_id: direction.id,
@@ -435,8 +474,52 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             mode: 'use_existing'
           });
 
+        } else if (direction.tiktok_campaign_id) {
+          // Создаём новый AdGroup в существующей кампании направления
+          const finalBudget = daily_budget || direction.tiktok_daily_budget || 2500;
+
+          const result = await workflowCreateAdGroupWithCreatives(
+            {
+              user_creative_ids: creative_ids,
+              direction_id,
+              daily_budget: finalBudget,
+              adgroup_name: `${direction.name} - Manual ${new Date().toISOString().replace('T', ' ').slice(0, 16)}`,
+              auto_activate: true
+            },
+            {
+              user_account_id,
+              ad_account_id: account_id
+            }
+          );
+
+          // Log business event
+          await eventLogger.logBusinessEvent(
+            user_account_id,
+            'tiktok_creative_launched',
+            {
+              directionId: direction_id,
+              directionName: direction.name,
+              creativesCount: creative_ids.length,
+              mode: 'manual',
+              platform: 'tiktok'
+            },
+            account_id
+          );
+
+          return reply.send({
+            success: true,
+            message: `TikTok ad group created: ${result.ads_count} ad(s)`,
+            direction_id,
+            direction_name: direction.name,
+            adgroup_id: result.adgroup_id,
+            tiktok_adgroup_id: result.tiktok_adgroup_id,
+            ads_created: result.ads_count,
+            ads: result.ads,
+            mode: 'create_adgroup'
+          });
+
         } else {
-          // Режим создания новой кампании
+          // Нет кампании у направления — создаём новую кампанию (первый запуск)
           const finalObjective = objective || direction.tiktok_objective || 'traffic';
           const finalBudget = daily_budget || direction.tiktok_daily_budget || 2500;
 
@@ -458,6 +541,17 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               identity_id: creds.identityId
             }
           );
+
+          // Сохраняем campaign_id в направление для последующих запусков
+          await supabase
+            .from('account_directions')
+            .update({ tiktok_campaign_id: result.campaign_id })
+            .eq('id', direction_id);
+
+          log.info({
+            directionId: direction_id,
+            campaignId: result.campaign_id
+          }, 'Saved tiktok_campaign_id to direction for future launches');
 
           // Log business event
           await eventLogger.logBusinessEvent(
@@ -507,6 +601,273 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
           success: false,
           error: resolution?.userMessageRu || error.message,
           error_details: error.message
+        });
+      }
+    }
+  );
+
+  /**
+   * POST /api/tiktok-campaign-builder/manual-launch-multi
+   *
+   * Ручной запуск рекламы с несколькими Ad Groups.
+   * Каждый адсет получает свой набор креативов и бюджет.
+   * Аналог /campaign-builder/manual-launch-multi для Facebook.
+   */
+  fastify.post(
+    '/manual-launch-multi',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['user_account_id', 'direction_id', 'adsets'],
+          properties: {
+            user_account_id: { type: 'string', format: 'uuid' },
+            account_id: {
+              oneOf: [
+                { type: 'string', format: 'uuid' },
+                { type: 'null' }
+              ]
+            },
+            direction_id: { type: 'string', format: 'uuid' },
+            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] },
+            adsets: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 10,
+              items: {
+                type: 'object',
+                required: ['creative_ids'],
+                properties: {
+                  creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
+                  daily_budget: { type: 'number', minimum: 2500 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const log = getWorkflowLogger(request, 'tiktokManualLaunchMulti');
+      const body = request.body as {
+        user_account_id: string;
+        account_id?: string;
+        direction_id: string;
+        objective?: TikTokObjectiveType;
+        adsets: Array<{
+          creative_ids: string[];
+          daily_budget?: number;
+        }>;
+      };
+
+      const { user_account_id, account_id, direction_id, adsets } = body;
+      const launchTs = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+      log.info({
+        userAccountId: user_account_id,
+        directionId: direction_id,
+        adsetCount: adsets.length,
+      }, 'TikTok manual launch multi request');
+
+      try {
+        const creds = await getTikTokCredentials(user_account_id, account_id);
+        if (!creds) {
+          return reply.status(400).send({
+            success: false,
+            error: 'TikTok credentials not found. Please connect TikTok account first.'
+          });
+        }
+
+        // Валидируем direction
+        const { data: direction, error: directionError } = await supabase
+          .from('account_directions')
+          .select('*')
+          .eq('id', direction_id)
+          .eq('user_account_id', user_account_id)
+          .eq('platform', 'tiktok')
+          .eq('is_active', true)
+          .single();
+
+        if (directionError || !direction) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Direction not found, inactive, or not TikTok'
+          });
+        }
+
+        // Если нет кампании — создаём первую (с первым адсетом)
+        if (!direction.tiktok_campaign_id) {
+          const firstAdset = adsets[0];
+          const finalObjective = body.objective || direction.tiktok_objective || 'traffic';
+          const finalBudget = firstAdset.daily_budget || direction.tiktok_daily_budget || 2500;
+
+          const firstResult = await workflowCreateTikTokCampaignWithCreative(
+            {
+              user_creative_ids: firstAdset.creative_ids,
+              objective: finalObjective as TikTokObjectiveType,
+              campaign_name: direction.name,
+              daily_budget: finalBudget,
+              auto_activate: true,
+              ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id })
+            },
+            {
+              user_account_id,
+              ad_account_id: account_id,
+              advertiser_id: creds.advertiserId,
+              access_token: creds.accessToken,
+              identity_id: creds.identityId
+            }
+          );
+
+          // Сохраняем campaign_id в направление
+          await supabase
+            .from('account_directions')
+            .update({ tiktok_campaign_id: firstResult.campaign_id })
+            .eq('id', direction_id);
+
+          direction.tiktok_campaign_id = firstResult.campaign_id;
+
+          log.info({ campaignId: firstResult.campaign_id }, 'Created initial TikTok campaign for direction');
+
+          // Результат первого адсета
+          const results: any[] = [{
+            success: true,
+            adset_id: firstResult.adgroup_id,
+            adset_name: `${direction.name} - Manual ${launchTs} #1`,
+            ads_created: firstResult.ads_count,
+            ads: firstResult.ads?.map((ad: any) => ({ ad_id: ad.ad_id, name: ad.ad_name || ad.ad_id })) || [],
+          }];
+
+          // Создаём остальные адсеты в этой кампании
+          for (let i = 1; i < adsets.length; i++) {
+            const adsetConfig = adsets[i];
+            try {
+              const result = await workflowCreateAdGroupWithCreatives(
+                {
+                  user_creative_ids: adsetConfig.creative_ids,
+                  direction_id,
+                  daily_budget: adsetConfig.daily_budget || direction.tiktok_daily_budget || 2500,
+                  adgroup_name: `${direction.name} - Manual ${launchTs} #${i + 1}`,
+                  auto_activate: true
+                },
+                { user_account_id, ad_account_id: account_id }
+              );
+
+              results.push({
+                success: true,
+                adset_id: result.tiktok_adgroup_id,
+                adset_name: `${direction.name} - Manual ${launchTs} #${i + 1}`,
+                ads_created: result.ads_count,
+                ads: result.ads?.map((ad: any) => ({ ad_id: ad.ad_id, name: ad.ad_id })) || [],
+              });
+            } catch (error: any) {
+              log.warn({ err: error, adsetIndex: i }, 'Failed to create TikTok adgroup in multi-launch');
+              const resolution = error?.tiktok ? resolveTikTokError(error.tiktok) : undefined;
+              results.push({ success: false, error: resolution?.userMessageRu || error.message });
+            }
+          }
+
+          const successCount = results.filter(r => r.success).length;
+          const failedCount = results.filter(r => !r.success).length;
+          const totalAds = results.reduce((sum, r) => sum + (r.ads_created || 0), 0);
+
+          await eventLogger.logBusinessEvent(
+            user_account_id, 'tiktok_creative_launched',
+            { directionId: direction_id, directionName: direction.name, adsetsCount: successCount, totalAds, mode: 'manual_multi', platform: 'tiktok' },
+            account_id
+          );
+
+          return reply.send({
+            success: successCount > 0,
+            message: `TikTok: создано ${successCount} адсетов, ${totalAds} объявлений`,
+            direction_id, direction_name: direction.name,
+            campaign_id: firstResult.campaign_id,
+            total_adsets: results.length, total_ads: totalAds,
+            success_count: successCount, failed_count: failedCount,
+            adsets: results,
+          });
+        }
+
+        // Кампания уже есть — создаём адгруппы в ней
+        const results: any[] = [];
+        for (let i = 0; i < adsets.length; i++) {
+          const adsetConfig = adsets[i];
+          try {
+            const result = await workflowCreateAdGroupWithCreatives(
+              {
+                user_creative_ids: adsetConfig.creative_ids,
+                direction_id,
+                daily_budget: adsetConfig.daily_budget || direction.tiktok_daily_budget || 2500,
+                adgroup_name: `${direction.name} - Manual ${launchTs} #${i + 1}`,
+                auto_activate: true
+              },
+              { user_account_id, ad_account_id: account_id }
+            );
+
+            results.push({
+              success: true,
+              adset_id: result.tiktok_adgroup_id,
+              adset_name: `${direction.name} - Manual ${launchTs} #${i + 1}`,
+              ads_created: result.ads_count,
+              ads: result.ads?.map((ad: any) => ({ ad_id: ad.ad_id, name: ad.ad_id })) || [],
+            });
+          } catch (error: any) {
+            log.warn({ err: error, adsetIndex: i }, 'Failed to create TikTok adgroup in multi-launch');
+            const resolution = error?.tiktok ? resolveTikTokError(error.tiktok) : undefined;
+            results.push({ success: false, error: resolution?.userMessageRu || error.message });
+          }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const failedCount = results.filter(r => !r.success).length;
+        const totalAds = results.reduce((sum, r) => sum + (r.ads_created || 0), 0);
+
+        if (successCount === 0) {
+          const firstError = results.find(r => r.error)?.error || 'All ad groups failed to create';
+          return reply.status(400).send({
+            success: false, error: firstError,
+            total_adsets: results.length, total_ads: 0,
+            success_count: 0, failed_count: failedCount,
+            adsets: results,
+          });
+        }
+
+        await eventLogger.logBusinessEvent(
+          user_account_id, 'tiktok_creative_launched',
+          { directionId: direction_id, directionName: direction.name, adsetsCount: successCount, totalAds, mode: 'manual_multi', platform: 'tiktok' },
+          account_id
+        );
+
+        return reply.send({
+          success: true,
+          message: `TikTok: создано ${successCount} адсетов, ${totalAds} объявлений`,
+          direction_id, direction_name: direction.name,
+          campaign_id: direction.tiktok_campaign_id,
+          total_adsets: results.length, total_ads: totalAds,
+          success_count: successCount, failed_count: failedCount,
+          adsets: results,
+        });
+
+      } catch (error: any) {
+        log.error({ error }, 'TikTok manual launch multi failed');
+
+        logErrorToAdmin({
+          user_account_id,
+          error_type: error?.tiktok ? 'tiktok' : 'api',
+          error_code: error?.tiktok?.code?.toString(),
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'tiktok_manual_launch_multi',
+          endpoint: '/tiktok-campaign-builder/manual-launch-multi',
+          request_data: { direction_id, adsets_count: adsets?.length },
+          severity: 'warning',
+        }).catch(() => {});
+
+        const resolution = error?.tiktok ? resolveTikTokError(error.tiktok) : undefined;
+
+        return reply.status(500).send({
+          success: false,
+          error: resolution?.userMessageRu || error.message,
         });
       }
     }
