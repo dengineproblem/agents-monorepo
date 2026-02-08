@@ -33,15 +33,16 @@ import { TooltipKeys } from '@/content/tooltips';
 import { API_BASE_URL } from '@/config/api';
 import {
   getLeadCustomFields as getAmocrmFields,
+  getPipelines as getAmocrmPipelines,
   type CustomField as AmocrmCustomField,
-  type QualificationFieldConfig as AmocrmFieldConfig,
+  type Pipeline as AmocrmPipeline,
 } from '@/services/amocrmApi';
 import {
   getBitrix24Status,
+  getBitrix24Pipelines,
   getBitrix24LeadCustomFields,
-  getBitrix24DealCustomFields,
   type CustomField as Bitrix24CustomField,
-  type QualificationFieldConfig as Bitrix24FieldConfig,
+  type Bitrix24Pipelines,
 } from '@/services/bitrix24Api';
 
 // Unified type for CRM field selection in direction CAPI settings
@@ -52,11 +53,25 @@ export interface CapiFieldConfig {
   enum_id?: string | number | null;
   enum_value?: string | null;
   entity_type?: string; // for Bitrix24
+  pipeline_id?: string | number | null;
+  status_id?: string | number | null;
 }
 
 interface SelectedCapiField {
   fieldId: string | number | null;
   enumId: string | number | null;
+}
+
+interface SelectedCapiStage {
+  stageKey: string | null;
+}
+
+interface CrmStageOption {
+  key: string;
+  label: string;
+  entityType: 'lead' | 'deal';
+  pipelineId: string | number;
+  statusId: string | number;
 }
 
 interface ExistingCapiDirection {
@@ -69,6 +84,7 @@ interface ExistingCapiDirection {
 export type CrmType = 'amocrm' | 'bitrix24';
 export type CapiSource = 'whatsapp' | 'crm';
 export type ConnectionType = 'evolution' | 'waba';
+export type CapiTriggerMode = 'fields' | 'stages';
 
 const MAX_CAPI_FIELDS = 3;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
@@ -250,6 +266,121 @@ const CrmFieldSelector: React.FC<CrmFieldSelectorProps> = ({
   );
 };
 
+interface CrmStageSelectorProps {
+  stages: CrmStageOption[];
+  selectedStages: SelectedCapiStage[];
+  setSelectedStages: React.Dispatch<React.SetStateAction<SelectedCapiStage[]>>;
+  isSubmitting: boolean;
+}
+
+const CrmStageSelector: React.FC<CrmStageSelectorProps> = ({
+  stages,
+  selectedStages,
+  setSelectedStages,
+  isSubmitting,
+}) => {
+  const handleStageChange = (index: number, value: string) => {
+    const stageKey = value === 'none' ? null : value;
+    setSelectedStages((prev) => {
+      const updated = [...prev];
+      updated[index] = { stageKey };
+      return updated;
+    });
+  };
+
+  const addStage = () => {
+    if (selectedStages.length < MAX_CAPI_FIELDS) {
+      setSelectedStages((prev) => [...prev, { stageKey: null }]);
+    }
+  };
+
+  const removeStage = (index: number) => {
+    if (selectedStages.length > 1) {
+      setSelectedStages((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setSelectedStages([{ stageKey: null }]);
+    }
+  };
+
+  const getSelectedStageKeys = (excludeIndex: number) => {
+    return selectedStages
+      .filter((_, i) => i !== excludeIndex)
+      .map((item) => item.stageKey)
+      .filter((value): value is string => !!value);
+  };
+
+  const activeStagesCount = selectedStages.filter((item) => item.stageKey !== null).length;
+
+  return (
+    <div className="space-y-2">
+      {selectedStages.map((item, index) => {
+        const selectedStageKeys = getSelectedStageKeys(index);
+
+        return (
+          <div key={index} className="flex items-start gap-2">
+            <div className="flex-1">
+              <Select
+                value={item.stageKey || 'none'}
+                onValueChange={(value) => handleStageChange(index, value)}
+                disabled={isSubmitting || stages.length === 0}
+              >
+                <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                  <SelectValue placeholder="Выберите этап воронки" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Не выбрано</span>
+                  </SelectItem>
+                  {stages.map((stage) => (
+                    <SelectItem
+                      key={stage.key}
+                      value={stage.key}
+                      disabled={selectedStageKeys.includes(stage.key)}
+                    >
+                      {stage.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedStages.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeStage(index)}
+                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 flex-shrink-0"
+                disabled={isSubmitting}
+              >
+                <span className="text-lg">&times;</span>
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      {selectedStages.length < MAX_CAPI_FIELDS && stages.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addStage}
+          disabled={isSubmitting}
+          className="w-full h-8 text-xs"
+        >
+          + Добавить этап ({selectedStages.length}/{MAX_CAPI_FIELDS})
+        </Button>
+      )}
+
+      {activeStagesCount > 0 && (
+        <p className="text-xs text-green-600 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          {activeStagesCount === 1 ? 'Выбран 1 этап' : `Выбрано ${activeStagesCount} этапа`}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // CAPI settings to be passed to parent
 export interface DirectionCapiSettings {
   capi_enabled: boolean;
@@ -358,11 +489,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [capiEnabled, setCapiEnabled] = useState(false);
   const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
   const [capiCrmType, setCapiCrmType] = useState<CrmType>('amocrm');
+  const [capiInterestMode, setCapiInterestMode] = useState<CapiTriggerMode>('fields');
+  const [capiQualifiedMode, setCapiQualifiedMode] = useState<CapiTriggerMode>('fields');
+  const [capiScheduledMode, setCapiScheduledMode] = useState<CapiTriggerMode>('fields');
 
   // CRM field selections for each CAPI level
   const [capiInterestFields, setCapiInterestFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
   const [capiQualifiedFields, setCapiQualifiedFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
   const [capiScheduledFields, setCapiScheduledFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiInterestStages, setCapiInterestStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [capiQualifiedStages, setCapiQualifiedStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
 
   // Connected CRMs
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
@@ -371,6 +508,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // CRM custom fields (loaded based on selected CRM type)
   const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
   const [isLoadingCrmFields, setIsLoadingCrmFields] = useState(false);
+  const [crmStages, setCrmStages] = useState<CrmStageOption[]>([]);
+  const [isLoadingCrmStages, setIsLoadingCrmStages] = useState(false);
 
   // Existing directions with CAPI (for reuse pixel option)
   const [existingCapiDirections, setExistingCapiDirections] = useState<ExistingCapiDirection[]>([]);
@@ -492,8 +631,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
       try {
         // Check AmoCRM connection (check if user has amocrm token via API)
+        const params = new URLSearchParams({ userAccountId });
+        if (accountId) {
+          params.append('accountId', accountId);
+        }
         const amocrmResponse = await fetch(
-          `${API_BASE_URL}/amocrm/pipelines?userAccountId=${userAccountId}`
+          `${API_BASE_URL}/amocrm/pipelines?${params.toString()}`
         );
         if (amocrmResponse.ok) {
           crms.push('amocrm');
@@ -504,7 +647,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
       try {
         // Check Bitrix24 connection
-        const bitrixStatus = await getBitrix24Status(userAccountId);
+        const bitrixStatus = await getBitrix24Status(userAccountId, accountId || null);
         if (bitrixStatus.connected) {
           crms.push('bitrix24');
         }
@@ -523,7 +666,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     if (userAccountId) {
       loadConnectedCrms();
     }
-  }, [open, userAccountId, needsFacebook]);
+  }, [accountId, open, userAccountId, needsFacebook]);
 
   // Load CRM fields when CRM type changes and CAPI source is CRM
   useEffect(() => {
@@ -554,6 +697,76 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
     loadCrmFields();
   }, [capiEnabled, capiSource, capiCrmType, userAccountId, needsFacebook]);
+
+  // Load CRM pipeline stages for stage-based CAPI triggers
+  useEffect(() => {
+    const loadCrmStages = async () => {
+      if (!needsFacebook || !capiEnabled || capiSource !== 'crm') {
+        setCrmStages([]);
+        return;
+      }
+
+      setIsLoadingCrmStages(true);
+      try {
+        if (capiCrmType === 'amocrm') {
+          const pipelines = await getAmocrmPipelines(userAccountId, accountId || undefined) as AmocrmPipeline[];
+          const stageOptions: CrmStageOption[] = [];
+
+          for (const pipeline of pipelines || []) {
+            for (const stage of pipeline.stages || []) {
+              stageOptions.push({
+                key: `amocrm:lead:${pipeline.pipeline_id}:${stage.status_id}`,
+                label: `${pipeline.pipeline_name} → ${stage.status_name}`,
+                entityType: 'lead',
+                pipelineId: pipeline.pipeline_id,
+                statusId: stage.status_id,
+              });
+            }
+          }
+
+          setCrmStages(stageOptions);
+        } else if (capiCrmType === 'bitrix24') {
+          const pipelines = await getBitrix24Pipelines(userAccountId, accountId || undefined) as Bitrix24Pipelines;
+          const stageOptions: CrmStageOption[] = [];
+
+          for (const leadPipeline of pipelines.leads || []) {
+            for (const stage of leadPipeline.stages || []) {
+              stageOptions.push({
+                key: `bitrix24:lead:${leadPipeline.categoryId}:${stage.statusId}`,
+                label: `Лиды / ${leadPipeline.categoryName} → ${stage.statusName}`,
+                entityType: 'lead',
+                pipelineId: leadPipeline.categoryId,
+                statusId: stage.statusId,
+              });
+            }
+          }
+
+          for (const dealPipeline of pipelines.deals || []) {
+            for (const stage of dealPipeline.stages || []) {
+              stageOptions.push({
+                key: `bitrix24:deal:${dealPipeline.categoryId}:${stage.statusId}`,
+                label: `Сделки / ${dealPipeline.categoryName} → ${stage.statusName}`,
+                entityType: 'deal',
+                pipelineId: dealPipeline.categoryId,
+                statusId: stage.statusId,
+              });
+            }
+          }
+
+          setCrmStages(stageOptions);
+        } else {
+          setCrmStages([]);
+        }
+      } catch (err) {
+        console.error('Failed to load CRM stages:', err);
+        setCrmStages([]);
+      } finally {
+        setIsLoadingCrmStages(false);
+      }
+    };
+
+    loadCrmStages();
+  }, [accountId, capiEnabled, capiSource, capiCrmType, needsFacebook, userAccountId]);
 
   // Load existing CAPI directions for pixel reuse option
   useEffect(() => {
@@ -795,14 +1008,24 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           }
         : undefined;
 
+      const interestConfig = capiInterestMode === 'stages'
+        ? convertStagesToConfig(capiInterestStages)
+        : convertFieldsToConfig(capiInterestFields);
+      const qualifiedConfig = capiQualifiedMode === 'stages'
+        ? convertStagesToConfig(capiQualifiedStages)
+        : convertFieldsToConfig(capiQualifiedFields);
+      const scheduledConfig = capiScheduledMode === 'stages'
+        ? convertStagesToConfig(capiScheduledStages)
+        : convertFieldsToConfig(capiScheduledFields);
+
       // Build CAPI settings if enabled
       const capiSettings: DirectionCapiSettings | undefined = needsFacebook && capiEnabled && pixelId ? {
         capi_enabled: true,
         capi_source: capiSource,
         capi_crm_type: capiSource === 'crm' ? capiCrmType : null,
-        capi_interest_fields: capiSource === 'crm' ? convertFieldsToConfig(capiInterestFields) : [],
-        capi_qualified_fields: capiSource === 'crm' ? convertFieldsToConfig(capiQualifiedFields) : [],
-        capi_scheduled_fields: capiSource === 'crm' ? convertFieldsToConfig(capiScheduledFields) : [],
+        capi_interest_fields: capiSource === 'crm' ? interestConfig : [],
+        capi_qualified_fields: capiSource === 'crm' ? qualifiedConfig : [],
+        capi_scheduled_fields: capiSource === 'crm' ? scheduledConfig : [],
       } : undefined;
 
       await onSubmit({
@@ -883,9 +1106,16 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setCapiEnabled(false);
     setCapiSource('whatsapp');
     setCapiCrmType('amocrm');
+    setCapiInterestMode('fields');
+    setCapiQualifiedMode('fields');
+    setCapiScheduledMode('fields');
     setCapiInterestFields([{ fieldId: null, enumId: null }]);
     setCapiQualifiedFields([{ fieldId: null, enumId: null }]);
     setCapiScheduledFields([{ fieldId: null, enumId: null }]);
+    setCapiInterestStages([{ stageKey: null }]);
+    setCapiQualifiedStages([{ stageKey: null }]);
+    setCapiScheduledStages([{ stageKey: null }]);
+    setCrmStages([]);
     setUseExistingPixel(false);
     setSelectedExistingPixelId('');
   };
@@ -944,6 +1174,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     return isSelectType(field) && enums.length > 0;
   };
 
+  const getStageByKey = (stageKey: string | null): CrmStageOption | null => {
+    if (!stageKey) return null;
+    return crmStages.find((stage) => stage.key === stageKey) || null;
+  };
+
   const convertFieldsToConfig = (fields: SelectedCapiField[]): CapiFieldConfig[] => {
     return fields
       .filter(sf => sf.fieldId !== null)
@@ -973,6 +1208,21 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         };
       })
       .filter(Boolean) as CapiFieldConfig[];
+  };
+
+  const convertStagesToConfig = (stages: SelectedCapiStage[]): CapiFieldConfig[] => {
+    return stages
+      .filter((item) => item.stageKey !== null)
+      .map((item) => getStageByKey(item.stageKey))
+      .filter((item): item is CrmStageOption => !!item)
+      .map((stage) => ({
+        field_id: stage.key,
+        field_name: stage.label,
+        field_type: 'pipeline_stage',
+        entity_type: stage.entityType,
+        pipeline_id: stage.pipelineId,
+        status_id: stage.statusId,
+      }));
   };
 
   return (
@@ -1065,7 +1315,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       {OBJECTIVE_DESCRIPTIONS.whatsapp}
                     </Label>
                   </div>
-                  {/* TODO: whatsapp_conversions скрыт — функция требует доработки */}
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="whatsapp_conversions" id="obj-whatsapp-conv" />
+                    <Label htmlFor="obj-whatsapp-conv" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.whatsapp_conversions}
+                    </Label>
+                  </div>
                   {hasInstagramId && (
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
@@ -1110,7 +1365,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         Level 1: Интерес
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        ViewContent — 3+ сообщения от клиента
+                            Contact — 3+ сообщения от клиента
                       </p>
                     </div>
                   </div>
@@ -2139,8 +2394,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {/* СЕКЦИЯ: Meta CAPI - скрыта, функция требует доработки */}
-          {false && needsFacebook && objective !== 'site_leads' && (
+          {needsFacebook && objective !== 'site_leads' && (
             <div className="space-y-4">
               <Separator />
               <div className="flex items-center justify-between">
@@ -2280,7 +2534,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                               htmlFor="capi-source-crm"
                               className={`font-normal cursor-pointer ${connectedCrms.length === 0 ? 'text-muted-foreground' : ''}`}
                             >
-                              CRM (поля карточки)
+                              CRM (поля или этапы воронки)
                             </Label>
                             <p className="text-xs text-muted-foreground">
                               {connectedCrms.length === 0
@@ -2318,22 +2572,47 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                             </div>
                           )}
 
-                          {isLoadingCrmFields ? (
-                            <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
-                          ) : crmFields.length === 0 ? (
-                            <div className="text-sm text-amber-600">
-                              В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                          {/* Level 1: Interest (Lead) */}
+                          <div className="space-y-3 p-3 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                            <div className="flex items-center gap-2">
+                              <span className="text-blue-600 font-medium text-sm">Level 1: Интерес (Lead)</span>
                             </div>
-                          ) : (
-                            <>
-                              {/* Level 1: Interest (Lead) */}
-                              <div className="space-y-2 p-3 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-blue-600 font-medium text-sm">Level 1: Интерес (Lead)</span>
+                            <div className="space-y-2">
+                              <Label className="text-xs">Триггер CAPI</Label>
+                              <RadioGroup
+                                value={capiInterestMode}
+                                onValueChange={(value) => setCapiInterestMode(value as CapiTriggerMode)}
+                                disabled={isSubmitting}
+                                className="flex flex-wrap gap-4"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="fields" id="capi-interest-mode-fields" />
+                                  <Label htmlFor="capi-interest-mode-fields" className="font-normal cursor-pointer text-sm">
+                                    Поля CRM
+                                  </Label>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Событие отправляется при установке любого из выбранных полей
-                                </p>
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="stages" id="capi-interest-mode-stages" />
+                                  <Label htmlFor="capi-interest-mode-stages" className="font-normal cursor-pointer text-sm">
+                                    Этапы воронки
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {capiInterestMode === 'fields'
+                                ? 'Событие отправляется при установке любого из выбранных полей'
+                                : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                            </p>
+
+                            {capiInterestMode === 'fields' ? (
+                              isLoadingCrmFields ? (
+                                <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                              ) : crmFields.length === 0 ? (
+                                <div className="text-sm text-amber-600">
+                                  В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                </div>
+                              ) : (
                                 <CrmFieldSelector
                                   fields={crmFields}
                                   selectedFields={capiInterestFields}
@@ -2347,16 +2626,64 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                                   getFieldEnums={getFieldEnums}
                                   needsEnumSelection={needsEnumSelection}
                                 />
+                              )
+                            ) : isLoadingCrmStages ? (
+                              <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                            ) : crmStages.length === 0 ? (
+                              <div className="text-sm text-amber-600">
+                                Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
                               </div>
+                            ) : (
+                              <CrmStageSelector
+                                stages={crmStages}
+                                selectedStages={capiInterestStages}
+                                setSelectedStages={setCapiInterestStages}
+                                isSubmitting={isSubmitting}
+                              />
+                            )}
+                          </div>
 
-                              {/* Level 2: Qualified (CompleteRegistration) */}
-                              <div className="space-y-2 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (CompleteRegistration)</span>
+                          {/* Level 2: Qualified (CompleteRegistration) */}
+                          <div className="space-y-3 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
+                            <div className="flex items-center gap-2">
+                              <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (CompleteRegistration)</span>
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs">Триггер CAPI</Label>
+                              <RadioGroup
+                                value={capiQualifiedMode}
+                                onValueChange={(value) => setCapiQualifiedMode(value as CapiTriggerMode)}
+                                disabled={isSubmitting}
+                                className="flex flex-wrap gap-4"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="fields" id="capi-qualified-mode-fields" />
+                                  <Label htmlFor="capi-qualified-mode-fields" className="font-normal cursor-pointer text-sm">
+                                    Поля CRM
+                                  </Label>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Событие отправляется при установке любого из выбранных полей
-                                </p>
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="stages" id="capi-qualified-mode-stages" />
+                                  <Label htmlFor="capi-qualified-mode-stages" className="font-normal cursor-pointer text-sm">
+                                    Этапы воронки
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {capiQualifiedMode === 'fields'
+                                ? 'Событие отправляется при установке любого из выбранных полей'
+                                : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                            </p>
+
+                            {capiQualifiedMode === 'fields' ? (
+                              isLoadingCrmFields ? (
+                                <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                              ) : crmFields.length === 0 ? (
+                                <div className="text-sm text-amber-600">
+                                  В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                </div>
+                              ) : (
                                 <CrmFieldSelector
                                   fields={crmFields}
                                   selectedFields={capiQualifiedFields}
@@ -2370,16 +2697,64 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                                   getFieldEnums={getFieldEnums}
                                   needsEnumSelection={needsEnumSelection}
                                 />
+                              )
+                            ) : isLoadingCrmStages ? (
+                              <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                            ) : crmStages.length === 0 ? (
+                              <div className="text-sm text-amber-600">
+                                Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
                               </div>
+                            ) : (
+                              <CrmStageSelector
+                                stages={crmStages}
+                                selectedStages={capiQualifiedStages}
+                                setSelectedStages={setCapiQualifiedStages}
+                                isSubmitting={isSubmitting}
+                              />
+                            )}
+                          </div>
 
-                              {/* Level 3: Schedule */}
-                              <div className="space-y-2 p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-purple-600 font-medium text-sm">Level 3: Запись (Schedule)</span>
+                          {/* Level 3: Schedule */}
+                          <div className="space-y-3 p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20">
+                            <div className="flex items-center gap-2">
+                              <span className="text-purple-600 font-medium text-sm">Level 3: Запись (Schedule)</span>
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs">Триггер CAPI</Label>
+                              <RadioGroup
+                                value={capiScheduledMode}
+                                onValueChange={(value) => setCapiScheduledMode(value as CapiTriggerMode)}
+                                disabled={isSubmitting}
+                                className="flex flex-wrap gap-4"
+                              >
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="fields" id="capi-scheduled-mode-fields" />
+                                  <Label htmlFor="capi-scheduled-mode-fields" className="font-normal cursor-pointer text-sm">
+                                    Поля CRM
+                                  </Label>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Событие отправляется при установке любого из выбранных полей
-                                </p>
+                                <div className="flex items-center space-x-2">
+                                  <RadioGroupItem value="stages" id="capi-scheduled-mode-stages" />
+                                  <Label htmlFor="capi-scheduled-mode-stages" className="font-normal cursor-pointer text-sm">
+                                    Этапы воронки
+                                  </Label>
+                                </div>
+                              </RadioGroup>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {capiScheduledMode === 'fields'
+                                ? 'Событие отправляется при установке любого из выбранных полей'
+                                : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                            </p>
+
+                            {capiScheduledMode === 'fields' ? (
+                              isLoadingCrmFields ? (
+                                <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                              ) : crmFields.length === 0 ? (
+                                <div className="text-sm text-amber-600">
+                                  В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                </div>
+                              ) : (
                                 <CrmFieldSelector
                                   fields={crmFields}
                                   selectedFields={capiScheduledFields}
@@ -2393,9 +2768,22 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                                   getFieldEnums={getFieldEnums}
                                   needsEnumSelection={needsEnumSelection}
                                 />
+                              )
+                            ) : isLoadingCrmStages ? (
+                              <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                            ) : crmStages.length === 0 ? (
+                              <div className="text-sm text-amber-600">
+                                Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
                               </div>
-                            </>
-                          )}
+                            ) : (
+                              <CrmStageSelector
+                                stages={crmStages}
+                                selectedStages={capiScheduledStages}
+                                setSelectedStages={setCapiScheduledStages}
+                                isSubmitting={isSubmitting}
+                              />
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
