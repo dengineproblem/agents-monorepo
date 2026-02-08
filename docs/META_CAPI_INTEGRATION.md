@@ -13,7 +13,7 @@
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `ViewContent` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
+| 1 | `Contact` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
 | 2 | `CompleteRegistration` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
 | 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
 
@@ -121,7 +121,7 @@ AMO CRM / Bitrix24
 
 ```typescript
 const CAPI_EVENTS = {
-  INTEREST: 'ViewContent',           // Level 1
+  INTEREST: 'Contact',           // Level 1
   QUALIFIED: 'CompleteRegistration', // Level 2
   SCHEDULED: 'Purchase',             // Level 3
 };
@@ -151,7 +151,7 @@ const CAPI_EVENTS = {
 **dialog_analysis (новые поля):**
 - `capi_msg_count` (INT, default 0) — счётчик входящих сообщений от рекламных лидов
 - Считает только сообщения от контактов с `source_id` в таблице `leads`
-- Сбрасывается в 0 при повторном клике на рекламу (для отправки нового ViewContent)
+- Сбрасывается в 0 при повторном клике на рекламу (для отправки нового Contact)
 
 **Важно:** `capi_msg_count` отделён от `incoming_count` — это позволяет:
 - Считать только сообщения ПОСЛЕ клика по рекламе
@@ -163,7 +163,7 @@ const CAPI_EVENTS = {
 - `capi_enabled` (BOOLEAN) - включен ли CAPI для направления
 - `capi_source` (TEXT) - источник событий: `whatsapp` или `crm`
 - `capi_crm_type` (TEXT) - тип CRM: `amocrm` или `bitrix24`
-- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/ViewContent)
+- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/Contact)
 - `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/CompleteRegistration)
 -- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled → Purchase event_name)
 
@@ -221,7 +221,7 @@ const CAPI_EVENTS = {
     - `Поля CRM`
     - `Этапы воронки`
   - Уровни:
-    - Level 1 (Интерес / ViewContent)
+    - Level 1 (Интерес / Contact)
     - Level 2 (Квалифицирован / CompleteRegistration)
     - Level 3 (Записался / Purchase)
   - Настройка доступна как при создании, так и при редактировании направления.
@@ -238,7 +238,7 @@ ENV переменная для настройки порога счётчика
 CAPI_INTEREST_THRESHOLD=3  # default: 3 сообщения
 ```
 
-Событие ViewContent отправляется когда `capi_msg_count >= CAPI_INTEREST_THRESHOLD`.
+Событие Contact отправляется когда `capi_msg_count >= CAPI_INTEREST_THRESHOLD`.
 
 ### 3. Access Token
 
@@ -284,7 +284,7 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 
 ### Источник: WhatsApp
 
-#### Level 1 (Interest/ViewContent) — по счётчику сообщений
+#### Level 1 (Interest/Contact) — по счётчику сообщений
 
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
    - Если есть `source_id` в сообщении:
@@ -300,7 +300,7 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 
 3. **chatbot-service** → `/capi/interest-event`
    - Получает `pixelId` и `accessToken` через `getDirectionPixelInfo()`
-   - Отправляет `ViewContent` через `sendCapiEventAtomic()`
+   - Отправляет `Contact` через `sendCapiEventAtomic()`
    - Обновляет `capi_interest_sent = true`
 
 #### Level 2, 3 (Qualified/Scheduled) — через Cron + AI анализ
@@ -414,7 +414,7 @@ Response:
    - `capi_msg_count++` при каждом входящем сообщении
 
 3. **При достижении порога (default: 3):**
-   - Отправляется ViewContent через `/capi/interest-event`
+   - Отправляется Contact через `/capi/interest-event`
    - `capi_interest_sent = true`
 
 ### Повторный клик на рекламу
@@ -422,7 +422,7 @@ Response:
 Если тот же контакт кликнет на рекламу снова (даже с тем же `source_id`):
 - `handleAdLead()` сбрасывает `capi_msg_count = 0`
 - `capi_interest_sent = false`
-- ViewContent отправится снова после 3 сообщений
+- Contact отправится снова после 3 сообщений
 
 Это корректное поведение — фактически происходит новое событие интереса.
 
@@ -453,7 +453,7 @@ Body:
 Response (success):
 {
   "success": true,
-  "event": "ViewContent",
+  "event": "Contact",
   "eventId": "abc123..."
 }
 
@@ -478,10 +478,10 @@ Response (already sent):
 **Level 1 (Interest) — счётчик сообщений:**
 ```
 [evolutionWebhooks] Reset CAPI counter for new ad click { instanceName, clientPhone }
-[evolutionWebhooks] CAPI threshold reached, sending ViewContent { contactPhone, capiMsgCount, threshold, directionId }
+[evolutionWebhooks] CAPI threshold reached, sending Contact { contactPhone, capiMsgCount, threshold, directionId }
 [evolutionWebhooks] CAPI Interest event sent successfully { instanceName, contactPhone }
 [chatbot-service] Interest CAPI event request { instanceName, contactPhone }
-[chatbot-service] Interest CAPI event (ViewContent) sent successfully { contactPhone, dialogId, directionId }
+[chatbot-service] Interest CAPI event (Contact) sent successfully { contactPhone, dialogId, directionId }
 ```
 
 **Level 2, 3 — AI анализ:**
@@ -512,7 +512,7 @@ Response (already sent):
 POST /v20.0/{pixel_id}/events
 {
   "data": [{
-    "event_name": "ViewContent",
+    "event_name": "Contact",
     "event_time": 1703520000,
     "event_id": "abc123...",
     "event_source_url": "https://wa.me/",
@@ -658,15 +658,15 @@ Dashboard.tsx
 
 | Ряд | Метрики |
 |-----|---------|
-| 1 | CAPI ViewContent, CAPI Registration, CAPI Purchase (количество) |
-| 2 | Лиды → CAPI ViewContent %, ViewContent → Registration %, Registration → Purchase % |
-| 3 | Cost per ViewContent, Cost per Registration, Cost per Purchase |
+| 1 | CAPI Contact, CAPI Registration, CAPI Purchase (количество) |
+| 2 | Лиды → CAPI Contact %, Contact → Registration %, Registration → Purchase % |
+| 3 | Cost per Contact, Cost per Registration, Cost per Purchase |
 
 ### Расчёт стоимости
 
 ```typescript
 const totalSpend = campaignStats.reduce((sum, s) => sum + s.spend, 0);
-const costPerLead = totalSpend / capiStats.lead; // lead == ViewContent
+const costPerLead = totalSpend / capiStats.lead; // lead == Contact
 const costPerRegistration = totalSpend / capiStats.registration;
 const costPerSchedule = totalSpend / capiStats.schedule; // schedule == Purchase
 ```
@@ -792,7 +792,7 @@ WHERE capi_interest_sent = true;
 
 **Симптомы:**
 - `capi_msg_count` не инкрементируется
-- ViewContent не отправляется после 3 сообщений
+- Contact не отправляется после 3 сообщений
 
 **Проверка:**
 
@@ -847,8 +847,8 @@ docker logs -f chatbot-service 2>&1 | grep "Interest CAPI"
 
 | Неделя | Событие для оптимизации |
 |--------|------------------------|
-| 1 | ViewContent (если 50+ событий) |
-| 2 | ViewContent → CompleteRegistration (если 50+) |
+| 1 | Contact (если 50+ событий) |
+| 2 | Contact → CompleteRegistration (если 50+) |
 | 3 | CompleteRegistration → Purchase |
 
 Переключение на следующий уровень когда:

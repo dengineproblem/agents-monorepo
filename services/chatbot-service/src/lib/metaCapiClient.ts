@@ -4,7 +4,7 @@
  * Отправляет события конверсий в Facebook для оптимизации рекламы.
  *
  * Три уровня событий (Pixel/CAPI без WABA):
- * 1. ViewContent (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
+ * 1. Contact (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
  * 2. CompleteRegistration (QUALIFIED) - клиент прошёл квалификацию
  * 3. Purchase (BOOKED) - клиент записался/купил (event_name = Purchase)
  */
@@ -65,7 +65,7 @@ const circuitBreaker = new MetaCircuitBreaker();
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  INTEREST: 'ViewContent',          // Level 1: 3+ inbound messages
+  INTEREST: 'Contact',              // Level 1: 3+ inbound messages
   QUALIFIED: 'CompleteRegistration',// Level 2: Passed qualification
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;

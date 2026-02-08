@@ -90,7 +90,7 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
  * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
  *
  * Соответствие уровней оптимизации и событий CAPI:
- * - level_1: CONTENT_VIEW (ViewContent) — Интерес, 3+ сообщения от клиента
+ * - level_1: CONTACT (Contact) — Интерес, 3+ сообщения от клиента
  * - level_2: COMPLETE_REGISTRATION (CompleteRegistration) — Клиент квалифицирован
  * - level_3: PURCHASE (Purchase) — Клиент записался или совершил покупку
  *
@@ -99,11 +99,11 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
  */
 export function getCustomEventType(level: string | undefined): string {
   const map: Record<string, string> = {
-    'level_1': 'CONTENT_VIEW',
+    'level_1': 'CONTACT',
     'level_2': 'COMPLETE_REGISTRATION',
     'level_3': 'PURCHASE'
   };
-  const result = map[level || 'level_1'] || 'CONTENT_VIEW';
+  const result = map[level || 'level_1'] || 'CONTACT';
 
   log.debug({
     input_level: level,
@@ -2775,4 +2775,3 @@ export async function createAdsInAdSet(params: {
     return { ads, failedAds: allFailedAds };
   }
 }
-
