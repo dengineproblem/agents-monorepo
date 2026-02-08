@@ -18,7 +18,7 @@
 - **Голос:** OpenAI Whisper API (`whisper-1`)
 - **Логирование:** Pino + pino-pretty
 
-**Архитектура:** Однотурновая — каждое Telegram-сообщение обрабатывается как отдельный запрос к Claude с собственным Tool Use циклом (до 10 turns внутри). Между сообщениями conversation context НЕ сохраняется.
+**Архитектура:** Мультиагентная с domain routing — каждое Telegram-сообщение классифицируется роутером (keyword → LLM fallback) и направляется в специализированный домен (ads, creative, crm, tiktok, onboarding, general). Каждый домен имеет свой системный промпт и subset tools. Между сообщениями conversation context НЕ сохраняется.
 
 ---
 
@@ -39,8 +39,10 @@
 │  4. Store in SQLite                                            │
 │  5. Check trigger (/bot, @Claude, private chat)               │
 │  6. Resolve telegram_id -> userAccountId (agent-brain API)   │
-│  7. Load system prompt (groups/main/CLAUDE.md)                │
-│  8. Inject userAccountId into prompt                          │
+│  7. DOMAIN ROUTING (keyword match → LLM fallback)            │
+│     → ads | creative | crm | tiktok | onboarding | general  │
+│  8. Load BASE.md + domain/CLAUDE.md + filter tools           │
+│  9. Inject userAccountId into prompt                          │
 │                                                                │
 │  ┌──────────────────────────────────────────────────────────┐ │
 │  │          TOOL USE LOOP (max 10 turns)                    │ │
@@ -48,7 +50,7 @@
 │  │  anthropic.messages.create({                              │ │
 │  │    model: 'claude-haiku-4-5-20251001',                   │ │
 │  │    system: systemPrompt,                                  │ │
-│  │    tools: [49 tools + web_search],                         │ │
+│  │    tools: [domain-filtered tools + web_search],            │ │
 │  │    messages: [...]                                        │ │
 │  │  })                                                        │ │
 │  │       |                                                    │ │
@@ -96,6 +98,8 @@
 services/telegram-claude-bot/
 ├── src/
 │   ├── index.ts              # Точка входа: polling, handleMessage, Tool Use цикл
+│   ├── router.ts             # Domain Router: keyword classifier + LLM fallback
+│   ├── domains.ts            # Маппинг доменов → tools subset + prompt paths
 │   ├── config.ts             # ENV переменные, пути, TRIGGER_PATTERN, таймзона
 │   ├── tools.ts              # 49 Anthropic Tool определений + executeTool()
 │   ├── db.ts                 # SQLite: init, CRUD для chats/messages/tasks
@@ -106,8 +110,22 @@ services/telegram-claude-bot/
 │   ├── container-runner.ts   # Docker контейнеры [НЕ ИСПОЛЬЗУЕТСЯ]
 │   └── mount-security.ts    # Mount валидация [НЕ ИСПОЛЬЗУЕТСЯ]
 ├── groups/
+│   ├── shared/
+│   │   └── BASE.md           # Общие правила: безопасность, форматирование, стиль
+│   ├── ads/
+│   │   └── CLAUDE.md         # Facebook Ads specialist prompt
+│   ├── creative/
+│   │   └── CLAUDE.md         # Creatives specialist prompt
+│   ├── crm/
+│   │   └── CLAUDE.md         # CRM specialist prompt
+│   ├── tiktok/
+│   │   └── CLAUDE.md         # TikTok specialist prompt
+│   ├── onboarding/
+│   │   └── CLAUDE.md         # Onboarding specialist prompt
+│   ├── general/
+│   │   └── CLAUDE.md         # General/fallback prompt
 │   └── main/
-│       └── CLAUDE.md         # Системный промпт для Claude (267 строк)
+│       └── CLAUDE.md         # Монолитный промпт (fallback, 300 строк)
 ├── store/
 │   └── messages.db           # SQLite БД (история сообщений)
 ├── data/
@@ -124,7 +142,9 @@ services/telegram-claude-bot/
 
 | Файл | Строк | Описание |
 |------|-------|----------|
-| `index.ts` | ~584 | Главная логика: Telegram polling, handleMessage(), Tool Use цикл, Whisper транскрибация, rate limiting, security guards |
+| `index.ts` | ~630 | Главная логика: Telegram polling, handleMessage(), domain routing интеграция, Tool Use цикл, Whisper транскрибация, rate limiting, security guards |
+| `router.ts` | ~140 | Domain Router: keyword regex classifier (0ms) + LLM Haiku fallback (~300ms). Определяет домен: ads, creative, crm, tiktok, onboarding, general |
+| `domains.ts` | ~100 | Маппинг доменов → tool subsets + prompt file paths. Фильтрует tools по имени из главного массива |
 | `config.ts` | ~78 | ENV переменные, пути, regex триггер, rate limits, admin IDs, voice limits |
 | `tools.ts` | ~988 | Определения 49 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
 | `db.ts` | ~322 | SQLite инициализация, таблицы chats/messages/scheduled_tasks/task_run_logs, CRUD операции |
@@ -206,19 +226,49 @@ const userAccountId = await resolveUserAccountId(telegramId);
 
 **Важно:** Бот НЕ хранит Supabase Service Role Key — резолв происходит через agent-brain, который уже имеет доступ к БД.
 
-### Шаг 6: Загрузка системного промпта
+### Шаг 6: Domain Routing
 
 ```typescript
-const baseSystemPrompt = fs.readFileSync(
-  path.join(DATA_DIR, '..', 'groups', 'main', 'CLAUDE.md'), 'utf-8'
-);
-const systemPrompt = `userAccountId пользователя: ${userAccountId}\n\n` +
-  `Всегда используй этот userAccountId при вызове tools.\n\n${baseSystemPrompt}`;
+import { routeMessage } from './router.js';
+import { DOMAINS, getToolsForDomain } from './domains.js';
+
+const routeResult = await routeMessage(truncatedMessage, anthropic);
+// routeResult = { domain: 'ads', method: 'keyword' }
 ```
 
-Файл `groups/main/CLAUDE.md` читается при **каждом сообщении** (не кэшируется). Это значит, что изменения в CLAUDE.md применяются без перезапуска бота.
+**Hybrid routing (2 фазы):**
 
-### Шаг 7: Tool Use Loop
+1. **Keyword classifier (0ms):** Regex-паттерны для каждого домена. Если >=1 паттерн совпал с одним доменом → роутинг завершён. Если совпали 2+ домена (cross-domain) → fallback на все tools.
+2. **LLM fallback (~300ms):** Если нет keyword match → быстрый Haiku classify вызов с `max_tokens: 10`, сообщение обрезано до 200 символов.
+
+| Домен | Keyword примеры | Tools |
+|-------|----------------|-------|
+| `ads` | кампания, бюджет, расход, CPL, направление, Facebook | 29 |
+| `creative` | креатив, баннер, картинка, карусель, оффер | 26 |
+| `crm` | лиды, продажи, воронка, WhatsApp диалог | 9 |
+| `tiktok` | tiktok, тикток | 4 |
+| `onboarding` | создай пользователя, регистрация | 2 |
+| `general` | (LLM fallback для приветствий, ошибок) | 2 + web_search |
+
+### Шаг 7: Загрузка системного промпта
+
+```typescript
+// Загрузка: shared/BASE.md + {domain}/CLAUDE.md
+const basePath = path.join(groupsDir, 'shared', 'BASE.md');
+const domainPath = path.join(groupsDir, domainConfig.promptFile);
+const fullPrompt = basePrompt + '\n\n' + specificPrompt;
+systemPrompt = `userAccountId: ${userAccountId}\n\n${fullPrompt}`;
+
+// Фильтрация tools по домену
+domainTools = getToolsForDomain(routeResult.domain);
+// domainConfig.includeWebSearch → добавить web_search
+```
+
+**Fallback:** Если routing вернул null (cross-domain) или неизвестный домен → загружается `groups/main/CLAUDE.md` + все 49 tools (монолитный режим, как было раньше).
+
+Файлы промптов читаются при **каждом сообщении** (не кэшируются). Изменения применяются без перезапуска бота.
+
+### Шаг 8: Tool Use Loop
 
 ```typescript
 const messages: Anthropic.MessageParam[] = [{ role: 'user', content: cleanedMessage }];
@@ -233,7 +283,7 @@ while (continueLoop && turnCount < MAX_TURNS) {
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 4096,
     system: systemPrompt,
-    tools,
+    tools: domainTools,  // Отфильтрованные tools для домена
     messages,
   });
 
@@ -708,36 +758,51 @@ CREATE TABLE task_run_logs (
 
 ---
 
-## 10. Системный промпт (CLAUDE.md)
+## 10. Системный промпт (мультиагентная структура)
 
-**Путь:** `groups/main/CLAUDE.md`
+### Структура промптов
 
-### Содержание
-
-1. **Роли:** 5 специалистов (Facebook Ads, Creatives, CRM, TikTok, Onboarding)
-2. **Безопасность:** Запрет раскрытия API ключей, env, путей
-3. **Форматирование:** Telegram Markdown, мобильный формат, эмодзи статусов
-4. **Tools:** Полный список с описаниями (50+ tools)
-5. **Правила работы:** 11 правил — бюджеты, лиды, 3 типа креативов, Brain Mini, ошибки
-
-### Как загружается
-
-```typescript
-const baseSystemPrompt = fs.readFileSync(
-  path.join(DATA_DIR, '..', 'groups', 'main', 'CLAUDE.md'), 'utf-8'
-);
-const systemPrompt = `userAccountId пользователя: ${userAccountId}\n\n` +
-  `Всегда используй этот userAccountId при вызове tools.\n\n${baseSystemPrompt}`;
+```
+groups/
+├── shared/BASE.md        ← Общие правила (безопасность, форматирование, стиль)
+├── ads/CLAUDE.md          ← Facebook Ads: tools, бюджеты, Brain Mini
+├── creative/CLAUDE.md     ← Creatives: 3 типа генерации, 5-шаговый workflow
+├── crm/CLAUDE.md          ← CRM: лиды, продажи, WhatsApp
+├── tiktok/CLAUDE.md       ← TikTok: кампании
+├── onboarding/CLAUDE.md   ← Onboarding: createUser
+├── general/CLAUDE.md      ← General: ошибки, web search
+└── main/CLAUDE.md         ← Монолитный fallback (все 5 ролей, 300 строк)
 ```
 
-**Загружается при каждом сообщении** — изменения в CLAUDE.md вступают в силу сразу, без перезапуска бота.
+### Как собирается промпт
+
+```
+systemPrompt = userAccountId header
+             + securityReminder (если prompt injection detected)
+             + groups/shared/BASE.md
+             + groups/{domain}/CLAUDE.md
+```
+
+При fallback (cross-domain или ошибка роутинга):
+```
+systemPrompt = userAccountId header + groups/main/CLAUDE.md
+```
+
+### Содержание BASE.md (~80 строк)
+
+1. **Безопасность:** Запрет раскрытия API ключей, env, путей
+2. **Форматирование:** Telegram Markdown, мобильный формат, эмодзи статусов
+3. **Перевод терминов:** Facebook → русский
+4. **Общие правила:** подтверждение WRITE операций, не выдумывать данные
+5. **Стиль:** русский язык, профессиональный тон
 
 ### Как редактировать
 
-1. Открыть `groups/main/CLAUDE.md`
-2. Внести изменения
-3. Следующее сообщение в Telegram подхватит обновлённый промпт
-4. Для production — нужен rebuild Docker image или volume mount
+1. **Общие правила** → редактировать `groups/shared/BASE.md`
+2. **Доменная логика** → редактировать `groups/{domain}/CLAUDE.md`
+3. **Fallback промпт** → редактировать `groups/main/CLAUDE.md`
+4. Следующее сообщение подхватит изменения (файлы читаются при каждом запросе)
+5. Для production — rebuild Docker image или volume mount
 
 ---
 
@@ -847,7 +912,7 @@ telegram-claude-bot:
 
 ### 14.1 Добавление нового tool (чеклист)
 
-При добавлении нового tool нужно изменить **5 файлов** в **2 сервисах**:
+При добавлении нового tool нужно изменить **6 файлов** в **2 сервисах**:
 
 **agent-brain (3 файла):**
 
@@ -857,12 +922,15 @@ telegram-claude-bot:
 | 2 | `agents/{category}/handlers.js` | Добавить async handler функцию |
 | 3 | `mcp/tools/definitions.js` | `createMCPTool()` + добавить в массив категории |
 
-**telegram-claude-bot (2 файла):**
+**telegram-claude-bot (3 файла):**
 
 | # | Файл | Что делать |
 |---|------|-----------|
 | 4 | `src/tools.ts` | Добавить Anthropic Tool определение (JSON Schema) |
-| 5 | `groups/main/CLAUDE.md` | Добавить описание tool + правило когда использовать |
+| 5 | `src/domains.ts` | Добавить имя tool в `toolNames` массив соответствующего домена |
+| 6 | `groups/{domain}/CLAUDE.md` | Добавить описание tool + правило когда использовать |
+
+> **Важно:** Если tool не добавлен в `domains.ts`, он не будет доступен при domain routing (только в fallback-режиме с полным набором tools).
 
 ### 14.2 Шаблон для нового tool
 
@@ -931,36 +999,52 @@ export const allMCPTools = [
 },
 ```
 
-**Шаг 5 — CLAUDE.md:**
+**Шаг 5 — domains.ts:**
+```typescript
+// Добавить tool в соответствующий домен
+export const DOMAINS: Record<string, DomainConfig> = {
+  myDomain: {
+    ...
+    toolNames: [...existingTools, 'myNewTool'],  // ← добавить
+  },
+};
+```
+
+**Шаг 6 — groups/{domain}/CLAUDE.md:**
 ```markdown
 ### My Category Tools
 - `myNewTool` - краткое описание для бота
 
-## Важные правила работы
-12. **МОЯ НОВАЯ ФУНКЦИЯ:**
-    - Триггерные фразы: "...", "..." → вызови `myNewTool`
-    - Формат вывода: ...
+## Правила
+- Триггерные фразы: "...", "..." → вызови `myNewTool`
 ```
 
-### 14.3 Добавление новой категории агентов
+### 14.3 Добавление новой категории агентов (нового домена)
 
+**agent-brain:**
 1. Создать папку `agent-brain/src/chatAssistant/agents/{newCategory}/`
 2. Создать `toolDefs.js` + `handlers.js` (по шаблону выше)
 3. В `definitions.js` — импорт + массив `{newCategory}Tools` + добавить в `allMCPTools`
-4. В `tools.ts` — секция `// ===== NEW CATEGORY =====`
-5. В `CLAUDE.md` — раздел `### New Category Tools` + правило в "Важные правила работы"
+
+**telegram-claude-bot:**
+4. В `tools.ts` — секция `// ===== NEW CATEGORY =====` с определениями tools
+5. В `domains.ts` — добавить новый домен в `DOMAINS` с toolNames и promptFile
+6. В `router.ts` — добавить keyword patterns для нового домена + домен в `validDomains` LLM промпта
+7. Создать `groups/{newDomain}/CLAUDE.md` — системный промпт для домена
 
 ### 14.4 Частые ошибки при доработке
 
 | Ошибка | Симптом | Решение |
 |--------|---------|---------|
-| Tool не добавлен в `CLAUDE.md` | Claude не вызывает tool, хотя он существует | Добавить описание в CLAUDE.md |
+| Tool не добавлен в `CLAUDE.md` | Claude не вызывает tool, хотя он существует | Добавить описание в `groups/{domain}/CLAUDE.md` |
 | Tool не добавлен в `tools.ts` | Anthropic API не знает про tool → Claude не видит | Добавить определение в массив tools |
+| Tool не добавлен в `domains.ts` | Tool не загружается при domain routing (только в fallback) | Добавить имя в `toolNames` домена |
 | Tool не добавлен в `allMCPTools` | agent-brain отвечает 404 | Добавить `...categoryTools` в allMCPTools |
-| Имена не совпадают | tools.ts: `getErrors`, definitions.js: `getUserErrors` → 404 | Имена должны совпадать во всех 5 файлах |
+| Имена не совпадают | tools.ts: `getErrors`, definitions.js: `getUserErrors` → 404 | Имена должны совпадать во всех 6 файлах |
 | Нет таймаута для тяжёлого tool | Timeout через 30 секунд | Добавить в `TOOL_TIMEOUTS` в tools.ts |
 | Не передан userAccountId | Handler получает null, запрос к БД пустой | Бот инжектит автоматически; в handler проверять context |
 | Ошибка в Zod-схеме | agent-brain крашится при старте | Проверить импорты и синтаксис Zod |
+| Keyword не добавлен в router.ts | Сообщение роутится через LLM вместо мгновенного keyword match | Добавить regex в `KEYWORD_RULES` для домена |
 
 ---
 
