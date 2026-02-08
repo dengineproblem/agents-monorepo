@@ -20,6 +20,13 @@ import {
   AmoCRMLead,
   AmoCRMCustomFieldValue
 } from '../adapters/amocrm.js';
+import {
+  getDirectionCapiSettings,
+  evaluateAmoCapiLevelsWithDiagnostics,
+  normalizeContactPhoneForCapi,
+  sendCrmCapiLevels,
+  summarizeDirectionCapiSettings
+} from '../lib/crmCapi.js';
 
 /**
  * Qualification field configuration from user_accounts.amocrm_qualification_fields
@@ -119,6 +126,145 @@ function normalizePhone(phone: string): string {
   }
 
   return normalized;
+}
+
+async function fetchAmoLeadWithContacts(
+  amocrmLeadId: number,
+  userAccountId: string,
+  accountId?: string | null
+): Promise<any | null> {
+  try {
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId, accountId || null);
+    const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
+
+    if (!amocrmLead) {
+      return null;
+    }
+
+    const linkedContacts = amocrmLead?._embedded?.contacts || [];
+    const contactsWithFields: any[] = [];
+
+    for (const contactRef of linkedContacts) {
+      if (!contactRef?.id) continue;
+      try {
+        const fullContact = await getContact(contactRef.id, subdomain, accessToken);
+        if (fullContact) {
+          contactsWithFields.push(fullContact);
+        }
+      } catch {
+        // Ignore contact-level fetch errors, continue with lead-level fields
+      }
+    }
+
+    return {
+      ...amocrmLead,
+      _embedded: {
+        ...amocrmLead?._embedded,
+        contacts: contactsWithFields
+      }
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function syncDirectionCrmCapiForAmoLead(params: {
+  userAccountId: string;
+  lead: any;
+  amocrmLeadId: number;
+  app: FastifyInstance;
+  preparedAmoLead?: any | null;
+}): Promise<void> {
+  const { userAccountId, lead, amocrmLeadId, app, preparedAmoLead } = params;
+
+  if (!lead?.direction_id) {
+    app.log.debug({
+      userAccountId,
+      leadId: lead?.id || null,
+      amocrmLeadId
+    }, 'CRM CAPI: skip AmoCRM sync (lead has no direction_id)');
+    return;
+  }
+
+  const capiSettings = await getDirectionCapiSettings(lead.direction_id);
+  if (!capiSettings) {
+    app.log.debug({
+      userAccountId,
+      leadId: lead.id,
+      directionId: lead.direction_id
+    }, 'CRM CAPI: skip AmoCRM sync (direction settings not found)');
+    return;
+  }
+
+  if (!capiSettings.capiEnabled || capiSettings.capiSource !== 'crm' || capiSettings.capiCrmType !== 'amocrm') {
+    app.log.debug({
+      userAccountId,
+      leadId: lead.id,
+      directionId: lead.direction_id,
+      settings: summarizeDirectionCapiSettings(capiSettings)
+    }, 'CRM CAPI: skip AmoCRM sync (source/type/enable mismatch)');
+    return;
+  }
+
+  const amocrmLead = preparedAmoLead || await fetchAmoLeadWithContacts(amocrmLeadId, userAccountId, lead.account_id || null);
+  if (!amocrmLead) {
+    app.log.warn({ userAccountId, leadId: lead.id, amocrmLeadId }, 'CRM CAPI: failed to fetch AmoCRM lead for matching');
+    return;
+  }
+
+  const evaluation = evaluateAmoCapiLevelsWithDiagnostics(amocrmLead, capiSettings);
+  const matches = evaluation.levels;
+  const hasAnyMatch = matches.interest || matches.qualified || matches.scheduled;
+
+  const evaluationLogPayload = {
+    userAccountId,
+    leadId: lead.id,
+    directionId: lead.direction_id,
+    amocrmLeadId,
+    matches,
+    diagnostics: evaluation.diagnostics,
+    settings: summarizeDirectionCapiSettings(capiSettings)
+  };
+
+  if (hasAnyMatch) {
+    app.log.info(evaluationLogPayload, 'CRM CAPI: AmoCRM level evaluation matched');
+  } else {
+    app.log.debug(evaluationLogPayload, 'CRM CAPI: AmoCRM level evaluation without matches');
+  }
+
+  const { error: updateError } = await supabase
+    .from('leads')
+    .update({
+      is_qualified: matches.qualified,
+      is_scheduled: matches.scheduled,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', lead.id);
+
+  if (updateError) {
+    app.log.error({
+      error: updateError.message,
+      leadId: lead.id,
+      directionId: lead.direction_id
+    }, 'CRM CAPI: failed updating leads flags from AmoCRM fields');
+  }
+
+  const contactPhone = normalizeContactPhoneForCapi(lead.chat_id || lead.phone);
+  if (!contactPhone) {
+    app.log.warn({
+      leadId: lead.id,
+      directionId: lead.direction_id
+    }, 'CRM CAPI: no contact phone for AmoCRM event');
+    return;
+  }
+
+  await sendCrmCapiLevels({
+    userAccountId,
+    directionId: lead.direction_id,
+    contactPhone,
+    crmType: 'amocrm',
+    levels: matches
+  }, app);
 }
 
 /**
@@ -499,6 +645,31 @@ export async function processDealWebhook(
       }
     }
 
+    // CAPI CRM mode: match direction-level CRM fields and send level events near-real-time
+    const amocrmLeadIdForCapi = Number(leadId || ourLead.amocrm_lead_id || 0);
+    if (Number.isFinite(amocrmLeadIdForCapi) && amocrmLeadIdForCapi > 0) {
+      try {
+        await syncDirectionCrmCapiForAmoLead({
+          userAccountId,
+          lead: ourLead,
+          amocrmLeadId: amocrmLeadIdForCapi,
+          app
+        });
+      } catch (crmCapiError: any) {
+        app.log.error({
+          error: crmCapiError.message,
+          leadId: ourLead.id,
+          amocrmLeadId: amocrmLeadIdForCapi
+        }, 'CRM CAPI sync failed in processDealWebhook');
+      }
+    } else {
+      app.log.warn({
+        leadId: ourLead.id,
+        dealId,
+        sourceLeadId: leadId || null
+      }, 'CRM CAPI sync skipped in processDealWebhook: missing AmoCRM lead ID');
+    }
+
     // 4. Log success
     await logSync({
       userAccountId,
@@ -644,14 +815,12 @@ export async function processLeadStatusChange(
 
     const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
     let isQualified = false;
+    let enrichedLeadForCapi: any | null = null;
 
     if (qualificationFields.length > 0) {
       // Use custom fields for qualification - need to fetch lead details from AmoCRM
       // Supports both lead fields AND contact fields
       try {
-        const { getLead, getContact } = await import('../adapters/amocrm.js');
-        const { getValidAmoCRMToken } = await import('../lib/amocrmTokens.js');
-
         const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
         const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
 
@@ -681,6 +850,7 @@ export async function processLeadStatusChange(
             contacts: contactsWithFields
           }
         };
+        enrichedLeadForCapi = enrichedLead;
 
         isQualified = checkQualification(enrichedLead, qualificationFields);
 
@@ -742,6 +912,23 @@ export async function processLeadStatusChange(
       newStatusId,
       isQualified
     }, 'Updated lead status and qualification');
+
+    // CAPI CRM mode: evaluate direction-level CRM field mapping and send levels near-real-time
+    try {
+      await syncDirectionCrmCapiForAmoLead({
+        userAccountId,
+        lead,
+        amocrmLeadId,
+        preparedAmoLead: enrichedLeadForCapi,
+        app
+      });
+    } catch (crmCapiError: any) {
+      app.log.error({
+        error: crmCapiError.message,
+        leadId: lead.id,
+        amocrmLeadId
+      }, 'CRM CAPI sync failed in processLeadStatusChange');
+    }
 
     // 3b. Check if lead reached any of the 3 key stages (once qualified, always qualified)
     // Get direction with all 3 key stages

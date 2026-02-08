@@ -16,19 +16,337 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { ChevronDown, Loader2 } from 'lucide-react';
-import type { Direction, UpdateDefaultSettingsInput, CapiSource, CapiFieldConfig, OptimizationLevel } from '@/types/direction';
+import type {
+  Direction,
+  UpdateDefaultSettingsInput,
+  CapiSource,
+  CapiFieldConfig,
+  CapiCrmType,
+  OptimizationLevel
+} from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
+import {
+  getLeadCustomFields as getAmocrmFields,
+  getPipelines as getAmocrmPipelines,
+  type CustomField as AmocrmCustomField,
+  type Pipeline as AmocrmPipeline,
+} from '@/services/amocrmApi';
+import {
+  getBitrix24Status,
+  getBitrix24Pipelines,
+  getBitrix24LeadCustomFields,
+  type CustomField as Bitrix24CustomField,
+  type Bitrix24Pipelines,
+} from '@/services/bitrix24Api';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
+const MAX_CAPI_FIELDS = 3;
+
+type CrmType = CapiCrmType;
+type CapiTriggerMode = 'fields' | 'stages';
+
+interface SelectedCapiField {
+  fieldId: string | number | null;
+  enumId: string | number | null;
+}
+
+interface SelectedCapiStage {
+  stageKey: string | null;
+}
+
+interface CrmStageOption {
+  key: string;
+  label: string;
+  entityType: 'lead' | 'deal';
+  pipelineId: string | number;
+  statusId: string | number;
+}
+
+interface CrmFieldSelectorProps {
+  fields: (AmocrmCustomField | Bitrix24CustomField)[];
+  selectedFields: SelectedCapiField[];
+  setSelectedFields: React.Dispatch<React.SetStateAction<SelectedCapiField[]>>;
+  crmType: CrmType;
+  isSubmitting: boolean;
+  getFieldById: (fieldId: string | number | null) => AmocrmCustomField | Bitrix24CustomField | undefined;
+  getFieldId: (field: AmocrmCustomField | Bitrix24CustomField) => string | number;
+  getFieldName: (field: AmocrmCustomField | Bitrix24CustomField) => string;
+  getFieldType: (field: AmocrmCustomField | Bitrix24CustomField) => string;
+  getFieldEnums: (field: AmocrmCustomField | Bitrix24CustomField) => Array<{ id: string | number; value: string }>;
+  needsEnumSelection: (field: AmocrmCustomField | Bitrix24CustomField | null) => boolean;
+}
+
+const CrmFieldSelector: React.FC<CrmFieldSelectorProps> = ({
+  fields,
+  selectedFields,
+  setSelectedFields,
+  crmType,
+  isSubmitting,
+  getFieldById,
+  getFieldId,
+  getFieldName,
+  getFieldType,
+  getFieldEnums,
+  needsEnumSelection,
+}) => {
+  const handleFieldChange = (index: number, value: string) => {
+    const fieldId = value === 'none' ? null : (crmType === 'amocrm' ? parseInt(value, 10) : value);
+    setSelectedFields(prev => {
+      const updated = [...prev];
+      updated[index] = { fieldId, enumId: null };
+      return updated;
+    });
+  };
+
+  const handleEnumChange = (index: number, value: string) => {
+    const enumId = value === 'none' ? null : (crmType === 'amocrm' ? parseInt(value, 10) : value);
+    setSelectedFields(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], enumId };
+      return updated;
+    });
+  };
+
+  const addField = () => {
+    if (selectedFields.length < MAX_CAPI_FIELDS) {
+      setSelectedFields(prev => [...prev, { fieldId: null, enumId: null }]);
+    }
+  };
+
+  const removeField = (index: number) => {
+    if (selectedFields.length > 1) {
+      setSelectedFields(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setSelectedFields([{ fieldId: null, enumId: null }]);
+    }
+  };
+
+  const isCheckboxType = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const fieldType = getFieldType(field);
+    return fieldType === 'checkbox' || fieldType === 'boolean';
+  };
+
+  const getSelectedCheckboxFieldIds = (excludeIndex: number) => {
+    return selectedFields
+      .filter((_, i) => i !== excludeIndex)
+      .filter(sf => {
+        if (!sf.fieldId) return false;
+        const field = getFieldById(sf.fieldId);
+        return field && isCheckboxType(field);
+      })
+      .map(sf => sf.fieldId)
+      .filter(Boolean);
+  };
+
+  return (
+    <div className="space-y-2">
+      {selectedFields.map((sf, index) => {
+        const selectedCheckboxIds = getSelectedCheckboxFieldIds(index);
+        const currentField = sf.fieldId ? getFieldById(sf.fieldId) : null;
+
+        return (
+          <div key={index} className="flex items-start gap-2">
+            <div className="flex-1 space-y-1">
+              <Select
+                value={sf.fieldId?.toString() || 'none'}
+                onValueChange={(value) => handleFieldChange(index, value)}
+                disabled={isSubmitting || fields.length === 0}
+              >
+                <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                  <SelectValue placeholder="Выберите поле" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Не выбрано</span>
+                  </SelectItem>
+                  {fields.map((field) => {
+                    const fId = getFieldId(field);
+                    const isDisabled = isCheckboxType(field) && selectedCheckboxIds.includes(fId);
+                    return (
+                      <SelectItem
+                        key={fId}
+                        value={fId.toString()}
+                        disabled={isDisabled}
+                      >
+                        {getFieldName(field)} ({getFieldType(field)})
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+
+              {currentField && needsEnumSelection(currentField) && (
+                <Select
+                  value={sf.enumId?.toString() || 'none'}
+                  onValueChange={(value) => handleEnumChange(index, value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                    <SelectValue placeholder="Выберите значение" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      <span className="text-muted-foreground">Не выбрано</span>
+                    </SelectItem>
+                    {getFieldEnums(currentField).map((enumItem) => (
+                      <SelectItem key={enumItem.id} value={enumItem.id.toString()}>
+                        {enumItem.value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {selectedFields.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeField(index)}
+                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 flex-shrink-0"
+                disabled={isSubmitting}
+              >
+                <span className="text-lg">&times;</span>
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      {selectedFields.length < MAX_CAPI_FIELDS && fields.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addField}
+          disabled={isSubmitting}
+          className="w-full h-8 text-xs"
+        >
+          + Добавить поле ({selectedFields.length}/{MAX_CAPI_FIELDS})
+        </Button>
+      )}
+    </div>
+  );
+};
+
+interface CrmStageSelectorProps {
+  stages: CrmStageOption[];
+  selectedStages: SelectedCapiStage[];
+  setSelectedStages: React.Dispatch<React.SetStateAction<SelectedCapiStage[]>>;
+  isSubmitting: boolean;
+}
+
+const CrmStageSelector: React.FC<CrmStageSelectorProps> = ({
+  stages,
+  selectedStages,
+  setSelectedStages,
+  isSubmitting,
+}) => {
+  const handleStageChange = (index: number, value: string) => {
+    const stageKey = value === 'none' ? null : value;
+    setSelectedStages(prev => {
+      const updated = [...prev];
+      updated[index] = { stageKey };
+      return updated;
+    });
+  };
+
+  const addStage = () => {
+    if (selectedStages.length < MAX_CAPI_FIELDS) {
+      setSelectedStages(prev => [...prev, { stageKey: null }]);
+    }
+  };
+
+  const removeStage = (index: number) => {
+    if (selectedStages.length > 1) {
+      setSelectedStages(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setSelectedStages([{ stageKey: null }]);
+    }
+  };
+
+  const getSelectedStageKeys = (excludeIndex: number) => {
+    return selectedStages
+      .filter((_, i) => i !== excludeIndex)
+      .map((item) => item.stageKey)
+      .filter((value): value is string => !!value);
+  };
+
+  return (
+    <div className="space-y-2">
+      {selectedStages.map((item, index) => {
+        const selectedStageKeys = getSelectedStageKeys(index);
+        return (
+          <div key={index} className="flex items-start gap-2">
+            <div className="flex-1">
+              <Select
+                value={item.stageKey || 'none'}
+                onValueChange={(value) => handleStageChange(index, value)}
+                disabled={isSubmitting || stages.length === 0}
+              >
+                <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                  <SelectValue placeholder="Выберите этап воронки" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Не выбрано</span>
+                  </SelectItem>
+                  {stages.map((stage) => (
+                    <SelectItem
+                      key={stage.key}
+                      value={stage.key}
+                      disabled={selectedStageKeys.includes(stage.key)}
+                    >
+                      {stage.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedStages.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeStage(index)}
+                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 flex-shrink-0"
+                disabled={isSubmitting}
+              >
+                <span className="text-lg">&times;</span>
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      {selectedStages.length < MAX_CAPI_FIELDS && stages.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addStage}
+          disabled={isSubmitting}
+          className="w-full h-8 text-xs"
+        >
+          + Добавить этап ({selectedStages.length}/{MAX_CAPI_FIELDS})
+        </Button>
+      )}
+    </div>
+  );
+};
 
 // CAPI settings for update
 export interface EditDirectionCapiSettings {
   capi_enabled: boolean;
   capi_source: CapiSource | null;
+  capi_crm_type: CrmType | null;
+  capi_interest_fields: CapiFieldConfig[];
+  capi_qualified_fields: CapiFieldConfig[];
+  capi_scheduled_fields: CapiFieldConfig[];
   pixel_id: string | null;
 }
 
@@ -36,6 +354,8 @@ interface EditDirectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   direction: Direction | null;
+  userAccountId: string;
+  accountId?: string | null;
   onSubmit: (data: {
     name: string;
     daily_budget_cents?: number;
@@ -53,6 +373,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   open,
   onOpenChange,
   direction,
+  userAccountId,
+  accountId,
   onSubmit,
 }) => {
   // Ref для порталинга Popover внутрь Dialog
@@ -94,7 +416,76 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   // CAPI settings
   const [capiEnabled, setCapiEnabled] = useState(false);
   const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
+  const [capiCrmType, setCapiCrmType] = useState<CrmType>('amocrm');
+  const [capiInterestMode, setCapiInterestMode] = useState<CapiTriggerMode>('fields');
+  const [capiQualifiedMode, setCapiQualifiedMode] = useState<CapiTriggerMode>('fields');
+  const [capiScheduledMode, setCapiScheduledMode] = useState<CapiTriggerMode>('fields');
+  const [capiInterestFields, setCapiInterestFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiQualifiedFields, setCapiQualifiedFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiScheduledFields, setCapiScheduledFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiInterestStages, setCapiInterestStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [capiQualifiedStages, setCapiQualifiedStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
+  const [isLoadingCrms, setIsLoadingCrms] = useState(false);
+  const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
+  const [isLoadingCrmFields, setIsLoadingCrmFields] = useState(false);
+  const [crmStages, setCrmStages] = useState<CrmStageOption[]>([]);
+  const [isLoadingCrmStages, setIsLoadingCrmStages] = useState(false);
   const [capiPixelId, setCapiPixelId] = useState<string>('');
+
+  const isStageFieldConfig = (config: CapiFieldConfig): boolean => {
+    const fieldType = String(config.field_type || '').trim().toLowerCase();
+    return fieldType === 'pipeline_stage' || fieldType === 'stage';
+  };
+
+  const buildStageKeyFromConfig = (config: CapiFieldConfig, crmType: CrmType): string | null => {
+    const pipelineId = config.pipeline_id ?? null;
+    const statusId = config.status_id ?? null;
+    if (pipelineId === null || pipelineId === undefined || statusId === null || statusId === undefined) {
+      return null;
+    }
+
+    if (crmType === 'amocrm') {
+      return `amocrm:lead:${pipelineId}:${statusId}`;
+    }
+
+    const entityType = (config.entity_type === 'deal' ? 'deal' : 'lead');
+    return `bitrix24:${entityType}:${pipelineId}:${statusId}`;
+  };
+
+  const parseLevelConfig = (
+    configs: CapiFieldConfig[] | undefined,
+    crmType: CrmType
+  ): {
+    mode: CapiTriggerMode;
+    fields: SelectedCapiField[];
+    stages: SelectedCapiStage[];
+  } => {
+    const safeConfigs = Array.isArray(configs) ? configs : [];
+    const stageConfigs = safeConfigs.filter((config) => isStageFieldConfig(config));
+    const fieldConfigs = safeConfigs.filter((config) => !isStageFieldConfig(config));
+
+    const fields = fieldConfigs
+      .map((config) => ({
+        fieldId: config.field_id ?? null,
+        enumId: config.enum_id ?? null,
+      }))
+      .filter((item) => item.fieldId !== null);
+
+    const stages = stageConfigs
+      .map((config) => buildStageKeyFromConfig(config, crmType))
+      .filter((value): value is string => !!value)
+      .map((stageKey) => ({ stageKey }));
+
+    const mode: CapiTriggerMode = stageConfigs.length > 0 && fieldConfigs.length === 0 ? 'stages' : 'fields';
+
+    return {
+      mode,
+      fields: fields.length > 0 ? fields : [{ fieldId: null, enumId: null }],
+      stages: stages.length > 0 ? stages : [{ stageKey: null }],
+    };
+  };
 
   // Загрузка пикселей - для site_leads или для CAPI
   useEffect(() => {
@@ -125,6 +516,151 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     loadPixels();
   }, [direction?.objective, capiEnabled, isTikTok]);
 
+  // Load connected CRMs for CRM-based CAPI source
+  useEffect(() => {
+    if (!open || isTikTok || !userAccountId) {
+      setConnectedCrms([]);
+      return;
+    }
+
+    const loadConnectedCrms = async () => {
+      setIsLoadingCrms(true);
+      const crms: CrmType[] = [];
+
+      try {
+        const params = new URLSearchParams({ userAccountId });
+        if (accountId) {
+          params.append('accountId', accountId);
+        }
+        const amocrmResponse = await fetch(`${API_BASE_URL}/amocrm/pipelines?${params.toString()}`);
+        if (amocrmResponse.ok) {
+          crms.push('amocrm');
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        const bitrixStatus = await getBitrix24Status(userAccountId, accountId || null);
+        if (bitrixStatus.connected) {
+          crms.push('bitrix24');
+        }
+      } catch {
+        // ignore
+      }
+
+      setConnectedCrms(crms);
+      setCapiCrmType((prev) => {
+        if (crms.length === 0) return prev;
+        if (crms.includes(prev)) return prev;
+        return crms[0];
+      });
+      setIsLoadingCrms(false);
+    };
+
+    loadConnectedCrms();
+  }, [open, isTikTok, userAccountId, accountId]);
+
+  // Load CRM fields for field-based triggers
+  useEffect(() => {
+    const loadCrmFields = async () => {
+      if (isTikTok || !open || !capiEnabled || capiSource !== 'crm') {
+        setCrmFields([]);
+        return;
+      }
+
+      setIsLoadingCrmFields(true);
+      try {
+        if (capiCrmType === 'amocrm') {
+          const response = await getAmocrmFields(userAccountId);
+          setCrmFields(response.fields || []);
+        } else if (capiCrmType === 'bitrix24') {
+          const response = await getBitrix24LeadCustomFields(userAccountId);
+          setCrmFields(response.fields || []);
+        } else {
+          setCrmFields([]);
+        }
+      } catch (err) {
+        console.error('Failed to load CRM fields:', err);
+        setCrmFields([]);
+      } finally {
+        setIsLoadingCrmFields(false);
+      }
+    };
+
+    loadCrmFields();
+  }, [open, isTikTok, capiEnabled, capiSource, capiCrmType, userAccountId]);
+
+  // Load CRM pipeline stages for stage-based triggers
+  useEffect(() => {
+    const loadCrmStages = async () => {
+      if (isTikTok || !open || !capiEnabled || capiSource !== 'crm') {
+        setCrmStages([]);
+        return;
+      }
+
+      setIsLoadingCrmStages(true);
+      try {
+        if (capiCrmType === 'amocrm') {
+          const pipelines = await getAmocrmPipelines(userAccountId, accountId || undefined) as AmocrmPipeline[];
+          const stageOptions: CrmStageOption[] = [];
+
+          for (const pipeline of pipelines || []) {
+            for (const stage of pipeline.stages || []) {
+              stageOptions.push({
+                key: `amocrm:lead:${pipeline.pipeline_id}:${stage.status_id}`,
+                label: `${pipeline.pipeline_name} → ${stage.status_name}`,
+                entityType: 'lead',
+                pipelineId: pipeline.pipeline_id,
+                statusId: stage.status_id,
+              });
+            }
+          }
+
+          setCrmStages(stageOptions);
+        } else if (capiCrmType === 'bitrix24') {
+          const pipelines = await getBitrix24Pipelines(userAccountId, accountId || undefined) as Bitrix24Pipelines;
+          const stageOptions: CrmStageOption[] = [];
+
+          for (const leadPipeline of pipelines.leads || []) {
+            for (const stage of leadPipeline.stages || []) {
+              stageOptions.push({
+                key: `bitrix24:lead:${leadPipeline.categoryId}:${stage.statusId}`,
+                label: `Лиды / ${leadPipeline.categoryName} → ${stage.statusName}`,
+                entityType: 'lead',
+                pipelineId: leadPipeline.categoryId,
+                statusId: stage.statusId,
+              });
+            }
+          }
+
+          for (const dealPipeline of pipelines.deals || []) {
+            for (const stage of dealPipeline.stages || []) {
+              stageOptions.push({
+                key: `bitrix24:deal:${dealPipeline.categoryId}:${stage.statusId}`,
+                label: `Сделки / ${dealPipeline.categoryName} → ${stage.statusName}`,
+                entityType: 'deal',
+                pipelineId: dealPipeline.categoryId,
+                statusId: stage.statusId,
+              });
+            }
+          }
+
+          setCrmStages(stageOptions);
+        } else {
+          setCrmStages([]);
+        }
+      } catch (err) {
+        console.error('Failed to load CRM stages:', err);
+        setCrmStages([]);
+      } finally {
+        setIsLoadingCrmStages(false);
+      }
+    };
+
+    loadCrmStages();
+  }, [open, isTikTok, capiEnabled, capiSource, capiCrmType, userAccountId, accountId]);
+
   // Заполнение формы при открытии диалога
   useEffect(() => {
     if (!direction || !open) return;
@@ -139,6 +675,22 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     // CAPI settings
     setCapiEnabled(!isTikTok && (direction.capi_enabled || false));
     setCapiSource(!isTikTok ? (direction.capi_source || 'whatsapp') : 'whatsapp');
+    const initialCrmType: CrmType = direction.capi_crm_type || 'amocrm';
+    setCapiCrmType(initialCrmType);
+
+    const interestParsed = parseLevelConfig(direction.capi_interest_fields, initialCrmType);
+    const qualifiedParsed = parseLevelConfig(direction.capi_qualified_fields, initialCrmType);
+    const scheduledParsed = parseLevelConfig(direction.capi_scheduled_fields, initialCrmType);
+
+    setCapiInterestMode(interestParsed.mode);
+    setCapiQualifiedMode(qualifiedParsed.mode);
+    setCapiScheduledMode(scheduledParsed.mode);
+    setCapiInterestFields(interestParsed.fields);
+    setCapiQualifiedFields(qualifiedParsed.fields);
+    setCapiScheduledFields(scheduledParsed.fields);
+    setCapiInterestStages(interestParsed.stages);
+    setCapiQualifiedStages(qualifiedParsed.stages);
+    setCapiScheduledStages(scheduledParsed.stages);
 
     if (isTikTok) {
       setTikTokDailyBudget(
@@ -214,6 +766,109 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setSiteUrl('');
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
+  };
+
+  // Helper functions for CRM field selection
+  const getFieldById = (fieldId: string | number | null) => {
+    if (!fieldId) return undefined;
+    return crmFields.find((field) => {
+      if (capiCrmType === 'amocrm') {
+        return (field as AmocrmCustomField).field_id === fieldId;
+      }
+      return (field as Bitrix24CustomField).id === fieldId;
+    });
+  };
+
+  const getFieldName = (field: AmocrmCustomField | Bitrix24CustomField): string => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_name;
+    }
+    return (field as Bitrix24CustomField).label || (field as Bitrix24CustomField).fieldName;
+  };
+
+  const getFieldId = (field: AmocrmCustomField | Bitrix24CustomField): string | number => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_id;
+    }
+    return (field as Bitrix24CustomField).id;
+  };
+
+  const getFieldType = (field: AmocrmCustomField | Bitrix24CustomField): string => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_type;
+    }
+    return (field as Bitrix24CustomField).userTypeId;
+  };
+
+  const getFieldEnums = (field: AmocrmCustomField | Bitrix24CustomField) => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).enums || [];
+    }
+    return (field as Bitrix24CustomField).list || [];
+  };
+
+  const isSelectType = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const fieldType = getFieldType(field);
+    return ['select', 'multiselect', 'enumeration'].includes(fieldType);
+  };
+
+  const needsEnumSelection = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const enums = getFieldEnums(field);
+    return isSelectType(field) && enums.length > 0;
+  };
+
+  const getStageByKey = (stageKey: string | null): CrmStageOption | null => {
+    if (!stageKey) return null;
+    return crmStages.find((stage) => stage.key === stageKey) || null;
+  };
+
+  const convertFieldsToConfig = (fields: SelectedCapiField[]): CapiFieldConfig[] => {
+    return fields
+      .filter((item) => item.fieldId !== null)
+      .map((item) => {
+        const field = getFieldById(item.fieldId);
+        if (!field) return null;
+
+        const enums = getFieldEnums(field);
+        let enumValue: string | null = null;
+
+        if (item.enumId) {
+          const selectedEnum = enums.find((enumItem) => {
+            if (capiCrmType === 'amocrm') {
+              return (enumItem as { id: number }).id === item.enumId;
+            }
+            return (enumItem as { id: string }).id === item.enumId;
+          });
+          enumValue = selectedEnum ? (selectedEnum as { value: string }).value : null;
+        }
+
+        return {
+          field_id: getFieldId(field),
+          field_name: getFieldName(field),
+          field_type: getFieldType(field),
+          enum_id: item.enumId,
+          enum_value: enumValue,
+          ...(capiCrmType === 'bitrix24' && { entity_type: 'lead' }),
+        };
+      })
+      .filter(Boolean) as CapiFieldConfig[];
+  };
+
+  const convertStagesToConfig = (stages: SelectedCapiStage[]): CapiFieldConfig[] => {
+    return stages
+      .filter((item) => item.stageKey !== null)
+      .map((item) => getStageByKey(item.stageKey))
+      .filter((item): item is CrmStageOption => !!item)
+      .map((stage) => ({
+        field_id: stage.key,
+        field_name: stage.label,
+        field_type: 'pipeline_stage',
+        entity_type: stage.entityType,
+        pipeline_id: stage.pipelineId,
+        status_id: stage.statusId,
+      }));
   };
 
   const handleCitySelection = (cityId: string) => {
@@ -317,6 +972,60 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
 
+    const interestConfig = capiInterestMode === 'stages'
+      ? convertStagesToConfig(capiInterestStages)
+      : convertFieldsToConfig(capiInterestFields);
+    const qualifiedConfig = capiQualifiedMode === 'stages'
+      ? convertStagesToConfig(capiQualifiedStages)
+      : convertFieldsToConfig(capiQualifiedFields);
+    const scheduledConfig = capiScheduledMode === 'stages'
+      ? convertStagesToConfig(capiScheduledStages)
+      : convertFieldsToConfig(capiScheduledFields);
+
+    const isCrmCapiActive = !isTikTok && capiEnabled && !!capiPixelId && capiSource === 'crm';
+    if (isCrmCapiActive) {
+      if (isLoadingCrms) {
+        setError('Подождите завершения проверки подключённых CRM и повторите сохранение');
+        return;
+      }
+
+      if (connectedCrms.length === 0) {
+        setError('Для источника CRM подключите AmoCRM или Bitrix24 в интеграциях');
+        return;
+      }
+
+      if (!connectedCrms.includes(capiCrmType)) {
+        setError('Выбранная CRM недоступна. Обновите подключение и попробуйте снова');
+        return;
+      }
+
+      if (interestConfig.length === 0) {
+        setError('Для Level 1 добавьте хотя бы один CRM-триггер (поле или этап)');
+        return;
+      }
+
+      if (qualifiedConfig.length === 0) {
+        setError('Для Level 2 добавьте хотя бы один CRM-триггер (поле или этап)');
+        return;
+      }
+
+      if (scheduledConfig.length === 0) {
+        setError('Для Level 3 добавьте хотя бы один CRM-триггер (поле или этап)');
+        return;
+      }
+
+      console.info('[EditDirectionDialog] CRM CAPI validation passed', {
+        directionId: direction.id,
+        crmType: capiCrmType,
+        interestCount: interestConfig.length,
+        qualifiedCount: qualifiedConfig.length,
+        scheduledCount: scheduledConfig.length,
+        interestMode: capiInterestMode,
+        qualifiedMode: capiQualifiedMode,
+        scheduledMode: capiScheduledMode
+      });
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -337,6 +1046,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               capiSettings: {
                 capi_enabled: capiEnabled && !!capiPixelId, // CAPI требует пиксель
                 capi_source: capiEnabled && capiPixelId ? capiSource : null,
+                capi_crm_type: isCrmCapiActive ? capiCrmType : null,
+                capi_interest_fields: isCrmCapiActive ? interestConfig : [],
+                capi_qualified_fields: isCrmCapiActive ? qualifiedConfig : [],
+                capi_scheduled_fields: isCrmCapiActive ? scheduledConfig : [],
                 pixel_id: capiEnabled ? capiPixelId || null : null,
               },
             }),
@@ -1025,21 +1738,272 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                               </div>
                             </div>
                             <div className="flex items-start space-x-2">
-                              <RadioGroupItem value="crm" id="edit-capi-source-crm" className="mt-1" />
+                              <RadioGroupItem
+                                value="crm"
+                                id="edit-capi-source-crm"
+                                className="mt-1"
+                                disabled={isLoadingCrms || connectedCrms.length === 0}
+                              />
                               <div>
                                 <Label htmlFor="edit-capi-source-crm" className="font-normal cursor-pointer">
-                                  CRM (поля карточки)
+                                  CRM (поля или этапы воронки)
                                 </Label>
                                 <p className="text-xs text-muted-foreground">
-                                  События отправляются при изменении полей в CRM
+                                  {isLoadingCrms
+                                    ? 'Проверяем подключения CRM...'
+                                    : connectedCrms.length === 0
+                                      ? 'Нет подключённых CRM'
+                                      : 'События отправляются при изменении полей или этапов воронки в CRM'}
                                 </p>
                               </div>
                             </div>
                           </RadioGroup>
+
                           {capiSource === 'crm' && (
-                            <p className="text-xs text-amber-600">
-                              ⚠️ Настройка полей CRM производится при создании направления
-                            </p>
+                            <div className="space-y-4 mt-4">
+                              {isLoadingCrms ? (
+                                <div className="text-sm text-muted-foreground">Проверяем подключённые CRM...</div>
+                              ) : connectedCrms.length === 0 ? (
+                                <div className="text-sm text-amber-600">
+                                  Нет подключённых CRM. Подключите AmoCRM или Bitrix24 в интеграциях профиля.
+                                </div>
+                              ) : (
+                                <>
+                                  {connectedCrms.length > 1 && (
+                                    <div className="space-y-2">
+                                      <Label>Выберите CRM</Label>
+                                      <Select
+                                        value={capiCrmType}
+                                        onValueChange={(value) => setCapiCrmType(value as CrmType)}
+                                        disabled={isSubmitting}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {connectedCrms.includes('amocrm') && (
+                                            <SelectItem value="amocrm">AmoCRM</SelectItem>
+                                          )}
+                                          {connectedCrms.includes('bitrix24') && (
+                                            <SelectItem value="bitrix24">Bitrix24</SelectItem>
+                                          )}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                  )}
+
+                                  <div className="space-y-3 p-3 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-blue-600 font-medium text-sm">Level 1: Интерес (Lead)</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-xs">Триггер CAPI</Label>
+                                      <RadioGroup
+                                        value={capiInterestMode}
+                                        onValueChange={(value) => setCapiInterestMode(value as CapiTriggerMode)}
+                                        disabled={isSubmitting}
+                                        className="flex flex-wrap gap-4"
+                                      >
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="fields" id="edit-capi-interest-mode-fields" />
+                                          <Label htmlFor="edit-capi-interest-mode-fields" className="font-normal cursor-pointer text-sm">
+                                            Поля CRM
+                                          </Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="stages" id="edit-capi-interest-mode-stages" />
+                                          <Label htmlFor="edit-capi-interest-mode-stages" className="font-normal cursor-pointer text-sm">
+                                            Этапы воронки
+                                          </Label>
+                                        </div>
+                                      </RadioGroup>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      {capiInterestMode === 'fields'
+                                        ? 'Событие отправляется при установке любого из выбранных полей'
+                                        : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                                    </p>
+
+                                    {capiInterestMode === 'fields' ? (
+                                      isLoadingCrmFields ? (
+                                        <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                                      ) : crmFields.length === 0 ? (
+                                        <div className="text-sm text-amber-600">
+                                          В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                        </div>
+                                      ) : (
+                                        <CrmFieldSelector
+                                          fields={crmFields}
+                                          selectedFields={capiInterestFields}
+                                          setSelectedFields={setCapiInterestFields}
+                                          crmType={capiCrmType}
+                                          isSubmitting={isSubmitting}
+                                          getFieldById={getFieldById}
+                                          getFieldId={getFieldId}
+                                          getFieldName={getFieldName}
+                                          getFieldType={getFieldType}
+                                          getFieldEnums={getFieldEnums}
+                                          needsEnumSelection={needsEnumSelection}
+                                        />
+                                      )
+                                    ) : isLoadingCrmStages ? (
+                                      <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                                    ) : crmStages.length === 0 ? (
+                                      <div className="text-sm text-amber-600">
+                                        Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
+                                      </div>
+                                    ) : (
+                                      <CrmStageSelector
+                                        stages={crmStages}
+                                        selectedStages={capiInterestStages}
+                                        setSelectedStages={setCapiInterestStages}
+                                        isSubmitting={isSubmitting}
+                                      />
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-3 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (CompleteRegistration)</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-xs">Триггер CAPI</Label>
+                                      <RadioGroup
+                                        value={capiQualifiedMode}
+                                        onValueChange={(value) => setCapiQualifiedMode(value as CapiTriggerMode)}
+                                        disabled={isSubmitting}
+                                        className="flex flex-wrap gap-4"
+                                      >
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="fields" id="edit-capi-qualified-mode-fields" />
+                                          <Label htmlFor="edit-capi-qualified-mode-fields" className="font-normal cursor-pointer text-sm">
+                                            Поля CRM
+                                          </Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="stages" id="edit-capi-qualified-mode-stages" />
+                                          <Label htmlFor="edit-capi-qualified-mode-stages" className="font-normal cursor-pointer text-sm">
+                                            Этапы воронки
+                                          </Label>
+                                        </div>
+                                      </RadioGroup>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      {capiQualifiedMode === 'fields'
+                                        ? 'Событие отправляется при установке любого из выбранных полей'
+                                        : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                                    </p>
+
+                                    {capiQualifiedMode === 'fields' ? (
+                                      isLoadingCrmFields ? (
+                                        <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                                      ) : crmFields.length === 0 ? (
+                                        <div className="text-sm text-amber-600">
+                                          В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                        </div>
+                                      ) : (
+                                        <CrmFieldSelector
+                                          fields={crmFields}
+                                          selectedFields={capiQualifiedFields}
+                                          setSelectedFields={setCapiQualifiedFields}
+                                          crmType={capiCrmType}
+                                          isSubmitting={isSubmitting}
+                                          getFieldById={getFieldById}
+                                          getFieldId={getFieldId}
+                                          getFieldName={getFieldName}
+                                          getFieldType={getFieldType}
+                                          getFieldEnums={getFieldEnums}
+                                          needsEnumSelection={needsEnumSelection}
+                                        />
+                                      )
+                                    ) : isLoadingCrmStages ? (
+                                      <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                                    ) : crmStages.length === 0 ? (
+                                      <div className="text-sm text-amber-600">
+                                        Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
+                                      </div>
+                                    ) : (
+                                      <CrmStageSelector
+                                        stages={crmStages}
+                                        selectedStages={capiQualifiedStages}
+                                        setSelectedStages={setCapiQualifiedStages}
+                                        isSubmitting={isSubmitting}
+                                      />
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-3 p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-purple-600 font-medium text-sm">Level 3: Запись (Schedule)</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                      <Label className="text-xs">Триггер CAPI</Label>
+                                      <RadioGroup
+                                        value={capiScheduledMode}
+                                        onValueChange={(value) => setCapiScheduledMode(value as CapiTriggerMode)}
+                                        disabled={isSubmitting}
+                                        className="flex flex-wrap gap-4"
+                                      >
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="fields" id="edit-capi-scheduled-mode-fields" />
+                                          <Label htmlFor="edit-capi-scheduled-mode-fields" className="font-normal cursor-pointer text-sm">
+                                            Поля CRM
+                                          </Label>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                          <RadioGroupItem value="stages" id="edit-capi-scheduled-mode-stages" />
+                                          <Label htmlFor="edit-capi-scheduled-mode-stages" className="font-normal cursor-pointer text-sm">
+                                            Этапы воронки
+                                          </Label>
+                                        </div>
+                                      </RadioGroup>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      {capiScheduledMode === 'fields'
+                                        ? 'Событие отправляется при установке любого из выбранных полей'
+                                        : 'Событие отправляется при переходе лида на любой из выбранных этапов'}
+                                    </p>
+
+                                    {capiScheduledMode === 'fields' ? (
+                                      isLoadingCrmFields ? (
+                                        <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                                      ) : crmFields.length === 0 ? (
+                                        <div className="text-sm text-amber-600">
+                                          В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                                        </div>
+                                      ) : (
+                                        <CrmFieldSelector
+                                          fields={crmFields}
+                                          selectedFields={capiScheduledFields}
+                                          setSelectedFields={setCapiScheduledFields}
+                                          crmType={capiCrmType}
+                                          isSubmitting={isSubmitting}
+                                          getFieldById={getFieldById}
+                                          getFieldId={getFieldId}
+                                          getFieldName={getFieldName}
+                                          getFieldType={getFieldType}
+                                          getFieldEnums={getFieldEnums}
+                                          needsEnumSelection={needsEnumSelection}
+                                        />
+                                      )
+                                    ) : isLoadingCrmStages ? (
+                                      <div className="text-sm text-muted-foreground">Загрузка этапов воронки...</div>
+                                    ) : crmStages.length === 0 ? (
+                                      <div className="text-sm text-amber-600">
+                                        Этапы воронки не найдены. Проверьте синхронизацию CRM-пайплайнов.
+                                      </div>
+                                    ) : (
+                                      <CrmStageSelector
+                                        stages={crmStages}
+                                        selectedStages={capiScheduledStages}
+                                        setSelectedStages={setCapiScheduledStages}
+                                        isSubmitting={isSubmitting}
+                                      />
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
                           )}
                         </div>
                       )}

@@ -137,6 +137,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     tiktok_target_cpl_kzt?: number;
     is_active: boolean;
     whatsapp_phone_number?: string | null;
+    optimization_level?: 'level_1' | 'level_2' | 'level_3';
     capiSettings?: EditDirectionCapiSettings;
   }) => {
     if (!selectedDirection) return;
@@ -150,10 +151,15 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(data.tiktok_daily_budget !== undefined && { tiktok_daily_budget: data.tiktok_daily_budget }),
       ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
       ...(data.whatsapp_phone_number !== undefined && { whatsapp_phone_number: data.whatsapp_phone_number }),
+      ...(data.optimization_level !== undefined && { optimization_level: data.optimization_level }),
       // CAPI settings
       ...(data.capiSettings && {
         capi_enabled: data.capiSettings.capi_enabled,
         capi_source: data.capiSettings.capi_source,
+        capi_crm_type: data.capiSettings.capi_crm_type,
+        capi_interest_fields: data.capiSettings.capi_interest_fields,
+        capi_qualified_fields: data.capiSettings.capi_qualified_fields,
+        capi_scheduled_fields: data.capiSettings.capi_scheduled_fields,
       }),
     };
 
@@ -391,6 +397,8 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         direction={selectedDirection}
+        userAccountId={userAccountId || ''}
+        accountId={accountId}
         onSubmit={handleEdit}
       />
 

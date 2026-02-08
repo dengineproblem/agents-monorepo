@@ -21,6 +21,13 @@ import { supabase } from '../lib/supabase.js';
 import { getValidBitrix24Token } from '../lib/bitrix24Tokens.js';
 import { getLead, getDeal, getContact } from '../adapters/bitrix24.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import {
+  getDirectionCapiSettings,
+  evaluateBitrixCapiLevelsWithDiagnostics,
+  normalizeContactPhoneForCapi,
+  sendCrmCapiLevels,
+  summarizeDirectionCapiSettings
+} from '../lib/crmCapi.js';
 
 /**
  * Bitrix24 webhook payload structure
@@ -208,7 +215,7 @@ async function handleLeadEvent(
   // Find local lead by bitrix24_lead_id
   const { data: localLead } = await supabase
     .from('leads')
-    .select('id, current_status_id, is_qualified')
+    .select('id, current_status_id, is_qualified, direction_id, chat_id, phone')
     .eq('user_account_id', userAccountId)
     .eq('bitrix24_lead_id', parseInt(leadId, 10))
     .single();
@@ -251,6 +258,21 @@ async function handleLeadEvent(
       isQualified,
       event
     }, 'Lead updated from Bitrix24 webhook');
+
+    try {
+      await syncDirectionCrmCapiForBitrixEntity({
+        app,
+        userAccountId,
+        localLead,
+        entity: bitrixLead
+      });
+    } catch (crmCapiError: any) {
+      app.log.error({
+        error: crmCapiError.message,
+        leadId: localLead.id,
+        bitrixLeadId: leadId
+      }, 'CRM CAPI sync failed in handleLeadEvent');
+    }
   } else {
     app.log.debug({ leadId }, 'No local lead found for Bitrix24 lead');
   }
@@ -288,7 +310,7 @@ async function handleDealEvent(
   // Find local lead by bitrix24_deal_id
   const { data: localLead } = await supabase
     .from('leads')
-    .select('id, current_status_id, current_pipeline_id, is_qualified')
+    .select('id, current_status_id, current_pipeline_id, is_qualified, direction_id, chat_id, phone')
     .eq('user_account_id', userAccountId)
     .eq('bitrix24_deal_id', parseInt(dealId, 10))
     .single();
@@ -341,6 +363,21 @@ async function handleDealEvent(
       isQualified,
       event
     }, 'Lead updated from Bitrix24 deal webhook');
+
+    try {
+      await syncDirectionCrmCapiForBitrixEntity({
+        app,
+        userAccountId,
+        localLead,
+        entity: bitrixDeal
+      });
+    } catch (crmCapiError: any) {
+      app.log.error({
+        error: crmCapiError.message,
+        leadId: localLead.id,
+        bitrixDealId: dealId
+      }, 'CRM CAPI sync failed in handleDealEvent');
+    }
   } else {
     app.log.debug({ dealId }, 'No local lead found for Bitrix24 deal');
   }
@@ -445,6 +482,98 @@ async function createSaleFromDeal(
     dealId,
     amount: deal.OPPORTUNITY
   }, 'Sale created from Bitrix24 deal');
+}
+
+async function syncDirectionCrmCapiForBitrixEntity(params: {
+  app: FastifyInstance;
+  userAccountId: string;
+  localLead: any;
+  entity: any;
+}): Promise<void> {
+  const { app, userAccountId, localLead, entity } = params;
+
+  if (!localLead?.direction_id) {
+    app.log.debug({
+      userAccountId,
+      leadId: localLead?.id || null
+    }, 'CRM CAPI: skip Bitrix sync (lead has no direction_id)');
+    return;
+  }
+
+  const capiSettings = await getDirectionCapiSettings(localLead.direction_id);
+  if (!capiSettings) {
+    app.log.debug({
+      userAccountId,
+      leadId: localLead.id,
+      directionId: localLead.direction_id
+    }, 'CRM CAPI: skip Bitrix sync (direction settings not found)');
+    return;
+  }
+
+  if (!capiSettings.capiEnabled || capiSettings.capiSource !== 'crm' || capiSettings.capiCrmType !== 'bitrix24') {
+    app.log.debug({
+      userAccountId,
+      leadId: localLead.id,
+      directionId: localLead.direction_id,
+      settings: summarizeDirectionCapiSettings(capiSettings)
+    }, 'CRM CAPI: skip Bitrix sync (source/type/enable mismatch)');
+    return;
+  }
+
+  const evaluation = evaluateBitrixCapiLevelsWithDiagnostics(entity, capiSettings);
+  const matches = evaluation.levels;
+  const hasAnyMatch = matches.interest || matches.qualified || matches.scheduled;
+
+  const evaluationLogPayload = {
+    userAccountId,
+    leadId: localLead.id,
+    directionId: localLead.direction_id,
+    bitrixEntityId: entity?.ID || null,
+    bitrixEntityStatus: entity?.STATUS_ID || entity?.STAGE_ID || null,
+    matches,
+    diagnostics: evaluation.diagnostics,
+    settings: summarizeDirectionCapiSettings(capiSettings)
+  };
+
+  if (hasAnyMatch) {
+    app.log.info(evaluationLogPayload, 'CRM CAPI: Bitrix level evaluation matched');
+  } else {
+    app.log.debug(evaluationLogPayload, 'CRM CAPI: Bitrix level evaluation without matches');
+  }
+
+  const { error: updateError } = await supabase
+    .from('leads')
+    .update({
+      is_qualified: matches.qualified,
+      is_scheduled: matches.scheduled,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', localLead.id);
+
+  if (updateError) {
+    app.log.error({
+      error: updateError.message,
+      leadId: localLead.id,
+      directionId: localLead.direction_id
+    }, 'CRM CAPI: failed updating leads flags from Bitrix fields');
+  }
+
+  const contactPhone = normalizeContactPhoneForCapi(localLead.chat_id || localLead.phone);
+  if (!contactPhone) {
+    app.log.warn({
+      leadId: localLead.id,
+      directionId: localLead.direction_id
+    }, 'CRM CAPI: no contact phone for Bitrix event');
+    return;
+  }
+
+  await sendCrmCapiLevels({
+    userAccountId,
+    directionId: localLead.direction_id,
+    contactPhone,
+    crmType: 'bitrix24',
+    levels: matches
+  }, app);
 }
 
 /**

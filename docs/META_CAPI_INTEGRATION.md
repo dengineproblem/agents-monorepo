@@ -7,15 +7,15 @@
 Система отправляет события конверсии в Facebook для оптимизации рекламы. Поддерживается два источника данных:
 
 1. **WhatsApp (LLM)** — автоматический анализ переписок с помощью GPT-4o-mini
-2. **CRM (field mapping)** — отслеживание изменений полей в AMO CRM / Bitrix24
+2. **CRM (field/stage mapping)** — отслеживание изменений полей и этапов воронки в AMO CRM / Bitrix24
 
 ### Три уровня конверсии
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `ViewContent` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM установлено в нужное значение |
-| 2 | `CompleteRegistration` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM установлено в нужное значение |
-| 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM установлено в нужное значение |
+| 1 | `ViewContent` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
+| 2 | `CompleteRegistration` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
+| 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
 
 > Уровень 3 использует `event_name = Purchase`, даже если фактически это "запись".
 
@@ -92,7 +92,23 @@ AMO CRM / Bitrix24
 - Критерии "хорошего" vs "плохого" ответа
 - Признаки записи на встречу
 
-### 2. metaCapiClient.ts
+### 2. crmCapi.ts (agent-service)
+
+Библиотека сопоставления CRM-триггеров с уровнями CAPI.
+
+**Основные функции:**
+- `getDirectionCapiSettings(directionId)` — читает direction-level конфиг
+- `evaluateAmoCapiLevelsWithDiagnostics(...)` — матчинг для AmoCRM с детализацией
+- `evaluateBitrixCapiLevelsWithDiagnostics(...)` — матчинг для Bitrix24 с детализацией
+- `sendCrmCapiLevels(...)` — отправка уровней в chatbot-service (`/capi/crm-event`)
+- `summarizeDirectionCapiSettings(...)` — агрегированный summary для логов
+
+**Диагностика:**
+- Определяет тип совпадения (`field` или `stage`)
+- Логирует причину отсутствия совпадения (`reason`)
+- Возвращает конфиг, который реально сработал (`matchedConfig`)
+
+### 3. metaCapiClient.ts
 
 Клиент для отправки событий в Meta Conversions API.
 
@@ -151,7 +167,7 @@ const CAPI_EVENTS = {
 - `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/CompleteRegistration)
 -- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled → Purchase event_name)
 
-**Формат JSONB для CRM полей:**
+**Формат JSONB для CRM-полей:**
 ```json
 [
   {
@@ -165,6 +181,20 @@ const CAPI_EVENTS = {
 ```
 
 Для Bitrix24 также поддерживается `entity_type` (contact/deal/lead).
+
+**Формат JSONB для этапов воронки:**
+```json
+[
+  {
+    "field_id": "bitrix24:deal:1:C1:NEW",
+    "field_name": "Сделки / Основная → Новая",
+    "field_type": "pipeline_stage",
+    "entity_type": "deal",
+    "pipeline_id": 1,
+    "status_id": "C1:NEW"
+  }
+]
+```
 
 ## Настройка
 
@@ -183,18 +213,22 @@ const CAPI_EVENTS = {
 
 **Шаг 3: Выбор источника событий**
 - `WhatsApp (AI анализ)` — LLM анализирует переписку
-- `CRM (поля)` — отслеживание полей в AMO CRM / Bitrix24
+- `CRM (поля или этапы воронки)` — отслеживание полей/этапов в AMO CRM / Bitrix24
 
 **Шаг 4 (только для CRM источника):**
 - Выбор типа CRM (AMO CRM или Bitrix24)
-  - Настройка полей для каждого уровня конверсии:
-  - Level 1 (Интерес / ViewContent)
-  - Level 2 (Квалифицирован / CompleteRegistration)
-  - Level 3 (Записался / Purchase)
+  - Для каждого уровня конверсии выбирается тип триггера:
+    - `Поля CRM`
+    - `Этапы воронки`
+  - Уровни:
+    - Level 1 (Интерес / ViewContent)
+    - Level 2 (Квалифицирован / CompleteRegistration)
+    - Level 3 (Записался / Purchase)
+  - Настройка доступна как при создании, так и при редактировании направления.
 
-**Логика проверки CRM полей:**
-- Если настроено несколько полей — используется логика OR
-- Событие отправляется при совпадении хотя бы одного поля
+**Логика проверки CRM триггеров:**
+- Если настроено несколько полей/этапов — используется логика OR
+- Событие отправляется при совпадении хотя бы одного условия
 
 ### 2. Порог Interest события
 
@@ -220,6 +254,19 @@ ctwa_clid сохраняется для справки/атрибуции, но 
 ```
 data.message.contextInfo.externalAdReply.ctwaClid
 ```
+
+**Извлечение ad-id (source_id) из Evolution API:**
+- Приоритет: `contextInfo.externalAdReply.sourceId`
+- Fallback: `message.key.sourceId` (legacy payload)
+- Fallback управляется флагом:
+```bash
+EVOLUTION_AD_SOURCE_FALLBACK_ENABLED=true  # default: true
+```
+
+В логах `evolutionWebhooks.ts` фиксируется происхождение ad-id:
+- `sourceIdOrigin=external`
+- `sourceIdOrigin=key`
+- `sourceIdOrigin=none`
 
 **Путь в webhook payload:**
 ```typescript
@@ -334,7 +381,7 @@ Response:
 [capiAnalysisCron] === CAPI analysis cron completed === { found, processed, skipped, errors, avgTimePerDialog }
 ```
 
-### Источник: CRM (field mapping)
+### Источник: CRM (field/stage mapping)
 
 1. **Webhook от CRM** → `agent-service`
    - AMO CRM: изменение сделки/контакта
@@ -344,7 +391,9 @@ Response:
    - Загружает настройки CAPI направления
    - Если `capi_source === 'crm'`:
      - Получает текущие значения полей из CRM
-     - Сравнивает с `capi_interest_fields`, `capi_qualified_fields`, `capi_scheduled_fields`
+     - Сравнивает с `capi_interest_fields`, `capi_qualified_fields`, `capi_scheduled_fields`:
+       - по полям CRM
+       - по этапам воронки (`field_type = pipeline_stage`)
      - Определяет уровни на основе совпадений (OR логика)
 
 3. **metaCapiClient**
@@ -442,6 +491,20 @@ Response (already sent):
 [metaCapiClient] Sending CAPI event { pixelId, eventName, eventLevel }
 [metaCapiClient] CAPI event sent successfully { eventId, eventsReceived }
 ```
+
+**CRM source — детальная диагностика матчей (agent-service):**
+```
+[CRM CAPI] skip ... (source/type/enable mismatch) { settings: { interest: { total, stage, field }, ... } }
+[CRM CAPI] AmoCRM level evaluation matched { matches, diagnostics, settings }
+[CRM CAPI] Bitrix level evaluation matched { matches, diagnostics, settings }
+[CRM CAPI] levels sent { correlationId, levels }
+```
+
+`diagnostics` включает по каждому уровню:
+- `matched` — есть совпадение или нет
+- `matchType` — `stage` / `field` / `none`
+- `reason` — причина (`matched_stage`, `matched_field`, `no_field_match`, и т.д.)
+- `matchedConfig` — конкретный конфиг, который сработал
 
 ## Пример CAPI запроса
 
@@ -638,6 +701,18 @@ Frontend логирует в консоль:
 2. Проверить наличие access_token
 3. Проверить логи `metaCapiClient`
 4. Проверить таблицу `capi_events_log`
+
+### CRM источник: события не триггерятся
+
+1. Проверить, что у направления:
+   - `capi_enabled = true`
+   - `capi_source = 'crm'`
+   - корректный `capi_crm_type` (`amocrm` или `bitrix24`)
+2. Проверить, что в каждом уровне L1/L2/L3 есть минимум один валидный триггер
+   - поле CRM (`field_id` + optional enum)
+   - или этап воронки (`field_type='pipeline_stage'`, `status_id`, optional `pipeline_id`)
+3. Проверить диагностические логи `CRM CAPI: ... evaluation ...`
+4. Проверить, что webhook пришёл по нужному entity type (lead/deal) и совпадает с `entity_type` в конфиге этапа
 
 ### Ошибки Facebook API
 
