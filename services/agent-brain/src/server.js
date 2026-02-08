@@ -2451,6 +2451,37 @@ async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumbe
   return data;
 }
 
+const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+const TELEGRAM_MIN_SPLIT_RATIO = 0.6;
+
+function splitTelegramText(text, maxLength = TELEGRAM_MAX_MESSAGE_LENGTH) {
+  const normalized = String(text || '');
+  if (!normalized) return [''];
+
+  const parts = [];
+  let remaining = normalized;
+
+  while (remaining.length > maxLength) {
+    // Стараемся резать по переводу строки, чтобы не ломать читаемость отчёта.
+    let splitAt = remaining.lastIndexOf('\n', maxLength);
+    if (splitAt <= 0 || splitAt < Math.floor(maxLength * TELEGRAM_MIN_SPLIT_RATIO)) {
+      splitAt = maxLength;
+    }
+
+    const chunk = remaining.slice(0, splitAt).trimEnd();
+    if (chunk.length > 0) {
+      parts.push(chunk);
+    }
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  if (remaining.length > 0) {
+    parts.push(remaining);
+  }
+
+  return parts.length > 0 ? parts : [''];
+}
+
 async function sendTelegram(chatId, text, token) {
   if (!chatId) {
     fastify.log.warn({ where: 'sendTelegram', error: 'no_chat_id' });
@@ -2462,14 +2493,7 @@ async function sendTelegram(chatId, text, token) {
     return false;
   }
 
-  const MAX_PART = 3800; // запас по лимиту 4096
-  const parts = [];
-  let remaining = String(text || '');
-  while (remaining.length > MAX_PART) {
-    parts.push(remaining.slice(0, MAX_PART));
-    remaining = remaining.slice(MAX_PART);
-  }
-  parts.push(remaining);
+  const parts = splitTelegramText(text);
 
   const telegramUrl = `https://api.telegram.org/bot${bot.slice(0, 10)}***/sendMessage`;
   
@@ -2837,9 +2861,7 @@ function finalizeReportText(raw, { adAccountId, dateStr }) {
       `\n🏢 Статус рекламного кабинета: Активен (ID: ${String(adAccountId)})`
     );
   }
-  // Простой лимит безопасности
-  const MAX_LEN = 3500;
-  if (text.length > MAX_LEN) text = text.slice(0, MAX_LEN - 3) + '...';
+  // НЕ обрезаем отчёт по длине: полный текст нужен и для БД, и для разбивки в Telegram.
   return text;
 }
 
@@ -5111,25 +5133,10 @@ async function sendTelegramReport(telegramId, botToken, reportText) {
   }
   
   try {
-    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: telegramId,
-        text: reportText,
-        parse_mode: 'Markdown'
-      })
-    });
-    
-    const result = await response.json();
-    
-    if (!response.ok || !result.ok) {
-      fastify.log.error({ where: 'sendTelegramReport', status: response.status, result });
-      return { success: false, reason: 'telegram_api_error', details: result };
-    }
-    
-    return { success: true };
+    const sent = await sendTelegram(telegramId, reportText, botToken);
+    return sent
+      ? { success: true }
+      : { success: false, reason: 'telegram_api_error' };
   } catch (err) {
     fastify.log.error({ where: 'sendTelegramReport', err: String(err) });
     return { success: false, reason: 'exception', error: String(err) };
