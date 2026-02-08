@@ -178,8 +178,6 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     console.log('[VideoUpload] Смена аккаунта, сбрасываем состояние');
     setSelectedDirectionId('');
     setSelectedCreativeId('');
-    setSelectedCreativeIds([]);
-    setAvailableCreatives([]);
     setExistingCreatives([]);
     setSelectedFile(null);
     setSelectedImage(null);
