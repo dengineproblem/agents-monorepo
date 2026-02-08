@@ -15,7 +15,7 @@ export interface DomainConfig {
 }
 
 // Tools available in every domain
-const SHARED_TOOLS = ['getUserErrors'];
+const SHARED_TOOLS = ['getUserErrors', 'getKnowledgeBase'];
 
 export const DOMAINS: Record<string, DomainConfig> = {
   ads: {
@@ -99,6 +99,11 @@ export const DOMAINS: Record<string, DomainConfig> = {
   },
 };
 
+// TikTok tools — фильтруются если нет tiktok в стеке
+const TIKTOK_TOOL_NAMES = new Set([
+  'getTikTokCampaigns', 'compareTikTokWithFacebook', 'pauseTikTokCampaign',
+]);
+
 /**
  * Get filtered Anthropic Tool definitions for a domain.
  * Returns all tools if domain is not found.
@@ -107,4 +112,19 @@ export function getToolsForDomain(domain: string): Anthropic.Tool[] {
   const config = DOMAINS[domain];
   if (!config) return tools; // fallback: all tools
   return tools.filter(t => config.toolNames.includes(t.name));
+}
+
+/**
+ * Get filtered tools with stack awareness.
+ * Removes TikTok tools if user doesn't have tiktok in stack.
+ */
+export function getToolsForDomainWithStack(
+  domain: string,
+  userStack: string[],
+): Anthropic.Tool[] {
+  let filtered = getToolsForDomain(domain);
+  if (!userStack.includes('tiktok')) {
+    filtered = filtered.filter(t => !TIKTOK_TOOL_NAMES.has(t.name));
+  }
+  return filtered;
 }

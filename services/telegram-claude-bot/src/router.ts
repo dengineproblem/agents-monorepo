@@ -145,6 +145,28 @@ async function classifyByLLM(message: string, anthropic: Anthropic): Promise<Rou
   }
 }
 
+// Какие сервисы нужны для каждого домена
+const DOMAIN_STACK_REQUIREMENTS: Record<string, string[]> = {
+  ads: ['facebook'],
+  creative: ['facebook'],
+  crm: [],
+  tiktok: ['tiktok'],
+  onboarding: [],
+  general: [],
+};
+
+// Паттерн переключения аккаунта
+export const ACCOUNT_SWITCH_PATTERN = /переключи.*аккаунт|смени.*аккаунт|другой\s+аккаунт/i;
+
+/**
+ * Проверяет, доступен ли домен для данного стека пользователя
+ */
+function isDomainAvailable(domain: string, userStack: string[]): boolean {
+  const required = DOMAIN_STACK_REQUIREMENTS[domain];
+  if (!required || required.length === 0) return true;
+  return required.some(req => userStack.includes(req));
+}
+
 /**
  * Route a user message to a domain.
  * Returns RouteResult with domain name and classification method.
@@ -153,16 +175,29 @@ async function classifyByLLM(message: string, anthropic: Anthropic): Promise<Rou
 export async function routeMessage(
   message: string,
   anthropic: Anthropic,
+  userStack?: string[],
 ): Promise<RouteResult | null> {
   // Phase 1: keyword matching (0ms)
   const keywordResult = classifyByKeywords(message);
   if (keywordResult) {
+    // Фильтрация по стеку — если домен недоступен, fallback на general
+    if (userStack && !isDomainAvailable(keywordResult.domain, userStack)) {
+      logger.info({ domain: keywordResult.domain, userStack }, 'Domain not available for user stack, fallback to general');
+      return { domain: 'general', method: 'keyword' };
+    }
     logger.info({ domain: keywordResult.domain, method: 'keyword' }, 'Routed');
     return keywordResult;
   }
 
   // Phase 2: LLM classify (~300ms)
   const llmResult = await classifyByLLM(message, anthropic);
+
+  // Фильтрация по стеку
+  if (userStack && !isDomainAvailable(llmResult.domain, userStack)) {
+    logger.info({ domain: llmResult.domain, userStack }, 'Domain not available for user stack, fallback to general');
+    return { domain: 'general', method: llmResult.method };
+  }
+
   logger.info({ domain: llmResult.domain, method: llmResult.method }, 'Routed');
   return llmResult;
 }

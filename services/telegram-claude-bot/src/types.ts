@@ -77,3 +77,19 @@ export interface TaskRunLog {
   result: string | null;
   error: string | null;
 }
+
+export interface AdAccountInfo {
+  id: string;
+  name: string;
+  adAccountId: string;
+  isDefault: boolean;
+  stack: string[];
+}
+
+export interface ResolvedUser {
+  userAccountId: string;
+  businessName: string | null;
+  multiAccountEnabled: boolean;
+  stack: string[];
+  adAccounts: AdAccountInfo[];
+}

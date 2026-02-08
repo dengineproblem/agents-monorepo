@@ -29,6 +29,7 @@ export function initDatabase(): void {
       FOREIGN KEY (chat_id) REFERENCES chats(chat_id)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON messages(chat_id, timestamp);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -304,6 +305,19 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export function getRecentMessages(
+  chatId: string,
+  limit: number = 10,
+): Array<{ text: string; is_from_me: number; timestamp: string }> {
+  return db
+    .prepare(
+      `SELECT text, is_from_me, timestamp FROM messages
+       WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(chatId, limit * 2 + 5)
+    .reverse() as Array<{ text: string; is_from_me: number; timestamp: string }>;
 }
 
 export function getTaskRunLogs(taskId: string, limit = 10): TaskRunLog[] {

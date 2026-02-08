@@ -30,6 +30,10 @@ import { adsHandlers } from '../../chatAssistant/agents/ads/handlers.js';
 import { TikTokToolDefs } from '../../chatAssistant/agents/tiktok/toolDefs.js';
 import { tikTokHandlers } from '../../chatAssistant/agents/tiktok/handlers.js';
 
+// System Agent (error logs, status)
+import { SystemToolDefs } from '../../chatAssistant/agents/system/toolDefs.js';
+import { systemHandlers } from '../../chatAssistant/agents/system/handlers.js';
+
 /**
  * Convert Zod schema to JSON Schema for MCP
  * @param {import('zod').ZodSchema} zodSchema
@@ -175,7 +179,9 @@ export const adsTools = [
   createMCPTool('triggerBrainOptimizationRun', AdsToolDefs.triggerBrainOptimizationRun, adsHandlers.triggerBrainOptimizationRun, 'ads'),
   createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads'),
   // Manual mode tools
-  createMCPTool('saveCampaignMapping', AdsToolDefs.saveCampaignMapping, adsHandlers.saveCampaignMapping, 'ads')
+  createMCPTool('saveCampaignMapping', AdsToolDefs.saveCampaignMapping, adsHandlers.saveCampaignMapping, 'ads'),
+  // Brain approval
+  createMCPTool('approveBrainActions', AdsToolDefs.approveBrainActions, adsHandlers.approveBrainActions, 'ads')
 ];
 
 /**
@@ -218,15 +224,24 @@ export const tikTokAdsTools = [
 ];
 
 /**
+ * System Agent Tools (2 READ)
+ */
+export const systemTools = [
+  createMCPTool('getUserErrors', SystemToolDefs.getUserErrors, systemHandlers.getUserErrors, 'system'),
+  createMCPTool('getKnowledgeBase', SystemToolDefs.getKnowledgeBase, systemHandlers.getKnowledgeBase, 'system'),
+];
+
+/**
  * All MCP tools - Complete
- * WhatsApp (4) + CRM (13) + Creative (23) + Ads (27) + TikTok (25) = 92 tools
+ * WhatsApp (4) + CRM (13) + Creative (23) + Ads (27) + TikTok (25) + System (1) = 93 tools
  */
 export const allMCPTools = [
   ...whatsappTools,
   ...crmTools,
   ...creativeTools,
   ...adsTools,
-  ...tikTokAdsTools
+  ...tikTokAdsTools,
+  ...systemTools
 ];
 
 /**

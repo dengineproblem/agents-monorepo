@@ -945,6 +945,19 @@ export const tools: Anthropic.Tool[] = [
       required: ['userAccountId'],
     },
   },
+  {
+    name: 'getKnowledgeBase',
+    description: 'Получить информацию из базы знаний платформы Performante.ai. Без параметров — список глав. С chapter_id — оглавление. С chapter_id + section_id — содержимое. Используй когда пользователь спрашивает "как подключить", "как создать", "инструкция", "помощь".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        chapter_id: { type: 'string', description: 'ID главы (getting-started, ad-launch, ad-management, roi-analytics, competitors, profile-settings)' },
+        section_id: { type: 'string', description: 'ID раздела внутри главы' },
+      },
+      required: ['userAccountId'],
+    },
+  },
 ];
 
 /**

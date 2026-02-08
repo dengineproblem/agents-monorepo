@@ -339,6 +339,20 @@ export const AdsToolDefs = {
     meta: { timeout: 600000, retryable: false, dangerous: true } // 10 минут — LLM может думать 4 мин × 2 retry
   },
 
+  approveBrainActions: {
+    description: `Выполнить выбранные шаги Brain оптимизации (из результатов triggerBrainOptimizationRun с dry_run=true).
+
+Используй после того как пользователь посмотрел план оптимизации и подтвердил выполнение конкретных шагов.
+Передай индексы шагов (stepIndices) из proposals массива.`,
+    schema: z.object({
+      stepIndices: z.array(z.number().int().min(0)).min(1).describe('Массив индексов шагов для выполнения (0-based, из proposals массива)'),
+      execution_id: z.string().optional().describe('ID выполнения brain optimization (опционально, по умолчанию — последнее)'),
+      direction_id: uuidSchema.optional().describe('UUID направления'),
+      campaign_id: z.string().optional().describe('Facebook Campaign ID (для external кампаний)'),
+    }),
+    meta: { timeout: 600000, retryable: false, dangerous: true }
+  },
+
   // ============================================================
   // CUSTOM FB API QUERY (LLM-powered)
   // ============================================================

@@ -392,6 +392,23 @@ services:
   #   depends_on:
   #     - agent-service
 
+  telegram-claude-bot:
+    build: ./services/telegram-claude-bot
+    container_name: telegram-claude-bot
+    labels:
+      logging: "promtail"
+    env_file:
+      - ./services/telegram-claude-bot/.env
+    environment:
+      - NODE_ENV=production
+      - BRAIN_SERVICE_URL=http://agent-brain:7080
+    volumes:
+      - telegram-bot-data:/app/data
+      - telegram-bot-store:/app/store
+    restart: unless-stopped
+    depends_on:
+      - agent-brain
+
   fake-reports-service:
     build: ./services/fake-reports-service
     labels:
@@ -415,3 +432,5 @@ volumes:
   evolution-postgres-data:
   redis-chatbot-data:
   moltbot-config:
+  telegram-bot-data:
+  telegram-bot-store:

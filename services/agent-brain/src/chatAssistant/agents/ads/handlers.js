@@ -3309,6 +3309,86 @@ export const adsHandlers = {
     }
   },
 
+  /**
+   * Approve and execute selected Brain optimization proposals
+   * Loads proposals from the last brain_execution (or by execution_id),
+   * filters by stepIndices, then calls triggerBrainOptimizationRun fast path
+   */
+  async approveBrainActions({ stepIndices, execution_id, direction_id, campaign_id }, context) {
+    const { userAccountId, adAccountDbId } = context;
+
+    try {
+      // Загрузить последнее brain_execution с proposals
+      let query = supabase
+        .from('brain_executions')
+        .select('id, plan_json, status, created_at')
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (execution_id) {
+        query = supabase
+          .from('brain_executions')
+          .select('id, plan_json, status, created_at')
+          .eq('id', execution_id)
+          .eq('user_account_id', userAccountId)
+          .limit(1);
+      }
+
+      if (adAccountDbId) {
+        query = query.eq('account_id', adAccountDbId);
+      }
+
+      const { data: executions, error: execError } = await query;
+
+      if (execError || !executions || executions.length === 0) {
+        return { success: false, error: 'Не найдено предыдущее выполнение Brain оптимизации. Сначала запустите triggerBrainOptimizationRun с dry_run=true.' };
+      }
+
+      const execution = executions[0];
+      const proposals = execution.plan_json?.proposals;
+
+      if (!proposals || !Array.isArray(proposals) || proposals.length === 0) {
+        return { success: false, error: 'В последнем выполнении не найдены proposals для одобрения.' };
+      }
+
+      // Валидация индексов
+      const invalidIndices = stepIndices.filter(i => i < 0 || i >= proposals.length);
+      if (invalidIndices.length > 0) {
+        return { success: false, error: `Невалидные индексы: ${invalidIndices.join(', ')}. Допустимый диапазон: 0-${proposals.length - 1}` };
+      }
+
+      // Отфильтровать proposals по stepIndices
+      const selectedProposals = stepIndices.map(i => proposals[i]);
+
+      logger.info({
+        where: 'approveBrainActions',
+        executionId: execution.id,
+        totalProposals: proposals.length,
+        selectedCount: selectedProposals.length,
+        stepIndices,
+        userAccountId,
+      }, `Approving ${selectedProposals.length}/${proposals.length} proposals`);
+
+      // Вызвать triggerBrainOptimizationRun fast path с отобранными proposals
+      const result = await this.triggerBrainOptimizationRun(
+        {
+          direction_id: direction_id || null,
+          campaign_id: campaign_id || null,
+          dry_run: false,
+          reason: `Approved ${selectedProposals.length} proposals from execution ${execution.id}`,
+          proposals: selectedProposals,
+        },
+        context
+      );
+
+      return result;
+    } catch (error) {
+      logger.error({ error: error.message, userAccountId }, 'approveBrainActions failed');
+      return { success: false, error: `Ошибка выполнения: ${error.message}` };
+    }
+  },
+
   // ============================================================
   // PRE-CHECK & INSIGHTS HANDLERS (Hybrid MCP)
   // ============================================================

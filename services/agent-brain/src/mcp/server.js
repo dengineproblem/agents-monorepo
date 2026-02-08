@@ -364,7 +364,7 @@ export function registerMCPRoutes(fastify) {
     try {
       const { data, error } = await supabase
         .from('user_accounts')
-        .select('id')
+        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, business_name')
         .eq('telegram_id', telegram_id)
         .limit(1);
 
@@ -377,7 +377,57 @@ export function registerMCPRoutes(fastify) {
         return reply.send({ success: false, error: 'user_not_found' });
       }
 
-      return reply.send({ success: true, userAccountId: data[0].id });
+      const user = data[0];
+
+      // Определяем стек по наличию токенов
+      const stack = [];
+      if (user.access_token) stack.push('facebook');
+      if (user.tiktok_access_token) stack.push('tiktok');
+      if (user.amocrm_access_token) stack.push('crm');
+
+      const result = {
+        success: true,
+        userAccountId: user.id,
+        businessName: user.business_name || null,
+        multiAccountEnabled: !!user.multi_account_enabled,
+        stack,
+        adAccounts: [],
+      };
+
+      // Если мультиаккаунт включён — загрузить ad_accounts
+      if (user.multi_account_enabled) {
+        const { data: accounts, error: accError } = await supabase
+          .from('ad_accounts')
+          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default')
+          .eq('user_account_id', user.id)
+          .eq('is_active', true);
+
+        if (!accError && accounts) {
+          result.adAccounts = accounts.map(acc => {
+            const accStack = [];
+            if (acc.access_token) accStack.push('facebook');
+            if (acc.tiktok_access_token) accStack.push('tiktok');
+            if (acc.amocrm_access_token) accStack.push('crm');
+            return {
+              id: acc.id,
+              name: acc.name || `Аккаунт ${acc.ad_account_id}`,
+              adAccountId: acc.ad_account_id,
+              isDefault: !!acc.is_default,
+              stack: accStack,
+            };
+          });
+        }
+      }
+
+      fastify.log.info({
+        telegramId: telegram_id,
+        userId: user.id,
+        stack,
+        multiAccount: !!user.multi_account_enabled,
+        adAccountCount: result.adAccounts.length,
+      }, 'resolve-user: success');
+
+      return reply.send(result);
     } catch (err) {
       fastify.log.error({ error: err.message }, 'resolve-user error');
       return reply.code(500).send({ success: false, error: 'internal_error' });

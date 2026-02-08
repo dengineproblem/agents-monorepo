@@ -18,7 +18,7 @@
 - **Голос:** OpenAI Whisper API (`whisper-1`)
 - **Логирование:** Pino + pino-pretty
 
-**Архитектура:** Мультиагентная с domain routing — каждое Telegram-сообщение классифицируется роутером (keyword → LLM fallback) и направляется в специализированный домен (ads, creative, crm, tiktok, onboarding, general). Каждый домен имеет свой системный промпт и subset tools. Между сообщениями conversation context НЕ сохраняется.
+**Архитектура:** Мультиагентная с domain routing — каждое Telegram-сообщение классифицируется роутером (keyword → LLM fallback) и направляется в специализированный домен (ads, creative, crm, tiktok, onboarding, general). Каждый домен имеет свой системный промпт и subset tools. Conversation memory подгружается из SQLite (последние 10 пар), per-user memory хранится в файлах `store/memory/{userId}.md`. Stack detection фильтрует недоступные домены/tools по наличию токенов. Multi-account support позволяет переключаться между рекламными аккаунтами.
 
 ---
 
@@ -38,11 +38,16 @@
 │  3. Parse message (text / voice->Whisper / photo->URL)        │
 │  4. Store in SQLite                                            │
 │  5. Check trigger (/bot, @Claude, private chat)               │
-│  6. Resolve telegram_id -> userAccountId (agent-brain API)   │
+│  6. Resolve telegram_id → ResolvedUser (agent-brain API)     │
+│     → userAccountId, stack, multiAccountEnabled, adAccounts  │
+│  6a. Create/restore Session (stack, selectedAccount, memory) │
+│  6b. Multi-account flow (select/switch account if needed)    │
 │  7. DOMAIN ROUTING (keyword match → LLM fallback)            │
+│     → stack-aware filtering (no TikTok if no tiktok token)  │
 │     → ads | creative | crm | tiktok | onboarding | general  │
 │  8. Load BASE.md + domain/CLAUDE.md + filter tools           │
-│  9. Inject userAccountId into prompt                          │
+│  8a. Inject: userAccountId + memory + greeting + history     │
+│  8b. Load conversation history (last 10 pairs, 8KB limit)    │
 │                                                                │
 │  ┌──────────────────────────────────────────────────────────┐ │
 │  │          TOOL USE LOOP (max 10 turns)                    │ │
@@ -98,12 +103,14 @@
 services/telegram-claude-bot/
 ├── src/
 │   ├── index.ts              # Точка входа: polling, handleMessage, Tool Use цикл
-│   ├── router.ts             # Domain Router: keyword classifier + LLM fallback
-│   ├── domains.ts            # Маппинг доменов → tools subset + prompt paths
+│   ├── router.ts             # Domain Router: keyword classifier + LLM fallback + stack filtering
+│   ├── domains.ts            # Маппинг доменов → tools subset + prompt paths + stack awareness
+│   ├── session.ts            # In-memory session state (stack, selectedAccount, TTL 30 min)
+│   ├── memory.ts             # Per-user memory files (store/memory/{userId}.md)
 │   ├── config.ts             # ENV переменные, пути, TRIGGER_PATTERN, таймзона
-│   ├── tools.ts              # 49 Anthropic Tool определений + executeTool()
-│   ├── db.ts                 # SQLite: init, CRUD для chats/messages/tasks
-│   ├── types.ts              # TypeScript интерфейсы
+│   ├── tools.ts              # 51 Anthropic Tool определений + executeTool()
+│   ├── db.ts                 # SQLite: init, CRUD, getRecentMessages() для conversation memory
+│   ├── types.ts              # TypeScript интерфейсы (ResolvedUser, AdAccountInfo, UserSession...)
 │   ├── logger.ts             # Pino logger (info/warn/error/debug)
 │   ├── utils.ts              # loadJson(), saveJson()
 │   ├── task-scheduler.ts     # Cron/interval планировщик [ОТКЛЮЧЁН]
@@ -111,7 +118,7 @@ services/telegram-claude-bot/
 │   └── mount-security.ts    # Mount валидация [НЕ ИСПОЛЬЗУЕТСЯ]
 ├── groups/
 │   ├── shared/
-│   │   └── BASE.md           # Общие правила: безопасность, форматирование, стиль
+│   │   └── BASE.md           # Общие правила: безопасность, форматирование, мультиаккаунт
 │   ├── ads/
 │   │   └── CLAUDE.md         # Facebook Ads specialist prompt
 │   ├── creative/
@@ -123,11 +130,13 @@ services/telegram-claude-bot/
 │   ├── onboarding/
 │   │   └── CLAUDE.md         # Onboarding specialist prompt
 │   ├── general/
-│   │   └── CLAUDE.md         # General/fallback prompt
+│   │   └── CLAUDE.md         # General/fallback prompt (+ KB инструкции)
 │   └── main/
 │       └── CLAUDE.md         # Монолитный промпт (fallback, 300 строк)
 ├── store/
-│   └── messages.db           # SQLite БД (история сообщений)
+│   ├── messages.db           # SQLite БД (история сообщений)
+│   └── memory/               # Per-user memory files (Docker volume: telegram-bot-store)
+│       └── {userId}.md       # key: value pairs (selected_account, stack, ...)
 ├── data/
 │   ├── router_state.json     # Состояние маршрутизатора
 │   └── sessions.json         # Сессии по группам
@@ -142,13 +151,15 @@ services/telegram-claude-bot/
 
 | Файл | Строк | Описание |
 |------|-------|----------|
-| `index.ts` | ~630 | Главная логика: Telegram polling, handleMessage(), domain routing интеграция, Tool Use цикл, Whisper транскрибация, rate limiting, security guards |
-| `router.ts` | ~140 | Domain Router: keyword regex classifier (0ms) + LLM Haiku fallback (~300ms). Определяет домен: ads, creative, crm, tiktok, onboarding, general |
-| `domains.ts` | ~100 | Маппинг доменов → tool subsets + prompt file paths. Фильтрует tools по имени из главного массива |
+| `index.ts` | ~830 | Главная логика: Telegram polling, handleMessage(), session management, multi-account flow, conversation memory, domain routing, Tool Use цикл, Whisper транскрибация, rate limiting, security guards |
+| `router.ts` | ~200 | Domain Router: keyword regex classifier (0ms) + LLM Haiku fallback (~300ms) + stack-aware filtering. `DOMAIN_STACK_REQUIREMENTS`, `ACCOUNT_SWITCH_PATTERN` |
+| `domains.ts` | ~130 | Маппинг доменов → tool subsets + prompt paths. `getToolsForDomainWithStack()` — фильтрует TikTok tools по стеку. `SHARED_TOOLS` включает `getUserErrors` + `getKnowledgeBase` |
+| `session.ts` | ~90 | In-memory session state (`Map<telegramId, UserSession>`), TTL 30 мин, auto-cleanup. `createSession`, `setSelectedAccount`, `clearSelectedAccount` (восстанавливает originalStack) |
+| `memory.ts` | ~80 | Per-user memory в файлах `store/memory/{userId}.md`. UUID-валидация для path traversal protection. `readUserMemory`, `updateUserMemory`, `getUserMemoryValue` |
 | `config.ts` | ~78 | ENV переменные, пути, regex триггер, rate limits, admin IDs, voice limits |
-| `tools.ts` | ~988 | Определения 49 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
-| `db.ts` | ~322 | SQLite инициализация, таблицы chats/messages/scheduled_tasks/task_run_logs, CRUD операции |
-| `types.ts` | 80 | Интерфейсы: Session, NewMessage, ScheduledTask, MountAllowlist, ContainerConfig |
+| `tools.ts` | ~998 | Определения 51 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
+| `db.ts` | ~336 | SQLite инициализация, таблицы chats/messages/scheduled_tasks/task_run_logs, CRUD, `getRecentMessages()` для conversation memory |
+| `types.ts` | ~96 | Интерфейсы: Session, NewMessage, ResolvedUser, AdAccountInfo, ScheduledTask, MountAllowlist |
 | `logger.ts` | 6 | Конфигурация Pino: уровень из `LOG_LEVEL` env, pino-pretty транспорт |
 | `utils.ts` | 19 | Хелперы: `loadJson(path, default)`, `saveJson(path, data)` |
 | `task-scheduler.ts` | 172 | Планировщик задач: cron/interval/once, getDueTasks(), runTask() — **отключён** |
@@ -206,40 +217,88 @@ export const TRIGGER_PATTERN = new RegExp(
 );
 ```
 
-### Шаг 5: Резолв telegram_id -> userAccountId
+### Шаг 5: Резолв telegram_id → ResolvedUser
 
 ```typescript
-const userAccountId = await resolveUserAccountId(telegramId);
+const resolvedUser = await resolveUser(telegramId);
+// resolvedUser = { userAccountId, businessName, multiAccountEnabled, stack, adAccounts }
 ```
 
 **Механизм:**
-1. Проверяет in-memory кэш с TTL (`Map<number, { id, expiresAt }>`)
+1. Проверяет in-memory кэш с TTL (`Map<number, { data: ResolvedUser; expiresAt: number }>`)
 2. Если нет или просрочен — HTTP POST к agent-brain:
    ```
    POST {BRAIN_SERVICE_URL}/brain/resolve-user
    Headers: X-Service-Auth: {BRAIN_SERVICE_SECRET}
    Body: { telegram_id: number }
-   Response: { success: true, userAccountId: "uuid" }
+   Response: {
+     success: true,
+     userAccountId: "uuid",
+     businessName: "Company",
+     multiAccountEnabled: true,
+     stack: ["facebook", "tiktok"],
+     adAccounts: [{ id, name, adAccountId, isDefault, stack }]
+   }
    ```
-3. Результат кэшируется на 15 минут (TTL)
-4. Если пользователь не найден — бот отвечает "Ваш Telegram аккаунт не привязан к системе"
+3. Stack определяется по наличию токенов: `access_token` → facebook, `tiktok_access_token` → tiktok, `amocrm_access_token` → crm
+4. Результат кэшируется на 15 минут (TTL)
+5. Если `multiAccountEnabled` — дополнительный запрос к `ad_accounts` таблице
+6. Если пользователь не найден — бот отвечает "Ваш Telegram аккаунт не привязан к системе"
 
-**Важно:** Бот НЕ хранит Supabase Service Role Key — резолв происходит через agent-brain, который уже имеет доступ к БД.
+**Важно:** Бот НЕ хранит Supabase Service Role Key — резолв происходит через agent-brain.
 
-### Шаг 6: Domain Routing
+### Шаг 5a: Session & Multi-account
+
+После resolve-user создаётся/обновляется in-memory session:
 
 ```typescript
-import { routeMessage } from './router.js';
-import { DOMAINS, getToolsForDomain } from './domains.js';
+let session = getSession(telegramId);
+if (!session) {
+  session = createSession(telegramId, resolvedUser);
+  // Восстановить выбранный аккаунт из memory файла
+  const savedAccountId = getUserMemoryValue(userAccountId, 'selected_account');
+}
+```
 
-const routeResult = await routeMessage(truncatedMessage, anthropic);
+**Session state** (`src/session.ts`):
+- `UserSession`: userAccountId, selectedAccountId, stack, originalStack, multiAccountEnabled, adAccounts, isFirstMessage
+- TTL: 30 минут, auto-cleanup каждые 5 мин
+- `originalStack` — запоминается при создании, восстанавливается при `clearSelectedAccount()`
+
+**Multi-account flow** (если `multiAccountEnabled && adAccounts.length > 1`):
+1. Проверка `ACCOUNT_SWITCH_PATTERN` (`переключи аккаунт`, `смени аккаунт`, `другой аккаунт`)
+2. Если аккаунт не выбран — показать список, ждать номер
+3. При выборе: `setSelectedAccount()` + сохранить в memory файл
+4. `accountId` инжектируется в каждый tool input наряду с `userAccountId`
+
+**Per-user memory** (`src/memory.ts`):
+- Хранится в `store/memory/{userId}.md` (Docker volume `telegram-bot-store`)
+- Формат: `key: value` (одна пара на строку)
+- Ключи: `selected_account`, `selected_account_name`, `stack`
+- UUID-валидация для защиты от path traversal
+
+### Шаг 6: Domain Routing (stack-aware)
+
+```typescript
+const routeResult = await routeMessage(truncatedMessage, anthropic, session.stack);
 // routeResult = { domain: 'ads', method: 'keyword' }
 ```
 
-**Hybrid routing (2 фазы):**
+**Hybrid routing (2 фазы) + stack фильтрация:**
 
 1. **Keyword classifier (0ms):** Regex-паттерны для каждого домена. Если >=1 паттерн совпал с одним доменом → роутинг завершён. Если совпали 2+ домена (cross-domain) → fallback на все tools.
 2. **LLM fallback (~300ms):** Если нет keyword match → быстрый Haiku classify вызов с `max_tokens: 10`, сообщение обрезано до 200 символов.
+3. **Stack filtering:** Если выбранный домен недоступен для стека пользователя → fallback на `general`. Например, запрос про TikTok при отсутствии `tiktok_access_token` → general.
+
+**Stack requirements** (`DOMAIN_STACK_REQUIREMENTS`):
+| Домен | Требуемый стек | Если нет → |
+|-------|---------------|------------|
+| `ads` | `['facebook']` | general |
+| `creative` | `['facebook']` | general |
+| `crm` | `[]` (всем доступен) | — |
+| `tiktok` | `['tiktok']` | general |
+| `onboarding` | `[]` | — |
+| `general` | `[]` | — |
 
 | Домен | Keyword примеры | Tools |
 |-------|----------------|-------|
@@ -248,7 +307,7 @@ const routeResult = await routeMessage(truncatedMessage, anthropic);
 | `crm` | лиды, продажи, воронка, WhatsApp диалог | 9 |
 | `tiktok` | tiktok, тикток | 4 |
 | `onboarding` | создай пользователя, регистрация | 2 |
-| `general` | (LLM fallback для приветствий, ошибок) | 2 + web_search |
+| `general` | (LLM fallback для приветствий, ошибок, KB) | 3 + web_search |
 
 ### Шаг 7: Загрузка системного промпта
 
@@ -257,61 +316,87 @@ const routeResult = await routeMessage(truncatedMessage, anthropic);
 const basePath = path.join(groupsDir, 'shared', 'BASE.md');
 const domainPath = path.join(groupsDir, domainConfig.promptFile);
 const fullPrompt = basePrompt + '\n\n' + specificPrompt;
-systemPrompt = `userAccountId: ${userAccountId}\n\n${fullPrompt}`;
 
-// Фильтрация tools по домену
-domainTools = getToolsForDomain(routeResult.domain);
+// Инжекция контекста
+const userMemory = readUserMemory(userAccountId);
+const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
+systemPrompt = `userAccountId: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
+
+// Фильтрация tools по домену с учётом стека
+domainTools = getToolsForDomainWithStack(routeResult.domain, session.stack);
 // domainConfig.includeWebSearch → добавить web_search
 ```
 
-**Fallback:** Если routing вернул null (cross-domain) или неизвестный домен → загружается `groups/main/CLAUDE.md` + все 49 tools (монолитный режим, как было раньше).
+**Состав systemPrompt:**
+1. `userAccountId` header — всегда
+2. `securityReminder` — если обнаружена попытка prompt injection
+3. `memoryBlock` — per-user memory из файла (selected_account, stack...)
+4. `greetingInstruction` — при первом сообщении в сессии (список подключённых сервисов)
+5. `BASE.md` + `{domain}/CLAUDE.md` — промпт домена
+
+**Fallback:** Если routing вернул null (cross-domain) или неизвестный домен → загружается `groups/main/CLAUDE.md` + все 51 tools (монолитный режим).
 
 Файлы промптов читаются при **каждом сообщении** (не кэшируются). Изменения применяются без перезапуска бота.
+
+### Шаг 7a: Загрузка Conversation Memory
+
+```typescript
+// Загрузка последних 10 пар сообщений из SQLite
+const recentRows = getRecentMessages(chatId, 10);
+// → SELECT text, is_from_me, timestamp FROM messages
+//   WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 25
+//   (reversed to chronological order)
+
+// Формируем user/assistant пары, обрезаем до 8000 символов
+// Гарантируем: начинается с user, заканчивается на assistant
+// Объединяем последовательные сообщения одной роли
+
+const messages = [
+  ...historyMessages,           // conversation memory из SQLite
+  { role: 'user', content: truncatedMessage }  // текущее сообщение
+];
+```
+
+**Алгоритм conversation memory:**
+1. Загружает `limit * 2 + 5` строк из SQLite (для 10 пар = 25 строк)
+2. Разворачивает в хронологический порядок (`reverse()`)
+3. Обрезает от конца к началу (приоритет свежим) до `MAX_HISTORY_CHARS = 8000`
+4. Гарантирует чередование: первый = user, последний = assistant
+5. Объединяет последовательные сообщения одной роли через `\n`
+6. Текущее сообщение (только что сохранённое) отсекается правилом "последний = assistant"
 
 ### Шаг 8: Tool Use Loop
 
 ```typescript
-const messages: Anthropic.MessageParam[] = [{ role: 'user', content: cleanedMessage }];
-let continueLoop = true;
-let turnCount = 0;
-const MAX_TURNS = 10;
-
 while (continueLoop && turnCount < MAX_TURNS) {
   turnCount++;
-
   const response = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 4096,
     system: systemPrompt,
-    tools: domainTools,  // Отфильтрованные tools для домена
+    tools: domainTools,
     messages,
   });
 
-  messages.push({ role: 'assistant', content: response.content });
-
   if (response.stop_reason === 'tool_use') {
-    // Выполнить каждый tool и добавить результаты
-    const toolResults = [];
     for (const block of response.content) {
       if (block.type === 'tool_use') {
-        const toolInput = { ...block.input, userAccountId };  // ИНЖЕКТ userAccountId
+        // ИНЖЕКТ: userAccountId + accountId (multi-account)
+        const toolInput = {
+          ...block.input,
+          userAccountId,
+          ...(session.selectedAccountId ? { accountId: session.selectedAccountId } : {}),
+        };
         const result = await executeTool(block.name, toolInput);
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: JSON.stringify(result),
-        });
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
     }
     messages.push({ role: 'user', content: toolResults });
-    continue;  // Следующий turn
+    continue;
   }
 
   if (response.stop_reason === 'end_turn') {
-    // Собрать текстовый ответ
-    for (const block of response.content) {
-      if (block.type === 'text') agentResponse += block.text;
-    }
+    // Собрать текст + citations от web search
     continueLoop = false;
   }
 }
@@ -319,9 +404,9 @@ while (continueLoop && turnCount < MAX_TURNS) {
 
 **Ключевые моменты:**
 - `MAX_TURNS = 10` — защита от бесконечного цикла
-- `userAccountId` инжектируется в **каждый** tool input автоматически
+- `userAccountId` + `accountId` (multi-account) инжектируются в **каждый** tool input
 - Claude может вызвать несколько tools за один turn (parallel tool use)
-- Между Telegram-сообщениями conversation history **не сохраняется**
+- **Conversation memory** подгружается из SQLite (последние 10 пар, 8KB лимит)
 - **Web Search** обрабатывается server-side: блоки `server_tool_use` и `web_search_tool_result` уже включены в `response.content`, для них НЕ нужно отправлять `tool_result`
 - При `stop_reason === 'pause_turn'` (долгий web search) — продолжаем loop
 - Citations из web search результатов собираются и добавляются в конец ответа как блок "Источники:"
@@ -370,15 +455,19 @@ Claude Haiku 4.5 получает массив `tools` (49 определени�
 }
 ```
 
-### 5.2 Инжект userAccountId
+### 5.2 Инжект userAccountId + accountId
 
 Claude НЕ знает реальный userAccountId — он указан только в system prompt. Бот автоматически добавляет его в каждый tool input:
 
 ```typescript
-const toolInput = { ...(block.input as Record<string, any>), userAccountId };
+const toolInput = {
+  ...(block.input as Record<string, any>),
+  userAccountId,
+  ...(session.selectedAccountId ? { accountId: session.selectedAccountId } : {}),
+};
 ```
 
-Это гарантирует, что handler в agent-brain всегда получает корректный userAccountId, даже если Claude его не передал.
+Это гарантирует, что handler в agent-brain всегда получает корректный userAccountId и accountId (для multi-account), даже если Claude их не передал.
 
 ### 5.3 Вызов agent-brain
 
@@ -444,14 +533,24 @@ const DEFAULT_TIMEOUT = 30_000; // 30 секунд для всех осталь�
 
 **Аутентификация:** Все endpoints проверяют `X-Service-Auth` header (shared secret).
 
-**Эндпоинт 1:** `POST /brain/resolve-user` — резолв telegram_id → userAccountId
+**Эндпоинт 1:** `POST /brain/resolve-user` — резолв telegram_id → ResolvedUser
 ```
 Headers: X-Service-Auth: {BRAIN_SERVICE_SECRET}
 Body: { telegram_id: number }
-Response (success): { success: true, userAccountId: "uuid" }
+Response (success): {
+  success: true,
+  userAccountId: "uuid",
+  businessName: "Company Name",
+  multiAccountEnabled: true,
+  stack: ["facebook", "tiktok"],
+  adAccounts: [
+    { id: "uuid", name: "Account 1", adAccountId: "act_xxx", isDefault: true, stack: ["facebook"] }
+  ]
+}
 Response (not found): { success: false, error: "user_not_found" }
 Response (401): { success: false, error: "unauthorized" }
 ```
+Stack определяется по наличию токенов в user_accounts: `access_token` → facebook, `tiktok_access_token` → tiktok, `amocrm_access_token` → crm. При `multi_account_enabled = true` дополнительно загружаются ad_accounts с аналогичным определением стека для каждого аккаунта.
 
 **Эндпоинт 2:** `POST /brain/tools/:toolName` — выполнение tool
 ```
@@ -526,11 +625,12 @@ export function getToolByName(name) {
 | `crm` | `agents/crm/` | 13 | CRM: лиды, продажи, воронка, amoCRM интеграция |
 | `tiktok` | `agents/tiktok/` | 25 | TikTok Ads: кампании, адгруппы, видео, ROI |
 | `whatsapp` | `agents/whatsapp/` | 4 | WhatsApp: диалоги, поиск, AI-анализ |
-| `system` | `agents/system/` | 1 | Системные: ошибки пользователя |
+| `system` | `agents/system/` | 2 | Системные: ошибки пользователя + база знаний |
 
-Каждая категория — это папка с двумя файлами:
+Каждая категория — это папка с файлами:
 - `toolDefs.js` — Zod-схемы и описания
 - `handlers.js` — async функции-обработчики (Supabase / Facebook API / AI)
+- `knowledgeBase.js` — (только system) контент базы знаний (6 глав, 41 раздел, 2263 строки)
 
 ---
 
@@ -635,11 +735,12 @@ export function getToolByName(name) {
 |------|----------|
 | `createUser` | Создать пользователя (business_name, niche, username, password) |
 
-### System (1 tool)
+### System (2 tools, SHARED — доступны во всех доменах)
 
 | Tool | Описание |
 |------|----------|
 | `getUserErrors` | Ошибки пользователя с LLM-расшифровкой (severity, type, explanation, solution) |
+| `getKnowledgeBase` | База знаний платформы: 6 глав, 41 раздел. Без параметров → список глав, с chapter_id → оглавление, с chapter_id + section_id → содержимое |
 
 ### Web Search (встроенный, server-side)
 
@@ -748,13 +849,21 @@ CREATE TABLE task_run_logs (
 );
 ```
 
+### Индексы
+
+```sql
+CREATE INDEX idx_timestamp ON messages(timestamp);
+CREATE INDEX idx_chat_timestamp ON messages(chat_id, timestamp);  -- для conversation memory
+```
+
 ### Использование
 
 - **Входящее сообщение** → `storeMessage()` с `is_from_me: false`
 - **Ответ бота** → `storeMessage()` с `is_from_me: true`, id = `{messageId}-response`
 - **Метаданные чата** → `storeChatMetadata(chatId, chatName)`
+- **Conversation memory** → `getRecentMessages(chatId, 10)` — загрузка последних ~25 строк для формирования контекста (8KB лимит)
 
-**Важно:** SQLite хранит только историю сообщений. Conversation context для Claude строится в памяти за каждый запрос и **не сохраняется** между Telegram-сообщениями.
+**Conversation memory:** SQLite используется как источник для conversation history. При каждом запросе `getRecentMessages()` загружает последние сообщения, формирует user/assistant пары с лимитом 8000 символов и инжектирует в `messages[]` перед текущим сообщением пользователя.
 
 ---
 
@@ -770,7 +879,7 @@ groups/
 ├── crm/CLAUDE.md          ← CRM: лиды, продажи, WhatsApp
 ├── tiktok/CLAUDE.md       ← TikTok: кампании
 ├── onboarding/CLAUDE.md   ← Onboarding: createUser
-├── general/CLAUDE.md      ← General: ошибки, web search
+├── general/CLAUDE.md      ← General: ошибки, web search, KB навигация
 └── main/CLAUDE.md         ← Монолитный fallback (все 5 ролей, 300 строк)
 ```
 
@@ -779,22 +888,25 @@ groups/
 ```
 systemPrompt = userAccountId header
              + securityReminder (если prompt injection detected)
+             + memoryBlock (per-user memory: selected_account, stack...)
+             + greetingInstruction (при первом сообщении в сессии)
              + groups/shared/BASE.md
              + groups/{domain}/CLAUDE.md
 ```
 
 При fallback (cross-domain или ошибка роутинга):
 ```
-systemPrompt = userAccountId header + groups/main/CLAUDE.md
+systemPrompt = userAccountId header + memory + greeting + groups/main/CLAUDE.md
 ```
 
-### Содержание BASE.md (~80 строк)
+### Содержание BASE.md (~97 строк)
 
 1. **Безопасность:** Запрет раскрытия API ключей, env, путей
 2. **Форматирование:** Telegram Markdown, мобильный формат, эмодзи статусов
 3. **Перевод терминов:** Facebook → русский
 4. **Общие правила:** подтверждение WRITE операций, не выдумывать данные
-5. **Стиль:** русский язык, профессиональный тон
+5. **Мультиаккаунт:** инструкция по переключению аккаунтов ("переключи аккаунт")
+6. **Стиль:** русский язык, профессиональный тон
 
 ### Как редактировать
 
@@ -892,10 +1004,13 @@ telegram-claude-bot:
     - BRAIN_SERVICE_URL=http://agent-brain:7080
   volumes:
     - telegram-bot-data:/app/data
+    - telegram-bot-store:/app/store    # SQLite + per-user memory files
   restart: unless-stopped
   depends_on:
     - agent-brain
 ```
+
+> **Volume `telegram-bot-store`** содержит `messages.db` (SQLite) и `memory/` (per-user memory files). Данные сохраняются при пересборке контейнера.
 
 ### Команды
 
@@ -1053,9 +1168,10 @@ export const DOMAINS: Record<string, DomainConfig> = {
 ### 15.1 Изоляция данных пользователей
 
 - **userAccountId** привязан к `telegram_id` через agent-brain → Supabase
-- **Forced override (index.ts:398):** `{ ...block.input, userAccountId }` — даже если Claude через prompt injection передаст чужой userAccountId, он будет ПЕРЕЗАПИСАН реальным. Это ключевая защита.
+- **Forced override:** `{ ...block.input, userAccountId, accountId }` — даже если Claude через prompt injection передаст чужой userAccountId/accountId, они будут ПЕРЕЗАПИСАНЫ реальными. Это ключевая защита.
 - `getCredentials()` проверяет ownership — `.eq('user_account_id', userAccountId)` при загрузке ad_accounts
 - Каждый handler в agent-brain фильтрует по `user_account_id`
+- **Per-user memory** защищена UUID-валидацией (regex `^[a-f0-9-]{36}$`) от path traversal
 
 ### 15.2 Rate Limiting
 
@@ -1177,3 +1293,79 @@ const DANGEROUS_TOOLS = new Set([
 | Mount Security | `mount-security.ts` | Валидация mount points для контейнеров | NanoClaw legacy, не используется |
 
 Планировщик можно включить, раскомментировав `startSchedulerLoop()` в `index.ts`. Container Runner и Mount Security ориентированы на WhatsApp-бот и не применимы к Telegram.
+
+---
+
+## 17. Knowledge Base (getKnowledgeBase)
+
+### Описание
+
+Tool `getKnowledgeBase` предоставляет доступ к базе знаний платформы Performante.ai. Доступен во **всех доменах** (входит в `SHARED_TOOLS`).
+
+### Архитектура
+
+**Контент:** `agent-brain/src/chatAssistant/agents/system/knowledgeBase.js` — 2263 строки, 6 глав, 41 раздел. Сконвертирован из frontend-источника (`services/frontend/src/content/knowledge-base/index.ts`).
+
+**API (3 режима):**
+| Параметры | Результат |
+|-----------|----------|
+| Без параметров | Список всех 6 глав с описаниями и section IDs |
+| `chapter_id` | Оглавление главы: title, description, sections[] |
+| `chapter_id` + `section_id` | Полное содержимое раздела (Markdown) |
+
+**Главы:**
+| ID | Название | Разделов |
+|----|----------|----------|
+| `getting-started` | Начало работы | 7 |
+| `ad-launch` | Запуск рекламы | 8 |
+| `ad-management` | Управление рекламой | 8 |
+| `roi-analytics` | ROI и аналитика | 7 |
+| `competitors` | Конкуренты | 5 |
+| `profile-settings` | Профиль и настройки | 6 |
+
+### Файлы
+
+| Сервис | Файл | Роль |
+|--------|------|------|
+| agent-brain | `agents/system/knowledgeBase.js` | Контент + helper функции |
+| agent-brain | `agents/system/toolDefs.js` | Zod-схема tool |
+| agent-brain | `agents/system/handlers.js` | Handler (3 режима) |
+| agent-brain | `mcp/tools/definitions.js` | Регистрация в `systemTools` |
+| telegram-bot | `src/tools.ts` | Anthropic Tool определение |
+| telegram-bot | `src/domains.ts` | В `SHARED_TOOLS` (все домены) |
+| telegram-bot | `groups/general/CLAUDE.md` | Инструкции когда использовать |
+
+### Триггеры в промпте
+
+В `groups/general/CLAUDE.md` указано: при вопросах "как подключить", "как создать направление", "инструкция", "помощь", "что такое" → вызвать `getKnowledgeBase`. Сначала без параметров (список глав), затем с chapter_id + section_id (содержимое).
+
+---
+
+## 18. approveBrainActions
+
+### Описание
+
+Tool `approveBrainActions` позволяет одобрить и выполнить выбранные шаги Brain Mini оптимизации. Доступен в домене `ads`.
+
+### Flow
+
+1. Пользователь запускает `triggerBrainOptimizationRun` с `dry_run: true` → получает список proposals
+2. Claude показывает proposals пользователю с индексами
+3. Пользователь одобряет конкретные шаги
+4. Claude вызывает `approveBrainActions` с `stepIndices: [0, 2, 3]`
+
+### Handler (`agents/ads/handlers.js`)
+
+1. Загружает последний `brain_executions` (или по `execution_id`) с `plan_json.proposals`
+2. Валидирует `stepIndices` (диапазон 0..N-1)
+3. Фильтрует proposals по индексам
+4. Вызывает `this.triggerBrainOptimizationRun()` fast path с `preApprovedProposals`
+
+### Параметры
+
+| Параметр | Тип | Обязательный | Описание |
+|----------|-----|-------------|----------|
+| `stepIndices` | `number[]` | Да | Индексы proposals для выполнения |
+| `execution_id` | `string` | Нет | UUID конкретного выполнения (по умолчанию — последнее) |
+| `direction_id` | `string` | Нет | UUID направления |
+| `campaign_id` | `string` | Нет | ID кампании |
