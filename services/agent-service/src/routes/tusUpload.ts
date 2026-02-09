@@ -21,7 +21,8 @@ import {
   createWhatsAppCreative,
   createInstagramCreative,
   createWebsiteLeadsCreative,
-  createLeadFormVideoCreative
+  createLeadFormVideoCreative,
+  createAppInstallsVideoCreative
 } from '../adapters/facebook.js';
 import { uploadVideo as uploadTikTokVideo } from '../adapters/tiktok.js';
 import { getTikTokCredentials } from '../lib/tiktokSettings.js';
@@ -656,7 +657,9 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let siteUrl = null;
     let utm = null;
     let leadFormId: string | null = null;
-    let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp';
+    let appId: string | null = null;
+    let appStoreUrl: string | null = null;
+    let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
     let useInstagram = true; // По умолчанию используем Instagram
 
     if (directionId) {
@@ -693,6 +696,8 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         siteUrl = defaultSettings.site_url;
         utm = defaultSettings.utm_tag;
         leadFormId = defaultSettings.lead_form_id;
+        appId = defaultSettings.app_id;
+        appStoreUrl = defaultSettings.app_store_url;
       }
     }
 
@@ -703,7 +708,9 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       useInstagram,
       hasInstagramId: !!instagramId,
       hasSiteUrl: !!siteUrl,
-      hasLeadFormId: !!leadFormId
+      hasLeadFormId: !!leadFormId,
+      hasAppId: !!appId,
+      hasAppStoreUrl: !!appStoreUrl
     }, '[TUS] Creating FB creative');
 
     if (!instagramId) {
@@ -764,6 +771,19 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = leadFormCreative.id;
+    } else if (objective === 'app_installs') {
+      if (!appId || !appStoreUrl) {
+        throw new Error('app_id and app_store_url are required for app_installs objective');
+      }
+      const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+        videoId: fbVideo.id,
+        pageId: pageId,
+        instagramId: useInstagram ? (instagramId || undefined) : undefined,
+        message: description,
+        appStoreUrl: appStoreUrl,
+        thumbnailHash: thumbnailResult.hash
+      });
+      fbCreativeId = appInstallCreative.id;
     }
 
     // Сохраняем транскрипцию

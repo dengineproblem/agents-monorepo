@@ -9,7 +9,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const CreateDefaultSettingsSchema = z.object({
   direction_id: z.string().uuid(),
-  campaign_goal: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms']),
+  campaign_goal: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']),
   cities: z.array(z.string()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
@@ -25,6 +25,10 @@ const CreateDefaultSettingsSchema = z.object({
   utm_tag: z.string().optional(),
   // Lead Forms specific
   lead_form_id: z.string().optional(),
+  // App Installs specific
+  app_id: z.string().optional(),
+  app_store_url: z.string().url().optional(),
+  is_skadnetwork_attribution: z.boolean().optional(),
 });
 
 const UpdateDefaultSettingsSchema = z.object({
@@ -38,6 +42,11 @@ const UpdateDefaultSettingsSchema = z.object({
   site_url: z.string().url().optional(),
   pixel_id: z.string().optional(),
   utm_tag: z.string().optional(),
+  lead_form_id: z.string().optional(),
+  // App Installs specific
+  app_id: z.string().optional(),
+  app_store_url: z.string().url().optional(),
+  is_skadnetwork_attribution: z.boolean().optional(),
 });
 
 type CreateDefaultSettingsInput = z.infer<typeof CreateDefaultSettingsSchema>;
@@ -177,6 +186,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             site_url: input.site_url,
             pixel_id: input.pixel_id,
             utm_tag: input.utm_tag,
+            lead_form_id: input.lead_form_id,
+            app_id: input.app_id,
+            app_store_url: input.app_store_url,
+            is_skadnetwork_attribution: input.is_skadnetwork_attribution,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
@@ -210,6 +223,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             site_url: input.site_url,
             pixel_id: input.pixel_id,
             utm_tag: input.utm_tag ?? 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}',
+            lead_form_id: input.lead_form_id,
+            app_id: input.app_id,
+            app_store_url: input.app_store_url,
+            is_skadnetwork_attribution: input.is_skadnetwork_attribution,
           })
           .select()
           .single();
@@ -378,4 +395,3 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
     }
   });
 }
-

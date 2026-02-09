@@ -62,7 +62,7 @@ const autoLaunchRequestSchema = {
   properties: {
     user_account_id: { type: 'string', format: 'uuid' },
     userId: { type: 'string', format: 'uuid' }, // Алиас для обратной совместимости
-    objective: { type: 'string', enum: ['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms'] },
+    objective: { type: 'string', enum: ['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs'] },
     campaign_name: { type: 'string' },
     requested_budget_cents: { type: 'number', minimum: 500 }, // Минимум $5
     additional_context: { type: 'string' },
@@ -540,6 +540,43 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               promoted_object = {
                 page_id: credentials.fbPageId
               };
+            } else if (direction.objective === 'app_installs') {
+              const appId = defaultSettings?.app_id;
+              const appStoreUrl = defaultSettings?.app_store_url;
+
+              if (!appId || !appStoreUrl) {
+                log.warn({
+                  directionId: direction.id,
+                  directionName: direction.name,
+                  objective: direction.objective,
+                  hasAppId: !!appId,
+                  hasAppStoreUrl: !!appStoreUrl,
+                }, 'app_installs requires app_id and app_store_url, but settings are incomplete. Skipping direction.');
+                results.push({
+                  direction_id: direction.id,
+                  direction_name: direction.name,
+                  success: false,
+                  error: 'App installs objective requires app_id and app_store_url in direction settings',
+                });
+                continue;
+              }
+
+              promoted_object = {
+                application_id: String(appId),
+                object_store_url: appStoreUrl,
+                ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+                  is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+                })
+              };
+
+              log.info({
+                directionId: direction.id,
+                directionName: direction.name,
+                objective: direction.objective,
+                appId: String(appId),
+                appStoreUrl: appStoreUrl,
+                isSkadnetworkAttribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+              }, 'Configured promoted_object for app_installs (deterministic)');
             }
 
             // Создаём Ad Set в существующей кампании или используем pre-created
@@ -547,6 +584,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
             if (credentials.defaultAdsetMode === 'use_existing') {
               // РЕЖИМ: использовать pre-created ad set
+              if (direction.objective === 'app_installs') {
+                log.warn({
+                  directionId: direction.id,
+                  directionName: direction.name,
+                  mode: credentials.defaultAdsetMode
+                }, 'Using pre-created ad set for app_installs: ensure promoted_object (application_id/object_store_url) is already configured in Facebook');
+              }
               const hasAvailable = await hasAvailableAdSets(direction.id);
               
               if (!hasAvailable) {
@@ -962,6 +1006,39 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           promoted_object = {
             page_id: credentials.fbPageId
           };
+        } else if (direction.objective === 'app_installs') {
+          const appId = defaultSettings?.app_id;
+          const appStoreUrl = defaultSettings?.app_store_url;
+          if (!appId || !appStoreUrl) {
+            log.error({
+              directionId: direction.id,
+              directionName: direction.name,
+              objective: direction.objective,
+              hasAppId: !!appId,
+              hasAppStoreUrl: !!appStoreUrl,
+            }, 'app_installs requires app_id and app_store_url, but settings are incomplete');
+            return reply.code(400).send({
+              success: false,
+              error: 'app_id and app_store_url are required for app_installs objective. Configure them in direction settings.',
+            });
+          }
+
+          promoted_object = {
+            application_id: String(appId),
+            object_store_url: appStoreUrl,
+            ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+              is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+            })
+          };
+
+          log.info({
+            directionId: direction.id,
+            directionName: direction.name,
+            objective: direction.objective,
+            appId: String(appId),
+            appStoreUrl: appStoreUrl,
+            isSkadnetworkAttribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+          }, 'Configured promoted_object for app_installs (manual launch)');
         }
 
         // Создаём Ad Set или используем pre-created
@@ -969,6 +1046,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         if (credentials.defaultAdsetMode === 'use_existing') {
           // РЕЖИМ: использовать pre-created ad set
+          if (direction.objective === 'app_installs') {
+            log.warn({
+              directionId: direction.id,
+              directionName: direction.name,
+              mode: credentials.defaultAdsetMode
+            }, 'Using pre-created ad set for app_installs: ensure promoted_object (application_id/object_store_url) is already configured in Facebook');
+          }
           const availableAdSet = await getAvailableAdSet(direction.id);
 
           if (!availableAdSet) {
@@ -1031,6 +1115,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         const creativesForAds = creatives.map(c => ({
           user_creative_id: c.id,
           title: c.title,
+          fb_creative_id: c.fb_creative_id,
           fb_creative_id_whatsapp: c.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: c.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: c.fb_creative_id_site_leads,

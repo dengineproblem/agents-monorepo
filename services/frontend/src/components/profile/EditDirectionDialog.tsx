@@ -411,6 +411,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
   const [pixelId, setPixelId] = useState('');
+  const [appId, setAppId] = useState('');
+  const [appStoreUrl, setAppStoreUrl] = useState('');
+  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
   const [utmTag, setUtmTag] = useState(DEFAULT_UTM);
@@ -789,6 +792,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         if (settings.client_question) setClientQuestion(settings.client_question);
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
+        setAppId(settings.app_id || '');
+        setAppStoreUrl(settings.app_store_url || '');
+        setIsSkadnetworkAttribution(Boolean(settings.is_skadnetwork_attribution));
         if (settings.pixel_id) {
           setPixelId(settings.pixel_id);
           setCapiPixelId(settings.pixel_id); // Используем тот же пиксель для CAPI
@@ -818,6 +824,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCapiPixelId('');
     setInstagramUrl('');
     setSiteUrl('');
+    setAppId('');
+    setAppStoreUrl('');
+    setIsSkadnetworkAttribution(false);
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
   };
@@ -1022,6 +1031,17 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         setError('Введите URL сайта');
         return;
       }
+
+      if (direction.objective === 'app_installs') {
+        if (!appId.trim()) {
+          setError('Введите App ID');
+          return;
+        }
+        if (!appStoreUrl.trim()) {
+          setError('Введите ссылку на приложение (App Store / Google Play)');
+          return;
+        }
+      }
     }
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
@@ -1137,6 +1157,12 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         ...(!isTikTok && direction.objective === 'lead_forms' && {
           site_url: siteUrl.trim() || null,
           // Сохраняем pixel_id для CAPI
+          ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
+        }),
+        ...(!isTikTok && direction.objective === 'app_installs' && {
+          app_id: appId.trim(),
+          app_store_url: appStoreUrl.trim(),
+          is_skadnetwork_attribution: isSkadnetworkAttribution,
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
       };
@@ -1769,6 +1795,52 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     <p className="text-xs text-muted-foreground">
                       Обязательно для креативов с картинками. Для видео креативов не требуется.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {!isTikTok && direction.objective === 'app_installs' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-app-id">
+                      App ID <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="edit-app-id"
+                      value={appId}
+                      onChange={(e) => setAppId(e.target.value)}
+                      placeholder="123456789012345"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-app-store-url">
+                      Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="edit-app-store-url"
+                      type="url"
+                      value={appStoreUrl}
+                      onChange={(e) => setAppStoreUrl(e.target.value)}
+                      placeholder="https://apps.apple.com/app/id1234567890"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="edit-skadnetwork-attribution"
+                      checked={isSkadnetworkAttribution}
+                      onCheckedChange={setIsSkadnetworkAttribution}
+                      disabled={isSubmitting}
+                    />
+                    <Label htmlFor="edit-skadnetwork-attribution" className="font-normal cursor-pointer">
+                      Включить SKAdNetwork атрибуцию (iOS)
+                    </Label>
                   </div>
                 </div>
               )}

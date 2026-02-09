@@ -489,6 +489,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
 
+  // App Installs специфичные (Facebook)
+  const [appId, setAppId] = useState('');
+  const [appStoreUrl, setAppStoreUrl] = useState('');
+  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
+
   // TikTok Instant Page ID (Lead Forms) - ручной ввод
   const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
 
@@ -999,6 +1004,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         setError('Выберите лидформу');
         return;
       }
+
+      if (objective === 'app_installs') {
+        if (!appId.trim()) {
+          setError('Введите App ID');
+          return;
+        }
+        if (!appStoreUrl.trim()) {
+          setError('Введите ссылку на приложение (App Store / Google Play)');
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
@@ -1026,6 +1042,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             ...(objective === 'lead_forms' && {
               lead_form_id: leadFormId,
               ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
+            }),
+            ...(objective === 'app_installs' && {
+              app_id: appId.trim(),
+              app_store_url: appStoreUrl.trim(),
+              is_skadnetwork_attribution: isSkadnetworkAttribution,
             }),
           }
         : undefined;
@@ -1140,6 +1161,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
+    setAppId('');
+    setAppStoreUrl('');
+    setIsSkadnetworkAttribution(false);
     // CAPI settings
     setCapiEnabled(false);
     setCapiSource('whatsapp');
@@ -1377,6 +1401,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     <RadioGroupItem value="lead_forms" id="obj-lead-forms" />
                     <Label htmlFor="obj-lead-forms" className="font-normal cursor-pointer">
                       {OBJECTIVE_DESCRIPTIONS.lead_forms}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="app_installs" id="obj-app-installs" />
+                    <Label htmlFor="obj-app-installs" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.app_installs}
                     </Label>
                   </div>
                 </RadioGroup>
@@ -2481,6 +2511,55 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <p className="text-xs text-muted-foreground">
                   Если не указан, вы сможете создавать только видео объявления на эту лид-форму.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {needsFacebook && objective === 'app_installs' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="app-id">
+                  App ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="app-id"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                  placeholder="123456789012345"
+                  disabled={isSubmitting}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  ID приложения из Meta App Dashboard.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="app-store-url">
+                  Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="app-store-url"
+                  type="url"
+                  value={appStoreUrl}
+                  onChange={(e) => setAppStoreUrl(e.target.value)}
+                  placeholder="https://apps.apple.com/app/id1234567890"
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="skadnetwork-attribution"
+                  checked={isSkadnetworkAttribution}
+                  onCheckedChange={setIsSkadnetworkAttribution}
+                  disabled={isSubmitting}
+                />
+                <Label htmlFor="skadnetwork-attribution" className="font-normal cursor-pointer">
+                  Включить SKAdNetwork атрибуцию (iOS)
+                </Label>
               </div>
             </div>
           )}

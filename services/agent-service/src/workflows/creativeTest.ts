@@ -147,6 +147,12 @@ export async function workflowStartCreativeTest(
   }
 
   if (!fb_creative_id) {
+    log.error({
+      creative_id: creative.id,
+      objective: direction.objective,
+      has_unified_fb_creative_id: Boolean(creative.fb_creative_id),
+      has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads),
+    }, 'Creative is missing required fb_creative_id for objective');
     throw new Error(
       `Creative does not have Facebook creative ID. ` +
       `Please create a creative for ${direction.objective} objective first.`
@@ -282,6 +288,24 @@ export async function workflowStartCreativeTest(
         }
         log.warn('No pixel_id found in default settings for whatsapp_conversions');
       }
+      break;
+
+    case 'app_installs':
+      fb_objective = 'OUTCOME_APP_PROMOTION';
+      optimization_goal = 'APP_INSTALLS';
+      destination_type = undefined;
+
+      if (!defaultSettings?.app_id || !defaultSettings?.app_store_url) {
+        throw new Error('No app_id/app_store_url found in default settings for app_installs objective');
+      }
+
+      promoted_object = {
+        application_id: String(defaultSettings.app_id),
+        object_store_url: defaultSettings.app_store_url,
+        ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+          is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+        })
+      };
       break;
 
     default:
@@ -553,6 +577,15 @@ export async function fetchCreativeTestInsights(
     const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
     leads = messaging_connection || legacy_leads;
     baseLog.debug({ ad_id, objective, messaging_connection, legacy_leads, leads }, 'WhatsApp leads extracted from insights');
+  } else if (objective === 'app_installs') {
+    const appInstalls =
+      actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ||
+      actions.find((a: any) => a.action_type === 'app_install')?.value ||
+      actions.find((a: any) => a.action_type === 'omni_app_install')?.value ||
+      actions.find((a: any) => a.action_type === 'offsite_conversion.fb_mobile_app_install')?.value ||
+      0;
+    leads = appInstalls;
+    baseLog.debug({ ad_id, objective, appInstalls, leads }, 'App installs extracted from insights');
   } else {
     // Для instagram_traffic и других - legacy leads или link clicks
     const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;

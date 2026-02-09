@@ -349,7 +349,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       const p = (action as any).params as {
         user_creative_id?: string; // Backward compatibility: single creative
         user_creative_ids?: string[]; // New: multiple creatives
-        objective: 'WhatsApp' | 'Instagram' | 'SiteLeads';
+        objective: 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
         campaign_name: string;
         adset_name?: string;
         daily_budget_cents: number;
@@ -377,7 +377,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
 
       // Получаем WhatsApp номер из направления (если есть)
       let whatsapp_phone_number;
-      if (p.objective === 'WhatsApp' && creative_ids.length > 0) {
+      if ((p.objective === 'WhatsApp' || p.objective === 'WhatsAppConversions') && creative_ids.length > 0) {
         const { data: firstCreative } = await supabase
           .from('user_creatives')
           .select('direction_id')
@@ -795,13 +795,22 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         }
         
         // Определить fb_creative_id по objective направления
-        let fb_creative_id;
-        if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
-        else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
-        else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
-        else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
+        let fb_creative_id = creative.fb_creative_id;
+        if (!fb_creative_id) {
+          if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
+          else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
+          else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
+          else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
+        }
         
         if (!fb_creative_id) {
+          if (direction.objective === 'app_installs') {
+            console.warn('⚠️ [ACTION] app_installs creative missing unified fb_creative_id', {
+              creativeId,
+              direction_id: direction.id,
+              has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads)
+            });
+          }
           console.warn(`⚠️ [ACTION] No fb_creative_id for objective ${direction.objective}, skipping:`, { 
             creativeId,
             objective: direction.objective
@@ -941,11 +950,13 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           if (!creative) continue;
           
           // Определить fb_creative_id по objective направления
-          let fb_creative_id;
-          if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
-          else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
-          else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
-          else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
+          let fb_creative_id = creative.fb_creative_id;
+          if (!fb_creative_id) {
+            if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
+            else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
+            else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
+            else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
+          }
           
           if (!fb_creative_id) continue;
           
@@ -1148,8 +1159,8 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         if (!params.objective) issues.push('CreateCampaignWithCreative: objective required');
         if (!params.campaign_name) issues.push('CreateCampaignWithCreative: campaign_name required');
         if (typeof params.daily_budget_cents !== 'number') issues.push('CreateCampaignWithCreative: daily_budget_cents number required');
-        if (!['WhatsApp', 'Instagram', 'SiteLeads'].includes(params.objective)) {
-          issues.push('CreateCampaignWithCreative: objective must be WhatsApp, Instagram, or SiteLeads');
+        if (!['WhatsApp', 'WhatsAppConversions', 'Instagram', 'SiteLeads', 'LeadForms', 'AppInstalls'].includes(params.objective)) {
+          issues.push('CreateCampaignWithCreative: objective must be WhatsApp, WhatsAppConversions, Instagram, SiteLeads, LeadForms, or AppInstalls');
         }
         break;
       }

@@ -872,6 +872,62 @@ export async function createWebsiteLeadsCreative(
 }
 
 /**
+ * Создает App Installs видео креатив
+ * Для objective OUTCOME_APP_PROMOTION (app installs)
+ */
+export async function createAppInstallsVideoCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId?: string | null;
+    message: string;
+    appStoreUrl: string;
+    thumbnailHash?: string;
+    imageUrl?: string;
+  }
+): Promise<{ id: string }> {
+  log.info({
+    fn: 'createAppInstallsVideoCreative',
+    adAccountId,
+    pageId: params.pageId,
+    hasInstagramId: !!params.instagramId,
+    appStoreUrl: params.appStoreUrl
+  }, '[FB Creative] Building App Installs video creative');
+
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "INSTALL_MOBILE_APP",
+      value: {
+        link: params.appStoreUrl
+      }
+    }
+  };
+
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoData.image_url = params.imageUrl;
+  }
+
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    video_data: videoData
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "App Installs Video Creative",
+    object_story_spec: objectStorySpec
+  });
+}
+
+/**
  * Создает Lead Form видео креатив
  * Для Facebook Instant Forms (lead_gen_form_id)
  */
@@ -1187,6 +1243,53 @@ export async function createWebsiteLeadsImageCreative(
   const payload: any = {
     name: "Website Leads Image Creative",
     url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
+    object_story_spec: objectStorySpec
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает App Installs креатив с изображением
+ */
+export async function createAppInstallsImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId?: string | null;
+    message: string;
+    appStoreUrl: string;
+  }
+): Promise<{ id: string }> {
+  log.info({
+    fn: 'createAppInstallsImageCreative',
+    pageId: params.pageId,
+    hasInstagramId: !!params.instagramId,
+    appStoreUrl: params.appStoreUrl
+  }, '[FB Creative] Building App Installs image creative');
+
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    link_data: {
+      image_hash: params.imageHash,
+      message: params.message,
+      link: params.appStoreUrl,
+      call_to_action: {
+        type: "INSTALL_MOBILE_APP",
+        value: {
+          link: params.appStoreUrl
+        }
+      }
+    }
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
+  const payload: any = {
+    name: "App Installs Image Creative",
     object_story_spec: objectStorySpec
   };
 
@@ -1642,6 +1745,66 @@ export async function createWebsiteLeadsCarouselCreative(
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Website Leads carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создаёт App Installs carousel creative
+ * Каждая карточка ведёт в App Store / Google Play
+ */
+export async function createAppInstallsCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId?: string | null;
+    message: string;
+    appStoreUrl: string;
+  }
+): Promise<{ id: string }> {
+  log.info({
+    fn: 'createAppInstallsCarouselCreative',
+    pageId: params.pageId,
+    hasInstagramId: !!params.instagramId,
+    cardsCount: params.cards.length,
+    appStoreUrl: params.appStoreUrl
+  }, '[FB Creative] Building App Installs carousel creative');
+
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    link: card.link || params.appStoreUrl,
+    call_to_action: {
+      type: "INSTALL_MOBILE_APP",
+      value: { link: card.link || params.appStoreUrl }
+    }
+  }));
+
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    link_data: {
+      message: params.message,
+      link: params.appStoreUrl,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "INSTALL_MOBILE_APP",
+        value: { link: params.appStoreUrl }
+      }
+    }
+  };
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
+
+  const payload: any = {
+    name: "App Installs Carousel Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating App Installs carousel creative');
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 

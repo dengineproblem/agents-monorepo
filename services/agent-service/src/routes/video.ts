@@ -13,7 +13,8 @@ import {
   createWhatsAppCreative,
   createInstagramCreative,
   createWebsiteLeadsCreative,
-  createLeadFormVideoCreative
+  createLeadFormVideoCreative,
+  createAppInstallsVideoCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -290,7 +291,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = null;
       let utm = null;
       let leadFormId: string | null = null;
-      let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp'; // default
+      let appId: string | null = null;
+      let appStoreUrl: string | null = null;
+      let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
 
       if (body.direction_id) {
         // Загружаем direction для получения objective
@@ -308,7 +311,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (direction?.objective) {
-          objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+          objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
           app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
         }
 
@@ -325,6 +328,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           siteUrl = defaultSettings.site_url;
           utm = defaultSettings.utm_tag;
           leadFormId = defaultSettings.lead_form_id;
+          appId = defaultSettings.app_id;
+          appStoreUrl = defaultSettings.app_store_url;
 
           app.log.info({
             direction_id: body.direction_id,
@@ -332,7 +337,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             description,
             clientQuestion,
             siteUrl,
-            utm
+            utm,
+            appId,
+            appStoreUrl
           }, 'Using settings from direction for video creative');
         } else {
           app.log.warn({
@@ -404,6 +411,20 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = leadFormCreative.id;
+        } else if (objective === 'app_installs') {
+          if (!appId || !appStoreUrl) {
+            app.log.error('app_installs objective requires app_id and app_store_url in direction settings');
+            throw new Error('app_id and app_store_url are required for app_installs objective');
+          }
+          const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+            videoId: fbVideo.id,
+            pageId: pageId,
+            instagramId: instagramId,
+            message: description,
+            appStoreUrl: appStoreUrl,
+            thumbnailHash: thumbnailResult.hash
+          });
+          fbCreativeId = appInstallCreative.id;
         }
 
         app.log.info(`Creative created with ID: ${fbCreativeId}, saving transcription...`);

@@ -192,6 +192,10 @@ export async function workflowCreateAdSetInDirection(
       optimization_goal = 'LEAD_GENERATION';
       destination_type = 'ON_AD';
       break;
+    case 'app_installs':
+      fb_objective = 'OUTCOME_APP_PROMOTION';
+      optimization_goal = 'APP_INSTALLS';
+      break;
     default:
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
@@ -222,7 +226,14 @@ export async function workflowCreateAdSetInDirection(
     }
 
     if (!fb_creative_id) {
-      throw new Error(`Creative ${creative.id} does not have fb_creative_id`);
+      log.error({
+        direction_id,
+        objective: direction.objective,
+        creative_id: creative.id,
+        has_unified_fb_creative_id: Boolean(creative.fb_creative_id),
+        has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads),
+      }, 'Creative does not have required fb_creative_id for objective');
+      throw new Error(`Creative ${creative.id} does not have fb_creative_id for objective ${direction.objective}`);
     }
 
     return {
@@ -509,6 +520,32 @@ export async function workflowCreateAdSetInDirection(
     }, 'Using lead_form for lead_forms objective (form_id in creative CTA)');
   }
 
+  if (direction.objective === 'app_installs') {
+    const appId = defaultSettings?.app_id;
+    const appStoreUrl = defaultSettings?.app_store_url;
+
+    if (!appId || !appStoreUrl) {
+      throw new Error(
+        `Cannot create app_installs adset for direction "${direction.name}": app_id and app_store_url are required in settings.`
+      );
+    }
+
+    adsetBody.promoted_object = {
+      application_id: String(appId),
+      object_store_url: appStoreUrl,
+      ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+        is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+      })
+    };
+
+    log.info({
+      directionId: direction.id,
+      app_id: appId,
+      app_store_url: appStoreUrl,
+      is_skadnetwork_attribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+    }, 'Using promoted_object for app_installs objective');
+  }
+
   // ===================================================
   // Выбор режима: создать новый ad set или использовать pre-created
   // ===================================================
@@ -517,6 +554,13 @@ export async function workflowCreateAdSetInDirection(
 
   if (userAccount?.default_adset_mode === 'use_existing') {
     // РЕЖИМ: использовать pre-created ad set
+    if (direction.objective === 'app_installs') {
+      log.warn({
+        directionId: direction.id,
+        directionName: direction.name,
+        mode: userAccount?.default_adset_mode
+      }, 'Using pre-created ad set for app_installs: promoted_object cannot be injected and must be configured in Facebook ad set');
+    }
     log.info({
       directionId: direction.id,
       directionName: direction.name,

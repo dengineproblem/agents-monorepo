@@ -154,7 +154,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [ageMax, setAgeMax] = useState<number | ''>(65); // максимальный возраст
   const [selectedGender, setSelectedGender] = useState<'all' | 'male' | 'female'>('all');
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.'); // Вопрос клиента
-  const [campaignGoal, setCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms'>('whatsapp'); // Цель объявления
+  const [campaignGoal, setCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs'>('whatsapp'); // Цель объявления
   const [siteUrl, setSiteUrl] = useState<string>('');
   const [pixelId, setPixelId] = useState<string>('');
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
@@ -225,6 +225,36 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [autoLaunchResults, setAutoLaunchResults] = useState<any[] | null>(null);
   const [autoLaunchResultDialogOpen, setAutoLaunchResultDialogOpen] = useState(false);
   const adGroupTitle = isTikTokPlatform ? 'Ad Group' : 'Ad Set';
+  const adGroupTitlePlural = isTikTokPlatform ? 'Ad Groups' : 'Ad Sets';
+
+  const normalizeAutoLaunchResults = (results: any[]): any[] => {
+    return results.map((rawResult: any, index: number) => {
+      const status = rawResult.status ?? (
+        rawResult.success === true
+          ? 'success'
+          : rawResult.success === false
+            ? 'failed'
+            : undefined
+      );
+
+      const ads = Array.isArray(rawResult.ads)
+        ? rawResult.ads.map((ad: any, adIndex: number) => ({
+            ...ad,
+            ad_id: ad.ad_id || ad.tiktok_ad_id || ad.id || `ad_${index}_${adIndex}`,
+            name: ad.name || ad.ad_name || ad.title || `Объявление ${adIndex + 1}`,
+          }))
+        : rawResult.ads;
+
+      return {
+        ...rawResult,
+        status,
+        campaign_id: rawResult.campaign_id || rawResult.tiktok_campaign_id || null,
+        adset_id: rawResult.adset_id || rawResult.adgroup_id || rawResult.tiktok_adgroup_id || null,
+        adset_name: rawResult.adset_name || rawResult.adgroup_name || rawResult.tiktok_adgroup_name || rawResult.direction_name,
+        ads,
+      };
+    });
+  };
 
   useEffect(() => {
     async function fetchUserData() {
@@ -423,7 +453,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       }
     };
 
-    const updateCurrentCampaignGoal = async (goal: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms') => {
+    const updateCurrentCampaignGoal = async (goal: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs') => {
       try {
         const storedUser = localStorage.getItem('user');
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
@@ -1127,25 +1157,37 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         return;
       }
 
-      // Отправляем запрос на автолонч v2 (берет первые 5 креативов)
-      const response = await fetch(`${API_BASE_URL}/campaign-builder/auto-launch-v2`, {
+      const isTikTokAutoLaunch = platform === 'tiktok';
+      const endpoint = isTikTokAutoLaunch
+        ? `${API_BASE_URL}/tiktok-campaign-builder/auto-launch`
+        : `${API_BASE_URL}/campaign-builder/auto-launch-v2`;
+
+      const payload: Record<string, any> = {
+        user_account_id: userId,
+        account_id: currentAdAccountId, // UUID для мультиаккаунтности
+        start_mode: autoStartMode,
+      };
+
+      if (!isTikTokAutoLaunch) {
+        payload.objective = 'whatsapp'; // Указываем objective для AI-агента
+        payload.auto_activate = false; // Создаем в паузе для проверки
+      }
+
+      // Отправляем запрос на AI-автозапуск (берет первые 5 креативов на направление)
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          user_account_id: userId,
-          account_id: currentAdAccountId, // UUID для мультиаккаунтности
-          objective: 'whatsapp', // Указываем objective для AI-агента
-          auto_activate: false, // Создаем в паузе для проверки
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
 
-      if (data.success && data.results) {
+      if (data.success && Array.isArray(data.results)) {
+        const normalizedResults = normalizeAutoLaunchResults(data.results);
         // Сохраняем результаты и показываем модалку
-        setAutoLaunchResults(data.results);
+        setAutoLaunchResults(normalizedResults);
         setAutoLaunchResultDialogOpen(true);
         setLaunchDialogOpen(false);
       } else {
@@ -1461,7 +1503,62 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             </div>
           ) : platform === 'tiktok' ? (
             /* Действия для TikTok */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <Dialog open={launchDialogOpen} onOpenChange={setLaunchDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    disabled={isUploading || directions.length === 0}
+                    className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+                  >
+                    <Rocket className="mr-2 h-4 w-4" />
+                    Запуск с AI
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Запуск с AI</DialogTitle>
+                    <DialogDescription>
+                      Реклама будет запущена для всех активных направлений
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="pt-2 space-y-2">
+                    <Label>Время запуска</Label>
+                    <RadioGroup
+                      value={autoStartMode}
+                      onValueChange={(v: 'now' | 'midnight_almaty') => setAutoStartMode(v)}
+                      className="grid grid-cols-1 gap-2"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="midnight_almaty" id="auto-start-midnight-tiktok" />
+                        <Label htmlFor="auto-start-midnight-tiktok" className="cursor-pointer">С полуночи (Алматы)</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="now" id="auto-start-now-tiktok" />
+                        <Label htmlFor="auto-start-now-tiktok" className="cursor-pointer">Сейчас</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" onClick={() => setLaunchDialogOpen(false)} disabled={launchLoading}>
+                      Отмена
+                    </Button>
+                    <Button onClick={handleLaunchAd} disabled={launchLoading} className="dark:bg-gray-700 dark:hover:bg-gray-800">
+                      {launchLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Запуск...
+                        </>
+                      ) : (
+                        <>
+                          <Rocket className="h-4 w-4 mr-2" />
+                          Запустить
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
               <Button
                 variant="outline"
                 onClick={() => setManualLaunchDialogOpen(true)}
@@ -1469,7 +1566,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
               >
                 <Rocket className="mr-2 h-4 w-4" />
-                Запустить рекламу
+                Ручной запуск
               </Button>
               <Button
                 variant="outline"
@@ -1729,6 +1826,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <span>
                             {campaignGoal === 'whatsapp' ? 'Сообщение WhatsApp' : 
                              campaignGoal === 'instagram_traffic' ? 'Переходы в профиль Instagram' : 
+                             campaignGoal === 'app_installs' ? 'Установки приложения' :
                              'Лиды на сайте'}
                           </span>
                           <ChevronDown className="h-4 w-4 opacity-50" />
@@ -1739,7 +1837,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           {[
                             { value: 'whatsapp', label: 'Сообщение WhatsApp' },
                             { value: 'instagram_traffic', label: 'Переходы в профиль Instagram' },
-                            { value: 'site_leads', label: 'Лиды на сайте' }
+                            { value: 'site_leads', label: 'Лиды на сайте' },
+                            { value: 'app_installs', label: 'Установки приложения' }
                           ].map((option) => (
                             <label key={option.value} className="flex items-center gap-2 cursor-pointer">
                               <input
@@ -1747,7 +1846,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                                 name="campaignGoal"
                                 value={option.value}
                                 checked={campaignGoal === option.value}
-                                onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms')}
+                                onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs')}
                                 disabled={isUploading}
                                 className="cursor-pointer"
                               />
@@ -2392,6 +2491,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     <span>
                       {campaignGoal === 'whatsapp' ? 'Сообщение WhatsApp' : 
                        campaignGoal === 'instagram_traffic' ? 'Переходы в профиль Instagram' : 
+                       campaignGoal === 'app_installs' ? 'Установки приложения' :
                        'Лиды на сайте'}
                     </span>
                     <ChevronDown className="h-4 w-4 opacity-50" />
@@ -2402,7 +2502,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     {[
                       { value: 'whatsapp', label: 'Сообщение WhatsApp' },
                       { value: 'instagram_traffic', label: 'Переходы в профиль Instagram' },
-                      { value: 'site_leads', label: 'Лиды на сайте' }
+                      { value: 'site_leads', label: 'Лиды на сайте' },
+                      { value: 'app_installs', label: 'Установки приложения' }
                     ].map((option) => (
                       <label key={option.value} className="flex items-center gap-2 cursor-pointer">
                         <input
@@ -2410,7 +2511,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           name="campaignGoalImage"
                           value={option.value}
                           checked={campaignGoal === option.value}
-                          onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms')}
+                          onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs')}
                           disabled={isUploading}
                           className="cursor-pointer"
                         />
@@ -2925,10 +3026,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <span className="text-muted-foreground shrink-0">Направление:</span>{' '}
                           <span className="font-medium truncate" title={result.direction_name}>{result.direction_name}</span>
                         </div>
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Campaign ID:</span>{' '}
-                          <span className="font-mono text-xs">{result.campaign_id}</span>
-                        </div>
+                        {result.campaign_id && (
+                          <div className="text-sm">
+                            <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                            <span className="font-mono text-xs">{result.campaign_id}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Информация об Ad Sets */}
@@ -2936,17 +3039,25 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         // Множественные адсеты
                         <div className="space-y-3 mt-3">
                           <div className="text-sm font-medium">
-                            Создано Ad Sets: {result.total_adsets || result.all_adsets.length}
+                            Создано {adGroupTitlePlural}: {result.total_adsets || result.all_adsets.length}
                           </div>
                           <div className="space-y-2 max-h-[300px] overflow-y-auto">
                             {result.all_adsets.map((adset: any, adsetIndex: number) => (
                               <div key={adset.adset_id} className="p-4 bg-muted/30 rounded-lg space-y-2">
                                 <div className="flex items-center justify-between gap-2 min-w-0">
                                   <div className="text-sm font-medium truncate" title={adset.adset_name}>{adset.adset_name}</div>
-                                  {adset.daily_budget_cents && (
-                                    <div className="text-xs text-muted-foreground">
-                                      ${(adset.daily_budget_cents / 100).toFixed(0)}/день
-                                    </div>
+                                  {isTikTokPlatform ? (
+                                    adset.daily_budget ? (
+                                      <div className="text-xs text-muted-foreground">
+                                        {Number(adset.daily_budget).toLocaleString('ru-RU')}₸/день
+                                      </div>
+                                    ) : null
+                                  ) : (
+                                    adset.daily_budget_cents ? (
+                                      <div className="text-xs text-muted-foreground">
+                                        ${(adset.daily_budget_cents / 100).toFixed(0)}/день
+                                      </div>
+                                    ) : null
                                   )}
                                 </div>
                                 <div className="text-xs text-muted-foreground font-mono">
@@ -2964,16 +3075,25 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                       ) : (
                         // Одиночный адсет (fallback)
                         <div className="p-4 bg-muted/30 rounded-lg space-y-2 mt-3">
-                          <div className="text-sm font-medium">Ad Set</div>
+                          <div className="text-sm font-medium">{adGroupTitle}</div>
                           <div className="text-sm text-muted-foreground truncate" title={result.adset_name}>{result.adset_name}</div>
                           <div className="text-xs text-muted-foreground font-mono">
                             ID: {result.adset_id}
                           </div>
-                          {result.daily_budget_cents && (
-                            <div className="text-sm pt-2 border-t border-border/50">
-                              <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                              <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
-                            </div>
+                          {isTikTokPlatform ? (
+                            result.daily_budget ? (
+                              <div className="text-sm pt-2 border-t border-border/50">
+                                <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                                <span className="font-medium">{Number(result.daily_budget).toLocaleString('ru-RU')}₸</span>
+                              </div>
+                            ) : null
+                          ) : (
+                            result.daily_budget_cents ? (
+                              <div className="text-sm pt-2 border-t border-border/50">
+                                <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                                <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
+                              </div>
+                            ) : null
                           )}
                         </div>
                       )}
@@ -2987,14 +3107,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <div className="space-y-2 max-h-[200px] overflow-y-auto">
                             {result.ads.map((ad: any, adIndex: number) => (
                               <div
-                                key={ad.ad_id}
+                                key={ad.ad_id || ad.tiktok_ad_id || ad.id || `${result.direction_id}-${adIndex}`}
                                 className="p-3 border rounded-lg text-sm space-y-1"
                               >
-                                <div className="font-medium truncate" title={ad.name}>
-                                  {adIndex + 1}. {ad.name}
+                                <div className="font-medium truncate" title={ad.name || ad.ad_name}>
+                                  {adIndex + 1}. {ad.name || ad.ad_name || `Объявление ${adIndex + 1}`}
                                 </div>
                                 <div className="text-xs text-muted-foreground font-mono">
-                                  ID: {ad.ad_id}
+                                  ID: {ad.ad_id || ad.tiktok_ad_id || ad.id}
                                 </div>
                               </div>
                             ))}

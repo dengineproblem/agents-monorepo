@@ -4,11 +4,13 @@ const OBJECTIVE_LABELS = {
   // snake_case формат (из account_directions.objective)
   'whatsapp': 'wa',
   'lead_forms': 'leadforms',
+  'app_installs': 'app',
   'site_leads': 'site leads',
   'instagram_traffic': 'clicks',
   // PascalCase формат
   'WhatsApp': 'wa',
   'LeadForms': 'leadforms',
+  'AppInstalls': 'app',
   'SiteLeads': 'site leads',
   'Instagram': 'clicks',
 };

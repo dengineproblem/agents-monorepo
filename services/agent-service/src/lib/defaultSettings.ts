@@ -37,6 +37,11 @@ export interface DefaultAdSettings {
   // Lead Forms
   lead_form_id?: string;
 
+  // App Installs
+  app_id?: string;
+  app_store_url?: string;
+  is_skadnetwork_attribution?: boolean;
+
   created_at: string;
   updated_at: string;
 }
@@ -157,6 +162,9 @@ export async function getDefaultAdSettingsWithFallback(
     utm_tag: campaignGoal === 'site_leads'
       ? 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}'
       : undefined,
+    app_id: undefined,
+    app_store_url: undefined,
+    is_skadnetwork_attribution: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };

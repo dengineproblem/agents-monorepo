@@ -114,6 +114,10 @@ export interface DirectionDefaultSettingsInput {
   utm_tag?: string;
   // Lead Forms специфичные
   lead_form_id?: string;
+  // App Installs специфичные
+  app_id?: string;
+  app_store_url?: string;
+  is_skadnetwork_attribution?: boolean;
 }
 
 export interface UpdateDirectionPayload {
@@ -162,6 +166,10 @@ export interface DefaultAdSettings {
   utm_tag: string | null;
   // Lead Forms специфичные
   lead_form_id: string | null;
+  // App Installs специфичные
+  app_id: string | null;
+  app_store_url: string | null;
+  is_skadnetwork_attribution: boolean | null;
   created_at: string;
   updated_at: string;
 }
@@ -180,6 +188,9 @@ export interface CreateDefaultSettingsInput {
   pixel_id?: string;
   utm_tag?: string;
   lead_form_id?: string;
+  app_id?: string;
+  app_store_url?: string;
+  is_skadnetwork_attribution?: boolean;
 }
 
 export interface UpdateDefaultSettingsInput {
@@ -194,6 +205,9 @@ export interface UpdateDefaultSettingsInput {
   pixel_id?: string;
   utm_tag?: string;
   lead_form_id?: string;
+  app_id?: string;
+  app_store_url?: string;
+  is_skadnetwork_attribution?: boolean;
 }
 
 // Маппинг objective в читаемые названия
@@ -203,6 +217,7 @@ export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
   instagram_traffic: 'Instagram Traffic',
   site_leads: 'Site Leads',
   lead_forms: 'Lead Forms',
+  app_installs: 'App Installs',
 };
 
 export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
@@ -211,6 +226,7 @@ export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
   instagram_traffic: 'Instagram Traffic (переходы)',
   site_leads: 'Site Leads (заявки на сайте)',
   lead_forms: 'Lead Forms (лидформы Facebook)',
+  app_installs: 'App Installs (установки приложения)',
 };
 
 export const TIKTOK_OBJECTIVE_LABELS: Record<TikTokObjective, string> = {

@@ -6,7 +6,8 @@ import {
   createWhatsAppCarouselCreative,
   createInstagramCarouselCreative,
   createWebsiteLeadsCarouselCreative,
-  createLeadFormCarouselCreative
+  createLeadFormCarouselCreative,
+  createAppInstallsCarouselCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -98,7 +99,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
       app.log.info({ objective }, 'Direction objective');
 
       // 3. Загружаем настройки из default_ad_settings
@@ -113,6 +114,8 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
+      const appId = defaultSettings?.app_id || null;
+      const appStoreUrl = defaultSettings?.app_store_url || null;
 
       // 4. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -307,6 +310,21 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           instagramId: instagramId,
           message: description,
           leadFormId: leadFormId
+        });
+        fbCreativeId = result.id;
+      } else if (objective === 'app_installs') {
+        if (!appId || !appStoreUrl) {
+          return reply.status(400).send({
+            success: false,
+            error: 'app_id and app_store_url are required for app_installs objective. Please configure them in direction settings.'
+          });
+        }
+        const result = await createAppInstallsCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          cards: cardParams,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description,
+          appStoreUrl: appStoreUrl
         });
         fbCreativeId = result.id;
       } else {

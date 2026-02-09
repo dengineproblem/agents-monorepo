@@ -76,13 +76,14 @@ const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status
 export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
     whatsapp_conversions: 'WhatsAppConversions' as const,
     instagram_traffic: 'Instagram' as const,
     site_leads: 'SiteLeads' as const,
     lead_forms: 'LeadForms' as const,
+    app_installs: 'AppInstalls' as const,
   };
   return mapping[objective];
 }
@@ -130,6 +131,7 @@ export function getCustomEventType(level: string | undefined): string {
 export type AvailableCreative = {
   user_creative_id: string;
   title: string;
+  fb_creative_id?: string | null;
   fb_creative_id_whatsapp: string | null;
   fb_creative_id_instagram_traffic: string | null;
   fb_creative_id_site_leads: string | null;
@@ -194,7 +196,7 @@ export type CampaignAction = {
     auto_activate?: boolean;
     
     // Legacy поля
-    objective?: 'WhatsApp' | 'Instagram' | 'SiteLeads';
+    objective?: 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
     campaign_name?: string;
     use_default_settings?: boolean;
     adsets?: Array<{
@@ -242,7 +244,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
    - best_cpl_cents, worst_cpl_cents: диапазон CPL
    Используй эти данные для понимания общего контекста
 3. budget_constraints — ограничения по бюджету пользователя
-4. objective — цель кампании (whatsapp/instagram_traffic/site_leads)
+4. objective — цель кампании (whatsapp/whatsapp_conversions/instagram_traffic/site_leads/lead_forms/app_installs)
 5. user_context — дополнительная информация от пользователя
 6. direction_info — информация о направлении (если работаем с directions)
 
@@ -251,7 +253,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
 В системе используются НАПРАВЛЕНИЯ - логические группы креативов с настройками:
 - У каждого direction уже есть СУЩЕСТВУЮЩАЯ кампания (fb_campaign_id)
 - У каждого direction свой бюджет (daily_budget_cents)
-- У каждого direction свой objective (whatsapp/instagram_traffic/site_leads)
+- У каждого direction свой objective (whatsapp/whatsapp_conversions/instagram_traffic/site_leads/lead_forms/app_installs)
 - Креативы привязаны к directions через direction_id
 
 ДВА РЕЖИМА СОЗДАНИЯ AD SETS:
@@ -686,7 +688,7 @@ $30 (3 adsets), 9 креативов:
    - ИСПОЛЬЗУЙ АДАПТИВНУЮ ЛОГИКУ: бюджет $50 → 5 готовых adsets
 
 ДОПОЛНИТЕЛЬНО:
-- objective в params должен быть "WhatsApp", "Instagram" или "SiteLeads" (с заглавной буквы!)
+- objective в params должен быть одним из: "WhatsApp", "WhatsAppConversions", "Instagram", "SiteLeads", "LeadForms", "AppInstalls"
 - Минимальный бюджет на каждый adset: 1000 центов ($10)
 - use_default_settings = true (используем дефолтные настройки таргетинга)
 - auto_activate = true (создаем включенными для немедленного запуска)
@@ -1143,6 +1145,7 @@ export async function getAvailableCreatives(
         id,
         user_id,
         title,
+        fb_creative_id,
         fb_video_id,
         fb_creative_id_whatsapp,
         fb_creative_id_instagram_traffic,
@@ -1214,10 +1217,25 @@ export async function getAvailableCreatives(
           return !!c.fb_creative_id_site_leads;
         case 'lead_forms':
           return !!c.fb_creative_id_lead_forms;
+        case 'app_installs':
+          return !!c.fb_creative_id;
         default:
           return false;
       }
     });
+    if (objective === 'app_installs') {
+      const creativesWithoutUnifiedId = creatives
+        .filter((c) => !c.fb_creative_id)
+        .map((c) => c.id);
+      if (creativesWithoutUnifiedId.length > 0) {
+        log.warn({
+          objective,
+          totalCreatives: creatives.length,
+          withoutUnifiedCreativeId: creativesWithoutUnifiedId.length,
+          sampleCreativeIds: creativesWithoutUnifiedId.slice(0, 5),
+        }, 'App installs creatives must have unified fb_creative_id; some creatives are missing it');
+      }
+    }
     log.info({ count: filteredCreatives.length, objective }, 'Filtered creatives for objective');
   }
 
@@ -1234,6 +1252,10 @@ export async function getAvailableCreatives(
         return c.fb_creative_id_instagram_traffic;
       case 'site_leads':
         return c.fb_creative_id_site_leads;
+      case 'lead_forms':
+        return c.fb_creative_id_lead_forms;
+      case 'app_installs':
+        return c.fb_creative_id;
       default:
         return null;
     }
@@ -1276,6 +1298,9 @@ export async function getAvailableCreatives(
       case 'lead_forms':
         fbCreativeId = creative.fb_creative_id_lead_forms;
         break;
+      case 'app_installs':
+        fbCreativeId = creative.fb_creative_id;
+        break;
     }
 
     const score = scores?.find((s) => s.creative_id === fbCreativeId);
@@ -1285,6 +1310,7 @@ export async function getAvailableCreatives(
     return {
       user_creative_id: creative.id,
       title: creative.title,
+      fb_creative_id: creative.fb_creative_id || null,
       fb_creative_id_whatsapp: creative.fb_creative_id_whatsapp,
       fb_creative_id_instagram_traffic: creative.fb_creative_id_instagram_traffic,
       fb_creative_id_site_leads: creative.fb_creative_id_site_leads,
@@ -2210,6 +2236,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
       return 'OFFSITE_CONVERSIONS';
     case 'lead_forms':
       return 'LEAD_GENERATION';
+    case 'app_installs':
+      return 'APP_INSTALLS';
     default:
       return 'CONVERSATIONS';
   }
@@ -2229,6 +2257,8 @@ export function getBillingEvent(objective: CampaignObjective): string {
     case 'site_leads':
       return 'IMPRESSIONS';
     case 'lead_forms':
+      return 'IMPRESSIONS';
+    case 'app_installs':
       return 'IMPRESSIONS';
     default:
       return 'IMPRESSIONS';
@@ -2449,6 +2479,8 @@ export function getCreativeIdForObjective(creative: AvailableCreative, objective
       return creative.fb_creative_id_site_leads;
     case 'lead_forms':
       return creative.fb_creative_id_lead_forms;
+    case 'app_installs':
+      return creative.fb_creative_id || null;
     default:
       return null;
   }
@@ -2492,6 +2524,7 @@ export async function createAdsInAdSet(params: {
         creativeTitle: creative.title,
         objective,
         availableCreativeIds: {
+          unified: creative.fb_creative_id || null,
           whatsapp: creative.fb_creative_id_whatsapp,
           instagram_traffic: creative.fb_creative_id_instagram_traffic,
           site_leads: creative.fb_creative_id_site_leads,

@@ -10,7 +10,8 @@ import {
   createWhatsAppImageCreative,
   createInstagramImageCreative,
   createWebsiteLeadsImageCreative,
-  createLeadFormImageCreative
+  createLeadFormImageCreative,
+  createAppInstallsImageCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -221,7 +222,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         let siteUrl = body.site_url || null;
         let utm = body.utm || null;
         let leadFormId: string | null = null;
-        let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp'; // default
+        let appId: string | null = null;
+        let appStoreUrl: string | null = null;
+        let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
 
         if (body.direction_id) {
           // Загружаем direction для получения objective
@@ -239,7 +242,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           }
 
           if (direction?.objective) {
-            objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+            objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
             app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
           }
 
@@ -256,6 +259,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             siteUrl = defaultSettings.site_url || siteUrl;
             utm = defaultSettings.utm_tag || utm;
             leadFormId = defaultSettings.lead_form_id || leadFormId;
+            appId = defaultSettings.app_id || appId;
+            appStoreUrl = defaultSettings.app_store_url || appStoreUrl;
 
             app.log.info({
               direction_id: body.direction_id,
@@ -263,7 +268,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
               description,
               clientQuestion,
               siteUrl,
-              utm
+              utm,
+              appId,
+              appStoreUrl
             }, 'Using settings from direction for image creative');
           } else {
             app.log.warn({
@@ -335,6 +342,19 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             link: siteUrl
           });
           fbCreativeId = leadFormCreative.id;
+        } else if (objective === 'app_installs') {
+          if (!appId || !appStoreUrl) {
+            app.log.error({ direction_id: body.direction_id }, 'app_installs objective requires app_id and app_store_url in direction settings');
+            throw new Error('app_id and app_store_url are required for app_installs objective. Please configure them in direction default_ad_settings.');
+          }
+          const appInstallCreative = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+            imageHash: fbImage.hash,
+            pageId: pageId,
+            instagramId: instagramId,
+            message: description,
+            appStoreUrl: appStoreUrl
+          });
+          fbCreativeId = appInstallCreative.id;
         }
 
         app.log.info(`Creative created with ID: ${fbCreativeId}, updating record...`);
@@ -547,7 +567,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
       app.log.info({ objective }, 'Direction objective loaded');
 
       // 4. Загружаем настройки из default_ad_settings
@@ -562,6 +582,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
+      const appId = defaultSettings?.app_id || null;
+      const appStoreUrl = defaultSettings?.app_store_url || null;
 
       // 5. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -725,6 +747,22 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           message: description,
           leadFormId: leadFormId,
           link: siteUrl
+        });
+        fbCreativeId = result.id;
+      } else if (objective === 'app_installs') {
+        if (!appId || !appStoreUrl) {
+          return reply.status(400).send({
+            success: false,
+            error: 'app_id and app_store_url are required for app_installs objective. Please configure them in direction default_ad_settings.',
+            direction_id: direction_id
+          });
+        }
+        const result = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          imageHash: fbImage.hash,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description,
+          appStoreUrl: appStoreUrl
         });
         fbCreativeId = result.id;
       } else {
