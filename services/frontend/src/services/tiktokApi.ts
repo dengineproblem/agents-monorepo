@@ -805,14 +805,14 @@ export const tiktokApi = {
           data_level: 'AUCTION_ADGROUP',
           dimensions: ['adgroup_id', 'stat_time_day'],
           metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
-          filtering: {
-            campaign_ids: [campaignId]
-          },
+          filtering: [
+            { field_name: 'campaign_ids', filter_type: 'IN', filter_value: JSON.stringify([campaignId]) }
+          ],
           start_date: format(windowStart, 'yyyy-MM-dd'),
           end_date: format(windowEnd, 'yyyy-MM-dd'),
           page: 1,
           page_size: 1000
-        };
+        } as any;
 
         const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
         if (response.code !== 0) {
@@ -950,14 +950,14 @@ export const tiktokApi = {
           data_level: 'AUCTION_AD',
           dimensions: ['ad_id', 'stat_time_day'],
           metrics: ['spend', 'impressions', 'clicks', 'ctr', 'conversion'],
-          filtering: {
-            adgroup_ids: [adGroupId]
-          },
+          filtering: [
+            { field_name: 'adgroup_ids', filter_type: 'IN', filter_value: JSON.stringify([adGroupId]) }
+          ],
           start_date: format(windowStart, 'yyyy-MM-dd'),
           end_date: format(windowEnd, 'yyyy-MM-dd'),
           page: 1,
           page_size: 1000
-        };
+        } as any;
 
         const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
         if (response.code !== 0) {

@@ -20,7 +20,7 @@ import {
   Megaphone,
   ImageIcon,
 } from 'lucide-react';
-import { formatCurrency, formatNumber } from '../utils/formatters';
+import { formatCurrency, formatCurrencyKZT, formatNumber } from '../utils/formatters';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
 import DateRangePicker from '../components/DateRangePicker';
@@ -1191,9 +1191,10 @@ const MultiAccountDashboard: React.FC = () => {
 interface CplWithDeviationProps {
   cpl: number;
   targetCplCents: number | null;
+  formatFn?: (value: number) => string;
 }
 
-const CplWithDeviation: React.FC<CplWithDeviationProps> = ({ cpl, targetCplCents }) => {
+const CplWithDeviation: React.FC<CplWithDeviationProps> = ({ cpl, targetCplCents, formatFn = formatCurrency }) => {
   const deviation = targetCplCents ? calculateCplDeviation(cpl, targetCplCents) : null;
 
   const getDeviationColor = (dev: number) => {
@@ -1204,7 +1205,7 @@ const CplWithDeviation: React.FC<CplWithDeviationProps> = ({ cpl, targetCplCents
 
   return (
     <div className="relative inline-flex items-center">
-      <span className="font-medium text-sm">{formatCurrency(cpl)}</span>
+      <span className="font-medium text-sm">{formatFn(cpl)}</span>
       {deviation && (
         <span
           className={cn('absolute -top-2.5 left-full ml-0.5 text-[10px] font-medium whitespace-nowrap', getDeviationColor(deviation.deviation))}
@@ -1545,10 +1546,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     setCampaignActive(campaign.status === 'ACTIVE');
   }, [campaign.status]);
 
+  const fmt = platform === 'tiktok' ? formatCurrencyKZT : formatCurrency;
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
-    return formatCurrency(calculatedCpm);
+    return fmt(calculatedCpm);
   };
 
   const handleCampaignToggle = async (e: React.MouseEvent | null, checked: boolean) => {
@@ -1629,19 +1631,19 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             </div>
             {/* Мобильная версия — компактная строка метрик */}
             <p className="md:hidden text-xs text-muted-foreground truncate">
-              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL • {displayCpql > 0 ? formatCurrency(displayCpql) + ' CPQL' : ''} • {displayQualityRate > 0 ? displayQualityRate.toFixed(0) + '% качество' : ''}
+              {fmt(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {fmt(campaign.cpl)} CPL • {displayCpql > 0 ? fmt(displayCpql) + ' CPQL' : ''} • {displayQualityRate > 0 ? displayQualityRate.toFixed(0) + '% качество' : ''}
             </p>
           </div>
         </div>
 
         {/* Десктопная версия — отдельные колонки */}
         <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="text-sm">{formatCurrency(campaign.spend)}</span>
+          <span className="text-sm">{fmt(campaign.spend)}</span>
         </div>
 
         {/* Бюджет */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
-          <span className="text-sm">{formatCurrency(campaign.daily_budget)}</span>
+          <span className="text-sm">{fmt(campaign.daily_budget)}</span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
@@ -1653,13 +1655,14 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
           <CplWithDeviation
             cpl={campaign.cpl}
             targetCplCents={getTargetCplForLevel(campaign.campaign_id, directions)}
+            formatFn={fmt}
           />
         </div>
 
         {/* CPQL */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">
-            {displayCpql > 0 ? formatCurrency(displayCpql) : '—'}
+            {displayCpql > 0 ? fmt(displayCpql) : '—'}
           </span>
         </div>
 
@@ -1741,10 +1744,11 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   const displayQualityRate = isWhatsAppCampaign ? adset.qualityRate : 0;
   const displayCpql = isWhatsAppCampaign ? adset.cpql : 0;
 
+  const fmt = platform === 'tiktok' ? formatCurrencyKZT : formatCurrency;
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
-    return formatCurrency(calculatedCpm);
+    return fmt(calculatedCpm);
   };
 
   const [isHovered, setIsHovered] = React.useState(false);
@@ -1853,7 +1857,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             <p className="text-sm truncate">{adset.adset_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
             <div className="md:hidden text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-              <span>{formatCurrency(adset.spend)}</span>
+              <span>{fmt(adset.spend)}</span>
               <span>•</span>
               {/* Бюджет с редактированием для мобильной версии */}
               {isEditing ? (
@@ -1888,14 +1892,14 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
                     setIsEditing(true);
                   }}
                 >
-                  {formatCurrency(currentBudget)} бюджет
+                  {fmt(currentBudget)} бюджет
                 </span>
               )}
               <span>•</span>
               <span>{formatNumber(adset.leads)} лидов</span>
               <span>•</span>
-              <span>{formatCurrency(adset.cpl)} CPL</span>
-              {displayCpql > 0 && <><span>•</span><span>{formatCurrency(displayCpql)} CPQL</span></>}
+              <span>{fmt(adset.cpl)} CPL</span>
+              {displayCpql > 0 && <><span>•</span><span>{fmt(displayCpql)} CPQL</span></>}
               {displayQualityRate > 0 && <><span>•</span><span>{displayQualityRate.toFixed(0)}% качество</span></>}
             </div>
           </div>
@@ -1903,7 +1907,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
 
         {/* Десктопная версия — отдельные колонки */}
         <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="text-sm text-muted-foreground">{formatCurrency(adset.spend)}</span>
+          <span className="text-sm text-muted-foreground">{fmt(adset.spend)}</span>
         </div>
 
         {/* Бюджет с редактированием */}
@@ -1943,7 +1947,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             />
           ) : (
             <span className={cn('text-sm text-muted-foreground', isHovered && 'underline cursor-text')}>
-              {formatCurrency(currentBudget)}
+              {fmt(currentBudget)}
             </span>
           )}
         </div>
@@ -1954,13 +1958,13 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
 
         {/* CPL с отклонением */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
-          <CplWithDeviation cpl={adset.cpl} targetCplCents={targetCplCents} />
+          <CplWithDeviation cpl={adset.cpl} targetCplCents={targetCplCents} formatFn={fmt} />
         </div>
 
         {/* CPQL */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">
-            {displayCpql > 0 ? formatCurrency(displayCpql) : '—'}
+            {displayCpql > 0 ? fmt(displayCpql) : '—'}
           </span>
         </div>
 
@@ -2024,10 +2028,11 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
     setAdActive(ad.status === 'ACTIVE');
   }, [ad.status]);
 
+  const fmt = platform === 'tiktok' ? formatCurrencyKZT : formatCurrency;
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
-    return formatCurrency(calculatedCpm);
+    return fmt(calculatedCpm);
   };
 
   const handleAdToggle = async (e: React.MouseEvent | null, checked: boolean) => {
@@ -2090,8 +2095,8 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
           <p className="text-xs truncate text-muted-foreground">{ad.ad_name}</p>
           {/* Мобильная версия — компактная строка метрик */}
           <p className="md:hidden text-[10px] text-muted-foreground/70 truncate">
-            {formatCurrency(ad.spend)} • {formatNumber(ad.leads)} лидов • {formatCurrency(ad.cpl)} CPL
-            {cpql > 0 && ` • ${formatCurrency(cpql)} CPQL`}
+            {fmt(ad.spend)} • {formatNumber(ad.leads)} лидов • {fmt(ad.cpl)} CPL
+            {cpql > 0 && ` • ${fmt(cpql)} CPQL`}
             {qualityRate > 0 && ` • ${qualityRate.toFixed(0)}% кач.`}
           </p>
         </div>
@@ -2099,12 +2104,12 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
 
       {/* Десктопная версия — отдельные колонки */}
       <div className="hidden md:flex col-span-2 items-center justify-end">
-        <span className="text-xs text-muted-foreground/70">{formatCurrency(ad.spend)}</span>
+        <span className="text-xs text-muted-foreground/70">{fmt(ad.spend)}</span>
       </div>
 
       {/* Бюджет адсета */}
       <div className="hidden md:flex col-span-1 items-center justify-end">
-        <span className="text-xs text-muted-foreground/70">{formatCurrency(adsetBudget)}</span>
+        <span className="text-xs text-muted-foreground/70">{fmt(adsetBudget)}</span>
       </div>
 
       <div className="hidden md:flex col-span-1 items-center justify-end">
@@ -2117,6 +2122,7 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
           <CplWithDeviation
             cpl={ad.cpl}
             targetCplCents={targetCplCents}
+            formatFn={fmt}
           />
         </div>
       </div>
@@ -2124,7 +2130,7 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
       {/* CPQL */}
       <div className="hidden md:flex col-span-1 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">
-          {cpql > 0 ? formatCurrency(cpql) : '—'}
+          {cpql > 0 ? fmt(cpql) : '—'}
         </span>
       </div>
 
