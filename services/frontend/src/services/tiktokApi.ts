@@ -739,7 +739,7 @@ export const tiktokApi = {
       const endpoint = `adgroup/get/`;
       const params = {
         advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
-        campaign_ids: [campaignId],
+        filtering: { campaign_ids: [campaignId] },
         fields: ['adgroup_id', 'adgroup_name', 'operation_status', 'campaign_id', 'budget', 'create_time'],
         page: 1,
         page_size: 100
@@ -886,7 +886,7 @@ export const tiktokApi = {
       const endpoint = `ad/get/`;
       const params = {
         advertiser_id: TIKTOK_API_CONFIG.advertiser_id,
-        adgroup_ids: [adGroupId],
+        filtering: { adgroup_ids: [adGroupId] },
         fields: ['ad_id', 'ad_name', 'operation_status', 'adgroup_id', 'create_time'],
         page: 1,
         page_size: 100
