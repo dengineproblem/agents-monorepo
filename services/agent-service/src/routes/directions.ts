@@ -47,11 +47,15 @@ const DefaultSettingsSchema = z.object({
   utm_tag: z.string().optional(),
   // Lead Forms specific
   lead_form_id: z.string().optional(),
+  // App Installs specific
+  app_id: z.string().optional(),
+  app_store_url: z.string().url().optional(),
+  is_skadnetwork_attribution: z.boolean().optional(),
 });
 
 type DirectionPlatform = z.infer<typeof DirectionPlatformSchema>;
 type TikTokObjectiveInput = z.infer<typeof TikTokObjectiveSchema>;
-type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
 const DEFAULT_FB_DAILY_BUDGET_CENTS = 500;
@@ -87,14 +91,26 @@ function normalizeDirectionPlatform(platform?: string | null): 'facebook' | 'tik
   return platform === 'tiktok' ? 'tiktok' : 'facebook';
 }
 
+function normalizeCustomAudiences(raw: unknown): Array<{ id: string; name: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item: any) => ({
+      id: String(item?.id || '').trim(),
+      name: String(item?.name || item?.id || '').trim(),
+    }))
+    .filter((item) => item.id.length > 0);
+}
+
 const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
   platform: DirectionPlatformSchema.optional(),
   name: z.string().min(2).max(100),
-  objective: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms']).optional(),
+  objective: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']).optional(),
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
   use_instagram: z.boolean().optional(),
+  advantage_audience_enabled: z.boolean().optional(),
+  custom_audience_id: z.string().nullable().optional(),
   daily_budget_cents: z.number().int().min(500).optional(), // минимум $5
   target_cpl_cents: z.number().int().min(10).optional(), // минимум $0.10 для instagram_traffic, проверяется в refine
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
@@ -181,6 +197,8 @@ const UpdateDirectionSchema = z.object({
   daily_budget_cents: z.number().int().min(500).optional(),
   target_cpl_cents: z.number().int().min(10).optional(), // минимум проверяется в handler по objective
   is_active: z.boolean().optional(),
+  advantage_audience_enabled: z.boolean().optional(),
+  custom_audience_id: z.string().nullable().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
   whatsapp_connection_type: z.enum(['evolution', 'waba']).optional(),
   whatsapp_waba_phone_id: z.string().nullable().optional(),
@@ -243,6 +261,10 @@ async function createFacebookCampaign(
     case 'lead_forms':
       fbObjective = 'OUTCOME_LEADS';
       objectiveReadable = 'Lead Forms';
+      break;
+    case 'app_installs':
+      fbObjective = 'OUTCOME_APP_PROMOTION';
+      objectiveReadable = 'App Installs';
       break;
     default:
       throw new Error(`Unknown objective: ${objective}`);
@@ -527,6 +549,241 @@ export async function directionsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /api/directions/custom-audiences
+   * Подтягивает Custom Audiences из Meta Ads Manager для текущего аккаунта
+   * @query userAccountId - ID пользователя (обязательный)
+   * @query accountId - UUID ad_accounts.id (обязательный в multi-account режиме)
+   */
+  app.get('/directions/custom-audiences', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const userAccountId = (request.query as any).userAccountId;
+      const accountId = (request.query as any).accountId;
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'userAccountId is required',
+        });
+      }
+
+      log.info({
+        userAccountId,
+        accountId: accountId || null,
+      }, 'Fetching custom audiences for direction form');
+
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, access_token, ad_account_id')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.code(404).send({
+          success: false,
+          error: 'User account not found',
+        });
+      }
+
+      log.info({
+        userAccountId,
+        accountId: accountId || null,
+        multiAccountEnabled: userAccount.multi_account_enabled,
+      }, 'Resolved user account for custom audiences request');
+
+      let graphAdAccountId: string | null = null;
+      let graphAccessToken: string | null = null;
+      let storedAudiences: Array<{ id: string; name: string }> = [];
+      let adAccountRowId: string | null = null;
+
+      if (userAccount.multi_account_enabled) {
+        if (!accountId) {
+          return reply.code(400).send({
+            success: false,
+            error: 'accountId is required in multi-account mode',
+          });
+        }
+
+        const { data: adAccount, error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .select('id, ad_account_id, access_token, custom_audiences')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (adAccountError || !adAccount) {
+          return reply.code(404).send({
+            success: false,
+            error: 'Ad account not found',
+          });
+        }
+
+        adAccountRowId = adAccount.id;
+        graphAdAccountId = adAccount.ad_account_id;
+        graphAccessToken = adAccount.access_token;
+        storedAudiences = normalizeCustomAudiences(adAccount.custom_audiences);
+
+        log.info({
+          userAccountId,
+          accountId,
+          adAccountRowId,
+          hasAccessToken: Boolean(graphAccessToken),
+          storedAudiencesCount: storedAudiences.length,
+        }, 'Resolved ad account data for custom audiences request');
+      } else {
+        graphAdAccountId = userAccount.ad_account_id;
+        graphAccessToken = userAccount.access_token;
+      }
+
+      // Если нет доступов для Graph API - возвращаем сохранённые аудитории (если есть)
+      if (!graphAdAccountId || !graphAccessToken) {
+        log.warn({
+          userAccountId,
+          accountId: accountId || null,
+          hasAdAccountId: Boolean(graphAdAccountId),
+          hasAccessToken: Boolean(graphAccessToken),
+          storedCount: storedAudiences.length,
+        }, 'Graph credentials missing, returning stored custom audiences');
+
+        return reply.send({
+          success: true,
+          audiences: storedAudiences,
+          refreshed: false,
+          source: 'stored',
+        });
+      }
+
+      const normalizedAdAccountId = graphAdAccountId.startsWith('act_')
+        ? graphAdAccountId
+        : `act_${graphAdAccountId}`;
+
+      const audiencesMap = new Map<string, { id: string; name: string }>();
+      let pagesFetched = 0;
+      let nextUrl = `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/customaudiences?fields=id,name&limit=500&access_token=${encodeURIComponent(graphAccessToken)}`;
+
+      try {
+        while (nextUrl) {
+          pagesFetched += 1;
+          const response = await fetch(nextUrl);
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const fbMeta = {
+              status: response.status,
+              method: 'GET',
+              path: `${normalizedAdAccountId}/customaudiences`,
+              code: errorData?.error?.code,
+              error_subcode: errorData?.error?.error_subcode,
+              fbtrace_id: errorData?.error?.fbtrace_id,
+            };
+            log.warn({
+              userAccountId,
+              accountId: accountId || null,
+              meta: fbMeta,
+              storedCount: storedAudiences.length,
+              pagesFetched,
+            }, 'Failed to refresh custom audiences from Facebook, using stored value');
+
+            return reply.send({
+              success: true,
+              audiences: storedAudiences,
+              refreshed: false,
+              source: 'stored',
+            });
+          }
+
+          const data = await response.json();
+          const pageItems = Array.isArray(data?.data) ? data.data : [];
+
+          for (const item of pageItems) {
+            const id = String(item?.id || '').trim();
+            if (!id) continue;
+            audiencesMap.set(id, {
+              id,
+              name: String(item?.name || id),
+            });
+          }
+
+          nextUrl = data?.paging?.next || '';
+
+          // Safety guard to avoid huge loops
+          if (audiencesMap.size >= 2000) {
+            log.warn({
+              userAccountId,
+              accountId: accountId || null,
+              audiencesCount: audiencesMap.size,
+              pagesFetched,
+            }, 'Custom audiences pagination stopped by safety guard');
+            nextUrl = '';
+          }
+        }
+      } catch (fbError: any) {
+        log.warn({
+          err: fbError,
+          userAccountId,
+          accountId: accountId || null,
+          storedCount: storedAudiences.length,
+          pagesFetched,
+        }, 'Error refreshing custom audiences from Facebook, using stored value');
+
+        return reply.send({
+          success: true,
+          audiences: storedAudiences,
+          refreshed: false,
+          source: 'stored',
+        });
+      }
+
+      const refreshedAudiences = Array.from(audiencesMap.values());
+
+      log.info({
+        userAccountId,
+        accountId: accountId || null,
+        refreshedCount: refreshedAudiences.length,
+        storedCount: storedAudiences.length,
+        pagesFetched,
+      }, 'Custom audiences refreshed from Facebook');
+
+      // Для multi-account режима кешируем список в ad_accounts
+      if (adAccountRowId) {
+        const { error: cacheError } = await supabase
+          .from('ad_accounts')
+          .update({
+            custom_audiences: refreshedAudiences,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', adAccountRowId);
+
+        if (cacheError) {
+          log.warn({
+            err: cacheError,
+            adAccountRowId,
+            audiencesCount: refreshedAudiences.length,
+          }, 'Failed to cache refreshed custom audiences');
+        }
+      }
+
+      log.info({
+        userAccountId,
+        accountId: accountId || null,
+        refreshedCount: refreshedAudiences.length,
+        source: 'facebook',
+      }, 'Returning custom audiences response');
+
+      return reply.send({
+        success: true,
+        audiences: refreshedAudiences,
+        refreshed: true,
+        source: 'facebook',
+      });
+    } catch (error: any) {
+      log.error({ err: error }, 'Error fetching custom audiences');
+      return reply.code(500).send({
+        success: false,
+        error: error.message || 'Failed to fetch custom audiences',
+      });
+    }
+  });
+
+  /**
    * POST /api/directions
    * Создать новое направление + Facebook/TikTok Campaign
    */
@@ -553,11 +810,22 @@ export async function directionsRoutes(app: FastifyInstance) {
       }
 
       const input: CreateDirectionInput = validationResult.data;
+      const normalizedCustomAudienceId = input.custom_audience_id?.trim() || null;
       const requestedPlatform = input.platform || 'facebook';
       const platformsToCreate: Array<Exclude<DirectionPlatform, 'both'>> =
         requestedPlatform === 'both' ? ['facebook', 'tiktok'] : [requestedPlatform];
       const needsFacebook = platformsToCreate.includes('facebook');
       const needsTikTok = platformsToCreate.includes('tiktok');
+
+      log.info({
+        userAccountId: input.userAccountId,
+        accountId: input.accountId || null,
+        requestedPlatform,
+        needsFacebook,
+        needsTikTok,
+        advantageAudienceEnabled: input.advantage_audience_enabled !== false,
+        hasCustomAudience: Boolean(normalizedCustomAudienceId),
+      }, 'Creating direction with audience controls');
 
       // Проверяем флаг multi_account_enabled у пользователя
       const { data: userAccountCheck, error: userCheckError } = await supabase
@@ -686,6 +954,16 @@ export async function directionsRoutes(app: FastifyInstance) {
         tiktok_daily_budget: input.tiktok_daily_budget || null,
         userAccountName
       }, 'Creating direction');
+
+      if (needsFacebook && input.objective === 'app_installs') {
+        const appSettings = input.facebook_default_settings || input.default_settings;
+        if (!appSettings?.app_id || !appSettings?.app_store_url) {
+          return reply.code(400).send({
+            success: false,
+            error: 'app_installs objective requires app_id and app_store_url in default settings',
+          });
+        }
+      }
 
       // Если указан WhatsApp номер, создаем или находим запись в whatsapp_phone_numbers
       let whatsapp_phone_number_id: string | null = null;
@@ -910,6 +1188,9 @@ export async function directionsRoutes(app: FastifyInstance) {
             pixel_id: settingsInput.pixel_id,
             utm_tag: settingsInput.utm_tag,
             lead_form_id: settingsInput.lead_form_id,
+            app_id: settingsInput.app_id,
+            app_store_url: settingsInput.app_store_url,
+            is_skadnetwork_attribution: settingsInput.is_skadnetwork_attribution,
           })
           .select()
           .single();
@@ -982,6 +1263,8 @@ export async function directionsRoutes(app: FastifyInstance) {
               objective: input.objective,
               daily_budget_cents: input.daily_budget_cents,
               target_cpl_cents: input.target_cpl_cents,
+              advantage_audience_enabled: input.advantage_audience_enabled !== false,
+              custom_audience_id: normalizedCustomAudienceId,
               whatsapp_phone_number_id: whatsapp_phone_number_id,
               fb_campaign_id: fbCampaign.campaign_id,
               campaign_status: fbCampaign.status,
@@ -1044,6 +1327,8 @@ export async function directionsRoutes(app: FastifyInstance) {
               objective: mappedObjective,
               daily_budget_cents: DEFAULT_FB_DAILY_BUDGET_CENTS,
               target_cpl_cents: DEFAULT_FB_TARGET_CPL_CENTS,
+              advantage_audience_enabled: true,
+              custom_audience_id: null,
               whatsapp_phone_number_id: null,
               tiktok_campaign_id: tiktokCampaign.campaign_id,
               tiktok_objective: tiktokObjective,
@@ -1235,6 +1520,22 @@ export async function directionsRoutes(app: FastifyInstance) {
       delete updateData.whatsapp_phone_number; // Удаляем из объекта обновления, т.к. это не колонка БД
       delete updateData.whatsapp_connection_type; // Это поле для whatsapp_phone_numbers, не для directions
       delete updateData.whatsapp_waba_phone_id; // Это поле для whatsapp_phone_numbers, не для directions
+
+      if (typeof updateData.custom_audience_id === 'string') {
+        updateData.custom_audience_id = updateData.custom_audience_id.trim() || null;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(updateData, 'advantage_audience_enabled') ||
+        Object.prototype.hasOwnProperty.call(updateData, 'custom_audience_id')
+      ) {
+        log.info({
+          directionId: id,
+          advantageAudienceEnabled: updateData.advantage_audience_enabled,
+          hasCustomAudience: Boolean(updateData.custom_audience_id),
+          customAudienceId: updateData.custom_audience_id || null,
+        }, 'Updating direction audience controls');
+      }
       
       if (input.whatsapp_phone_number !== undefined) {
         if (input.whatsapp_phone_number === null || input.whatsapp_phone_number === '') {

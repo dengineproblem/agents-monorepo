@@ -1,6 +1,6 @@
 // Типы данных для направлений бизнеса
 
-export type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 export type OptimizationLevel = 'level_1' | 'level_2' | 'level_3';
 export type DirectionPlatform = 'facebook' | 'tiktok' | 'both';
 export type DirectionPlatformValue = 'facebook' | 'tiktok' | null;
@@ -39,6 +39,8 @@ export interface Direction {
   campaign_status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | null;
   daily_budget_cents: number;
   target_cpl_cents: number;
+  advantage_audience_enabled?: boolean;
+  custom_audience_id?: string | null;
   is_active: boolean;
   whatsapp_phone_number?: string | null;
   // AmoCRM key stages (up to 3)
@@ -94,6 +96,9 @@ export interface CreateDirectionPayload {
   optimization_level?: OptimizationLevel;
   // Instagram account usage
   use_instagram?: boolean;
+  // Audience controls
+  advantage_audience_enabled?: boolean;
+  custom_audience_id?: string | null;
 }
 
 export interface DirectionDefaultSettingsInput {
@@ -131,6 +136,9 @@ export interface UpdateDirectionPayload {
   capi_scheduled_fields?: CapiFieldConfig[];
   // WhatsApp-conversions optimization level
   optimization_level?: OptimizationLevel;
+  // Audience controls
+  advantage_audience_enabled?: boolean;
+  custom_audience_id?: string | null;
 }
 
 // Дефолтные настройки рекламы для направления

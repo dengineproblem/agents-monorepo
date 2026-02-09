@@ -8,7 +8,65 @@ import { createLogger } from './logger.js';
 
 const log = createLogger({ module: 'settingsHelpers' });
 
-export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+
+export type DirectionAudienceControls = {
+  advantageAudienceEnabled?: boolean | null;
+  customAudienceId?: string | null;
+};
+
+/**
+ * Применить direction-level audience controls к targeting
+ */
+export function applyDirectionAudienceControls(
+  targetingInput: any,
+  controls: DirectionAudienceControls = {}
+) {
+  const hasObjectTargeting =
+    targetingInput !== null &&
+    typeof targetingInput === 'object' &&
+    !Array.isArray(targetingInput);
+
+  const targeting = hasObjectTargeting
+    ? JSON.parse(JSON.stringify(targetingInput))
+    : {};
+
+  if (!hasObjectTargeting && targetingInput !== undefined && targetingInput !== null) {
+    log.warn({
+      targetingInputType: typeof targetingInput,
+    }, 'Invalid targeting input type, falling back to empty targeting object');
+  }
+
+  const {
+    advantageAudienceEnabled = true,
+    customAudienceId,
+  } = controls;
+  const normalizedCustomAudienceId = customAudienceId && String(customAudienceId).trim()
+    ? String(customAudienceId).trim()
+    : null;
+
+  // Advantage+ Audience toggle
+  if (advantageAudienceEnabled) {
+    targeting.targeting_automation = {
+      advantage_audience: 1
+    };
+  } else {
+    delete targeting.targeting_automation;
+  }
+
+  // Fixed Custom Audience for direction (optional)
+  if (normalizedCustomAudienceId) {
+    targeting.custom_audiences = [{ id: normalizedCustomAudienceId }];
+  }
+
+  log.debug({
+    advantageAudienceEnabled: advantageAudienceEnabled !== false,
+    hasCustomAudience: Boolean(normalizedCustomAudienceId),
+    hasGeoLocations: Boolean(targeting?.geo_locations),
+  }, 'Applied direction audience controls');
+
+  return targeting;
+}
 
 /**
  * Получить настройки таргетинга для направления
@@ -48,7 +106,11 @@ export async function getDirectionSettings(directionId: string) {
  * @param objective - Цель кампании (для логирования)
  * @returns Объект targeting для Facebook API
  */
-export function buildTargeting(settings: any, objective: CampaignObjective) {
+export function buildTargeting(
+  settings: any,
+  objective: CampaignObjective,
+  controls: DirectionAudienceControls = {}
+) {
   if (!settings) {
     throw new Error('Settings object is required to build targeting');
   }
@@ -105,19 +167,17 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     throw new Error('No cities/countries configured in targeting settings. Please add at least one location.');
   }
 
-  // Facebook требует targeting_automation для всех типов кампаний (постепенный rollout с конца 2024)
-  // advantage_audience: 1 = включено (Advantage+ Audience)
-  targeting.targeting_automation = {
-    advantage_audience: 1
-  };
+  const finalTargeting = applyDirectionAudienceControls(targeting, controls);
 
   log.info({
     objective,
-    countries: targeting.geo_locations?.countries?.length || 0,
-    cities: targeting.geo_locations?.cities?.length || 0
+    countries: finalTargeting.geo_locations?.countries?.length || 0,
+    cities: finalTargeting.geo_locations?.cities?.length || 0,
+    advantageAudienceEnabled: controls.advantageAudienceEnabled !== false,
+    hasCustomAudience: Boolean(controls.customAudienceId)
   }, 'Targeting built successfully');
 
-  return targeting;
+  return finalTargeting;
 }
 
 /**

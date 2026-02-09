@@ -27,6 +27,7 @@ import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/d
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
+import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
 // tiktokApi убран - Instant Page ID вводится вручную
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
@@ -407,6 +408,8 @@ export interface CreateDirectionFormData {
   objective?: DirectionObjective;
   optimization_level?: OptimizationLevel;
   use_instagram?: boolean;
+  advantage_audience_enabled?: boolean;
+  custom_audience_id?: string | null;
   daily_budget_cents?: number;
   target_cpl_cents?: number;
   tiktok_objective?: TikTokObjective;
@@ -440,6 +443,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [objective, setObjective] = useState<DirectionObjective>('whatsapp');
   const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
   const [useInstagram, setUseInstagram] = useState(hasInstagramId !== false);
+  const [advantageAudienceEnabled, setAdvantageAudienceEnabled] = useState(true);
+  const [customAudienceId, setCustomAudienceId] = useState('');
+  const [customAudiences, setCustomAudiences] = useState<DirectionCustomAudience[]>([]);
+  const [isLoadingCustomAudiences, setIsLoadingCustomAudiences] = useState(false);
   const [dailyBudget, setDailyBudget] = useState('50');
   const [targetCpl, setTargetCpl] = useState('2.00');
   const [tiktokObjective, setTiktokObjective] = useState<TikTokObjective>('traffic');
@@ -579,6 +586,33 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     };
     loadPixels();
   }, [open, needsFacebook]); // Загружаем при открытии диалога для Facebook
+
+  // Загрузка кастомных аудиторий из Meta кабинета
+  useEffect(() => {
+    if (!open || !needsFacebook || !userAccountId) {
+      setCustomAudiences([]);
+      setCustomAudienceId('');
+      return;
+    }
+
+    const loadCustomAudiences = async () => {
+      setIsLoadingCustomAudiences(true);
+      try {
+        const audiences = await directionsApi.listCustomAudiences(userAccountId, accountId || null);
+        setCustomAudiences(audiences);
+        setCustomAudienceId((prev) => (
+          prev && !audiences.some((aud) => aud.id === prev) ? '' : prev
+        ));
+      } catch (e) {
+        console.error('Ошибка загрузки custom audiences:', e);
+        setCustomAudiences([]);
+      } finally {
+        setIsLoadingCustomAudiences(false);
+      }
+    };
+
+    loadCustomAudiences();
+  }, [open, needsFacebook, userAccountId, accountId]);
 
   // Обновление дефолта целевой стоимости при смене objective
   useEffect(() => {
@@ -1035,6 +1069,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           objective,
           ...(objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
           use_instagram: useInstagram,
+          advantage_audience_enabled: advantageAudienceEnabled,
+          custom_audience_id: customAudienceId || null,
           daily_budget_cents: Math.round(budgetValue * 100),
           target_cpl_cents: Math.round(cplValue * 100),
           whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
@@ -1077,6 +1113,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setDirectionPlatform(defaultPlatform);
     setObjective('whatsapp');
     setOptimizationLevel('level_1');
+    setAdvantageAudienceEnabled(true);
+    setCustomAudienceId('');
     setDailyBudget('50');
     setTargetCpl('2.00');
     setTiktokObjective('traffic');
@@ -2061,6 +2099,59 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   </div>
                 </div>
               </>
+            )}
+
+            {needsFacebook && (
+              <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label>Advantage+ Audience</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Можно отключить, если нужен строго фиксированный таргетинг.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={advantageAudienceEnabled}
+                    onCheckedChange={setAdvantageAudienceEnabled}
+                    disabled={isSubmitting}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="direction-custom-audience">Custom Audience (опционально)</Label>
+                  <Select
+                    value={customAudienceId || 'none'}
+                    onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
+                    disabled={isSubmitting || isLoadingCustomAudiences}
+                  >
+                    <SelectTrigger id="direction-custom-audience">
+                      <SelectValue placeholder={
+                        isLoadingCustomAudiences
+                          ? 'Загрузка...'
+                          : customAudiences.length === 0
+                            ? 'Аудитории не найдены'
+                            : 'Выберите аудиторию'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Без Custom Audience</SelectItem>
+                      {customAudiences.length === 0 && !isLoadingCustomAudiences && (
+                        <SelectItem value="no-audiences" disabled>
+                          Нет доступных Custom Audience
+                        </SelectItem>
+                      )}
+                      {customAudiences.map((audience) => (
+                        <SelectItem key={audience.id} value={audience.id}>
+                          {audience.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Список подтягивается из текущего рекламного кабинета Meta.
+                  </p>
+                </div>
+              </div>
             )}
           </div>
 

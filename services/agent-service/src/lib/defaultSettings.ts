@@ -4,9 +4,9 @@
  */
 
 import { supabase } from './supabase.js';
-import { buildTargeting } from './settingsHelpers.js';
+import { buildTargeting, type DirectionAudienceControls } from './settingsHelpers.js';
 
-export type CampaignGoal = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignGoal = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 export interface DefaultAdSettings {
   id: string;
@@ -108,8 +108,11 @@ export async function upsertDefaultAdSettings(
  * @deprecated Use buildTargeting() from settingsHelpers.ts instead
  * This function is kept for backward compatibility and now uses the new implementation internally
  */
-export function convertToFacebookTargeting(settings: DefaultAdSettings) {
-  return buildTargeting(settings, settings.campaign_goal);
+export function convertToFacebookTargeting(
+  settings: DefaultAdSettings,
+  controls: DirectionAudienceControls = {}
+) {
+  return buildTargeting(settings, settings.campaign_goal, controls);
 }
 
 /**

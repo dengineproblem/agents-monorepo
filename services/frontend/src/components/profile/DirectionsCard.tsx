@@ -93,6 +93,8 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(data.objective && { objective: data.objective }),
       ...(data.optimization_level && { optimization_level: data.optimization_level }),
       ...(data.use_instagram !== undefined && { use_instagram: data.use_instagram }),
+      ...(data.advantage_audience_enabled !== undefined && { advantage_audience_enabled: data.advantage_audience_enabled }),
+      ...(data.custom_audience_id !== undefined && { custom_audience_id: data.custom_audience_id }),
       ...(data.daily_budget_cents !== undefined && { daily_budget_cents: data.daily_budget_cents }),
       ...(data.target_cpl_cents !== undefined && { target_cpl_cents: data.target_cpl_cents }),
       ...(data.whatsapp_phone_number && { whatsapp_phone_number: data.whatsapp_phone_number }),
@@ -138,6 +140,8 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     is_active: boolean;
     whatsapp_phone_number?: string | null;
     optimization_level?: 'level_1' | 'level_2' | 'level_3';
+    advantage_audience_enabled?: boolean;
+    custom_audience_id?: string | null;
     capiSettings?: EditDirectionCapiSettings;
   }) => {
     if (!selectedDirection) return;
@@ -152,6 +156,10 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
       ...(data.whatsapp_phone_number !== undefined && { whatsapp_phone_number: data.whatsapp_phone_number }),
       ...(data.optimization_level !== undefined && { optimization_level: data.optimization_level }),
+      ...(data.advantage_audience_enabled !== undefined && {
+        advantage_audience_enabled: data.advantage_audience_enabled,
+      }),
+      ...(data.custom_audience_id !== undefined && { custom_audience_id: data.custom_audience_id }),
       // CAPI settings
       ...(data.capiSettings && {
         capi_enabled: data.capiSettings.capi_enabled,

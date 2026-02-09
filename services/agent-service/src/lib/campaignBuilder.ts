@@ -11,6 +11,7 @@ import { createLogger } from './logger.js';
 import { resolveFacebookError } from './facebookErrors.js';
 import { saveAdCreativeMapping } from './adCreativeMapping.js';
 import { shouldFilterByAccountId } from './multiAccountHelper.js';
+import { applyDirectionAudienceControls } from './settingsHelpers.js';
 import { graphBatch, parseBatchBody, type BatchRequest } from '../adapters/facebook.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
@@ -72,7 +73,7 @@ const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // Конвертация lowercase objective в формат для LLM
 export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
@@ -2249,10 +2250,29 @@ export async function createAdSetInCampaign(params: {
   promoted_object?: any;
   start_mode?: 'now' | 'midnight_almaty';
   objective?: CampaignObjective; // Добавлен для различения whatsapp_conversions от site_leads
+  advantageAudienceEnabled?: boolean;
+  customAudienceId?: string | null;
 }) {
-  const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object, objective } = params;
+  const {
+    campaignId,
+    adAccountId,
+    accessToken,
+    name,
+    dailyBudget,
+    targeting,
+    optimization_goal,
+    billing_event,
+    promoted_object,
+    objective,
+    advantageAudienceEnabled,
+    customAudienceId,
+  } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+  const finalTargeting = applyDirectionAudienceControls(targeting, {
+    advantageAudienceEnabled,
+    customAudienceId,
+  });
 
   log.info({ campaignId, name, dailyBudget, optimizationGoal: optimization_goal }, 'Creating ad set in campaign');
 
@@ -2287,7 +2307,7 @@ export async function createAdSetInCampaign(params: {
     billing_event,
     optimization_goal,
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    targeting,
+    targeting: finalTargeting,
     status: 'ACTIVE',
   };
 
@@ -2345,8 +2365,9 @@ export async function createAdSetInCampaign(params: {
     page_id: body.promoted_object?.page_id,
     pixel_id: body.promoted_object?.pixel_id,
     custom_event_type: body.promoted_object?.custom_event_type,
-    targeting_automation: targeting?.targeting_automation,
-    has_targeting_automation: !!targeting?.targeting_automation
+    targeting_automation: finalTargeting?.targeting_automation,
+    has_targeting_automation: !!finalTargeting?.targeting_automation,
+    has_custom_audiences: Array.isArray(finalTargeting?.custom_audiences) && finalTargeting.custom_audiences.length > 0
   }, 'Final ad set parameters before Facebook API call');
 
   let response = await fetch(

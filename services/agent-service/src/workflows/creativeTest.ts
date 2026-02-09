@@ -298,7 +298,17 @@ export async function workflowStartCreativeTest(
   // ===================================================
   // STEP 5: Строим таргетинг
   // ===================================================
-  const targeting = buildTargeting(defaultSettings, direction.objective);
+  log.info({
+    directionId: direction.id,
+    advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
+    hasCustomAudience: Boolean(direction.custom_audience_id),
+    customAudienceId: direction.custom_audience_id || null,
+  }, 'Applying direction audience controls in creative test');
+
+  const targeting = buildTargeting(defaultSettings, direction.objective, {
+    advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
+    customAudienceId: direction.custom_audience_id || null,
+  });
 
   // ===================================================
   // STEP 6: Создаем Campaign

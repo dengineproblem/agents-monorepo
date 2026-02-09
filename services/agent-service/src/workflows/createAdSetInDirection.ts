@@ -4,6 +4,7 @@ import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 import { getCustomEventType } from '../lib/campaignBuilder.js';
+import { applyDirectionAudienceControls } from '../lib/settingsHelpers.js';
 import {
   getAvailableAdSet,
   activateAdSet,
@@ -256,22 +257,32 @@ export async function workflowCreateAdSetInDirection(
     .eq('direction_id', direction_id)
     .maybeSingle();
 
+  const directionAudienceControls = {
+    advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
+    customAudienceId: direction.custom_audience_id || null,
+  };
+
+  log.info({
+    directionId: direction.id,
+    advantageAudienceEnabled: directionAudienceControls.advantageAudienceEnabled,
+    hasCustomAudience: Boolean(directionAudienceControls.customAudienceId),
+    customAudienceId: directionAudienceControls.customAudienceId,
+  }, 'Applying direction audience controls in createAdSetInDirection');
+
   // Используем ту же функцию, что и в автозапуске (workflowCreateCampaignWithCreative)
   let targeting: any;
   
   if (defaultSettings) {
     // Преобразуем настройки из БД в формат Facebook API
-    targeting = convertToFacebookTargeting(defaultSettings);
+    targeting = convertToFacebookTargeting(defaultSettings, directionAudienceControls);
   } else {
-    // Fallback на базовый таргетинг (с Advantage+ Audience)
-    targeting = {
+    // Fallback на базовый таргетинг
+    const fallbackTargeting = {
       geo_locations: { countries: ['RU'] },
       age_min: 18,
       age_max: 65,
-      targeting_automation: {
-        advantage_audience: 1
-      }
     };
+    targeting = applyDirectionAudienceControls(fallbackTargeting, directionAudienceControls);
   }
 
   // НЕ добавляем дополнительные поля - используем targeting как есть
@@ -832,4 +843,3 @@ export async function workflowCreateAdSetInDirection(
     message: `AdSet created in direction "${direction.name}" with ${created_ads.length} ad(s) (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'})`,
   };
 }
-

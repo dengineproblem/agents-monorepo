@@ -28,6 +28,7 @@ import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/d
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
+import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
 import {
@@ -365,6 +366,8 @@ interface EditDirectionDialogProps {
     is_active: boolean;
     whatsapp_phone_number?: string | null;
     optimization_level?: OptimizationLevel;
+    advantage_audience_enabled?: boolean;
+    custom_audience_id?: string | null;
     capiSettings?: EditDirectionCapiSettings;
   }) => Promise<void>;
 }
@@ -388,6 +391,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [tiktokTargetCpl, setTikTokTargetCpl] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
+  const [advantageAudienceEnabled, setAdvantageAudienceEnabled] = useState(true);
+  const [customAudienceId, setCustomAudienceId] = useState('');
+  const [customAudiences, setCustomAudiences] = useState<DirectionCustomAudience[]>([]);
+  const [isLoadingCustomAudiences, setIsLoadingCustomAudiences] = useState(false);
 
   // Настройки рекламы
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -515,6 +522,51 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     };
     loadPixels();
   }, [direction?.objective, capiEnabled, isTikTok]);
+
+  // Загрузка кастомных аудиторий из Meta кабинета
+  useEffect(() => {
+    if (!open || isTikTok || !userAccountId) {
+      setCustomAudiences([]);
+      return;
+    }
+
+    const loadCustomAudiences = async () => {
+      setIsLoadingCustomAudiences(true);
+      try {
+        const audiences = await directionsApi.listCustomAudiences(userAccountId, accountId || null);
+        const currentAudienceId = direction?.custom_audience_id || '';
+        const hasCurrentAudience = currentAudienceId
+          ? audiences.some((aud) => aud.id === currentAudienceId)
+          : false;
+
+        const normalizedAudiences = hasCurrentAudience || !currentAudienceId
+          ? audiences
+          : [
+              {
+                id: currentAudienceId,
+                name: `Текущая аудитория (${currentAudienceId})`,
+              },
+              ...audiences,
+            ];
+
+        setCustomAudiences(normalizedAudiences);
+      } catch (e) {
+        console.error('Ошибка загрузки custom audiences:', e);
+        if (direction?.custom_audience_id) {
+          setCustomAudiences([{
+            id: direction.custom_audience_id,
+            name: `Текущая аудитория (${direction.custom_audience_id})`,
+          }]);
+        } else {
+          setCustomAudiences([]);
+        }
+      } finally {
+        setIsLoadingCustomAudiences(false);
+      }
+    };
+
+    loadCustomAudiences();
+  }, [open, isTikTok, userAccountId, accountId, direction?.id, direction?.custom_audience_id]);
 
   // Load connected CRMs for CRM-based CAPI source
   useEffect(() => {
@@ -670,6 +722,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setIsActive(direction.is_active);
     setOptimizationLevel(direction.optimization_level || 'level_1');
     setWhatsappPhoneNumber(direction.whatsapp_phone_number || '');
+    setAdvantageAudienceEnabled(direction.advantage_audience_enabled !== false);
+    setCustomAudienceId(direction.custom_audience_id || '');
     setError(null);
 
     // CAPI settings
@@ -1043,6 +1097,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               target_cpl_cents: Math.round(cplValue * 100),
               whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
               ...(direction.objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
+              advantage_audience_enabled: advantageAudienceEnabled,
+              custom_audience_id: customAudienceId || null,
               capiSettings: {
                 capi_enabled: capiEnabled && !!capiPixelId, // CAPI требует пиксель
                 capi_source: capiEnabled && capiPixelId ? capiSource : null,
@@ -1414,6 +1470,59 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     </div>
                   </RadioGroup>
                 </div>
+
+                {!isTikTok && (
+                  <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <Label>Advantage+ Audience</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Можно отключить, если нужен строго фиксированный таргетинг.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={advantageAudienceEnabled}
+                        onCheckedChange={setAdvantageAudienceEnabled}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-direction-custom-audience">Custom Audience (опционально)</Label>
+                      <Select
+                        value={customAudienceId || 'none'}
+                        onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
+                        disabled={isSubmitting || isLoadingCustomAudiences}
+                      >
+                        <SelectTrigger id="edit-direction-custom-audience">
+                          <SelectValue placeholder={
+                            isLoadingCustomAudiences
+                              ? 'Загрузка...'
+                              : customAudiences.length === 0
+                                ? 'Аудитории не найдены'
+                                : 'Выберите аудиторию'
+                          } />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Без Custom Audience</SelectItem>
+                          {customAudiences.length === 0 && !isLoadingCustomAudiences && (
+                            <SelectItem value="no-audiences" disabled>
+                              Нет доступных Custom Audience
+                            </SelectItem>
+                          )}
+                          {customAudiences.map((audience) => (
+                            <SelectItem key={audience.id} value={audience.id}>
+                              {audience.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Список подтягивается из текущего рекламного кабинета Meta.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Separator />

@@ -451,8 +451,21 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               adAccountName: credentials.adAccountName
             }, 'Default settings status');
 
+            const directionAudienceControls = {
+              advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
+              customAudienceId: direction.custom_audience_id || null,
+            };
+
+            log.info({
+              directionId: direction.id,
+              mode: 'deterministic_fallback',
+              advantageAudienceEnabled: directionAudienceControls.advantageAudienceEnabled,
+              hasCustomAudience: Boolean(directionAudienceControls.customAudienceId),
+              customAudienceId: directionAudienceControls.customAudienceId,
+            }, 'Applying direction audience controls for deterministic launch');
+
             // Строим таргетинг (используем objective направления)
-            const targeting = buildTargeting(defaultSettings, direction.objective);
+            const targeting = buildTargeting(defaultSettings, direction.objective, directionAudienceControls);
 
             // Получаем optimization_goal и billing_event (используем objective направления)
             const optimization_goal = getOptimizationGoal(direction.objective);
@@ -596,6 +609,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 promoted_object,
                 start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
                 objective: direction.objective,
+                advantageAudienceEnabled: directionAudienceControls.advantageAudienceEnabled,
+                customAudienceId: directionAudienceControls.customAudienceId,
               });
 
               adsetId = adset.id;
@@ -856,7 +871,21 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // Получаем дефолтные настройки направления (если не переопределены)
         const defaultSettings = await getDirectionSettings(direction_id);
         const finalBudget = daily_budget_cents || direction.daily_budget_cents;
-        const finalTargeting = targeting || buildTargeting(defaultSettings, direction.objective);
+        const directionAudienceControls = {
+          advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
+          customAudienceId: direction.custom_audience_id || null,
+        };
+
+        log.info({
+          directionId: direction.id,
+          mode: 'manual_launch',
+          advantageAudienceEnabled: directionAudienceControls.advantageAudienceEnabled,
+          hasCustomAudience: Boolean(directionAudienceControls.customAudienceId),
+          customAudienceId: directionAudienceControls.customAudienceId,
+          hasIncomingTargetingOverride: Boolean(targeting),
+        }, 'Applying direction audience controls for manual launch');
+
+        const finalTargeting = targeting || buildTargeting(defaultSettings, direction.objective, directionAudienceControls);
 
         // Получаем optimization_goal и billing_event
         const optimization_goal = getOptimizationGoal(direction.objective);
@@ -985,6 +1014,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             promoted_object,
             start_mode: start_mode || 'now', // Используем переданный режим или "Сейчас" по умолчанию
             objective: direction.objective,
+            advantageAudienceEnabled: directionAudienceControls.advantageAudienceEnabled,
+            customAudienceId: directionAudienceControls.customAudienceId,
           });
 
           adsetId = adset.id;

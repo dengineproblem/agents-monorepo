@@ -2,6 +2,11 @@ import type { Direction, CreateDirectionPayload, UpdateDirectionPayload } from '
 import { API_BASE_URL } from '@/config/api';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
+export interface DirectionCustomAudience {
+  id: string;
+  name: string;
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -54,6 +59,50 @@ export const directionsApi = {
       return [];
     } catch (error) {
       console.error('[directionsApi.list] Исключение при получении направлений:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Получить список Custom Audience из Meta кабинета (с fallback на кэш)
+   */
+  async listCustomAudiences(
+    userAccountId: string,
+    accountId?: string | null
+  ): Promise<DirectionCustomAudience[]> {
+    try {
+      console.log('[directionsApi.listCustomAudiences] Loading audiences', {
+        userAccountId,
+        accountId: accountId || null,
+      });
+      const params = new URLSearchParams({ userAccountId });
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/directions/custom-audiences?${params.toString()}`);
+      if (!response.ok) {
+        console.warn('[directionsApi.listCustomAudiences] HTTP error', {
+          status: response.status,
+          statusText: response.statusText,
+        });
+        return [];
+      }
+
+      const data = await response.json();
+      if (data.success && Array.isArray(data.audiences)) {
+        console.log('[directionsApi.listCustomAudiences] Loaded audiences', {
+          count: data.audiences.length,
+          refreshed: data.refreshed ?? null,
+          source: data.source ?? null,
+        });
+        return data.audiences;
+      }
+
+      console.warn('[directionsApi.listCustomAudiences] Unexpected response payload', data);
+      return [];
+    } catch (error) {
+      console.error('Исключение при загрузке custom audiences:', error);
       return [];
     }
   },
