@@ -90,25 +90,37 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
  * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
  *
  * Соответствие уровней оптимизации и событий CAPI:
- * - level_1: OTHER (Other) — Интерес, 3+ сообщения от клиента
- * - level_2: COMPLETE_REGISTRATION (CompleteRegistration) — Клиент квалифицирован
+ * - level_1: COMPLETE_REGISTRATION (CompleteRegistration) — Интерес, 3+ сообщения от клиента
+ * - level_2: ADD_TO_CART или SUBSCRIBE — Клиент квалифицирован
  * - level_3: PURCHASE (Purchase) — Клиент записался или совершил покупку
  *
  * @param level - уровень оптимизации из направления (level_1, level_2, level_3)
  * @returns custom_event_type для FB API promoted_object
  */
 export function getCustomEventType(level: string | undefined): string {
+  const level2EventRaw = (process.env.WHATSAPP_CONVERSIONS_LEVEL2_EVENT || process.env.META_CAPI_LEVEL2_EVENT || 'ADD_TO_CART')
+    .trim()
+    .toUpperCase();
+  if (level2EventRaw !== 'ADD_TO_CART' && level2EventRaw !== 'SUBSCRIBE') {
+    log.warn({
+      level2EventRaw,
+      fallback: 'ADD_TO_CART'
+    }, 'Invalid level_2 event config, falling back to ADD_TO_CART');
+  }
+  const level2Event = level2EventRaw === 'SUBSCRIBE' ? 'SUBSCRIBE' : 'ADD_TO_CART';
+
   const map: Record<string, string> = {
-    'level_1': 'OTHER',
-    'level_2': 'COMPLETE_REGISTRATION',
+    'level_1': 'COMPLETE_REGISTRATION',
+    'level_2': level2Event,
     'level_3': 'PURCHASE'
   };
-  const result = map[level || 'level_1'] || 'OTHER';
+  const result = map[level || 'level_1'] || 'COMPLETE_REGISTRATION';
 
   log.debug({
     input_level: level,
     resolved_level: level || 'level_1',
-    custom_event_type: result
+    custom_event_type: result,
+    level_2_event_config: level2Event,
   }, 'getCustomEventType: маппинг optimization_level → custom_event_type');
 
   return result;

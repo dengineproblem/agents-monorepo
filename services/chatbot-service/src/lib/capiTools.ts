@@ -60,7 +60,7 @@ export function getCapiToolDefinitions(): OpenAI.Chat.Completions.ChatCompletion
             level: {
               type: 'integer',
               enum: [1, 2, 3],
-              description: '1 = Interest/Lead (3+ входящих сообщений), 2 = Qualified/CompleteRegistration (прошёл квалификацию), 3 = Schedule (записался)'
+              description: '1 = Interest/CompleteRegistration (3+ входящих сообщений), 2 = Qualified/AddToCart|Subscribe (прошёл квалификацию), 3 = Schedule/Purchase (записался)'
             },
             reason: {
               type: 'string',
@@ -108,6 +108,7 @@ async function getLeadDataForCapi(leadId: string) {
       capi_interest_sent,
       capi_qualified_sent,
       capi_scheduled_sent,
+      ctwa_clid,
       ttclid
     `)
     .eq('id', leadId)
@@ -375,6 +376,7 @@ async function handleSendCapiEvent(
       eventName: eventName as CapiEventName,
       eventLevel: level,
       phone: lead.contact_phone,
+      ctwaClid: lead.ctwa_clid || undefined,
       dialogAnalysisId: lead.id,
       leadId: lead.lead_id ? String(lead.lead_id) : undefined,
       userAccountId: lead.user_account_id || '',

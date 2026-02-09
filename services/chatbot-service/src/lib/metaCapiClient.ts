@@ -4,8 +4,8 @@
  * Отправляет события конверсий в Facebook для оптимизации рекламы.
  *
  * Три уровня событий (Pixel/CAPI без WABA):
- * 1. Contact (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
- * 2. CompleteRegistration (QUALIFIED) - клиент прошёл квалификацию
+ * 1. CompleteRegistration (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
+ * 2. AddToCart/Subscribe (QUALIFIED) - клиент прошёл квалификацию
  * 3. Purchase (BOOKED) - клиент записался/купил (event_name = Purchase)
  */
 
@@ -63,10 +63,34 @@ class MetaCircuitBreaker {
 
 const circuitBreaker = new MetaCircuitBreaker();
 
+const level2EventRaw = (process.env.META_CAPI_LEVEL2_EVENT || 'ADD_TO_CART')
+  .trim()
+  .toUpperCase();
+if (level2EventRaw !== 'ADD_TO_CART' && level2EventRaw !== 'SUBSCRIBE') {
+  log.warn({
+    level2EventRaw,
+    fallback: 'ADD_TO_CART'
+  }, 'Invalid META_CAPI_LEVEL2_EVENT config, falling back to ADD_TO_CART');
+}
+const level2Event: 'AddToCart' | 'Subscribe' =
+  level2EventRaw === 'SUBSCRIBE' ? 'Subscribe' : 'AddToCart';
+
+const ALLOWED_ACTION_SOURCES = new Set([
+  'email',
+  'website',
+  'app',
+  'phone_call',
+  'chat',
+  'physical_store',
+  'system_generated',
+  'business_messaging',
+  'other',
+]);
+
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  INTEREST: 'Other',                // Level 1: 3+ inbound messages
-  QUALIFIED: 'CompleteRegistration',// Level 2: Passed qualification
+  INTEREST: 'CompleteRegistration',  // Level 1: 3+ inbound messages
+  QUALIFIED: level2Event,           // Level 2: Passed qualification
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
 
@@ -98,7 +122,7 @@ export interface CapiEventParams {
   // User data for matching (at least one required)
   phone?: string;        // Will be hashed
   email?: string;        // Will be hashed
-  ctwaClid?: string;     // Stored for logs only; not used in payload
+  ctwaClid?: string;     // Click-to-WhatsApp Click ID (passed to payload for business_messaging)
 
   // Context
   dialogAnalysisId?: string;
@@ -144,37 +168,69 @@ function hashPhone(phone: string): string {
   return hashForCapi(normalized);
 }
 
+function normalizeCtwaClid(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 /**
  * Generate deterministic event ID for deduplication
- * Format: wa_{leadId}_{interest|qualified|purchase}_v1
+ * Level 1 prioritizes ctwa_clid when available to avoid dedup collisions
+ * between repeated ad clicks for the same lead.
  */
-function generateEventId(params: CapiEventParams): string {
+function generateEventId(params: CapiEventParams): { eventId: string; strategy: string } {
   const levelSuffix = {
     1: 'interest',
     2: 'qualified',
     3: 'purchase',
   }[params.eventLevel];
+  const normalizedCtwaClid = normalizeCtwaClid(params.ctwaClid);
 
-  const baseId = params.leadId || params.dialogAnalysisId || params.phone || params.email || params.ctwaClid;
+  if (params.eventLevel === 1 && normalizedCtwaClid) {
+    return {
+      eventId: `wa_${normalizedCtwaClid}_${levelSuffix}_v2`,
+      strategy: 'ctwa_level1_v2',
+    };
+  }
+
+  const baseId = params.leadId || params.dialogAnalysisId || params.phone || params.email || normalizedCtwaClid;
 
   if (params.leadId || params.dialogAnalysisId) {
-    return `wa_${baseId}_${levelSuffix}_v1`;
+    return {
+      eventId: `wa_${baseId}_${levelSuffix}_v1`,
+      strategy: 'lead_or_dialog',
+    };
   }
 
   if (params.phone) {
-    return `wa_${hashPhone(params.phone)}_${levelSuffix}_v1`;
+    return {
+      eventId: `wa_${hashPhone(params.phone)}_${levelSuffix}_v1`,
+      strategy: 'phone_hash',
+    };
   }
 
   if (params.email) {
-    return `wa_${hashForCapi(params.email)}_${levelSuffix}_v1`;
+    return {
+      eventId: `wa_${hashForCapi(params.email)}_${levelSuffix}_v1`,
+      strategy: 'email_hash',
+    };
   }
 
-  if (params.ctwaClid) {
-    return `wa_${params.ctwaClid}_${levelSuffix}_v1`;
+  if (normalizedCtwaClid) {
+    return {
+      eventId: `wa_${normalizedCtwaClid}_${levelSuffix}_v1`,
+      strategy: 'ctwa_v1',
+    };
   }
 
   const fallback = crypto.randomUUID();
-  return `wa_${fallback}_${levelSuffix}_v1`;
+  return {
+    eventId: `wa_${fallback}_${levelSuffix}_v1`,
+    strategy: 'random_uuid',
+  };
 }
 
 /**
@@ -262,6 +318,31 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
   } = params;
 
   const requestStartedAt = new Date();
+  const normalizedCtwaClid = normalizeCtwaClid(ctwaClid);
+  const businessMessagingEnabled = process.env.META_CAPI_ENABLE_BUSINESS_MESSAGING !== 'false';
+  const useBusinessMessaging = !!normalizedCtwaClid && businessMessagingEnabled;
+
+  const configuredFallbackActionSource = (process.env.META_CAPI_ACTION_SOURCE || 'system_generated').trim();
+  const normalizedFallbackActionSource = (configuredFallbackActionSource || 'system_generated').toLowerCase();
+
+  let safeFallbackActionSource = normalizedFallbackActionSource;
+  if (!ALLOWED_ACTION_SOURCES.has(safeFallbackActionSource)) {
+    log.warn({
+      configuredFallbackActionSource,
+      fallback: 'system_generated'
+    }, 'Invalid META_CAPI_ACTION_SOURCE config, falling back to system_generated');
+    safeFallbackActionSource = 'system_generated';
+  }
+
+  if (!normalizedCtwaClid && safeFallbackActionSource === 'business_messaging') {
+    log.warn({
+      configuredFallbackActionSource,
+      fallback: 'system_generated'
+    }, 'META_CAPI_ACTION_SOURCE=business_messaging requires ctwa_clid, falling back to system_generated');
+    safeFallbackActionSource = 'system_generated';
+  }
+
+  const actionSource = useBusinessMessaging ? 'business_messaging' : safeFallbackActionSource;
 
   log.info({
     correlationId,
@@ -270,6 +351,14 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     eventLevel,
     hasPhone: !!phone,
     hasEmail: !!email,
+    hasCtwaClid: !!normalizedCtwaClid,
+    ctwaClidPrefix: normalizedCtwaClid ? normalizedCtwaClid.slice(0, 10) : null,
+    useBusinessMessaging,
+    businessMessagingEnabled,
+    actionSource,
+    configuredFallbackActionSource,
+    normalizedFallbackActionSource,
+    configuredLevel2Event: level2Event,
     dialogAnalysisId,
     circuitBreakerState: circuitBreaker.getState(),
     action: 'capi_send_start',
@@ -303,8 +392,21 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
 
   try {
     // Generate unique event ID
-    const eventId = generateEventId(params);
+    const { eventId, strategy: eventIdStrategy } = generateEventId({
+      ...params,
+      ctwaClid: normalizedCtwaClid,
+    });
     const eventTime = Math.floor(Date.now() / 1000);
+
+    log.debug({
+      correlationId,
+      eventLevel,
+      eventId,
+      eventIdStrategy,
+      leadId: leadId || null,
+      dialogAnalysisId: dialogAnalysisId || null,
+      hasCtwaClid: !!normalizedCtwaClid
+    }, 'Generated deterministic CAPI event_id');
 
     // Build user_data object
     const userData: Record<string, string | string[]> = {};
@@ -340,13 +442,31 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       event_name: eventName,
       event_time: eventTime,
       event_id: eventId,
-      action_source: process.env.META_CAPI_ACTION_SOURCE || 'system_generated',
+      action_source: actionSource,
       user_data: userData,
       custom_data: mergedCustomData,
     };
 
-    if (eventSourceUrl) {
+    // Meta rejects event_source_url for business_messaging payloads.
+    if (eventSourceUrl && !useBusinessMessaging) {
       eventPayload.event_source_url = eventSourceUrl;
+    } else if (eventSourceUrl && useBusinessMessaging) {
+      log.debug({
+        correlationId,
+        eventName,
+        actionSource
+      }, 'Skipping event_source_url for business_messaging payload');
+    }
+
+    if (useBusinessMessaging) {
+      eventPayload.messaging_channel = 'whatsapp';
+      eventPayload.ctwa_clid = normalizedCtwaClid;
+    } else if (normalizedCtwaClid && !businessMessagingEnabled) {
+      log.info({
+        correlationId,
+        eventName,
+        ctwaClidPrefix: normalizedCtwaClid.slice(0, 10)
+      }, 'ctwa_clid present but META_CAPI_ENABLE_BUSINESS_MESSAGING=false, using fallback action_source');
     }
 
     // Request payload for logging (without access_token)
@@ -394,7 +514,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
         eventName,
         eventLevel,
         pixelId,
-        ctwaClid,
+        ctwaClid: normalizedCtwaClid,
         eventTime: new Date(eventTime * 1000),
         eventId,
         contactPhone: phone,
@@ -438,7 +558,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       eventName,
       eventLevel,
       pixelId,
-      ctwaClid,
+      ctwaClid: normalizedCtwaClid,
       eventTime: new Date(eventTime * 1000),
       eventId,
       contactPhone: phone,
@@ -483,7 +603,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       eventName,
       eventLevel,
       pixelId,
-      ctwaClid,
+      ctwaClid: normalizedCtwaClid,
       eventTime: new Date(),
       contactPhone: phone,
       capiStatus: 'error',

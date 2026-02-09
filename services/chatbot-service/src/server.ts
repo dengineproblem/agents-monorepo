@@ -616,7 +616,7 @@ app.post('/capi/crm-event', async (request, reply) => {
   }
 });
 
-// Interest (Contact) событие по счётчику сообщений
+// Interest (Level 1) событие по счётчику сообщений
 // Вызывается из agent-service когда лид достиг порога capi_msg_count
 // Qualified и Scheduled отправляются через AI анализ в processDialogForCapi
 app.post('/capi/interest-event', async (request, reply) => {
@@ -676,11 +676,11 @@ app.post('/capi/interest-event', async (request, reply) => {
       .eq('user_account_id', dialog.user_account_id)
       .maybeSingle();
 
-    // Отправить Contact (Interest) - Level 1
+    // Отправить Level 1 событие
     const response = await sendCapiEventAtomic({
       pixelId: pixelInfo.pixelId,
       accessToken: pixelInfo.accessToken,
-      eventName: CAPI_EVENTS.INTEREST,  // Contact
+      eventName: CAPI_EVENTS.INTEREST,
       eventLevel: 1,
       phone: contactPhone,
       ctwaClid: dialog.ctwa_clid || undefined,
@@ -699,12 +699,13 @@ app.post('/capi/interest-event', async (request, reply) => {
         contactPhone,
         dialogId: dialog.id,
         directionId: dialog.direction_id,
+        eventName: CAPI_EVENTS.INTEREST,
         eventId: response.eventId,
         durationMs,
         action: 'capi_interest_success'
-      }, 'Interest CAPI event (Contact) sent successfully');
+      }, 'Interest CAPI event sent successfully');
 
-      return reply.send({ success: true, event: 'Contact', eventId: response.eventId, correlationId });
+      return reply.send({ success: true, event: CAPI_EVENTS.INTEREST, eventId: response.eventId, correlationId });
     } else {
       const normalizedError = (response.error || '').toLowerCase();
       const statusCode = normalizedError.includes('already sent') ? 409 : 502;

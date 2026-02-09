@@ -4,9 +4,9 @@
  * Анализирует WhatsApp-переписки и определяет уровень конверсии лида.
  * Отправляет события в Meta CAPI при достижении уровней:
  *
- * 1. INTEREST (Lead) - клиент отправил 3+ входящих сообщений
- * 2. QUALIFIED (CompleteRegistration) - клиент ответил на все квалификационные вопросы
- * 3. SCHEDULED (Schedule) - клиент записался на ключевой этап
+ * 1. INTEREST (CompleteRegistration) - клиент отправил 3+ входящих сообщений
+ * 2. QUALIFIED (AddToCart/Subscribe) - клиент ответил на все квалификационные вопросы
+ * 3. SCHEDULED (Purchase) - клиент записался на ключевой этап
  */
 
 import OpenAI from 'openai';

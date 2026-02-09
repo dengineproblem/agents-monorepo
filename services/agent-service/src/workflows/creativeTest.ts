@@ -4,6 +4,7 @@ import { getDirectionSettings, buildTargeting } from '../lib/settingsHelpers.js'
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
+import { getCustomEventType } from '../lib/campaignBuilder.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
 
@@ -259,14 +260,19 @@ export async function workflowStartCreativeTest(
       destination_type = 'WHATSAPP';
 
       if (defaultSettings?.pixel_id) {
+        const customEventType = getCustomEventType(direction.optimization_level);
         promoted_object = {
           pixel_id: String(defaultSettings.pixel_id),
-          custom_event_type: 'PURCHASE'
+          custom_event_type: customEventType
         };
         if (context.whatsapp_phone_number) {
           promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
         }
-        log.info({ pixel_id: defaultSettings.pixel_id }, 'Using pixel_id for whatsapp_conversions');
+        log.info({
+          pixel_id: defaultSettings.pixel_id,
+          optimization_level: direction.optimization_level || 'level_1',
+          custom_event_type: customEventType
+        }, 'Using pixel_id for whatsapp_conversions');
       } else {
         promoted_object = {
           page_id: String(page_id)

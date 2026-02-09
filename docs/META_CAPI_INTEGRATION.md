@@ -13,8 +13,8 @@
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `Contact` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
-| 2 | `CompleteRegistration` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
+| 1 | `CompleteRegistration` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
+| 2 | `AddToCart`/`Subscribe` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
 | 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
 
 > Уровень 3 использует `event_name = Purchase`, даже если фактически это "запись".
@@ -113,16 +113,16 @@ AMO CRM / Bitrix24
 Клиент для отправки событий в Meta Conversions API.
 
 **Особенности:**
-- Хеширование телефона/email (SHA256)
+- Хеширование телефона (SHA256), email — опционально
 - external_id для дедупликации и матчинга
-- action_source: `system_generated` (события от системы/бота/CRM)
+- action_source: `business_messaging` при наличии `ctwa_clid`, иначе fallback `system_generated`
 
 **Типы событий:**
 
 ```typescript
 const CAPI_EVENTS = {
-  INTEREST: 'Contact',           // Level 1
-  QUALIFIED: 'CompleteRegistration', // Level 2
+  INTEREST: 'CompleteRegistration',  // Level 1
+  QUALIFIED: 'AddToCart' | 'Subscribe', // Level 2 (configurable)
   SCHEDULED: 'Purchase',             // Level 3
 };
 ```
@@ -134,7 +134,7 @@ const CAPI_EVENTS = {
 ### Миграция 125_meta_capi_tracking.sql
 
 **leads:**
-- `ctwa_clid` - Click-to-WhatsApp Click ID (legacy, не обязателен для текущего Pixel/CAPI потока)
+- `ctwa_clid` - Click-to-WhatsApp Click ID (используется для business_messaging payload при наличии)
 
 **dialog_analysis:**
 - `capi_interest_sent` / `_sent_at` / `_event_id` - флаги Level 1
@@ -151,7 +151,7 @@ const CAPI_EVENTS = {
 **dialog_analysis (новые поля):**
 - `capi_msg_count` (INT, default 0) — счётчик входящих сообщений от рекламных лидов
 - Считает только сообщения от контактов с `source_id` в таблице `leads`
-- Сбрасывается в 0 при повторном клике на рекламу (для отправки нового Contact)
+- Сбрасывается в 0 при повторном клике на рекламу (для отправки нового Level 1 события)
 
 **Важно:** `capi_msg_count` отделён от `incoming_count` — это позволяет:
 - Считать только сообщения ПОСЛЕ клика по рекламе
@@ -163,8 +163,8 @@ const CAPI_EVENTS = {
 - `capi_enabled` (BOOLEAN) - включен ли CAPI для направления
 - `capi_source` (TEXT) - источник событий: `whatsapp` или `crm`
 - `capi_crm_type` (TEXT) - тип CRM: `amocrm` или `bitrix24`
-- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/Contact)
-- `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/CompleteRegistration)
+- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/CompleteRegistration)
+- `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/AddToCart или Subscribe)
 -- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled → Purchase event_name)
 
 **Формат JSONB для CRM-полей:**
@@ -221,8 +221,8 @@ const CAPI_EVENTS = {
     - `Поля CRM`
     - `Этапы воронки`
   - Уровни:
-    - Level 1 (Интерес / Contact)
-    - Level 2 (Квалифицирован / CompleteRegistration)
+    - Level 1 (Интерес / CompleteRegistration)
+    - Level 2 (Квалифицирован / AddToCart или Subscribe)
     - Level 3 (Записался / Purchase)
   - Настройка доступна как при создании, так и при редактировании направления.
 
@@ -236,9 +236,12 @@ ENV переменная для настройки порога счётчика
 
 ```bash
 CAPI_INTEREST_THRESHOLD=3  # default: 3 сообщения
+META_CAPI_LEVEL2_EVENT=ADD_TO_CART  # ADD_TO_CART или SUBSCRIBE
+WHATSAPP_CONVERSIONS_LEVEL2_EVENT=ADD_TO_CART  # (опционально) override для promoted_object custom_event_type
+META_CAPI_ENABLE_BUSINESS_MESSAGING=true  # при наличии ctwa_clid
 ```
 
-Событие Contact отправляется когда `capi_msg_count >= CAPI_INTEREST_THRESHOLD`.
+Событие Level 1 отправляется когда `capi_msg_count >= CAPI_INTEREST_THRESHOLD`.
 
 ### 3. Access Token
 
@@ -246,9 +249,9 @@ CAPI_INTEREST_THRESHOLD=3  # default: 3 сообщения
 1. `ad_accounts.access_token` (multi-account mode)
 2. `user_accounts.access_token` (fallback)
 
-### 4. ctwa_clid (Click-to-WhatsApp Click ID, legacy)
+### 4. ctwa_clid (Click-to-WhatsApp Click ID)
 
-ctwa_clid сохраняется для справки/атрибуции, но **не используется** в текущем Pixel/CAPI потоке и **не требуется** для отправки событий (action_source = `system_generated`).
+ctwa_clid извлекается из входящих ad-сообщений и используется для Meta CAPI payload в режиме `business_messaging` (если значение доступно).
 
 **Извлечение из Evolution API (WHATSAPP-BAILEYS mode):**
 ```
@@ -265,6 +268,7 @@ EVOLUTION_AD_SOURCE_FALLBACK_ENABLED=true  # default: true
 
 В логах `evolutionWebhooks.ts` фиксируется происхождение ad-id:
 - `sourceIdOrigin=external`
+- `sourceIdOrigin=referral`
 - `sourceIdOrigin=key`
 - `sourceIdOrigin=none`
 
@@ -284,7 +288,7 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 
 ### Источник: WhatsApp
 
-#### Level 1 (Interest/Contact) — по счётчику сообщений
+#### Level 1 (Interest/CompleteRegistration) — по счётчику сообщений
 
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
    - Если есть `source_id` в сообщении:
@@ -300,7 +304,7 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 
 3. **chatbot-service** → `/capi/interest-event`
    - Получает `pixelId` и `accessToken` через `getDirectionPixelInfo()`
-   - Отправляет `Contact` через `sendCapiEventAtomic()`
+   - Отправляет Level 1 событие через `sendCapiEventAtomic()`
    - Обновляет `capi_interest_sent = true`
 
 #### Level 2, 3 (Qualified/Scheduled) — через Cron + AI анализ
@@ -414,7 +418,7 @@ Response:
    - `capi_msg_count++` при каждом входящем сообщении
 
 3. **При достижении порога (default: 3):**
-   - Отправляется Contact через `/capi/interest-event`
+   - Отправляется Level 1 событие через `/capi/interest-event`
    - `capi_interest_sent = true`
 
 ### Повторный клик на рекламу
@@ -422,7 +426,7 @@ Response:
 Если тот же контакт кликнет на рекламу снова (даже с тем же `source_id`):
 - `handleAdLead()` сбрасывает `capi_msg_count = 0`
 - `capi_interest_sent = false`
-- Contact отправится снова после 3 сообщений
+- Level 1 событие отправится снова после 3 сообщений
 
 Это корректное поведение — фактически происходит новое событие интереса.
 
@@ -453,7 +457,7 @@ Body:
 Response (success):
 {
   "success": true,
-  "event": "Contact",
+  "event": "CompleteRegistration",
   "eventId": "abc123..."
 }
 
@@ -467,7 +471,9 @@ Response (already sent):
 ## Дедупликация
 
 - Флаги `capi_*_sent` предотвращают повторную отправку
-- `event_id` генерируется детерминированно: `wa_{leadId}_{interest|qualified|purchase}_v1`
+- `event_id` генерируется детерминированно:
+  - Level 1 с `ctwa_clid`: `wa_{ctwa_clid}_interest_v2`
+  - Остальные случаи: `wa_{leadId|dialogId|phoneHash|emailHash(optional)}_{level}_v1`
 - Facebook использует event_id для дедупликации на своей стороне
 - **Interest:** сбрасывается при повторном клике на рекламу (новый цикл воронки)
 
@@ -478,10 +484,11 @@ Response (already sent):
 **Level 1 (Interest) — счётчик сообщений:**
 ```
 [evolutionWebhooks] Reset CAPI counter for new ad click { instanceName, clientPhone }
-[evolutionWebhooks] CAPI threshold reached, sending Contact { contactPhone, capiMsgCount, threshold, directionId }
+[evolutionWebhooks] CAPI threshold reached, sending Level 1 event { contactPhone, capiMsgCount, threshold, directionId }
 [evolutionWebhooks] CAPI Interest event sent successfully { instanceName, contactPhone }
-[chatbot-service] Interest CAPI event request { instanceName, contactPhone }
-[chatbot-service] Interest CAPI event (Contact) sent successfully { contactPhone, dialogId, directionId }
+[chatbot-service] Interest CAPI event request received { instanceName, contactPhone }
+[chatbot-service] Interest CAPI event sent successfully { contactPhone, dialogId, directionId, eventName }
+[metaCapiClient] Sending CAPI event { hasCtwaClid, actionSource, useBusinessMessaging, eventIdStrategy }
 ```
 
 **Level 2, 3 — AI анализ:**
@@ -512,7 +519,7 @@ Response (already sent):
 POST /v20.0/{pixel_id}/events
 {
   "data": [{
-    "event_name": "Contact",
+    "event_name": "CompleteRegistration",
     "event_time": 1703520000,
     "event_id": "abc123...",
     "event_source_url": "https://wa.me/",
@@ -658,15 +665,15 @@ Dashboard.tsx
 
 | Ряд | Метрики |
 |-----|---------|
-| 1 | CAPI Contact, CAPI Registration, CAPI Purchase (количество) |
-| 2 | Лиды → CAPI Contact %, Contact → Registration %, Registration → Purchase % |
-| 3 | Cost per Contact, Cost per Registration, Cost per Purchase |
+| 1 | CAPI Level 1, CAPI Level 2, CAPI Purchase (количество) |
+| 2 | Лиды → Level 1 %, Level 1 → Level 2 %, Level 2 → Purchase % |
+| 3 | Cost per Level 1, Cost per Level 2, Cost per Purchase |
 
 ### Расчёт стоимости
 
 ```typescript
 const totalSpend = campaignStats.reduce((sum, s) => sum + s.spend, 0);
-const costPerLead = totalSpend / capiStats.lead; // lead == Contact
+const costPerLead = totalSpend / capiStats.lead; // lead == Level 1 (CompleteRegistration)
 const costPerRegistration = totalSpend / capiStats.registration;
 const costPerSchedule = totalSpend / capiStats.schedule; // schedule == Purchase
 ```
@@ -721,13 +728,13 @@ Frontend логирует в консоль:
 - `(#100)` - пиксель не существует или нет доступа
 - `Invalid OAuth access token` - обновить токен
 
-### ctwa_clid = null (legacy, не блокирует CAPI)
+### ctwa_clid = null (fallback mode)
 
 **Симптомы:**
 - `dialog_analysis.ctwa_clid` всегда null
 - В логах видно что ctwa_clid приходит в webhook (не всегда)
 
-**Важно:** ctwa_clid больше не требуется для отправки событий (action_source = `system_generated`), поэтому отсутствие значения не влияет на CAPI.
+**Важно:** при отсутствии `ctwa_clid` CAPI отправляется с fallback `action_source = system_generated`.
 
 **Возможные причины:**
 
@@ -792,7 +799,7 @@ WHERE capi_interest_sent = true;
 
 **Симптомы:**
 - `capi_msg_count` не инкрементируется
-- Contact не отправляется после 3 сообщений
+- Level 1 событие не отправляется после 3 сообщений
 
 **Проверка:**
 
@@ -847,9 +854,9 @@ docker logs -f chatbot-service 2>&1 | grep "Interest CAPI"
 
 | Неделя | Событие для оптимизации |
 |--------|------------------------|
-| 1 | Contact (если 50+ событий) |
-| 2 | Contact → CompleteRegistration (если 50+) |
-| 3 | CompleteRegistration → Purchase |
+| 1 | CompleteRegistration (если 50+ событий) |
+| 2 | CompleteRegistration → AddToCart/Subscribe (если 50+) |
+| 3 | AddToCart/Subscribe → Purchase |
 
 Переключение на следующий уровень когда:
 - Накоплено 50+ событий текущего уровня

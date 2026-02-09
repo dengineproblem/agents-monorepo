@@ -20,7 +20,7 @@
 ```json
 {
   "pixel_id": "4205947936322188",
-  "custom_event_type": "CONTENT_VIEW",
+  "custom_event_type": "COMPLETE_REGISTRATION",
   "page_id": "290307200829671",
   "whatsapp_phone_number": "77077707066"
 }
@@ -30,8 +30,8 @@
 
 | Уровень | UI название | custom_event_type | CAPI event_name | Триггер |
 |---------|-------------|-------------------|-----------------|---------|
-| level_1 | Интерес | `CONTENT_VIEW` | `ViewContent` | 3+ сообщения от клиента |
-| level_2 | Квалификация | `COMPLETE_REGISTRATION` | `CompleteRegistration` | Клиент квалифицирован в CRM |
+| level_1 | Интерес | `COMPLETE_REGISTRATION` | `CompleteRegistration` | 3+ сообщения от клиента |
+| level_2 | Квалификация | `ADD_TO_CART` (или `SUBSCRIBE`) | `AddToCart` (или `Subscribe`) | Клиент квалифицирован в CRM |
 | level_3 | Запись/Покупка | `PURCHASE` | `Purchase` | Клиент записался или купил |
 
 ## База данных
@@ -147,7 +147,7 @@ Content-Type: application/json
 ├── directionName
 ├── objective: whatsapp_conversions
 ├── optimization_level
-├── custom_event_type: CONTENT_VIEW|COMPLETE_REGISTRATION|PURCHASE
+├── custom_event_type: COMPLETE_REGISTRATION|ADD_TO_CART|SUBSCRIBE|PURCHASE
 ├── pixel_id
 ├── page_id
 └── has_whatsapp_number
@@ -234,7 +234,7 @@ WhatsApp-конверсии требуют настроенный Meta Pixel. Д
   "destination_type": "WHATSAPP",
   "promoted_object": {
     "pixel_id": "4205947936322188",
-    "custom_event_type": "CONTENT_VIEW",
+    "custom_event_type": "COMPLETE_REGISTRATION",
     "page_id": "290307200829671",
     "whatsapp_phone_number": "77077707066"
   }

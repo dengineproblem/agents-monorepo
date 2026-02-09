@@ -26,6 +26,12 @@ const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-s
 // Forwarding to ad-analytics
 const AD_ANALYTICS_WEBHOOK_URL = process.env.AD_ANALYTICS_WEBHOOK_URL || '';
 
+function normalizeCtwaClid(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // ============================================
 // Main Export
 // ============================================
@@ -172,15 +178,36 @@ async function handleWabaMessages(value: WabaValue, app: FastifyInstance) {
     }
 
     const referral = message.referral!;
+    const normalizedCtwaClid = normalizeCtwaClid(referral.ctwa_clid);
+    const normalizedSourceType = (referral.source_type || '').toLowerCase();
+
+    if (normalizedSourceType && normalizedSourceType !== 'ad' && normalizedSourceType !== 'advertisement') {
+      app.log.debug({
+        from: message.from,
+        sourceId: referral.source_id,
+        sourceType: referral.source_type
+      }, 'WABA: Referral source_type is not ad, skipping');
+      continue;
+    }
 
     app.log.info({
       from: message.from,
       sourceId: referral.source_id,
-      ctwaClid: referral.ctwa_clid,
+      sourceType: referral.source_type || null,
+      hasCtwaClid: !!normalizedCtwaClid,
+      ctwaClidPrefix: normalizedCtwaClid ? normalizedCtwaClid.slice(0, 10) : null,
       sourceUrl: referral.source_url,
       phoneNumberId,
       displayPhoneNumber
     }, 'WABA: Processing ad lead');
+
+    if (!normalizedCtwaClid) {
+      app.log.debug({
+        from: message.from,
+        sourceId: referral.source_id,
+        referralKeys: Object.keys(referral)
+      }, 'WABA: Ad referral without ctwa_clid');
+    }
 
     await processWabaAdLead({
       phoneNumberId,
@@ -189,7 +216,7 @@ async function handleWabaMessages(value: WabaValue, app: FastifyInstance) {
       contactName,
       sourceId: referral.source_id,
       sourceUrl: referral.source_url,
-      ctwaClid: referral.ctwa_clid || null,
+      ctwaClid: normalizedCtwaClid,
       messageText: extractMessageText(message),
       messageType: message.type,
       timestamp: new Date(parseInt(message.timestamp) * 1000),
@@ -509,7 +536,7 @@ async function upsertDialogAnalysis(params: {
         threshold: CAPI_INTEREST_THRESHOLD,
         directionId: finalDirectionId,
         capiSource: capiSource || null
-      }, 'WABA: CAPI threshold reached, sending Contact');
+      }, 'WABA: CAPI threshold reached, sending Level 1 event');
 
       await sendCapiInterestEvent(instanceName, contactPhone, app);
     } else if (isFromAd && !isWhatsappCapiTrackingEnabled) {

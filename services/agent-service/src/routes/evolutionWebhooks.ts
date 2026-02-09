@@ -101,6 +101,15 @@ function normalizeSourceId(value: unknown): string | undefined {
   return undefined;
 }
 
+function normalizeCtwaClid(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 /**
  * Handle incoming WhatsApp message
  */
@@ -157,35 +166,69 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   let messageType: 'text' | 'audio' | 'image' | 'video' | 'document' = 'text';
   const audioMessage = message.message?.audioMessage as WhatsAppAudioMessage | undefined;
 
-  // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из contextInfo.externalAdReply
-  // В реальных вебхуках Evolution API contextInfo приходит на верхнем уровне data
-  const contextInfo = data.contextInfo ||  // ✅ Top-level contextInfo (REAL ad messages)
-                      message.message?.contextInfo ||  // Fallback: Standard messages
-                      message.message?.extendedTextMessage?.contextInfo;  // Fallback: Extended text
-  
-  // Извлекаем метаданные Facebook из externalAdReply
-  const externalAdReply = contextInfo?.externalAdReply;
-  const sourceId = normalizeSourceId(externalAdReply?.sourceId); // Ad ID из Facebook (например: "120236271994930134")
-  const keySourceId = normalizeSourceId(message.key?.sourceId); // Fallback формат Evolution patch
-  const sourceType = externalAdReply?.sourceType; // "ad" для рекламных сообщений
-  const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
-  const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
+  // Извлекаем ad metadata из нескольких вариантов payload.
+  // Evolution/Baileys может передавать referral/context в разных полях.
+  const contextInfo = data.contextInfo ||
+                      data.message?.contextInfo ||
+                      data.message?.extendedTextMessage?.contextInfo ||
+                      message.message?.contextInfo ||
+                      message.message?.extendedTextMessage?.contextInfo;
 
-  // ✅ НОВОЕ: Извлекаем ctwa_clid (Click-to-WhatsApp Click ID) для Meta CAPI
-  // ctwa_clid используется для атрибуции конверсий в Meta Conversions API
-  // Может приходить в разных местах в зависимости от версии Evolution API
-  const referral = contextInfo?.referral || data.referral;
-  const ctwaClid = referral?.ctwaClid ||  // Стандартное место
-                   contextInfo?.ctwaClid ||  // Альтернативное место
-                   externalAdReply?.ctwaClid ||  // В externalAdReply
-                   data.ctwaClid;  // На верхнем уровне data
+  const conversationContext = data.conversationContext || message.message?.conversationContext;
+  const referral = contextInfo?.referral || data.referral || conversationContext?.referral;
+  const referredProductPromotion = contextInfo?.referredProductPromotion ||
+                                   contextInfo?.referencedProductPromotion ||
+                                   data.referredProductPromotion ||
+                                   data.referencedProductPromotion;
+  const externalAdReply = contextInfo?.externalAdReply;
+
+  const externalSourceId = normalizeSourceId(externalAdReply?.sourceId);
+  const referralSourceId = normalizeSourceId(
+    referral?.sourceId || referral?.source_id || data.sourceId || data.source_id
+  );
+  const sourceId = externalSourceId || referralSourceId;
+  const keySourceId = normalizeSourceId(message.key?.sourceId); // Fallback формат Evolution patch
+  const sourceType = externalAdReply?.sourceType || referral?.sourceType || referral?.source_type;
+  const sourceUrl = externalAdReply?.sourceUrl || referral?.sourceUrl || referral?.source_url;
+  const mediaUrl = externalAdReply?.mediaUrl ||
+                   referral?.mediaUrl ||
+                   referral?.imageUrl ||
+                   referral?.videoUrl ||
+                   referral?.image_url ||
+                   referral?.video_url;
+
+  // Click-to-WhatsApp Click ID может приходить в referral/conversationContext/contextInfo/externalAdReply.
+  const ctwaCandidates = [
+    { source: 'referral.ctwaClid', value: referral?.ctwaClid },
+    { source: 'referral.ctwa_clid', value: referral?.ctwa_clid },
+    { source: 'conversationContext.ctwaClid', value: conversationContext?.ctwaClid },
+    { source: 'conversationContext.referralCtwaClid', value: conversationContext?.referralCtwaClid },
+    { source: 'referredProductPromotion.ctwaClid', value: referredProductPromotion?.ctwaClid },
+    { source: 'referredProductPromotion.ctwa_clid', value: referredProductPromotion?.ctwa_clid },
+    { source: 'contextInfo.ctwaClid', value: contextInfo?.ctwaClid },
+    { source: 'externalAdReply.ctwaClid', value: externalAdReply?.ctwaClid },
+    { source: 'data.ctwaClid', value: data.ctwaClid },
+    { source: 'data.ctwa_clid', value: data.ctwa_clid },
+  ] as const;
+
+  const resolvedCtwa = ctwaCandidates
+    .map((candidate) => ({
+      source: candidate.source,
+      value: normalizeCtwaClid(candidate.value)
+    }))
+    .find((candidate) => !!candidate.value);
+
+  const ctwaClid = resolvedCtwa?.value;
+  const ctwaClidSource = resolvedCtwa?.source || 'none';
 
   // Приоритет: externalAdReply.sourceId -> fallback message.key.sourceId (под флагом)
   const fallbackSourceId = EVOLUTION_AD_SOURCE_FALLBACK_ENABLED && !sourceId
     ? keySourceId
     : undefined;
   const finalSourceId = sourceId || fallbackSourceId;
-  const sourceIdOrigin = sourceId ? 'external' : (fallbackSourceId ? 'key' : 'none');
+  const sourceIdOrigin = externalSourceId
+    ? 'external'
+    : (referralSourceId ? 'referral' : (fallbackSourceId ? 'key' : 'none'));
 
   // Log message structure for debugging
   app.log.info({
@@ -199,13 +242,43 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     sourceType: sourceType || null,
     sourceUrl: sourceUrl || null,
     ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: логируем ctwa_clid для CAPI
+    ctwaClidSource,
     hasExternalAdReply: !!externalAdReply,
     hasReferral: !!referral,
+    hasConversationContext: !!conversationContext,
+    hasReferredProductPromotion: !!referredProductPromotion,
+    externalSourceId: externalSourceId || null,
+    referralSourceId: referralSourceId || null,
     keyKeys: message.key ? Object.keys(message.key) : [],
     messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
 
   const hasAdMetadata = !!finalSourceId;
+
+  if (hasAdMetadata && ctwaClid) {
+    app.log.debug({
+      instance,
+      remoteJid,
+      sourceId: finalSourceId,
+      sourceIdOrigin,
+      ctwaClidSource,
+      ctwaClidPrefix: ctwaClid.slice(0, 10)
+    }, 'Resolved ad metadata with ctwa_clid');
+  }
+
+  if (hasAdMetadata && !ctwaClid) {
+    app.log.debug({
+      instance,
+      remoteJid,
+      sourceId: finalSourceId,
+      sourceIdOrigin,
+      ctwaClidSource,
+      contextInfoKeys: contextInfo ? Object.keys(contextInfo) : [],
+      referralKeys: referral ? Object.keys(referral) : [],
+      conversationContextKeys: conversationContext ? Object.keys(conversationContext) : [],
+      externalAdReplyKeys: externalAdReply ? Object.keys(externalAdReply) : []
+    }, 'Ad message detected without ctwa_clid');
+  }
 
   if (sourceIdOrigin === 'key') {
     app.log.info({
@@ -339,7 +412,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   }
 
   // ✅ Дополнительная проверка sourceType (опционально, но надежнее)
-  if (sourceType && sourceType !== 'ad') {
+  const normalizedSourceType = typeof sourceType === 'string' ? sourceType.toLowerCase() : '';
+  if (normalizedSourceType && normalizedSourceType !== 'ad' && normalizedSourceType !== 'advertisement') {
     app.log.debug({
       instance,
       remoteJid,
@@ -638,7 +712,7 @@ async function getDirectionCapiSource(directionId: string | null | undefined): P
 }
 
 /**
- * Отправить CAPI Interest (Contact) событие через chatbot-service
+ * Отправить CAPI Interest (Level 1) событие через chatbot-service
  */
 async function sendCapiInterestEvent(
   app: FastifyInstance,
@@ -714,7 +788,7 @@ async function sendCapiInterestEvent(
 
 /**
  * Создать или обновить запись в dialog_analysis
- * С CAPI Interest (Contact) логикой по счётчику сообщений
+ * С CAPI Interest (Level 1) логикой по счётчику сообщений
  */
 async function upsertDialogAnalysis(params: {
   userAccountId: string;
@@ -798,7 +872,7 @@ async function upsertDialogAnalysis(params: {
       app.log.error({ error: updateError, existingId: existing.id }, 'Failed to update dialog_analysis');
     }
 
-    // CAPI: Проверить порог для Contact (Interest)
+    // CAPI: Проверить порог для Level 1 (Interest)
     const INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 
     // ✅ ИСПРАВЛЕНО: используем finalDirectionId (может быть передан явно)
@@ -816,7 +890,7 @@ async function upsertDialogAnalysis(params: {
         threshold: INTEREST_THRESHOLD,
         directionId: finalDirectionId,
         capiSource: capiSource || null
-      }, 'CAPI threshold reached, sending Contact');
+      }, 'CAPI threshold reached, sending Level 1 event');
 
       await sendCapiInterestEvent(app, instanceName, contactPhone);
     } else if (isFromAd && !isWhatsappCapiTrackingEnabled) {

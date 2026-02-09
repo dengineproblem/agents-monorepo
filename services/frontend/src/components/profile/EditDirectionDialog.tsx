@@ -1501,7 +1501,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                             Level 1: Интерес
                           </Label>
                           <p className="text-xs text-muted-foreground">
-                            Contact — 3+ сообщения от клиента
+                            CompleteRegistration — 3+ сообщения от клиента
                           </p>
                         </div>
                       </div>
@@ -1512,7 +1512,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                             Level 2: Квалификация
                           </Label>
                           <p className="text-xs text-muted-foreground">
-                            CompleteRegistration — клиент квалифицирован
+                            AddToCart/Subscribe — клиент квалифицирован
                           </p>
                         </div>
                       </div>
@@ -1864,7 +1864,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
                                   <div className="space-y-3 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
                                     <div className="flex items-center gap-2">
-                                      <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (CompleteRegistration)</span>
+                                      <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (AddToCart/Subscribe)</span>
                                     </div>
                                     <div className="space-y-2">
                                       <Label className="text-xs">Триггер CAPI</Label>

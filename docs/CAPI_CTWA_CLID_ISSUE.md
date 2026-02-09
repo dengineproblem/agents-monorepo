@@ -1,131 +1,72 @@
-# Проблема: ctwa_clid отсутствует для рекламных лидов
-
-> ⚠️ Legacy заметка: текущая интеграция использует `action_source = system_generated` и не требует `ctwa_clid` для отправки CAPI событий. Этот документ актуален только для старой схемы с `business_messaging`.
+# ctwa_clid в CTWA: текущее состояние и диагностика
 
 ## Статус
-**CAPI работает**, но без полной атрибуции (ctwa_clid = null)
+- CAPI работает стабильно.
+- При наличии `ctwa_clid` отправляется `action_source=business_messaging` + `messaging_channel=whatsapp`.
+- При отсутствии `ctwa_clid` используется fallback `action_source=system_generated`.
 
-## Что было сделано
+Это означает, что отсутствие `ctwa_clid` не блокирует отправку событий, но ухудшает рекламную атрибуцию.
 
-### 1. Исправлена отправка CAPI событий
-- **Проблема**: Meta API возвращал ошибки 2804064 и 2804066
-- **Причина**: `action_source: 'business_messaging'` требует наличия `ctwa_clid`
-- **Решение**: Условная логика в `metaCapiClient.ts`:
-  ```typescript
-  if (ctwaClid) {
-    eventPayload.action_source = 'business_messaging';
-    eventPayload.messaging_channel = 'whatsapp';
-  } else {
-    eventPayload.action_source = 'other';
-  }
-  ```
-- **Результат**: 30/30 событий отправляются успешно
-- **Коммит**: `0a446ee`
+## Что уже реализовано
 
-### 2. Создан endpoint для принудительной отправки CAPI
-- **Файл**: `services/chatbot-service/src/server.ts`
-- **Endpoint**: `POST /capi/resend`
-- **Параметры**: `direction_id`, `dialog_ids`, `event_levels`
-
-## Нерешённая проблема: ctwa_clid = null
-
-### Суть проблемы
-Все лиды в базе данных имеют `ctwa_clid: null`, хотя они приходят из рекламы Facebook/Instagram (Click-to-WhatsApp ads).
-
-### Доказательства что лиды из рекламы
-- У лидов есть `direction_id` (связь с рекламным направлением)
-- Лиды маппятся с объявлениями в UI
-- Пользователь подтверждает что все лиды приходят из рекламы
-
-### SQL запрос для проверки
-```sql
-SELECT id, contact_phone, ctwa_clid, direction_id, source_id
-FROM dialog_analysis
-WHERE direction_id IS NOT NULL
-LIMIT 10;
-```
-**Результат**: Все записи имеют `ctwa_clid: null`
-
-### Где должен извлекаться ctwa_clid
-**Файл**: `services/agent-service/src/routes/evolutionWebhooks.ts` (строки 154-161)
+### 1. Надёжный fallback в `metaCapiClient.ts`
 
 ```typescript
-const referral = contextInfo?.referral || data.referral;
-const ctwaClid = referral?.ctwaClid ||  // Стандартное место
-                 contextInfo?.ctwaClid ||  // Альтернативное место
-                 externalAdReply?.ctwaClid ||  // В externalAdReply
-                 data.ctwaClid;  // На верхнем уровне data
-```
-
-### Логирование показывает
-```json
-{
-  "ctwaClid": null,
-  "hasExternalAdReply": false,
-  "hasReferral": false
+if (useBusinessMessaging) {
+  eventPayload.action_source = 'business_messaging';
+  eventPayload.messaging_channel = 'whatsapp';
+  eventPayload.ctwa_clid = normalizedCtwaClid;
+} else {
+  eventPayload.action_source = 'system_generated';
 }
 ```
 
-**Вывод**: Evolution API НЕ передаёт ctwa_clid в вебхуках.
+### 2. Расширенное извлечение `ctwa_clid` в webhook обработчиках
 
-## Что нужно исследовать
+Проверяются несколько путей:
+- `referral.ctwaClid` / `referral.ctwa_clid`
+- `conversationContext.ctwaClid`
+- `conversationContext.referralCtwaClid`
+- `referredProductPromotion.ctwaClid`
+- `externalAdReply.ctwaClid`
+- top-level поля payload
 
-### 1. Формат вебхуков Evolution API
-- Посмотреть полную структуру входящего вебхука для рекламного лида
-- Добавить детальный лог всего объекта `data` при входящем сообщении:
-  ```typescript
-  app.log.info({ fullData: JSON.stringify(data) }, 'Full webhook data');
-  ```
+### 3. Подробное логирование
 
-### 2. Документация Evolution API
-- Проверить, поддерживает ли Evolution API передачу ctwa_clid
-- Возможно требуется специальная настройка или версия API
+Логи включают:
+- откуда взят ad source (`sourceIdOrigin`: `external|referral|key|none`)
+- откуда взят `ctwa_clid` (`ctwaClidSource`)
+- префикс `ctwa_clid` для безопасной диагностики
+- ключи `contextInfo/referral` если ad есть, но `ctwa_clid` нет
 
-### 3. Альтернативные источники ctwa_clid
-- WhatsApp Business API напрямую (не через Evolution)
-- Meta Webhooks API
-- Проверить, приходит ли ctwa_clid как query parameter при клике на рекламу
+## Почему `ctwa_clid` может быть пустым
 
-### 4. Тип remoteJid для рекламных лидов
-- Рекламные лиды должны иметь `remoteJid` типа `@s.whatsapp.net` или `@lid`
-- Групповые чаты (`@g.us`) - это НЕ рекламные лиды
-- Нужно найти логи именно для рекламных лидов
+1. Провайдер webhook не передаёт CTWA metadata для конкретного сообщения.
+2. `ctwa_clid` приходит только в первом сообщении после клика по рекламе.
+3. Источник не является ad-сообщением (`source_type != ad/advertisement`).
+4. Поле приходит в нестандартном месте, которое ещё не покрыто extractor'ом.
 
-## Файлы для изучения
-
-| Файл | Описание |
-|------|----------|
-| `services/agent-service/src/routes/evolutionWebhooks.ts` | Обработка вебхуков Evolution API |
-| `services/chatbot-service/src/lib/metaCapiClient.ts` | Отправка CAPI событий |
-| `services/chatbot-service/src/lib/qualificationAgent.ts` | Квалификация лидов и вызов CAPI |
-| `services/chatbot-service/src/server.ts` | Endpoint `/capi/resend` |
-
-## Текущее состояние
-
-| Компонент | Статус |
-|-----------|--------|
-| CAPI отправка событий | ✅ Работает (action_source: 'other') |
-| Атрибуция с ctwa_clid | ❌ Не работает (ctwa_clid = null) |
-| Извлечение ctwa_clid из вебхуков | ❓ Код есть, но данные не приходят |
-
-## Команды для диагностики
+## Проверки в проде
 
 ```bash
-# Логи agent-service (вебхуки)
-docker logs --tail 500 agents-monorepo-agent-service-1 2>&1 | grep -i "Incoming message structure"
+# Evolution/WABA webhook diagnostics
+docker logs --tail 1000 agent-service 2>&1 | grep -E "(ctwaClid|ctwa_clid|sourceIdOrigin|sourceType)"
 
-# Логи chatbot-service (CAPI)
-docker logs --tail 300 chatbot-service-deploy 2>&1 | grep -i "capi"
-
-# Тест отправки CAPI
-curl -X POST http://localhost:8083/capi/resend \
-  -H "Content-Type: application/json" \
-  -d '{"direction_id": "YOUR_DIRECTION_ID", "event_levels": [1]}'
+# CAPI diagnostics
+docker logs --tail 1000 chatbot-service 2>&1 | grep -E "(business_messaging|system_generated|eventIdStrategy|ctwa)"
 ```
 
-## Гипотезы
+```sql
+-- Рекламные лиды с ctwa_clid
+SELECT contact_phone, source_id, ctwa_clid, created_at
+FROM dialog_analysis
+WHERE source_id IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 50;
+```
 
-1. **Evolution API не поддерживает ctwa_clid** - нужно проверить документацию
-2. **ctwa_clid приходит в другом месте** - нужно залогировать полный payload вебхука
-3. **Требуется настройка Evolution API** - возможно нужно включить какую-то опцию
-4. **Нужен прямой доступ к WhatsApp Business API** - Evolution может терять эти данные
+## Решение при системном отсутствии `ctwa_clid`
+
+- Оставлять текущий fallback (`system_generated`) как безопасный режим.
+- Оптимизацию кампаний вести через стандартные события (`CompleteRegistration`, `AddToCart/Subscribe`, `Purchase`).
+- Для полного CTWA-matching приоритетно использовать источник сообщений, который гарантированно передаёт `ctwa_clid`.

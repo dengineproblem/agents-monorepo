@@ -38,7 +38,7 @@ WABA (WhatsApp Business API) — официальное API от Meta для о�
 │  │  2. Парсинг WabaWebhookPayload                                      │ │
 │  │  3. Обработка сообщений с ad referral (source_id)                   │ │
 │  │  4. Создание/обновление lead                                         │ │
-│  │  5. CAPI tracking (ViewContent после N сообщений)                   │ │
+│  │  5. CAPI tracking (Level 1 после N сообщений)                       │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐ │
@@ -113,8 +113,14 @@ WABA_VERIFY_TOKEN=your_verify_token
 # App Secret для проверки подписи X-Hub-Signature-256
 WABA_APP_SECRET=your_app_secret
 
-# Порог сообщений для отправки CAPI Interest event
+# Порог сообщений для отправки CAPI Level 1 event
 CAPI_INTEREST_THRESHOLD=3  # По умолчанию: 3
+
+# Событие для Level 2 (квалификация): ADD_TO_CART или SUBSCRIBE
+META_CAPI_LEVEL2_EVENT=ADD_TO_CART
+
+# Разрешить business_messaging payload при наличии ctwa_clid
+META_CAPI_ENABLE_BUSINESS_MESSAGING=true
 ```
 
 ### Отключение WABA
@@ -250,12 +256,24 @@ GET /webhooks/waba?hub.mode=subscribe&hub.verify_token=xxx&hub.challenge=123
 
 ### 3. CAPI Integration
 
-После N сообщений (по умолчанию 3) отправляется `ViewContent` event через CAPI:
+После N сообщений (по умолчанию 3) отправляется **Level 1** event (`CompleteRegistration`) через CAPI:
 
 ```
 dialog_analysis.capi_msg_count >= CAPI_INTEREST_THRESHOLD
 → POST /capi/interest-event → Meta Conversions API
 ```
+
+Сопоставление уровней событий:
+
+| Уровень | custom_event_type | CAPI event_name |
+|---------|-------------------|-----------------|
+| Level 1 | `COMPLETE_REGISTRATION` | `CompleteRegistration` |
+| Level 2 | `ADD_TO_CART` или `SUBSCRIBE` | `AddToCart` или `Subscribe` |
+| Level 3 | `PURCHASE` | `Purchase` |
+
+По `ctwa_clid`:
+- Если `ctwa_clid` есть и `META_CAPI_ENABLE_BUSINESS_MESSAGING=true`, отправляется payload с `action_source=business_messaging`, `messaging_channel=whatsapp`.
+- Если `ctwa_clid` отсутствует, используется fallback `action_source=system_generated`.
 
 ---
 
