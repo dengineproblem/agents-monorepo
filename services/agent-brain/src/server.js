@@ -5255,6 +5255,9 @@ async function processUserTikTok(user) {
     status: 'started'
   });
 
+  // Step 1: Brain run (анализ и действия) — может упасть, но не блокирует метрики
+  let brainResult = null;
+  let brainError = null;
   try {
     const response = await fetch('http://localhost:7080/api/brain/run-tiktok', {
       method: 'POST',
@@ -5270,135 +5273,128 @@ async function processUserTikTok(user) {
       throw new Error(`TikTok brain run failed: ${response.status}`);
     }
 
-    const result = await response.json();
-
-    // Собираем TikTok метрики за последние 7 дней
-    let metricsResult = null;
-    if (user.tiktok_business_id && user.tiktok_access_token) {
-      try {
-        fastify.log.info({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          action: 'collecting_metrics'
-        }, 'Starting TikTok metrics collection');
-
-        metricsResult = await collectTikTokMetricsForDays(
-          user.tiktok_business_id,  // advertiserId
-          user.tiktok_access_token, // accessToken
-          user.id,                   // userAccountId
-          accountId,                 // accountId (UUID or null)
-          7                          // days
-        );
-
-        fastify.log.info({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          metricsCollected: metricsResult.totalMetrics,
-          errorsCount: metricsResult.errors?.length || 0,
-          action: 'metrics_collected'
-        }, 'TikTok metrics collection completed');
-      } catch (metricsErr) {
-        fastify.log.warn({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          error: metricsErr.message,
-          action: 'metrics_collection_failed'
-        }, 'Failed to collect TikTok metrics, continuing...');
-      }
-    }
-
-    // Собираем TikTok лиды из Instant Forms за последние 2 дня
-    let leadsResult = null;
-    if (user.tiktok_business_id && user.tiktok_access_token) {
-      try {
-        fastify.log.info({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          action: 'collecting_leads'
-        }, 'Starting TikTok leads collection');
-
-        leadsResult = await collectTikTokLeads(
-          user.tiktok_business_id,
-          user.tiktok_access_token,
-          user.id,
-          accountId,
-          { days: 2 }
-        );
-
-        fastify.log.info({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          newLeads: leadsResult.newLeads,
-          duplicates: leadsResult.duplicates,
-          errorsCount: leadsResult.errors?.length || 0,
-          action: 'leads_collected'
-        }, 'TikTok leads collection completed');
-      } catch (leadsErr) {
-        fastify.log.warn({
-          where: 'processUserTikTok',
-          userId: user.id,
-          accountId: accountId || 'legacy',
-          error: leadsErr.message,
-          action: 'leads_collection_failed'
-        }, 'Failed to collect TikTok leads, continuing...');
-      }
-    }
-
-    const duration = Date.now() - startTime;
-
-    fastify.log.info({
-      where: 'processUserTikTok',
-      userId: user.id,
-      username: user.username,
-      accountId: accountId || 'legacy',
-      status: 'completed',
-      duration,
-      actionsCount: result.actions?.length || 0,
-      dispatched: result.dispatched,
-      telegramSent: result.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0,
-      leadsCollected: leadsResult?.newLeads || 0,
-      leadsDuplicates: leadsResult?.duplicates || 0
-    });
-
-    return {
-      userId: user.id,
-      username: user.username,
-      accountId: accountId,
-      success: true,
-      actionsCount: result.actions?.length || 0,
-      telegramSent: result.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0,
-      leadsCollected: leadsResult?.newLeads || 0,
-      leadsDuplicates: leadsResult?.duplicates || 0,
-      duration
-    };
+    brainResult = await response.json();
   } catch (err) {
-    const duration = Date.now() - startTime;
+    brainError = String(err?.message || err);
     fastify.log.error({
       where: 'processUserTikTok',
       userId: user.id,
       username: user.username,
       accountId: accountId || 'legacy',
-      status: 'failed',
-      duration,
-      error: String(err?.message || err)
+      phase: 'brain_run_failed',
+      error: brainError
     });
-
-    return {
-      userId: user.id,
-      username: user.username,
-      accountId: accountId,
-      success: false,
-      error: String(err?.message || err),
-      duration
-    };
   }
+
+  // Step 2: Собираем TikTok метрики за последние 7 дней (НЕЗАВИСИМО от brain run)
+  let metricsResult = null;
+  if (user.tiktok_business_id && user.tiktok_access_token) {
+    try {
+      fastify.log.info({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        action: 'collecting_metrics'
+      }, 'Starting TikTok metrics collection');
+
+      metricsResult = await collectTikTokMetricsForDays(
+        user.tiktok_business_id,  // advertiserId
+        user.tiktok_access_token, // accessToken
+        user.id,                   // userAccountId
+        accountId,                 // accountId (UUID or null)
+        7                          // days
+      );
+
+      fastify.log.info({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        metricsCollected: metricsResult.totalMetrics,
+        errorsCount: metricsResult.errors?.length || 0,
+        action: 'metrics_collected'
+      }, 'TikTok metrics collection completed');
+    } catch (metricsErr) {
+      fastify.log.warn({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        error: metricsErr.message,
+        action: 'metrics_collection_failed'
+      }, 'Failed to collect TikTok metrics, continuing...');
+    }
+  }
+
+  // Step 3: Собираем TikTok лиды из Instant Forms за последние 2 дня (НЕЗАВИСИМО от brain run)
+  let leadsResult = null;
+  if (user.tiktok_business_id && user.tiktok_access_token) {
+    try {
+      fastify.log.info({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        action: 'collecting_leads'
+      }, 'Starting TikTok leads collection');
+
+      leadsResult = await collectTikTokLeads(
+        user.tiktok_business_id,
+        user.tiktok_access_token,
+        user.id,
+        accountId,
+        { days: 2 }
+      );
+
+      fastify.log.info({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        newLeads: leadsResult.newLeads,
+        duplicates: leadsResult.duplicates,
+        errorsCount: leadsResult.errors?.length || 0,
+        action: 'leads_collected'
+      }, 'TikTok leads collection completed');
+    } catch (leadsErr) {
+      fastify.log.warn({
+        where: 'processUserTikTok',
+        userId: user.id,
+        accountId: accountId || 'legacy',
+        error: leadsErr.message,
+        action: 'leads_collection_failed'
+      }, 'Failed to collect TikTok leads, continuing...');
+    }
+  }
+
+  const duration = Date.now() - startTime;
+  const success = !brainError;
+
+  fastify.log.info({
+    where: 'processUserTikTok',
+    userId: user.id,
+    username: user.username,
+    accountId: accountId || 'legacy',
+    status: success ? 'completed' : 'partial',
+    brainRunOk: success,
+    duration,
+    actionsCount: brainResult?.actions?.length || 0,
+    dispatched: brainResult?.dispatched,
+    telegramSent: brainResult?.telegramSent || false,
+    metricsCollected: metricsResult?.totalMetrics || 0,
+    leadsCollected: leadsResult?.newLeads || 0,
+    leadsDuplicates: leadsResult?.duplicates || 0
+  });
+
+  return {
+    userId: user.id,
+    username: user.username,
+    accountId: accountId,
+    success: success,
+    brainError: brainError || undefined,
+    actionsCount: brainResult?.actions?.length || 0,
+    telegramSent: brainResult?.telegramSent || false,
+    metricsCollected: metricsResult?.totalMetrics || 0,
+    leadsCollected: leadsResult?.newLeads || 0,
+    leadsDuplicates: leadsResult?.duplicates || 0,
+    duration
+  };
 }
 
 // ============================================================================
@@ -6914,6 +6910,9 @@ async function processAccountTikTok(account) {
     mode: isAutopilot ? 'autopilot' : 'report'
   });
 
+  // Step 1: Brain run (анализ и действия) — может упасть, но не блокирует метрики
+  let runResult = null;
+  let brainError = null;
   try {
     const runResponse = await fetch('http://localhost:7080/api/brain/run-tiktok', {
       method: 'POST',
@@ -6930,124 +6929,119 @@ async function processAccountTikTok(account) {
       throw new Error(`HTTP ${runResponse.status}: ${errorText.slice(0, 200)}`);
     }
 
-    const runResult = await runResponse.json();
-
-    // Собираем TikTok метрики за последние 7 дней
-    let metricsResult = null;
-    if (account.tiktok_business_id && account.tiktok_access_token) {
-      try {
-        fastify.log.info({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          action: 'collecting_metrics'
-        }, 'Starting TikTok metrics collection');
-
-        metricsResult = await collectTikTokMetricsForDays(
-          account.tiktok_business_id,  // advertiserId
-          account.tiktok_access_token, // accessToken
-          account.user_account_id,     // userAccountId
-          account.id,                  // accountId (UUID)
-          7                            // days
-        );
-
-        fastify.log.info({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          metricsCollected: metricsResult.totalMetrics,
-          errorsCount: metricsResult.errors?.length || 0,
-          action: 'metrics_collected'
-        }, 'TikTok metrics collection completed');
-      } catch (metricsErr) {
-        fastify.log.warn({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          error: metricsErr.message,
-          action: 'metrics_collection_failed'
-        }, 'Failed to collect TikTok metrics, continuing...');
-      }
-    }
-
-    // Собираем TikTok лиды из Instant Forms за последние 2 дня
-    let leadsResult = null;
-    if (account.tiktok_business_id && account.tiktok_access_token) {
-      try {
-        fastify.log.info({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          action: 'collecting_leads'
-        }, 'Starting TikTok leads collection');
-
-        leadsResult = await collectTikTokLeads(
-          account.tiktok_business_id,
-          account.tiktok_access_token,
-          account.user_account_id,
-          account.id,
-          { days: 2 }
-        );
-
-        fastify.log.info({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          newLeads: leadsResult.newLeads,
-          duplicates: leadsResult.duplicates,
-          errorsCount: leadsResult.errors?.length || 0,
-          action: 'leads_collected'
-        }, 'TikTok leads collection completed');
-      } catch (leadsErr) {
-        fastify.log.warn({
-          where: 'processAccountTikTok',
-          accountId: account.id,
-          error: leadsErr.message,
-          action: 'leads_collection_failed'
-        }, 'Failed to collect TikTok leads, continuing...');
-      }
-    }
-
-    const duration = Date.now() - startTime;
-
-    fastify.log.info({
-      where: 'processAccountTikTok',
-      phase: 'completed',
-      accountId: account.id,
-      accountName: account.name,
-      duration,
-      actionsCount: runResult.actions?.length || 0,
-      dispatched: runResult.dispatched,
-      telegramSent: runResult.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0,
-      leadsCollected: leadsResult?.newLeads || 0,
-      leadsDuplicates: leadsResult?.duplicates || 0
-    });
-
-    return {
-      success: true,
-      accountId: account.id,
-      accountName: account.name,
-      duration,
-      actionsCount: runResult.actions?.length || 0,
-      telegramSent: runResult.telegramSent || false,
-      metricsCollected: metricsResult?.totalMetrics || 0,
-      leadsCollected: leadsResult?.newLeads || 0,
-      leadsDuplicates: leadsResult?.duplicates || 0
-    };
+    runResult = await runResponse.json();
   } catch (err) {
-    const duration = Date.now() - startTime;
+    brainError = String(err?.message || err);
     fastify.log.error({
       where: 'processAccountTikTok',
-      phase: 'failed',
       accountId: account.id,
       accountName: account.name,
-      duration,
-      error: String(err)
+      phase: 'brain_run_failed',
+      error: brainError
     });
-    return {
-      success: false,
-      accountId: account.id,
-      accountName: account.name,
-      error: String(err),
-      duration
-    };
   }
+
+  // Step 2: Собираем TikTok метрики за последние 7 дней (НЕЗАВИСИМО от brain run)
+  let metricsResult = null;
+  if (account.tiktok_business_id && account.tiktok_access_token) {
+    try {
+      fastify.log.info({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        action: 'collecting_metrics'
+      }, 'Starting TikTok metrics collection');
+
+      metricsResult = await collectTikTokMetricsForDays(
+        account.tiktok_business_id,  // advertiserId
+        account.tiktok_access_token, // accessToken
+        account.user_account_id,     // userAccountId
+        account.id,                  // accountId (UUID)
+        7                            // days
+      );
+
+      fastify.log.info({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        metricsCollected: metricsResult.totalMetrics,
+        errorsCount: metricsResult.errors?.length || 0,
+        action: 'metrics_collected'
+      }, 'TikTok metrics collection completed');
+    } catch (metricsErr) {
+      fastify.log.warn({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        error: metricsErr.message,
+        action: 'metrics_collection_failed'
+      }, 'Failed to collect TikTok metrics, continuing...');
+    }
+  }
+
+  // Step 3: Собираем TikTok лиды из Instant Forms за последние 2 дня (НЕЗАВИСИМО от brain run)
+  let leadsResult = null;
+  if (account.tiktok_business_id && account.tiktok_access_token) {
+    try {
+      fastify.log.info({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        action: 'collecting_leads'
+      }, 'Starting TikTok leads collection');
+
+      leadsResult = await collectTikTokLeads(
+        account.tiktok_business_id,
+        account.tiktok_access_token,
+        account.user_account_id,
+        account.id,
+        { days: 2 }
+      );
+
+      fastify.log.info({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        newLeads: leadsResult.newLeads,
+        duplicates: leadsResult.duplicates,
+        errorsCount: leadsResult.errors?.length || 0,
+        action: 'leads_collected'
+      }, 'TikTok leads collection completed');
+    } catch (leadsErr) {
+      fastify.log.warn({
+        where: 'processAccountTikTok',
+        accountId: account.id,
+        error: leadsErr.message,
+        action: 'leads_collection_failed'
+      }, 'Failed to collect TikTok leads, continuing...');
+    }
+  }
+
+  const duration = Date.now() - startTime;
+  const success = !brainError;
+
+  fastify.log.info({
+    where: 'processAccountTikTok',
+    phase: success ? 'completed' : 'partial',
+    brainRunOk: success,
+    accountId: account.id,
+    accountName: account.name,
+    duration,
+    actionsCount: runResult?.actions?.length || 0,
+    dispatched: runResult?.dispatched,
+    telegramSent: runResult?.telegramSent || false,
+    metricsCollected: metricsResult?.totalMetrics || 0,
+    leadsCollected: leadsResult?.newLeads || 0,
+    leadsDuplicates: leadsResult?.duplicates || 0
+  });
+
+  return {
+    success: success,
+    accountId: account.id,
+    accountName: account.name,
+    brainError: brainError || undefined,
+    duration,
+    actionsCount: runResult?.actions?.length || 0,
+    telegramSent: runResult?.telegramSent || false,
+    metricsCollected: metricsResult?.totalMetrics || 0,
+    leadsCollected: leadsResult?.newLeads || 0,
+    leadsDuplicates: leadsResult?.duplicates || 0
+  };
 }
 
 /**

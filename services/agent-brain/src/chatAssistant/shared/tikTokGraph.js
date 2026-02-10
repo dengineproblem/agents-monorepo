@@ -32,6 +32,11 @@ function isTikTokRetryable(error) {
     return true;
   }
 
+  // Non-JSON response (HTML error page, Cloudflare) — временная ошибка, retry
+  if (error?.isNonJsonResponse) {
+    return true;
+  }
+
   // Use generic retryable check for network errors
   return isRetryableError(error);
 }
@@ -145,6 +150,19 @@ async function tikTokGraphInternal(method, endpoint, accessToken, params = {}) {
     headers,
     body
   });
+
+  // Проверяем что ответ — JSON, а не HTML (Cloudflare/error page)
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const bodyPreview = await res.text().then(t => t.substring(0, 200)).catch(() => '');
+    const error = new Error(
+      `TikTok API returned non-JSON response (${res.status} ${contentType}): ${bodyPreview}`
+    );
+    error.status = res.status || 502;
+    error.isNonJsonResponse = true;
+    logger.warn({ endpoint, status: res.status, contentType, bodyPreview }, 'TikTok API returned non-JSON');
+    throw error;
+  }
 
   const json = await res.json();
 
