@@ -97,6 +97,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
     prompt4: '',
     openai_api_key: '',
     gemini_api_key: '',
+    anthropic_api_key: '',
     brain_mode: 'report',
     brain_schedule_hour: 8,
     brain_timezone: 'Asia/Almaty',
@@ -227,6 +228,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       prompt4: '',
       openai_api_key: '',
       gemini_api_key: '',
+      anthropic_api_key: '',
       brain_mode: 'report',
       brain_schedule_hour: 8,
       brain_timezone: 'Asia/Almaty',
@@ -254,6 +256,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       prompt4: account.prompt4 || '',
       openai_api_key: account.openai_api_key || '',
       gemini_api_key: account.gemini_api_key || '',
+      anthropic_api_key: account.anthropic_api_key || '',
       brain_mode: account.brain_mode || 'report',
       brain_schedule_hour: account.brain_schedule_hour ?? 8,
       brain_timezone: account.brain_timezone || 'Asia/Almaty',
@@ -904,6 +907,19 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
               onChange={(e) => updateField('gemini_api_key', e.target.value)}
               placeholder="AIza..."
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="anthropic_api_key">Anthropic API Key (Claude бот)</Label>
+            <Input
+              id="anthropic_api_key"
+              type="password"
+              value={formData.anthropic_api_key || ''}
+              onChange={(e) => updateField('anthropic_api_key', e.target.value)}
+              placeholder="sk-ant-..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Ключ для Telegram бота. Если пуст — используется системный ключ.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="prompt1">Контекст бизнеса (для текстов)</Label>

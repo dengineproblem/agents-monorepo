@@ -39,7 +39,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: GenerateTextCreativeRequest; Reply: GenerateTextCreativeResponse }>(
     '/generate-text-creative',
     async (request, reply) => {
-      const { user_id, text_type, user_prompt, account_id } = request.body;
+      const { user_id, text_type, user_prompt, account_id, openai_api_key } = request.body as any;
 
       try {
         app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
@@ -158,7 +158,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         const generatedText = await generateText(
           '', // System prompt уже включен в fullPrompt
           fullPrompt,
-          { model: 'gpt-5' } // GPT-5 для лучшего качества текстов
+          { model: 'gpt-5', apiKey: openai_api_key } // GPT-5 для лучшего качества текстов
         );
 
         const trimmedText = generatedText.trim();
@@ -195,7 +195,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           // Не прерываем - генерация успешна, просто не сохранили в историю
         }
 
-        app.log.info(`[Generate Text Creative] Successfully generated ${TEXT_TYPE_LABELS[text_type]}`);
+        app.log.info(`[Generate Text Creative] Successfully generated ${TEXT_TYPE_LABELS[text_type as TextCreativeType]}`);
 
         // Добавляем тег онбординга: сгенерировал текст
         addOnboardingTag(user_id, 'generated_text').catch(err => {
@@ -226,7 +226,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: EditTextCreativeRequest; Reply: EditTextCreativeResponse }>(
     '/edit-text-creative',
     async (request, reply) => {
-      const { user_id, text_type, original_text, edit_instructions, account_id } = request.body;
+      const { user_id, text_type, original_text, edit_instructions, account_id, openai_api_key } = request.body as any;
 
       try {
         app.log.info(`[Edit Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
@@ -335,7 +335,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         const editedText = await generateText(
           '',
           fullPrompt,
-          { model: 'gpt-5' }
+          { model: 'gpt-5', apiKey: openai_api_key }
         );
 
         const trimmedText = editedText.trim();
@@ -348,7 +348,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        app.log.info(`[Edit Text Creative] Successfully edited ${TEXT_TYPE_LABELS[text_type]}`);
+        app.log.info(`[Edit Text Creative] Successfully edited ${TEXT_TYPE_LABELS[text_type as TextCreativeType]}`);
 
         return {
           success: true,

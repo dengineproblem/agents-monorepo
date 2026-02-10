@@ -3,17 +3,21 @@ import { generateCarouselCardPrompt } from './carouselPromptGenerator';
 import { upscaleImageTo4K } from './gemini-image';
 import { CarouselVisualStyle, CardChangeOption } from '../types';
 
-let genAI: GoogleGenerativeAI | null = null;
+let defaultGenAI: GoogleGenerativeAI | null = null;
 
-function getGeminiClient(): GoogleGenerativeAI {
-  if (!genAI) {
+function getGeminiClient(customApiKey?: string | null): GoogleGenerativeAI {
+  if (customApiKey) {
+    console.log('[Gemini Carousel] Using per-account API key (...%s)', customApiKey.slice(-4));
+    return new GoogleGenerativeAI(customApiKey);
+  }
+  if (!defaultGenAI) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY must be set in environment variables');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    defaultGenAI = new GoogleGenerativeAI(apiKey);
   }
-  return genAI;
+  return defaultGenAI;
 }
 
 /**
@@ -42,7 +46,9 @@ async function generateCarouselCard(
   contentReferenceImages?: string[],
   currentCardImage?: string,
   stylePrompt?: string,
-  changeOptions?: CardChangeOption[]
+  changeOptions?: CardChangeOption[],
+  openaiApiKey?: string | null,
+  geminiApiKey?: string | null
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
@@ -82,7 +88,8 @@ ${customPrompt ? `Дополнительные требования: ${customPro
         totalCards,
         visualStyle,
         undefined,  // customPrompt передаём напрямую, не через GPT-4o
-        stylePrompt
+        stylePrompt,
+        openaiApiKey
       );
 
       // Добавляем customPrompt напрямую к финальному промпту
@@ -96,7 +103,7 @@ ${customPrompt ? `Дополнительные требования: ${customPro
     console.log(prompt);
     console.log('[Gemini Carousel] ===== END PROMPT =====');
 
-    const client = getGeminiClient();
+    const client = getGeminiClient(geminiApiKey);
     const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
@@ -285,7 +292,9 @@ export async function generateCarouselImages(
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompts?: (string | null)[],
   referenceImages?: (string[] | null)[],
-  stylePrompt?: string
+  stylePrompt?: string,
+  openaiApiKey?: string | null,
+  geminiApiKey?: string | null
 ): Promise<string[]> {
   try {
     console.log('[Gemini Carousel] Starting carousel generation...');
@@ -324,7 +333,10 @@ export async function generateCarouselImages(
         styleReference,
         contentReferenceArray,
         undefined,  // currentCardImage — не используется при первичной генерации
-        stylePrompt  // Для freestyle стиля
+        stylePrompt,  // Для freestyle стиля
+        undefined,  // changeOptions — не используются при первичной генерации
+        openaiApiKey,
+        geminiApiKey
       );
 
       generatedImages.push(image);
@@ -370,7 +382,9 @@ export async function regenerateCarouselCard(
   customPrompt?: string,
   contentReferenceImages?: string[],
   stylePrompt?: string,
-  changeOptions?: CardChangeOption[]
+  changeOptions?: CardChangeOption[],
+  openaiApiKey?: string | null,
+  geminiApiKey?: string | null
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Regenerating card ${cardIndex + 1}...`);
@@ -396,7 +410,9 @@ export async function regenerateCarouselCard(
       contentReferenceImages,
       currentCardImage,  // Передаём текущую карточку для редактирования
       stylePrompt,  // Для freestyle стиля
-      changeOptions  // Что именно менять при перегенерации
+      changeOptions,  // Что именно менять при перегенерации
+      openaiApiKey,
+      geminiApiKey
     );
 
     console.log(`[Gemini Carousel] Card ${cardIndex + 1} regenerated successfully`);
@@ -416,7 +432,8 @@ export async function regenerateCarouselCard(
  */
 export async function upscaleCarouselTo4K(
   images: string[],
-  prompts: string[]
+  prompts: string[],
+  geminiApiKey?: string | null
 ): Promise<string[]> {
   try {
     console.log('[Gemini Carousel Upscale] Starting upscale to 4K...');
@@ -430,7 +447,8 @@ export async function upscaleCarouselTo4K(
       const upscaledImage = await upscaleImageTo4K(
         images[i],
         prompts[i] || 'Premium минималистичный рекламный креатив',
-        '1:1' // Карусель в формате 1:1
+        '1:1', // Карусель в формате 1:1
+        geminiApiKey
       );
 
       upscaledImages.push(upscaledImage);

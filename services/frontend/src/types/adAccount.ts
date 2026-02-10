@@ -49,6 +49,7 @@ export interface AdAccount {
   // API Keys
   openai_api_key: string | null;
   gemini_api_key: string | null;
+  anthropic_api_key: string | null;
 
   // AmoCRM
   amocrm_subdomain: string | null;
@@ -131,6 +132,7 @@ export interface CreateAdAccountPayload {
   // API Keys
   openai_api_key?: string;
   gemini_api_key?: string;
+  anthropic_api_key?: string;
 
   // Tariff
   tarif?: string;
@@ -176,6 +178,7 @@ export interface UpdateAdAccountPayload {
   // API Keys
   openai_api_key?: string | null;
   gemini_api_key?: string | null;
+  anthropic_api_key?: string | null;
 
   // Custom audiences
   custom_audiences?: CustomAudience[];

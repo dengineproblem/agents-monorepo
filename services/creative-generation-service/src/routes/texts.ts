@@ -9,11 +9,11 @@ export const textsRoutes: FastifyPluginAsync = async (app) => {
   
   // POST /generate-offer - Генерация заголовка
   app.post<{ Body: GenerateTextRequest }>('/generate-offer', async (request, reply) => {
-    const { user_id, prompt, existing_bullets, existing_benefits, existing_cta } = request.body;
+    const { user_id, prompt, existing_bullets, existing_benefits, existing_cta, openai_api_key } = request.body as any;
     
     try {
       app.log.info(`[Generate Offer] Request from user: ${user_id}`);
-      app.log.info(`[Generate Offer] Request body: ${JSON.stringify(request.body)}`);
+      app.log.info(`[Generate Offer] Params: user_id=${user_id}, hasCustomKey=${!!openai_api_key}`);
       
       // Получаем prompt4 из user_accounts (не используется для offer, но загружаем для консистентности)
       app.log.info(`[Generate Offer] Querying Supabase for user_id: ${user_id}`);
@@ -49,7 +49,7 @@ ${existing_cta || ''} - текущие cta`;
       const uniquePrompt = `${fullPrompt}\n\n[Запрос #${Date.now()}. Будь креативным и ОТЛИЧНЫМ от предыдущих вариантов!]`;
       app.log.info(`[Generate Offer] Final unique prompt: ${uniquePrompt}`);
       
-      const offer = await generateText(SYSTEM_PROMPTS.offer, uniquePrompt);
+      const offer = await generateText(SYSTEM_PROMPTS.offer, uniquePrompt, { apiKey: openai_api_key });
       
       app.log.info('[Generate Offer] ===== РЕЗУЛЬТАТ ГЕНЕРАЦИИ =====');
       app.log.info(`[Generate Offer] Raw offer: ${offer}`);
@@ -85,7 +85,7 @@ ${existing_cta || ''} - текущие cta`;
 
   // POST /generate-bullets - Генерация буллетов
   app.post<{ Body: GenerateTextRequest }>('/generate-bullets', async (request, reply) => {
-    const { user_id, prompt, existing_offer, existing_benefits, existing_cta } = request.body;
+    const { user_id, prompt, existing_offer, existing_benefits, existing_cta, openai_api_key } = request.body as any;
     
     try {
       app.log.info(`[Generate Bullets] Request from user: ${user_id}`);
@@ -116,7 +116,7 @@ ${existing_cta || ''} - текущие cta`;
       const uniquePrompt = `${fullPrompt}\n\n[Запрос #${Date.now()}. Генерируй НОВЫЕ уникальные буллеты!]`;
       app.log.info(`[Generate Bullets] Final unique prompt: ${uniquePrompt}`);
       
-      const bullets = await generateText(SYSTEM_PROMPTS.bullets, uniquePrompt);
+      const bullets = await generateText(SYSTEM_PROMPTS.bullets, uniquePrompt, { apiKey: openai_api_key });
       
       app.log.info('[Generate Bullets] ===== РЕЗУЛЬТАТ ГЕНЕРАЦИИ =====');
       app.log.info(`[Generate Bullets] Raw bullets: ${bullets}`);
@@ -152,7 +152,7 @@ ${existing_cta || ''} - текущие cta`;
 
   // POST /generate-profits - Генерация выгоды
   app.post<{ Body: GenerateTextRequest }>('/generate-profits', async (request, reply) => {
-    const { user_id, prompt, existing_offer, existing_bullets, existing_cta } = request.body;
+    const { user_id, prompt, existing_offer, existing_bullets, existing_cta, openai_api_key } = request.body as any;
     
     try {
       app.log.info(`[Generate Profits] Request from user: ${user_id}`);
@@ -183,7 +183,7 @@ ${existing_cta || ''} - текущие cta`;
       const uniquePrompt = `${fullPrompt}\n\n[Запрос #${Date.now()}. Предложи НОВУЮ уникальную выгоду!]`;
       app.log.info(`[Generate Profits] Final unique prompt: ${uniquePrompt}`);
       
-      const profits = await generateText(SYSTEM_PROMPTS.profits, uniquePrompt);
+      const profits = await generateText(SYSTEM_PROMPTS.profits, uniquePrompt, { apiKey: openai_api_key });
       
       app.log.info('[Generate Profits] ===== РЕЗУЛЬТАТ ГЕНЕРАЦИИ =====');
       app.log.info(`[Generate Profits] Raw profits: ${profits}`);
@@ -216,7 +216,7 @@ ${existing_cta || ''} - текущие cta`;
 
   // POST /generate-cta - Генерация CTA
   app.post<{ Body: GenerateTextRequest }>('/generate-cta', async (request, reply) => {
-    const { user_id, prompt, existing_offer, existing_bullets, existing_benefits } = request.body;
+    const { user_id, prompt, existing_offer, existing_bullets, existing_benefits, openai_api_key } = request.body as any;
     
     try {
       app.log.info(`[Generate CTA] Request from user: ${user_id}`);
@@ -247,7 +247,7 @@ ${existing_benefits || ''} - текущие выгоды`;
       const uniquePrompt = `${fullPrompt}\n\n[Запрос #${Date.now()}. Создай НОВЫЙ оригинальный CTA!]`;
       app.log.info(`[Generate CTA] Final unique prompt: ${uniquePrompt}`);
       
-      const cta = await generateText(SYSTEM_PROMPTS.cta, uniquePrompt);
+      const cta = await generateText(SYSTEM_PROMPTS.cta, uniquePrompt, { apiKey: openai_api_key });
       
       app.log.info('[Generate CTA] ===== РЕЗУЛЬТАТ ГЕНЕРАЦИИ =====');
       app.log.info(`[Generate CTA] Raw cta: ${cta}`);

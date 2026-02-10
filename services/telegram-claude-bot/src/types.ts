@@ -84,6 +84,7 @@ export interface AdAccountInfo {
   adAccountId: string;
   isDefault: boolean;
   stack: string[];
+  anthropicApiKey: string | null;
 }
 
 export interface ResolvedUser {
@@ -92,4 +93,5 @@ export interface ResolvedUser {
   multiAccountEnabled: boolean;
   stack: string[];
   adAccounts: AdAccountInfo[];
+  anthropicApiKey: string | null;
 }

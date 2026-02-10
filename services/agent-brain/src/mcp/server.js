@@ -39,7 +39,8 @@ async function getCredentials(userAccountId, accountId) {
       .from('user_accounts')
       .select(`
         id, multi_account_enabled,
-        access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id
+        access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id,
+        openai_api_key, anthropic_api_key
       `)
       .eq('id', userAccountId)
       .single();
@@ -62,7 +63,8 @@ async function getCredentials(userAccountId, accountId) {
       const { data: adAccount, error: adError } = await supabase
         .from('ad_accounts')
         .select(`
-          id, access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id
+          id, access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id,
+          openai_api_key, gemini_api_key, anthropic_api_key
         `)
         .eq('id', accountId)
         .eq('user_account_id', userAccountId)  // Security: verify ownership
@@ -85,6 +87,9 @@ async function getCredentials(userAccountId, accountId) {
           instagramId: adAccount.instagram_id,
           instagramUsername: adAccount.instagram_username,
           businessId: adAccount.business_id,
+          openaiApiKey: adAccount.openai_api_key || null,
+          geminiApiKey: adAccount.gemini_api_key || null,
+          anthropicApiKey: adAccount.anthropic_api_key || null,
           // Meta
           isMultiAccountMode: true,
           dbAccountId: adAccount.id,  // UUID for internal queries
@@ -104,6 +109,9 @@ async function getCredentials(userAccountId, accountId) {
         instagramId: user.instagram_id,
         instagramUsername: user.instagram_username,
         businessId: user.business_id,
+        openaiApiKey: user.openai_api_key || null,
+        geminiApiKey: null,
+        anthropicApiKey: user.anthropic_api_key || null,
         // Meta
         isMultiAccountMode: false,
         dbAccountId: null,
@@ -364,7 +372,7 @@ export function registerMCPRoutes(fastify) {
     try {
       const { data, error } = await supabase
         .from('user_accounts')
-        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, business_name')
+        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, business_name, anthropic_api_key')
         .eq('telegram_id', telegram_id)
         .limit(1);
 
@@ -392,13 +400,14 @@ export function registerMCPRoutes(fastify) {
         multiAccountEnabled: !!user.multi_account_enabled,
         stack,
         adAccounts: [],
+        anthropicApiKey: user.anthropic_api_key || null,
       };
 
       // Если мультиаккаунт включён — загрузить ad_accounts
       if (user.multi_account_enabled) {
         const { data: accounts, error: accError } = await supabase
           .from('ad_accounts')
-          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default')
+          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default, anthropic_api_key')
           .eq('user_account_id', user.id)
           .eq('is_active', true);
 
@@ -414,17 +423,21 @@ export function registerMCPRoutes(fastify) {
               adAccountId: acc.ad_account_id,
               isDefault: !!acc.is_default,
               stack: accStack,
+              anthropicApiKey: acc.anthropic_api_key || null,
             };
           });
         }
       }
 
+      const accountsWithAnthropicKey = result.adAccounts.filter(a => !!a.anthropicApiKey).length;
       fastify.log.info({
         telegramId: telegram_id,
         userId: user.id,
         stack,
         multiAccount: !!user.multi_account_enabled,
         adAccountCount: result.adAccounts.length,
+        hasAnthropicKey: !!result.anthropicApiKey,
+        accountsWithAnthropicKey,
       }, 'resolve-user: success');
 
       return reply.send(result);
@@ -547,8 +560,18 @@ export function registerMCPRoutes(fastify) {
         dangerousPolicy,
         // No session limits for Moltbot direct calls
         sessionId: null,
-        useRedis: false
+        useRedis: false,
+        // AI API keys for per-account creative generation
+        openaiApiKey: credentials.openaiApiKey || null,
+        geminiApiKey: credentials.geminiApiKey || null,
       };
+
+      if (credentials.openaiApiKey || credentials.geminiApiKey) {
+        fastify.log.info({
+          hasOpenaiKey: !!credentials.openaiApiKey,
+          hasGeminiKey: !!credentials.geminiApiKey,
+        }, 'Per-account AI API keys loaded into tool context');
+      }
 
       // Execute the tool with timeout (2 minutes)
       const TOOL_TIMEOUT = 120000;

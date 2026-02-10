@@ -14,7 +14,18 @@
 import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 
-const openai = new OpenAI();
+// Default (global) клиент — создаётся лениво
+let defaultOpenai;
+function getOpenAIClient(customApiKey) {
+  if (customApiKey) {
+    logger.info({ where: 'domainAgents', keyTail: customApiKey.slice(-4) }, 'Using per-account OpenAI key for domain agent');
+    return new OpenAI({ apiKey: customApiKey });
+  }
+  if (!defaultOpenai) {
+    defaultOpenai = new OpenAI();
+  }
+  return defaultOpenai;
+}
 
 // Model for domain agents - fast and good for summarization
 const DOMAIN_AGENT_MODEL = process.env.DOMAIN_AGENT_MODEL || 'gpt-5.2';
@@ -58,7 +69,8 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
   layerLogger?.info(9, `LLM call for domain: ${domain}`, { model: DOMAIN_AGENT_MODEL });
 
   try {
-    const response = await openai.chat.completions.create({
+    const client = getOpenAIClient(context.openaiApiKey);
+    const response = await client.chat.completions.create({
       model: DOMAIN_AGENT_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },

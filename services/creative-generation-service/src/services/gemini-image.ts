@@ -1,17 +1,21 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateImagePrompt } from './imagePromptGenerator';
 
-let genAI: GoogleGenerativeAI | null = null;
+let defaultGenAI: GoogleGenerativeAI | null = null;
 
-function getGeminiClient(): GoogleGenerativeAI {
-  if (!genAI) {
+function getGeminiClient(customApiKey?: string | null): GoogleGenerativeAI {
+  if (customApiKey) {
+    console.log('[Gemini] Using per-account API key (...%s)', customApiKey.slice(-4));
+    return new GoogleGenerativeAI(customApiKey);
+  }
+  if (!defaultGenAI) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error('GEMINI_API_KEY must be set in environment variables');
     }
-    genAI = new GoogleGenerativeAI(apiKey);
+    defaultGenAI = new GoogleGenerativeAI(apiKey);
   }
-  return genAI;
+  return defaultGenAI;
 }
 
 /**
@@ -36,7 +40,9 @@ export async function generateCreativeImage(
   referenceImage?: string,
   referenceImageType?: 'base64' | 'url',
   referenceImagePrompt?: string,
-  stylePrompt?: string
+  stylePrompt?: string,
+  apiKey?: string | null,
+  openaiApiKey?: string | null
 ): Promise<string> {
   try {
     const hasReferenceImage = !!referenceImage;
@@ -90,7 +96,8 @@ ${textsBlock}
         styleId,
         offer,
         bullets,
-        profits
+        profits,
+        openaiApiKey
       );
     }
 
@@ -104,7 +111,7 @@ ${textsBlock}
     console.log('[Gemini] Has reference image:', hasReferenceImage);
 
     // Используем Gemini 3 Pro Image Preview для генерации изображений
-    const client = getGeminiClient();
+    const client = getGeminiClient(apiKey);
     const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
@@ -205,13 +212,14 @@ ${textsBlock}
 export async function upscaleImageTo4K(
   base64Image: string,
   originalPrompt: string,
-  aspectRatio: '9:16' | '4:5' | '1:1' = '9:16' // Дефолт для одиночных креативов
+  aspectRatio: '9:16' | '4:5' | '1:1' = '9:16', // Дефолт для одиночных креативов
+  apiKey?: string | null
 ): Promise<string> {
   try {
     console.log('[Gemini Upscale] Starting image upscale to 4K...');
     console.log('[Gemini Upscale] Aspect ratio:', aspectRatio);
 
-    const client = getGeminiClient();
+    const client = getGeminiClient(apiKey);
     const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
@@ -287,12 +295,13 @@ export async function upscaleImageTo4K(
  */
 export async function expandTo9x16(
   base64Image: string,
-  originalPrompt: string
+  originalPrompt: string,
+  apiKey?: string | null
 ): Promise<string> {
   try {
     console.log('[Gemini Expand] Starting image expansion from 4:5 to 9:16...');
 
-    const client = getGeminiClient();
+    const client = getGeminiClient(apiKey);
     const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
@@ -393,13 +402,14 @@ The result should look like ONE seamless image that was always 9:16, not a 4:5 i
  */
 export async function extractTextFromImage(
   imageUrl: string,
-  imageType: 'url' | 'base64' = 'url'
+  imageType: 'url' | 'base64' = 'url',
+  apiKey?: string | null
 ): Promise<string> {
   try {
     console.log('[Gemini OCR] Starting text extraction...');
     console.log('[Gemini OCR] Image type:', imageType);
 
-    const client = getGeminiClient();
+    const client = getGeminiClient(apiKey);
     // Используем gemini-2.0-flash для OCR
     const model = client.getGenerativeModel({
       model: 'gemini-2.0-flash'

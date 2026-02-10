@@ -29,7 +29,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel-texts',
     async (request: FastifyRequest<{ Body: GenerateCarouselTextsRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_idea, cards_count } = request.body;
+        const { user_id, account_id, carousel_idea, cards_count, openai_api_key } = request.body as any;
 
         console.log('[Carousel Texts] Request:', { user_id, account_id, cards_count, idea_length: carousel_idea?.length || 0 });
 
@@ -95,7 +95,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         }
 
         // Генерируем тексты
-        const texts = await generateCarouselTexts(carousel_idea, cards_count, userPrompt1);
+        const texts = await generateCarouselTexts(carousel_idea, cards_count, userPrompt1, openai_api_key);
 
         const response: GenerateCarouselTextsResponse = {
           success: true,
@@ -127,7 +127,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card-text',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardTextRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_id, card_index, existing_texts } = request.body;
+        const { user_id, account_id, carousel_id, card_index, existing_texts, openai_api_key } = request.body as any;
 
         console.log('[Carousel Card Text] Request:', { user_id, account_id, carousel_id, card_index });
 
@@ -176,7 +176,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         }
 
         // Перегенерируем текст карточки
-        const text = await regenerateCarouselCardText(card_index, existing_texts, userPrompt1);
+        const text = await regenerateCarouselCardText(card_index, existing_texts, userPrompt1, openai_api_key);
 
         const response: RegenerateCarouselCardTextResponse = {
           success: true,
@@ -208,7 +208,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel',
     async (request: FastifyRequest<{ Body: GenerateCarouselRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_texts, visual_style, style_prompt, custom_prompts, reference_images, direction_id } = request.body;
+        const { user_id, account_id, carousel_texts, visual_style, style_prompt, custom_prompts, reference_images, direction_id, openai_api_key, gemini_api_key } = request.body as any;
 
         console.log('[Generate Carousel] Request:', {
           user_id,
@@ -282,7 +282,9 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           selectedStyle,
           custom_prompts,
           reference_images,
-          style_prompt  // Для freestyle стиля
+          style_prompt,  // Для freestyle стиля
+          openai_api_key,
+          gemini_api_key
         );
 
         // Загружаем изображения в Supabase Storage
@@ -405,7 +407,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_id, card_index, custom_prompt, style_prompt, reference_image, reference_images, text, change_options } = request.body;
+        const { user_id, account_id, carousel_id, card_index, custom_prompt, style_prompt, reference_image, reference_images, text, change_options, openai_api_key, gemini_api_key } = request.body as any;
 
         // Собираем все референсы в один массив (reference_images приоритетнее)
         let contentReferenceImages: string[] | undefined;
@@ -533,7 +535,9 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           custom_prompt,
           contentReferenceImages,
           style_prompt,  // Для freestyle стиля
-          change_options  // Что именно менять при перегенерации
+          change_options,  // Что именно менять при перегенерации
+          openai_api_key,
+          gemini_api_key
         );
 
         // Загружаем новое изображение в Storage
@@ -632,7 +636,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/upscale-carousel-to-4k',
     async (request: FastifyRequest<{ Body: UpscaleCarouselRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_id } = request.body;
+        const { user_id, carousel_id, gemini_api_key } = request.body as any;
 
         console.log('[Upscale Carousel] Request:', { user_id, carousel_id });
 
@@ -680,7 +684,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         }
 
         // Upscale всех изображений
-        const images4K = await upscaleCarouselTo4K(images2K, prompts);
+        const images4K = await upscaleCarouselTo4K(images2K, prompts, gemini_api_key);
 
         // Загружаем 4K версии в Storage
         console.log('[Upscale Carousel] Uploading 4K images to Storage...');

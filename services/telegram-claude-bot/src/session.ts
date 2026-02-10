@@ -11,6 +11,8 @@ export interface UserSession {
   adAccounts: AdAccountInfo[];
   lastActivity: number;
   isFirstMessage: boolean;
+  anthropicApiKey: string | null;
+  originalAnthropicApiKey: string | null; // ключ из resolve-user (восстанавливается при сбросе аккаунта)
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 минут
@@ -49,6 +51,8 @@ export function createSession(
     adAccounts: resolved.adAccounts,
     lastActivity: Date.now(),
     isFirstMessage: true,
+    anthropicApiKey: resolved.anthropicApiKey || null,
+    originalAnthropicApiKey: resolved.anthropicApiKey || null,
   };
   sessions.set(telegramId, session);
   logger.info({
@@ -69,11 +73,13 @@ export function setSelectedAccount(
   telegramId: number,
   accountId: string,
   accountStack: string[],
+  anthropicApiKey?: string | null,
 ): void {
   const session = sessions.get(telegramId);
   if (session) {
     session.selectedAccountId = accountId;
     session.stack = [...accountStack];
+    session.anthropicApiKey = anthropicApiKey || null;
     session.lastActivity = Date.now();
     logger.info({ telegramId, accountId, accountStack }, 'Account selected');
   }
@@ -85,6 +91,7 @@ export function clearSelectedAccount(telegramId: number): void {
     const prevAccountId = session.selectedAccountId;
     session.selectedAccountId = null;
     session.stack = [...session.originalStack];
+    session.anthropicApiKey = session.originalAnthropicApiKey;
     logger.info({ telegramId, prevAccountId }, 'Account selection cleared, stack restored');
   }
 }

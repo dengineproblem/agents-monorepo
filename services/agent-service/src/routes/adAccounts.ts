@@ -43,6 +43,7 @@ const CreateAdAccountSchema = z.object({
   // API Keys
   openai_api_key: z.string().optional(),
   gemini_api_key: z.string().optional(),
+  anthropic_api_key: z.string().optional(),
 
   // Tariff
   tarif: z.string().optional(),
@@ -84,6 +85,7 @@ const UpdateAdAccountSchema = z.object({
   // API Keys
   openai_api_key: z.string().nullable().optional(),
   gemini_api_key: z.string().nullable().optional(),
+  anthropic_api_key: z.string().nullable().optional(),
 
   // Custom audiences
   custom_audiences: z.array(z.object({
@@ -519,6 +521,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         // API Keys
         openai_api_key: adAccountData.openai_api_key,
         gemini_api_key: adAccountData.gemini_api_key,
+        anthropic_api_key: adAccountData.anthropic_api_key,
         // Tariff
         tarif: adAccountData.tarif,
         tarif_expires: adAccountData.tarif_expires,
@@ -653,6 +656,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       // API Keys
       if (validated.openai_api_key !== undefined) dbData.openai_api_key = validated.openai_api_key;
       if (validated.gemini_api_key !== undefined) dbData.gemini_api_key = validated.gemini_api_key;
+      if (validated.anthropic_api_key !== undefined) dbData.anthropic_api_key = validated.anthropic_api_key;
 
       // Custom audiences
       if (validated.custom_audiences !== undefined) dbData.custom_audiences = validated.custom_audiences;

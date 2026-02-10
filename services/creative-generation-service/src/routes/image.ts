@@ -27,8 +27,10 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       style_prompt,  // Промпт для freestyle стиля
       reference_image,
       reference_image_type,
-      reference_image_prompt
-    } = request.body;
+      reference_image_prompt,
+      gemini_api_key,
+      openai_api_key
+    } = request.body as any;
 
     try {
       app.log.info(`[Generate Creative] Request from user: ${user_id}`);
@@ -125,7 +127,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         reference_image,
         reference_image_type,
         reference_image_prompt,
-        style_prompt  // Для freestyle стиля
+        style_prompt,  // Для freestyle стиля
+        gemini_api_key,
+        openai_api_key  // Для imagePromptGenerator (OpenAI генерирует промпт)
       );
 
       app.log.info(`[Generate Creative] Image generated, base64 length: ${base64Image.length}`);
@@ -249,9 +253,10 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
     Body: {
       creative_id: string;
       user_id: string;
+      gemini_api_key?: string;
     };
   }>('/upscale-to-4k', async (request, reply) => {
-    const { creative_id, user_id } = request.body;
+    const { creative_id, user_id, gemini_api_key } = request.body;
 
     try {
       app.log.info(`[Upscale to 4K] Request for creative: ${creative_id}, user: ${user_id}`);
@@ -316,7 +321,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       // Расширяем 4:5 до 9:16 4K (достраиваем фон снизу)
       app.log.info('[Upscale to 4K] Expanding 4:5 to 9:16 4K...');
-      const expanded9x16Image = await expandTo9x16(base64Image, originalPrompt);
+      const expanded9x16Image = await expandTo9x16(base64Image, originalPrompt, gemini_api_key);
 
       // Сохраняем 9:16 4K версию
       const imageBuffer9x16 = Buffer.from(expanded9x16Image, 'base64');
@@ -386,9 +391,10 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
     Body: {
       image_url: string;
       image_type?: 'url' | 'base64';
+      gemini_api_key?: string;
     };
   }>('/ocr', async (request, reply) => {
-    const { image_url, image_type = 'url' } = request.body;
+    const { image_url, image_type = 'url', gemini_api_key } = request.body;
 
     try {
       app.log.info(`[OCR] Request for image: ${image_url.substring(0, 100)}...`);
@@ -400,7 +406,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const extractedText = await extractTextFromImage(image_url, image_type);
+      const extractedText = await extractTextFromImage(image_url, image_type, gemini_api_key);
 
       app.log.info(`[OCR] Extracted ${extractedText.length} characters`);
 

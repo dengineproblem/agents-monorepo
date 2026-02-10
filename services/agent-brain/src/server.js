@@ -5464,6 +5464,7 @@ async function getAccountsForCurrentHour(utcHour) {
       default_cpl_target_cents, plan_daily_budget_cents,
       last_brain_batch_run_at,
       prompt3, whatsapp_phone_number, ig_seed_audience_id,
+      openai_api_key,
       user_accounts!inner(
         id, username, access_token, multi_account_enabled, optimization, is_active
       )
@@ -6490,7 +6491,8 @@ async function processAccountBrain(account) {
         const result = await runInteractiveBrain(userAccountForBrain, {
           accountUUID: accountId,
           supabase,
-          logger: fastify.log
+          logger: fastify.log,
+          openaiApiKey: account.openai_api_key || null
         });
 
         // Проверяем успех Brain Mini в fallback
@@ -6594,7 +6596,8 @@ async function processAccountBrain(account) {
         const result = await runInteractiveBrain(userAccountForBrain, {
           accountUUID: accountId,
           supabase,
-          logger: fastify.log
+          logger: fastify.log,
+          openaiApiKey: account.openai_api_key || null
         });
 
         if (result.success) {
@@ -6633,7 +6636,8 @@ async function processAccountBrain(account) {
       const result = await runInteractiveBrain(userAccountForBrain, {
         accountUUID: accountId,
         supabase,
-        logger: fastify.log
+        logger: fastify.log,
+        openaiApiKey: account.openai_api_key || null
       });
 
       // Проверяем успех runInteractiveBrain

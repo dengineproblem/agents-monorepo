@@ -40,6 +40,7 @@ const INITIAL_FORM_DATA: Partial<CreateAdAccountPayload> = {
   prompt4: '',
   openai_api_key: '',
   gemini_api_key: '',
+  anthropic_api_key: '',
 };
 
 export function CreateAdAccountDialog({ open, onOpenChange, onSuccess }: CreateAdAccountDialogProps) {
@@ -249,6 +250,19 @@ export function CreateAdAccountDialog({ open, onOpenChange, onSuccess }: CreateA
                   onChange={(e) => updateField('gemini_api_key', e.target.value)}
                   placeholder="AI..."
                 />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="create-anthropic_api_key">Anthropic API Key (Claude бот)</Label>
+                <Input
+                  id="create-anthropic_api_key"
+                  type="password"
+                  value={formData.anthropic_api_key || ''}
+                  onChange={(e) => updateField('anthropic_api_key', e.target.value)}
+                  placeholder="sk-ant-..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ключ для Telegram бота. Если пуст — используется системный ключ.
+                </p>
               </div>
             </div>
           </TabsContent>

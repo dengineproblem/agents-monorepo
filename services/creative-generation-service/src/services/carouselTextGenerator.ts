@@ -1,11 +1,20 @@
 import OpenAI from 'openai';
 
-function getOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY must be set in environment variables');
+let defaultOpenai: OpenAI | null = null;
+
+function getOpenAIClient(customApiKey?: string | null): OpenAI {
+  if (customApiKey) {
+    console.log('[Carousel Text] Using per-account OpenAI API key (sk-...%s)', customApiKey.slice(-4));
+    return new OpenAI({ apiKey: customApiKey });
   }
-  return new OpenAI({ apiKey });
+  if (!defaultOpenai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY must be set in environment variables');
+    }
+    defaultOpenai = new OpenAI({ apiKey });
+  }
+  return defaultOpenai;
 }
 
 /**
@@ -19,14 +28,15 @@ function getOpenAIClient(): OpenAI {
 export async function generateCarouselTexts(
   carouselIdea: string,
   cardsCount: number,
-  userPrompt1: string
+  userPrompt1: string,
+  apiKey?: string | null
 ): Promise<string[]> {
   try {
     console.log(`[Carousel Text] Generating ${cardsCount} carousel card texts...`);
     console.log('[Carousel Text] User idea length:', carouselIdea?.length || 0);
     console.log('[Carousel Text] PROMPT1 length:', userPrompt1.length);
 
-    const openai = getOpenAIClient();
+    const openai = getOpenAIClient(apiKey);
 
     const systemPrompt = `Ты - expert копирайтер, специализирующийся на сторителлинге для рекламных каруселей.
 
@@ -164,12 +174,13 @@ ${userPrompt1}`;
 export async function regenerateCarouselCardText(
   cardIndex: number,
   existingTexts: string[],
-  userPrompt1: string
+  userPrompt1: string,
+  apiKey?: string | null
 ): Promise<string> {
   try {
     console.log(`[Carousel Text] Regenerating card #${cardIndex}...`);
 
-    const openai = getOpenAIClient();
+    const openai = getOpenAIClient(apiKey);
 
     const totalCards = existingTexts.length;
     const position = cardIndex === 0 ? 'первая (хук)' :

@@ -34,6 +34,7 @@ export interface AdCredentials {
   // API Keys
   openaiApiKey: string | null;
   geminiApiKey: string | null;
+  anthropicApiKey: string | null;
 
   // AmoCRM
   amocrmSubdomain: string | null;
@@ -90,7 +91,7 @@ export async function getCredentials(
       tiktok_access_token,
       prompt1, prompt2, prompt3, prompt4,
       telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
-      openai_api_key,
+      openai_api_key, anthropic_api_key,
       amocrm_subdomain, amocrm_access_token, amocrm_refresh_token,
       amocrm_token_expires_at, amocrm_client_id, amocrm_client_secret,
       tarif, tarif_expires
@@ -148,6 +149,7 @@ export async function getCredentials(
 
       openaiApiKey: adAccount.openai_api_key,
       geminiApiKey: adAccount.gemini_api_key,
+      anthropicApiKey: adAccount.anthropic_api_key,
 
       amocrmSubdomain: adAccount.amocrm_subdomain,
       amocrmAccessToken: adAccount.amocrm_access_token,
@@ -196,6 +198,7 @@ export async function getCredentials(
 
     openaiApiKey: user.openai_api_key,
     geminiApiKey: null, // нет в user_accounts, только в ad_accounts
+    anthropicApiKey: user.anthropic_api_key,
 
     amocrmSubdomain: user.amocrm_subdomain,
     amocrmAccessToken: user.amocrm_access_token,

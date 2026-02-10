@@ -81,20 +81,30 @@ const LLM_TIMEOUT_MS = 600000; // 10 минут таймаут для LLM (GPT-5
  * Вызов OpenAI Responses API для Brain Mini
  * С таймаутом и подробным логированием
  */
-async function responsesCreateMini(payload) {
+async function responsesCreateMini(payload, openaiApiKey) {
   const startTime = Date.now();
   const { model, input, reasoning, temperature, top_p, metadata } = payload || {};
 
-  // Проверка наличия API ключа
-  if (!process.env.OPENAI_API_KEY) {
+  // Per-account ключ или глобальный из env
+  const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
     const err = new Error('OPENAI_API_KEY not configured');
     err.status = 500;
     logger.error({
       where: 'responsesCreateMini',
       phase: 'config_error',
-      error: 'OPENAI_API_KEY environment variable is not set'
+      error: 'OPENAI_API_KEY environment variable is not set and no per-account key provided'
     });
     throw err;
+  }
+
+  if (openaiApiKey) {
+    logger.info({
+      where: 'responsesCreateMini',
+      phase: 'using_per_account_key',
+      keyTail: openaiApiKey.slice(-4)
+    });
   }
 
   const safeBody = {
@@ -124,7 +134,7 @@ async function responsesCreateMini(payload) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        'authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(safeBody),
       signal: controller.signal
@@ -201,7 +211,7 @@ async function responsesCreateMini(payload) {
  * Wrapper с retry-логикой для Brain Mini
  * Ретраит на 429 (rate limit), 500, 502, 503 и таймауты
  */
-async function responsesCreateMiniWithRetry(payload, maxRetries = 3) {
+async function responsesCreateMiniWithRetry(payload, maxRetries = 3, openaiApiKey) {
   let lastError;
   const overallStartTime = Date.now();
 
@@ -209,14 +219,15 @@ async function responsesCreateMiniWithRetry(payload, maxRetries = 3) {
     where: 'responsesCreateMiniWithRetry',
     phase: 'start',
     max_retries: maxRetries,
-    model: payload?.model
+    model: payload?.model,
+    hasCustomKey: !!openaiApiKey
   });
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const attemptStartTime = Date.now();
 
     try {
-      const result = await responsesCreateMini(payload);
+      const result = await responsesCreateMini(payload, openaiApiKey);
 
       logger.info({
         where: 'responsesCreateMiniWithRetry',
@@ -295,7 +306,7 @@ async function responsesCreateMiniWithRetry(payload, maxRetries = 3) {
  * @param {object} userPayload - Данные для анализа
  * @returns {object} - { parsed, rawText, parseError, meta, validation }
  */
-async function llmPlanMini(systemPrompt, userPayload) {
+async function llmPlanMini(systemPrompt, userPayload, openaiApiKey) {
   const startTime = Date.now();
 
   // Безопасная сериализация payload
@@ -325,7 +336,8 @@ async function llmPlanMini(systemPrompt, userPayload) {
     prompt_length: systemPrompt.length,
     payload_length: payloadJson.length,
     payload_adsets_count: userPayload?.adsets?.length || 0,
-    payload_directions_count: userPayload?.directions?.length || 0
+    payload_directions_count: userPayload?.directions?.length || 0,
+    hasCustomKey: !!openaiApiKey
   });
 
   const resp = await responsesCreateMiniWithRetry({
@@ -334,7 +346,7 @@ async function llmPlanMini(systemPrompt, userPayload) {
       { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
       { role: 'user', content: [{ type: 'input_text', text: payloadJson }] }
     ]
-  });
+  }, 3, openaiApiKey);
 
   const duration = Date.now() - startTime;
 
@@ -2789,6 +2801,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
   const directionId = options.directionId || null;
   const campaignId = options.campaignId || null;  // Facebook campaign ID для фильтрации
   const useLLM = options.useLLM !== false; // default: true
+  const openaiApiKey = options.openaiApiKey || null; // per-account OpenAI key
 
   // accountUUID может быть передан через options или через userAccount
   // Консистентно с основным Brain (server.js)
@@ -2802,7 +2815,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     campaignId,
     useLLM,
     accountUUID,
-    ad_account_id
+    ad_account_id,
+    hasCustomOpenaiKey: !!openaiApiKey
   });
 
   try {
@@ -4367,7 +4381,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         });
 
         const systemPrompt = SYSTEM_PROMPT_MINI(llmPayload.time_context, log);
-        const llmResult = await llmPlanMini(systemPrompt, llmPayload);
+        const llmResult = await llmPlanMini(systemPrompt, llmPayload, openaiApiKey);
         const llmDuration = Date.now() - llmStartTime;
 
         llmMeta = llmResult.meta;

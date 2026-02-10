@@ -2624,7 +2624,7 @@ export const adsHandlers = {
    * Trigger a Brain Agent optimization run
    * WARNING: This is a dangerous operation that can modify budgets and pause/resume adsets
    */
-  async triggerBrainOptimizationRun({ direction_id, campaign_id, dry_run, reason, proposals: preApprovedProposals }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
+  async triggerBrainOptimizationRun({ direction_id, campaign_id, dry_run, reason, proposals: preApprovedProposals }, { userAccountId, adAccountId, adAccountDbId, accessToken, openaiApiKey }) {
     const dbAccountId = adAccountDbId || null;
 
     // Логируем входящие параметры
@@ -2638,6 +2638,7 @@ export const adsHandlers = {
       campaign_id: campaign_id || null,
       dry_run,
       reason,
+      hasCustomOpenaiKey: !!openaiApiKey,
       hasPreApprovedProposals: !!preApprovedProposals?.length,
       preApprovedProposalsCount: preApprovedProposals?.length || 0,
       message: preApprovedProposals?.length
@@ -2945,7 +2946,8 @@ export const adsHandlers = {
           campaignId: campaign_id,  // Facebook campaign ID для фильтрации по кампании
           supabase,
           logger,
-          accountUUID  // Также передаём в options для directions
+          accountUUID,  // Также передаём в options для directions
+          openaiApiKey: openaiApiKey || null  // Per-account OpenAI key для Brain LLM
         }
       );
 

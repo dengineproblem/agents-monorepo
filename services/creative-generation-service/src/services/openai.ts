@@ -3,17 +3,21 @@ import { buildImagePrompt } from './prompts';
 
 const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
-let openai: OpenAI;
+let defaultOpenai: OpenAI;
 
-function getOpenAIClient(): OpenAI {
-  if (!openai) {
+function getOpenAIClient(customApiKey?: string | null): OpenAI {
+  if (customApiKey) {
+    console.log('[OpenAI] Using per-account API key (sk-...%s)', customApiKey.slice(-4));
+    return new OpenAI({ apiKey: customApiKey });
+  }
+  if (!defaultOpenai) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY must be set in environment variables');
     }
-    openai = new OpenAI({ apiKey });
+    defaultOpenai = new OpenAI({ apiKey });
   }
-  return openai;
+  return defaultOpenai;
 }
 
 /**
@@ -26,7 +30,7 @@ function getOpenAIClient(): OpenAI {
 export async function generateText(
   systemPrompt: string,
   userPrompt: string,
-  options?: { temperature?: number; seed?: number; model?: string }
+  options?: { temperature?: number; seed?: number; model?: string; apiKey?: string | null }
 ): Promise<string> {
   try {
     const useModel = options?.model || model;
@@ -59,7 +63,7 @@ export async function generateText(
       requestParams.seed = options.seed;
     }
 
-    const client = getOpenAIClient();
+    const client = getOpenAIClient(options?.apiKey);
     const completion = await client.chat.completions.create(requestParams);
     
     console.log('[OpenAI] ===== ПОЛНЫЙ ОТВЕТ ОТ OPENAI =====');
@@ -110,7 +114,8 @@ export async function generateCreativeImage(
   bullets: string,
   profits: string,
   cta: string,
-  userPrompt4: string
+  userPrompt4: string,
+  apiKey?: string | null
 ): Promise<string> {
   try {
     // DALL-E 3 генерирует только фоновое изображение
@@ -140,7 +145,7 @@ Generate a beautiful background that complements these texts but DO NOT include 
     console.log('[OpenAI] Generating background image with DALL-E 3...');
     console.log('[OpenAI] Note: Text overlay will need to be added separately');
 
-    const client = getOpenAIClient();
+    const client = getOpenAIClient(apiKey);
     const response = await client.images.generate({
       model: 'dall-e-3',
       prompt: backgroundPrompt,

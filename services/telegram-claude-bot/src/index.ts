@@ -68,6 +68,19 @@ const webSearchTool: Anthropic.Messages.WebSearchTool20250305 = {
 let bot: TelegramBot;
 let anthropic: Anthropic;
 let openai: OpenAI | null = null;
+
+/**
+ * Get Anthropic client — per-account key if set, otherwise global fallback.
+ * Creating a new Anthropic() per request is cheap (stateless HTTP wrapper).
+ */
+function getAnthropicClient(session: UserSession | null): Anthropic {
+  if (session?.anthropicApiKey) {
+    logger.info({ keyTail: session.anthropicApiKey.slice(-4) }, 'Using per-account Anthropic API key');
+    return new Anthropic({ apiKey: session.anthropicApiKey });
+  }
+  return anthropic; // global fallback
+}
+
 let lastTimestamp = '';
 let sessions: Session = {};
 let lastAgentTimestamp: Record<string, string> = {};
@@ -172,7 +185,11 @@ async function resolveUser(telegramId: number): Promise<ResolvedUser | null> {
         businessName: response.data.businessName || null,
         multiAccountEnabled: !!response.data.multiAccountEnabled,
         stack: response.data.stack || [],
-        adAccounts: response.data.adAccounts || [],
+        adAccounts: (response.data.adAccounts || []).map((acc: any) => ({
+          ...acc,
+          anthropicApiKey: acc.anthropicApiKey || null,
+        })),
+        anthropicApiKey: response.data.anthropicApiKey || null,
       };
       userCache.set(telegramId, { data: resolved, expiresAt: Date.now() + CACHE_TTL_MS });
       logger.info({ telegramId, stack: resolved.stack }, 'Resolved user');
@@ -385,7 +402,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         if (savedAccountId) {
           const acc = session.adAccounts.find(a => a.id === savedAccountId);
           if (acc) {
-            setSelectedAccount(telegramId!, acc.id, acc.stack);
+            setSelectedAccount(telegramId!, acc.id, acc.stack, acc.anthropicApiKey);
             session = getSession(telegramId!)!;
             logger.info({ telegramId, accountId: acc.id, accountName: acc.name }, 'Restored saved account from memory');
           } else {
@@ -417,7 +434,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         if (num > 0 && num <= session.adAccounts.length) {
           // Пользователь выбрал аккаунт
           const acc = session.adAccounts[num - 1];
-          setSelectedAccount(telegramId!, acc.id, acc.stack);
+          setSelectedAccount(telegramId!, acc.id, acc.stack, acc.anthropicApiKey);
           session = getSession(telegramId!)!;
           updateUserMemory(userAccountId, 'selected_account', acc.id);
           updateUserMemory(userAccountId, 'selected_account_name', acc.name);
@@ -589,13 +606,32 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     while (continueLoop && turnCount < MAX_TURNS) {
       turnCount++;
 
-      const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 4096,
-        system: systemPrompt,
-        tools: domainTools,
-        messages,
-      });
+      let response: Anthropic.Messages.Message;
+      try {
+        response = await getAnthropicClient(session).messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4096,
+          system: systemPrompt,
+          tools: domainTools,
+          messages,
+        });
+      } catch (apiError: any) {
+        // If per-account key is invalid (401), fallback to global key
+        if (apiError?.status === 401 && session.anthropicApiKey) {
+          logger.warn({ telegramId, chatId }, 'Per-account Anthropic API key is invalid, falling back to global key');
+          session.anthropicApiKey = null;
+          await bot.sendMessage(chatId, '⚠️ Ваш Anthropic API ключ недействителен. Используется системный ключ.');
+          response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 4096,
+            system: systemPrompt,
+            tools: domainTools,
+            messages,
+          });
+        } else {
+          throw apiError;
+        }
+      }
 
       logger.info({
         chatId,

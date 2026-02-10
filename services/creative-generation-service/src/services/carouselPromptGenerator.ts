@@ -4,12 +4,21 @@ import { CarouselVisualStyle } from '../types';
 
 const logger = pino({ name: 'carouselPromptGenerator' });
 
-function getOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY must be set in environment variables');
+let defaultOpenai: OpenAI | null = null;
+
+function getOpenAIClient(customApiKey?: string | null): OpenAI {
+  if (customApiKey) {
+    logger.info({ keyTail: customApiKey.slice(-4) }, 'Using per-account OpenAI API key for carousel prompt');
+    return new OpenAI({ apiKey: customApiKey });
   }
-  return new OpenAI({ apiKey });
+  if (!defaultOpenai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY must be set in environment variables');
+    }
+    defaultOpenai = new OpenAI({ apiKey });
+  }
+  return defaultOpenai;
 }
 
 const systemPromptCarouselImageGenerator = `
@@ -1013,7 +1022,8 @@ export async function generateCarouselCardPrompt(
   totalCards: number,
   carouselVisualStyle: CarouselVisualStyle,
   customPrompt?: string,
-  stylePrompt?: string
+  stylePrompt?: string,
+  apiKey?: string | null
 ): Promise<string> {
   logger.info({ cardIndex, totalCards, carouselVisualStyle, hasStylePrompt: !!stylePrompt }, 'Генерация промпта для карточки карусели');
 
@@ -1100,7 +1110,7 @@ ${customPrompt ? `ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ ОТ ПОЛ�
 `;
 
   try {
-    const client = getOpenAIClient();
+    const client = getOpenAIClient(apiKey);
     const response = await client.chat.completions.create({
       model: 'gpt-4o',
       messages: [

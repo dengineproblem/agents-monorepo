@@ -3,12 +3,21 @@ import pino from 'pino';
 
 const logger = pino({ name: 'imagePromptGenerator' });
 
-function getOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY must be set in environment variables');
+let defaultOpenai: OpenAI | null = null;
+
+function getOpenAIClient(customApiKey?: string | null): OpenAI {
+  if (customApiKey) {
+    logger.info({ keyTail: customApiKey.slice(-4) }, 'Using per-account OpenAI API key for image prompt');
+    return new OpenAI({ apiKey: customApiKey });
   }
-  return new OpenAI({ apiKey });
+  if (!defaultOpenai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY must be set in environment variables');
+    }
+    defaultOpenai = new OpenAI({ apiKey });
+  }
+  return defaultOpenai;
 }
 
 const systemPromptImageGenerator = `
@@ -352,7 +361,8 @@ export async function generateImagePrompt(
   styleId: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle',
   offer: string,
   bullets: string,
-  profits: string
+  profits: string,
+  apiKey?: string | null
 ): Promise<string> {
   logger.info({ styleId }, 'Генерация промпта для изображения');
 
@@ -398,7 +408,7 @@ ${textsSection}
 `;
 
   try {
-    const client = getOpenAIClient();
+    const client = getOpenAIClient(apiKey);
     const response = await client.chat.completions.create({
       model: 'gpt-4o',
       messages: [

@@ -996,8 +996,12 @@ export const creativeHandlers = {
    * generateCreatives - Генерация креатива-картинки (single image)
    * Вызывает /generate-creative endpoint Creative Generation Service
    */
-  async generateCreatives({ offer, bullets, profits, cta, direction_id, style_id, style_prompt, reference_image }, { userAccountId, adAccountDbId }) {
+  async generateCreatives({ offer, bullets, profits, cta, direction_id, style_id, style_prompt, reference_image }, { userAccountId, adAccountDbId, openaiApiKey, geminiApiKey }) {
     const dbAccountId = adAccountDbId || null;
+
+    if (openaiApiKey || geminiApiKey) {
+      logger.info({ hasOpenaiKey: !!openaiApiKey, hasGeminiKey: !!geminiApiKey, userAccountId }, 'generateCreatives: using per-account AI keys');
+    }
 
     // Check if creative generation service is configured
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
@@ -1033,7 +1037,9 @@ export const creativeHandlers = {
           direction_id: direction_id || null,
           style_id: style_id || 'modern_performance',
           style_prompt: style_prompt || null,
-          reference_image: reference_image || null
+          reference_image: reference_image || null,
+          openai_api_key: openaiApiKey || null,
+          gemini_api_key: geminiApiKey || null
         }),
         signal: controller.signal
       });
@@ -1092,8 +1098,12 @@ export const creativeHandlers = {
    * generateCarousel - Генерация карусели (2-10 карточек)
    * Вызывает /generate-carousel endpoint Creative Generation Service
    */
-  async generateCarousel({ carousel_texts, visual_style, style_prompt, reference_image, direction_id }, { userAccountId, adAccountDbId }) {
+  async generateCarousel({ carousel_texts, visual_style, style_prompt, reference_image, direction_id }, { userAccountId, adAccountDbId, openaiApiKey, geminiApiKey }) {
     const dbAccountId = adAccountDbId || null;
+
+    if (openaiApiKey || geminiApiKey) {
+      logger.info({ hasOpenaiKey: !!openaiApiKey, hasGeminiKey: !!geminiApiKey, userAccountId }, 'generateCarousel: using per-account AI keys');
+    }
 
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
@@ -1128,7 +1138,9 @@ export const creativeHandlers = {
           visual_style: visual_style || 'clean_minimal',
           style_prompt: style_prompt || null,
           reference_image: reference_image || null,
-          direction_id: direction_id || null
+          direction_id: direction_id || null,
+          openai_api_key: openaiApiKey || null,
+          gemini_api_key: geminiApiKey || null
         }),
         signal: controller.signal
       });
@@ -1181,7 +1193,7 @@ export const creativeHandlers = {
    * generateTextCreative - Генерация текстового креатива
    * Вызывает /generate-text-creative endpoint Creative Generation Service
    */
-  async generateTextCreative({ text_type, user_prompt }, { userAccountId, adAccountDbId }) {
+  async generateTextCreative({ text_type, user_prompt }, { userAccountId, adAccountDbId, openaiApiKey }) {
     const dbAccountId = adAccountDbId || null;
 
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
@@ -1210,7 +1222,8 @@ export const creativeHandlers = {
         body: JSON.stringify({
           user_id: userAccountId,
           text_type,
-          user_prompt: user_prompt || ''
+          user_prompt: user_prompt || '',
+          openai_api_key: openaiApiKey || null
         })
       });
 
@@ -1260,7 +1273,7 @@ export const creativeHandlers = {
    * generateCarouselTexts - Генерация текстов для карусели
    * Вызывает /generate-carousel-texts endpoint для получения текстов карточек
    */
-  async generateCarouselTexts({ carousel_idea, cards_count }, { userAccountId, adAccountDbId }) {
+  async generateCarouselTexts({ carousel_idea, cards_count }, { userAccountId, adAccountDbId, openaiApiKey }) {
     const dbAccountId = adAccountDbId || null;
 
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
@@ -1288,7 +1301,8 @@ export const creativeHandlers = {
           user_id: userAccountId,
           account_id: dbAccountId,
           carousel_idea: carousel_idea || '',
-          cards_count
+          cards_count,
+          openai_api_key: openaiApiKey || null
         })
       });
 
@@ -1328,7 +1342,7 @@ export const creativeHandlers = {
   /**
    * generateOffer - Генерация заголовка/оффера для креатива
    */
-  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId }) {
+  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1347,7 +1361,8 @@ export const creativeHandlers = {
           prompt: prompt || '',
           existing_bullets: existing_bullets || '',
           existing_benefits: existing_profits || '',
-          existing_cta: existing_cta || ''
+          existing_cta: existing_cta || '',
+          openai_api_key: openaiApiKey || null
         })
       });
 
@@ -1372,7 +1387,7 @@ export const creativeHandlers = {
   /**
    * generateBullets - Генерация буллетов/преимуществ
    */
-  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId }) {
+  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1388,7 +1403,8 @@ export const creativeHandlers = {
           prompt: prompt || '',
           existing_offer: existing_offer || '',
           existing_benefits: existing_profits || '',
-          existing_cta: existing_cta || ''
+          existing_cta: existing_cta || '',
+          openai_api_key: openaiApiKey || null
         })
       });
 
@@ -1413,7 +1429,7 @@ export const creativeHandlers = {
   /**
    * generateProfits - Генерация выгод для клиента
    */
-  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId }) {
+  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1429,7 +1445,8 @@ export const creativeHandlers = {
           prompt: prompt || '',
           existing_offer: existing_offer || '',
           existing_bullets: existing_bullets || '',
-          existing_cta: existing_cta || ''
+          existing_cta: existing_cta || '',
+          openai_api_key: openaiApiKey || null
         })
       });
 
@@ -1454,7 +1471,7 @@ export const creativeHandlers = {
   /**
    * generateCta - Генерация призыва к действию (CTA)
    */
-  async generateCta({ prompt, existing_offer, existing_bullets, existing_profits }, { userAccountId }) {
+  async generateCta({ prompt, existing_offer, existing_bullets, existing_profits }, { userAccountId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1470,7 +1487,8 @@ export const creativeHandlers = {
           prompt: prompt || '',
           existing_offer: existing_offer || '',
           existing_bullets: existing_bullets || '',
-          existing_benefits: existing_profits || ''
+          existing_benefits: existing_profits || '',
+          openai_api_key: openaiApiKey || null
         })
       });
 
