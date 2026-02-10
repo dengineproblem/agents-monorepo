@@ -359,16 +359,15 @@ export async function workflowStartCreativeTest(
       promoted_object = {
         application_id: appConfig.applicationId,
         object_store_url: appStoreUrl,
-        ...(appConfig.isSkadnetworkAttribution !== undefined && {
-          is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
+        ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+          is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
         })
       };
 
       log.info({
         appIdEnvKey: appConfig.appIdEnvKey,
         hasAppStoreUrlInSettings: true,
-        skadEnvKey: appConfig.skadEnvKey || null,
-        isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
+        isSkadnetworkAttribution: defaultSettings?.is_skadnetwork_attribution ?? null
       }, 'Using global env app config for app_installs creative test');
       break;
 

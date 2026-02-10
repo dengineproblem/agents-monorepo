@@ -568,8 +568,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               promoted_object = {
                 application_id: appConfig.applicationId,
                 object_store_url: appStoreUrl,
-                ...(appConfig.isSkadnetworkAttribution !== undefined && {
-                  is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
+                ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+                  is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
                 })
               };
 
@@ -579,8 +579,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 objective: direction.objective,
                 appIdEnvKey: appConfig.appIdEnvKey,
                 hasAppStoreUrlInSettings: true,
-                skadEnvKey: appConfig.skadEnvKey || null,
-                isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
+                isSkadnetworkAttribution: defaultSettings?.is_skadnetwork_attribution ?? null
               }, 'Configured promoted_object for app_installs (deterministic)');
             }
 
@@ -1034,8 +1033,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           promoted_object = {
             application_id: appConfig.applicationId,
             object_store_url: appStoreUrl,
-            ...(appConfig.isSkadnetworkAttribution !== undefined && {
-              is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
+            ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+              is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
             })
           };
 
@@ -1045,8 +1044,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             objective: direction.objective,
             appIdEnvKey: appConfig.appIdEnvKey,
             hasAppStoreUrlInSettings: true,
-            skadEnvKey: appConfig.skadEnvKey || null,
-            isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
+            isSkadnetworkAttribution: defaultSettings?.is_skadnetwork_attribution ?? null
           }, 'Configured promoted_object for app_installs (manual launch)');
         }
 

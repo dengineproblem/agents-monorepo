@@ -393,16 +393,15 @@ export async function workflowCreateCampaignWithCreative(
     adsetBody.promoted_object = {
       application_id: appConfig.applicationId,
       object_store_url: appStoreUrl,
-      ...(appConfig.isSkadnetworkAttribution !== undefined && {
-        is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
+      ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+        is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
       })
     };
 
     console.log('[CreateCampaignWithCreative] AppInstalls promoted_object configured', {
       app_id_env_key: appConfig.appIdEnvKey,
       has_app_store_url_in_settings: true,
-      skad_env_key: appConfig.skadEnvKey || null,
-      is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
+      is_skadnetwork_attribution: defaultSettings?.is_skadnetwork_attribution ?? null
     });
   }
 

@@ -585,8 +585,8 @@ export async function workflowCreateAdSetInDirection(
     adsetBody.promoted_object = {
       application_id: appConfig.applicationId,
       object_store_url: appStoreUrl,
-      ...(appConfig.isSkadnetworkAttribution !== undefined && {
-        is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
+      ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
+        is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
       })
     };
 
@@ -594,8 +594,7 @@ export async function workflowCreateAdSetInDirection(
       directionId: direction.id,
       appIdEnvKey: appConfig.appIdEnvKey,
       hasAppStoreUrlInSettings: true,
-      skadEnvKey: appConfig.skadEnvKey || null,
-      is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
+      is_skadnetwork_attribution: defaultSettings?.is_skadnetwork_attribution ?? null
     }, 'Using promoted_object for app_installs objective');
   }
 

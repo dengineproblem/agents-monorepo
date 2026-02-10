@@ -357,8 +357,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           app.log.info({
             direction_id: body.direction_id,
             appIdEnvKey: appConfig.appIdEnvKey,
-            hasAppStoreUrlInSettings: true,
-            skadEnvKey: appConfig.skadEnvKey || null
+            hasAppStoreUrlInSettings: true
           }, 'Using global app config for app_installs image creative');
           const appInstallCreative = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
@@ -778,8 +777,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({
           direction_id,
           appIdEnvKey: appConfig.appIdEnvKey,
-          hasAppStoreUrlInSettings: true,
-          skadEnvKey: appConfig.skadEnvKey || null
+          hasAppStoreUrlInSettings: true
         }, 'Using global app config for app_installs image creative');
         const result = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,

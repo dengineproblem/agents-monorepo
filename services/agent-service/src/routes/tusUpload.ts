@@ -785,8 +785,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       log.info({
         uploadId,
         appIdEnvKey: appConfig.appIdEnvKey,
-        hasAppStoreUrlInSettings: true,
-        skadEnvKey: appConfig.skadEnvKey || null
+        hasAppStoreUrlInSettings: true
       }, '[TUS] Using global app config for app_installs video creative');
       const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,

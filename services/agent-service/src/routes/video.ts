@@ -424,8 +424,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           }
           app.log.info({
             appIdEnvKey: appConfig.appIdEnvKey,
-            hasAppStoreUrlInSettings: true,
-            skadEnvKey: appConfig.skadEnvKey || null
+            hasAppStoreUrlInSettings: true
           }, 'Using global app config for app_installs video creative');
           const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,

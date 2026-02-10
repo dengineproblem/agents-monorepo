@@ -491,6 +491,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
   const [appStoreUrl, setAppStoreUrl] = useState('');
+  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
 
   // TikTok Instant Page ID (Lead Forms) - ручной ввод
   const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
@@ -1043,6 +1044,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             }),
             ...(objective === 'app_installs' && {
               app_store_url: appStoreUrl.trim(),
+              is_skadnetwork_attribution: isSkadnetworkAttribution,
             }),
           }
         : undefined;
@@ -1159,6 +1161,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
     setAppStoreUrl('');
+    setIsSkadnetworkAttribution(false);
     // CAPI settings
     setCapiEnabled(false);
     setCapiSource('whatsapp');
@@ -2573,8 +2576,19 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   disabled={isSubmitting}
                 />
               </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="skadnetwork-attribution"
+                  checked={isSkadnetworkAttribution}
+                  onCheckedChange={setIsSkadnetworkAttribution}
+                  disabled={isSubmitting}
+                />
+                <Label htmlFor="skadnetwork-attribution" className="font-normal cursor-pointer">
+                  Включить SKAdNetwork атрибуцию (iOS)
+                </Label>
+              </div>
               <p className="text-xs text-muted-foreground">
-                App ID и SKAdNetwork берутся из глобальных env на сервере.
+                App ID берётся из глобального env на сервере.
               </p>
             </div>
           )}

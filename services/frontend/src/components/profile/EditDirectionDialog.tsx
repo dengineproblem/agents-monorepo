@@ -411,6 +411,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
   const [appStoreUrl, setAppStoreUrl] = useState('');
+  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
   const [pixelId, setPixelId] = useState('');
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
@@ -791,6 +792,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
         if (settings.app_store_url) setAppStoreUrl(settings.app_store_url);
+        setIsSkadnetworkAttribution(Boolean(settings.is_skadnetwork_attribution));
         if (settings.pixel_id) {
           setPixelId(settings.pixel_id);
           setCapiPixelId(settings.pixel_id); // Используем тот же пиксель для CAPI
@@ -821,6 +823,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setInstagramUrl('');
     setSiteUrl('');
     setAppStoreUrl('');
+    setIsSkadnetworkAttribution(false);
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
   };
@@ -1150,6 +1153,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         }),
         ...(!isTikTok && direction.objective === 'app_installs' && {
           app_store_url: appStoreUrl.trim(),
+          is_skadnetwork_attribution: isSkadnetworkAttribution,
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
       };
@@ -1809,8 +1813,19 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       disabled={isSubmitting}
                     />
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="edit-skadnetwork-attribution"
+                      checked={isSkadnetworkAttribution}
+                      onCheckedChange={setIsSkadnetworkAttribution}
+                      disabled={isSubmitting}
+                    />
+                    <Label htmlFor="edit-skadnetwork-attribution" className="font-normal cursor-pointer">
+                      Включить SKAdNetwork атрибуцию (iOS)
+                    </Label>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    App ID и SKAdNetwork берутся из глобальных env на сервере.
+                    App ID берётся из глобального env на сервере.
                   </p>
                 </div>
               )}
