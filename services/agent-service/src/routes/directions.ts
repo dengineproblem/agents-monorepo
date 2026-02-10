@@ -980,15 +980,22 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       if (needsFacebook && input.objective === 'app_installs') {
         const appConfig = getAppInstallsConfig();
+        const appSettings = input.facebook_default_settings || input.default_settings;
         if (!appConfig) {
           const envHints = getAppInstallsConfigEnvHints();
           return reply.code(400).send({
             success: false,
-            error: 'app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)',
+            error: 'app_installs objective requires global app_id env config (META_APP_INSTALLS_APP_ID or META_APP_ID/FB_APP_ID).',
             details: {
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
             }
+          });
+        }
+
+        if (!appSettings?.app_store_url) {
+          return reply.code(400).send({
+            success: false,
+            error: 'app_installs objective requires app_store_url in direction settings',
           });
         }
       }

@@ -658,6 +658,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let siteUrl = null;
     let utm = null;
     let leadFormId: string | null = null;
+    let appStoreUrl: string | null = null;
     let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
     let useInstagram = true; // По умолчанию используем Instagram
     let direction: any = null; // для доступа к conversion_channel
@@ -698,6 +699,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         siteUrl = defaultSettings.site_url;
         utm = defaultSettings.utm_tag;
         leadFormId = defaultSettings.lead_form_id;
+        appStoreUrl = defaultSettings.app_store_url || null;
       }
     }
 
@@ -771,19 +773,19 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       fbCreativeId = leadFormCreative.id;
     } else if (objective === 'app_installs') {
       const appConfig = getAppInstallsConfig();
-      if (!appConfig) {
+      if (!appConfig || !appStoreUrl) {
         const envHints = getAppInstallsConfigEnvHints();
         log.error({
           uploadId,
           appIdEnvKeys: envHints.appIdEnvKeys,
-          appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
-        }, '[TUS] app_installs objective requires global env config');
-        throw new Error('app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)');
+          hasAppStoreUrlInSettings: Boolean(appStoreUrl)
+        }, '[TUS] app_installs objective requires app_id in env and app_store_url in direction settings');
+        throw new Error('app_installs objective requires app_id in env and app_store_url in direction settings');
       }
       log.info({
         uploadId,
         appIdEnvKey: appConfig.appIdEnvKey,
-        appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+        hasAppStoreUrlInSettings: true,
         skadEnvKey: appConfig.skadEnvKey || null
       }, '[TUS] Using global app config for app_installs video creative');
       const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
@@ -791,7 +793,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         pageId: pageId,
         instagramId: useInstagram ? (instagramId || undefined) : undefined,
         message: description,
-        appStoreUrl: appConfig.objectStoreUrl,
+        appStoreUrl: appStoreUrl,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = appInstallCreative.id;

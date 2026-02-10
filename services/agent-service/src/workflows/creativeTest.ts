@@ -350,10 +350,15 @@ export async function workflowStartCreativeTest(
       destination_type = undefined;
 
       const appConfig = requireAppInstallsConfig();
+      const appStoreUrl = defaultSettings?.app_store_url;
+
+      if (!appStoreUrl) {
+        throw new Error('No app_store_url found in default settings for app_installs objective');
+      }
 
       promoted_object = {
         application_id: appConfig.applicationId,
-        object_store_url: appConfig.objectStoreUrl,
+        object_store_url: appStoreUrl,
         ...(appConfig.isSkadnetworkAttribution !== undefined && {
           is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
         })
@@ -361,7 +366,7 @@ export async function workflowStartCreativeTest(
 
       log.info({
         appIdEnvKey: appConfig.appIdEnvKey,
-        appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+        hasAppStoreUrlInSettings: true,
         skadEnvKey: appConfig.skadEnvKey || null,
         isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
       }, 'Using global env app config for app_installs creative test');

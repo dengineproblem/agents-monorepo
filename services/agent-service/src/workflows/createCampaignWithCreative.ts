@@ -384,10 +384,15 @@ export async function workflowCreateCampaignWithCreative(
 
   if (objective === 'AppInstalls') {
     const appConfig = requireAppInstallsConfig();
+    const appStoreUrl = defaultSettings?.app_store_url;
+
+    if (!appStoreUrl) {
+      throw new Error('AppInstalls requires app_store_url in default settings');
+    }
 
     adsetBody.promoted_object = {
       application_id: appConfig.applicationId,
-      object_store_url: appConfig.objectStoreUrl,
+      object_store_url: appStoreUrl,
       ...(appConfig.isSkadnetworkAttribution !== undefined && {
         is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
       })
@@ -395,7 +400,7 @@ export async function workflowCreateCampaignWithCreative(
 
     console.log('[CreateCampaignWithCreative] AppInstalls promoted_object configured', {
       app_id_env_key: appConfig.appIdEnvKey,
-      app_store_url_env_key: appConfig.objectStoreUrlEnvKey,
+      has_app_store_url_in_settings: true,
       skad_env_key: appConfig.skadEnvKey || null,
       is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
     });

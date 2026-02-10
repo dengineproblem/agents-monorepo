@@ -1,11 +1,4 @@
 const APP_ID_ENV_KEYS = ['META_APP_INSTALLS_APP_ID', 'META_APP_ID', 'FB_APP_ID', 'APP_ID'] as const;
-const APP_STORE_URL_ENV_KEYS = [
-  'META_APP_INSTALLS_STORE_URL',
-  'META_APP_STORE_URL',
-  'APP_STORE_URL',
-  'APP_INSTALLS_STORE_URL',
-  'MOBILE_APP_STORE_URL',
-] as const;
 const SKAD_ENV_KEYS = [
   'META_APP_INSTALLS_SKADNETWORK_ATTRIBUTION',
   'META_SKADNETWORK_ATTRIBUTION',
@@ -14,10 +7,8 @@ const SKAD_ENV_KEYS = [
 
 export type AppInstallsConfig = {
   applicationId: string;
-  objectStoreUrl: string;
   isSkadnetworkAttribution?: boolean;
   appIdEnvKey: string;
-  objectStoreUrlEnvKey: string;
   skadEnvKey?: string;
 };
 
@@ -43,9 +34,7 @@ function parseBooleanEnv(raw: string | null): boolean | undefined {
 
 export function getAppInstallsConfig(): AppInstallsConfig | null {
   const appId = resolveEnv(APP_ID_ENV_KEYS);
-  const storeUrl = resolveEnv(APP_STORE_URL_ENV_KEYS);
-
-  if (!appId.value || !storeUrl.value || !appId.key || !storeUrl.key) {
+  if (!appId.value || !appId.key) {
     return null;
   }
 
@@ -54,10 +43,8 @@ export function getAppInstallsConfig(): AppInstallsConfig | null {
 
   return {
     applicationId: appId.value,
-    objectStoreUrl: storeUrl.value,
     ...(parsedSkad !== undefined && { isSkadnetworkAttribution: parsedSkad }),
     appIdEnvKey: appId.key,
-    objectStoreUrlEnvKey: storeUrl.key,
     ...(skad.key && { skadEnvKey: skad.key }),
   };
 }
@@ -65,7 +52,6 @@ export function getAppInstallsConfig(): AppInstallsConfig | null {
 export function getAppInstallsConfigEnvHints() {
   return {
     appIdEnvKeys: APP_ID_ENV_KEYS,
-    appStoreUrlEnvKeys: APP_STORE_URL_ENV_KEYS,
     skadEnvKeys: SKAD_ENV_KEYS,
   };
 }
@@ -75,8 +61,7 @@ export function requireAppInstallsConfig(): AppInstallsConfig {
 
   if (!config) {
     throw new Error(
-      'Missing app installs configuration in env. Set META_APP_INSTALLS_APP_ID (or META_APP_ID/FB_APP_ID) ' +
-      'and META_APP_INSTALLS_STORE_URL (or META_APP_STORE_URL/APP_STORE_URL).'
+      'Missing app installs app_id in env. Set META_APP_INSTALLS_APP_ID (or META_APP_ID/FB_APP_ID/APP_ID).'
     );
   }
 

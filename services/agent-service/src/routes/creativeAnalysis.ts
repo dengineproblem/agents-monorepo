@@ -1065,6 +1065,7 @@ async function importSingleCreative(
             const siteUrl = defaultSettings?.site_url;
             const utm = defaultSettings?.utm_tag;
             const leadFormId = defaultSettings?.lead_form_id;
+            const appStoreUrl = defaultSettings?.app_store_url;
 
             // Создаём креатив в зависимости от objective
             let fbCreativeId = '';
@@ -1120,13 +1121,13 @@ async function importSingleCreative(
               }
             } else if (objective === 'app_installs') {
               const appConfig = getAppInstallsConfig();
-              if (appConfig) {
+              if (appConfig && appStoreUrl) {
                 const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
                   pageId: fullCredentials.pageId,
                   instagramId: fullCredentials.instagramId,
                   message: description,
-                  appStoreUrl: appConfig.objectStoreUrl,
+                  appStoreUrl: appStoreUrl,
                   imageUrl: creative.thumbnail_url || undefined
                 });
                 fbCreativeId = appInstallCreative.id;
@@ -1136,8 +1137,8 @@ async function importSingleCreative(
                   directionId,
                   objective,
                   appIdEnvKeys: envHints.appIdEnvKeys,
-                  appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
-                }, '[IMPORT_DEBUG] Skipping app_installs creative creation: global env app settings are incomplete');
+                  hasAppStoreUrlInSettings: Boolean(appStoreUrl)
+                }, '[IMPORT_DEBUG] Skipping app_installs creative creation: missing app_id env or app_store_url in settings');
               }
             }
 

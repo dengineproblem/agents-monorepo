@@ -410,6 +410,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.');
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
+  const [appStoreUrl, setAppStoreUrl] = useState('');
   const [pixelId, setPixelId] = useState('');
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
@@ -789,6 +790,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         if (settings.client_question) setClientQuestion(settings.client_question);
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
+        if (settings.app_store_url) setAppStoreUrl(settings.app_store_url);
         if (settings.pixel_id) {
           setPixelId(settings.pixel_id);
           setCapiPixelId(settings.pixel_id); // Используем тот же пиксель для CAPI
@@ -818,6 +820,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCapiPixelId('');
     setInstagramUrl('');
     setSiteUrl('');
+    setAppStoreUrl('');
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
   };
@@ -1023,6 +1026,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         return;
       }
 
+      if (direction.objective === 'app_installs' && !appStoreUrl.trim()) {
+        setError('Введите ссылку на приложение (App Store / Google Play)');
+        return;
+      }
+
     }
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
@@ -1141,6 +1149,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
         ...(!isTikTok && direction.objective === 'app_installs' && {
+          app_store_url: appStoreUrl.trim(),
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
       };
@@ -1785,10 +1794,23 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               )}
 
               {!isTikTok && direction.objective === 'app_installs' && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-                  <h3 className="font-semibold text-sm text-amber-900">📲 Установки приложения</h3>
-                  <p className="mt-1 text-xs text-amber-800">
-                    App ID, Store URL и SKAdNetwork берутся из глобальных env на сервере. Для направления эти поля заполнять не нужно.
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-app-store-url">
+                      Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="edit-app-store-url"
+                      type="url"
+                      value={appStoreUrl}
+                      onChange={(e) => setAppStoreUrl(e.target.value)}
+                      placeholder="https://apps.apple.com/app/id1234567890"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    App ID и SKAdNetwork берутся из глобальных env на сервере.
                   </p>
                 </div>
               )}

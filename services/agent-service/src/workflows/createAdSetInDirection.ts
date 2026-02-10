@@ -574,10 +574,17 @@ export async function workflowCreateAdSetInDirection(
 
   if (direction.objective === 'app_installs') {
     const appConfig = requireAppInstallsConfig();
+    const appStoreUrl = defaultSettings?.app_store_url;
+
+    if (!appStoreUrl) {
+      throw new Error(
+        `Cannot create app_installs adset for direction "${direction.name}": app_store_url is required in direction settings.`
+      );
+    }
 
     adsetBody.promoted_object = {
       application_id: appConfig.applicationId,
-      object_store_url: appConfig.objectStoreUrl,
+      object_store_url: appStoreUrl,
       ...(appConfig.isSkadnetworkAttribution !== undefined && {
         is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
       })
@@ -586,7 +593,7 @@ export async function workflowCreateAdSetInDirection(
     log.info({
       directionId: direction.id,
       appIdEnvKey: appConfig.appIdEnvKey,
-      appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+      hasAppStoreUrlInSettings: true,
       skadEnvKey: appConfig.skadEnvKey || null,
       is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
     }, 'Using promoted_object for app_installs objective');

@@ -545,28 +545,29 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               };
             } else if (direction.objective === 'app_installs') {
               const appConfig = getAppInstallsConfig();
+              const appStoreUrl = defaultSettings?.app_store_url;
 
-              if (!appConfig) {
+              if (!appConfig || !appStoreUrl) {
                 const envHints = getAppInstallsConfigEnvHints();
                 log.warn({
                   directionId: direction.id,
                   directionName: direction.name,
                   objective: direction.objective,
                   appIdEnvKeys: envHints.appIdEnvKeys,
-                  appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys,
-                }, 'app_installs requires global env config, but it is missing. Skipping direction.');
+                  hasAppStoreUrlInSettings: Boolean(appStoreUrl),
+                }, 'app_installs requires app_id in env and app_store_url in direction settings. Skipping direction.');
                 results.push({
                   direction_id: direction.id,
                   direction_name: direction.name,
                   success: false,
-                  error: 'App installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
+                  error: 'App installs objective requires global app_id env and app_store_url in direction settings.',
                 });
                 continue;
               }
 
               promoted_object = {
                 application_id: appConfig.applicationId,
-                object_store_url: appConfig.objectStoreUrl,
+                object_store_url: appStoreUrl,
                 ...(appConfig.isSkadnetworkAttribution !== undefined && {
                   is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
                 })
@@ -577,7 +578,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 directionName: direction.name,
                 objective: direction.objective,
                 appIdEnvKey: appConfig.appIdEnvKey,
-                appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+                hasAppStoreUrlInSettings: true,
                 skadEnvKey: appConfig.skadEnvKey || null,
                 isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
               }, 'Configured promoted_object for app_installs (deterministic)');
@@ -1014,24 +1015,25 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           };
         } else if (direction.objective === 'app_installs') {
           const appConfig = getAppInstallsConfig();
-          if (!appConfig) {
+          const appStoreUrl = defaultSettings?.app_store_url;
+          if (!appConfig || !appStoreUrl) {
             const envHints = getAppInstallsConfigEnvHints();
             log.error({
               directionId: direction.id,
               directionName: direction.name,
               objective: direction.objective,
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys,
-            }, 'app_installs requires global env config, but it is missing');
+              hasAppStoreUrlInSettings: Boolean(appStoreUrl),
+            }, 'app_installs requires app_id in env and app_store_url in direction settings');
             return reply.code(400).send({
               success: false,
-              error: 'app_installs requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
+              error: 'app_installs requires app_id in env (META_APP_INSTALLS_APP_ID) and app_store_url in direction settings.',
             });
           }
 
           promoted_object = {
             application_id: appConfig.applicationId,
-            object_store_url: appConfig.objectStoreUrl,
+            object_store_url: appStoreUrl,
             ...(appConfig.isSkadnetworkAttribution !== undefined && {
               is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
             })
@@ -1042,7 +1044,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             directionName: direction.name,
             objective: direction.objective,
             appIdEnvKey: appConfig.appIdEnvKey,
-            appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+            hasAppStoreUrlInSettings: true,
             skadEnvKey: appConfig.skadEnvKey || null,
             isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
           }, 'Configured promoted_object for app_installs (manual launch)');

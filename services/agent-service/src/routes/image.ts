@@ -223,6 +223,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         let siteUrl = body.site_url || null;
         let utm = body.utm || null;
         let leadFormId: string | null = null;
+        let appStoreUrl: string | null = null;
         let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
         let direction: any = null; // для доступа к conversion_channel
 
@@ -261,6 +262,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             siteUrl = defaultSettings.site_url || siteUrl;
             utm = defaultSettings.utm_tag || utm;
             leadFormId = defaultSettings.lead_form_id || leadFormId;
+            appStoreUrl = defaultSettings.app_store_url || appStoreUrl;
 
             app.log.info({
               direction_id: body.direction_id,
@@ -268,7 +270,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
               description,
               clientQuestion,
               siteUrl,
-              utm
+              utm,
+              hasAppStoreUrl: Boolean(appStoreUrl)
             }, 'Using settings from direction for image creative');
           } else {
             app.log.warn({
@@ -342,19 +345,19 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           fbCreativeId = leadFormCreative.id;
         } else if (objective === 'app_installs') {
           const appConfig = getAppInstallsConfig();
-          if (!appConfig) {
+          if (!appConfig || !appStoreUrl) {
             const envHints = getAppInstallsConfigEnvHints();
             app.log.error({
               direction_id: body.direction_id,
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
-            }, 'app_installs objective requires global env config');
-            throw new Error('app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).');
+              hasAppStoreUrlInSettings: Boolean(appStoreUrl)
+            }, 'app_installs objective requires app_id in env and app_store_url in direction settings');
+            throw new Error('app_installs objective requires app_id in env and app_store_url in direction settings.');
           }
           app.log.info({
             direction_id: body.direction_id,
             appIdEnvKey: appConfig.appIdEnvKey,
-            appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+            hasAppStoreUrlInSettings: true,
             skadEnvKey: appConfig.skadEnvKey || null
           }, 'Using global app config for app_installs image creative');
           const appInstallCreative = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
@@ -362,7 +365,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId,
             message: description,
-            appStoreUrl: appConfig.objectStoreUrl
+            appStoreUrl: appStoreUrl
           });
           fbCreativeId = appInstallCreative.id;
         }
@@ -592,6 +595,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
+      const appStoreUrl = defaultSettings?.app_store_url || null;
 
       // 5. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -759,14 +763,14 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         fbCreativeId = result.id;
       } else if (objective === 'app_installs') {
         const appConfig = getAppInstallsConfig();
-        if (!appConfig) {
+        if (!appConfig || !appStoreUrl) {
           const envHints = getAppInstallsConfigEnvHints();
           return reply.status(400).send({
             success: false,
-            error: 'app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
+            error: 'app_installs objective requires app_id in env and app_store_url in direction settings.',
             details: {
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+              hasAppStoreUrlInSettings: Boolean(appStoreUrl)
             },
             direction_id: direction_id
           });
@@ -774,7 +778,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({
           direction_id,
           appIdEnvKey: appConfig.appIdEnvKey,
-          appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+          hasAppStoreUrlInSettings: true,
           skadEnvKey: appConfig.skadEnvKey || null
         }, 'Using global app config for app_installs image creative');
         const result = await createAppInstallsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
@@ -782,7 +786,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           pageId: pageId,
           instagramId: instagramId,
           message: description,
-          appStoreUrl: appConfig.objectStoreUrl
+          appStoreUrl: appStoreUrl
         });
         fbCreativeId = result.id;
       } else {

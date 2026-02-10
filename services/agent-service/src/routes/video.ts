@@ -292,6 +292,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = null;
       let utm = null;
       let leadFormId: string | null = null;
+      let appStoreUrl: string | null = null;
       let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
       let direction: any = null; // для доступа к conversion_channel
 
@@ -330,6 +331,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           siteUrl = defaultSettings.site_url;
           utm = defaultSettings.utm_tag;
           leadFormId = defaultSettings.lead_form_id;
+          appStoreUrl = defaultSettings.app_store_url || null;
 
           app.log.info({
             direction_id: body.direction_id,
@@ -337,7 +339,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             description,
             clientQuestion,
             siteUrl,
-            utm
+            utm,
+            hasAppStoreUrl: Boolean(appStoreUrl)
           }, 'Using settings from direction for video creative');
         } else {
           app.log.warn({
@@ -411,17 +414,17 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           fbCreativeId = leadFormCreative.id;
         } else if (objective === 'app_installs') {
           const appConfig = getAppInstallsConfig();
-          if (!appConfig) {
+          if (!appConfig || !appStoreUrl) {
             const envHints = getAppInstallsConfigEnvHints();
             app.log.error({
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
-            }, 'app_installs objective requires global env config');
-            throw new Error('app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)');
+              hasAppStoreUrlInSettings: Boolean(appStoreUrl)
+            }, 'app_installs objective requires app_id in env and app_store_url in direction settings');
+            throw new Error('app_installs objective requires app_id in env and app_store_url in direction settings');
           }
           app.log.info({
             appIdEnvKey: appConfig.appIdEnvKey,
-            appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+            hasAppStoreUrlInSettings: true,
             skadEnvKey: appConfig.skadEnvKey || null
           }, 'Using global app config for app_installs video creative');
           const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
@@ -429,7 +432,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId,
             message: description,
-            appStoreUrl: appConfig.objectStoreUrl,
+            appStoreUrl: appStoreUrl,
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = appInstallCreative.id;

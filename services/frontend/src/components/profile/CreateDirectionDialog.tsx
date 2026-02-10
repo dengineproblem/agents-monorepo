@@ -490,6 +490,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadFormId, setLeadFormId] = useState('');
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
+  const [appStoreUrl, setAppStoreUrl] = useState('');
 
   // TikTok Instant Page ID (Lead Forms) - ручной ввод
   const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
@@ -1007,6 +1008,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         return;
       }
 
+      if (objective === 'app_installs' && !appStoreUrl.trim()) {
+        setError('Введите ссылку на приложение (App Store / Google Play)');
+        return;
+      }
+
     }
 
     setIsSubmitting(true);
@@ -1034,6 +1040,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             ...((objective === 'lead_forms' || (objective === 'conversions' && conversionChannel === 'lead_form')) && {
               lead_form_id: leadFormId,
               ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
+            }),
+            ...(objective === 'app_installs' && {
+              app_store_url: appStoreUrl.trim(),
             }),
           }
         : undefined;
@@ -1149,6 +1158,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
+    setAppStoreUrl('');
     // CAPI settings
     setCapiEnabled(false);
     setCapiSource('whatsapp');
@@ -2548,10 +2558,23 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           )}
 
           {needsFacebook && objective === 'app_installs' && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-              <h3 className="font-semibold text-sm text-amber-900">📲 Установки приложения</h3>
-              <p className="mt-1 text-xs text-amber-800">
-                App ID, Store URL и SKAdNetwork берутся из глобальных env на сервере. Для направления эти поля заполнять не нужно.
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
+              <div className="space-y-2">
+                <Label htmlFor="app-store-url">
+                  Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="app-store-url"
+                  type="url"
+                  value={appStoreUrl}
+                  onChange={(e) => setAppStoreUrl(e.target.value)}
+                  placeholder="https://apps.apple.com/app/id1234567890"
+                  disabled={isSubmitting}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                App ID и SKAdNetwork берутся из глобальных env на сервере.
               </p>
             </div>
           )}

@@ -115,6 +115,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
+      const appStoreUrl = defaultSettings?.app_store_url || null;
 
       // 4. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -313,21 +314,21 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         fbCreativeId = result.id;
       } else if (objective === 'app_installs') {
         const appConfig = getAppInstallsConfig();
-        if (!appConfig) {
+        if (!appConfig || !appStoreUrl) {
           const envHints = getAppInstallsConfigEnvHints();
           return reply.status(400).send({
             success: false,
-            error: 'app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
+            error: 'app_installs objective requires app_id in env and app_store_url in direction settings.',
             details: {
               appIdEnvKeys: envHints.appIdEnvKeys,
-              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+              hasAppStoreUrlInSettings: Boolean(appStoreUrl)
             }
           });
         }
         app.log.info({
           direction_id,
           appIdEnvKey: appConfig.appIdEnvKey,
-          appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+          hasAppStoreUrlInSettings: true,
           skadEnvKey: appConfig.skadEnvKey || null
         }, 'Using global app config for app_installs carousel creative');
         const result = await createAppInstallsCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
@@ -335,7 +336,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           pageId: pageId,
           instagramId: instagramId,
           message: description,
-          appStoreUrl: appConfig.objectStoreUrl
+          appStoreUrl: appStoreUrl
         });
         fbCreativeId = result.id;
       } else {
