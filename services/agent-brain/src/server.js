@@ -1066,7 +1066,7 @@ function parseTikTokMetrics(metrics = {}) {
     spend: Number(metrics.spend) || 0,
     impressions: Number(metrics.impressions) || 0,
     clicks: Number(metrics.clicks) || 0,
-    conversions: Number(metrics.conversions) || 0
+    conversions: Number(metrics.conversion) || 0
   };
 }
 
@@ -4488,7 +4488,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
       reportOnlyReason
     });
 
-    const reportMetrics = ['spend', 'impressions', 'clicks', 'conversions'];
+    const reportMetrics = ['spend', 'impressions', 'clicks', 'conversion'];
     const [
       yCampaignRows,
       yAdgroupRows,
@@ -4513,7 +4513,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         accessToken: tikTokAccessToken,
         preset: 'yesterday',
         dataLevel: 'AUCTION_ADGROUP',
-        dimensions: ['adgroup_id', 'campaign_id'],
+        dimensions: ['adgroup_id'],
         metrics: reportMetrics,
         timeZone: accountTimezone,
         filtering: reportFiltering
@@ -4563,7 +4563,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         accessToken: tikTokAccessToken,
         preset: 'yesterday',
         dataLevel: 'AUCTION_AD',
-        dimensions: ['ad_id', 'adgroup_id', 'campaign_id'],
+        dimensions: ['ad_id'],
         metrics: reportMetrics,
         timeZone: accountTimezone,
         filtering: reportFiltering

@@ -279,13 +279,13 @@ export async function getTikTokReport(advertiserId, accessToken, options) {
   const {
     dataLevel = 'AUCTION_CAMPAIGN',
     dimensions = ['campaign_id'],
-    metrics = ['spend', 'impressions', 'clicks', 'conversions'],
+    metrics = ['spend', 'impressions', 'clicks', 'conversion'],
     startDate,
     endDate,
     filtering
   } = options;
 
-  return tikTokGraph('POST', 'report/integrated/get/', accessToken, {
+  return tikTokGraph('GET', 'report/integrated/get/', accessToken, {
     advertiser_id: advertiserId,
     report_type: 'BASIC',
     data_level: dataLevel,
