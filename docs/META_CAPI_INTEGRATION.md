@@ -9,6 +9,62 @@
 1. **WhatsApp (LLM)** — автоматический анализ переписок с помощью GPT-4o-mini
 2. **CRM (field/stage mapping)** — отслеживание изменений полей и этапов воронки в AMO CRM / Bitrix24
 
+## Объединённая цель "Конверсии" (multi-channel)
+
+С миграции `200_conversions_objective.sql` цель `whatsapp_conversions` заменена на универсальную **`conversions`** с выбором канала (`conversion_channel`):
+
+```
+objective = 'conversions'
+  └── conversion_channel:
+      ├── 'whatsapp'   → destination_type=WHATSAPP, capi_source: whatsapp|crm
+      ├── 'lead_form'  → destination_type=ON_AD,    capi_source: crm only
+      └── 'site'       → destination_type=WEBSITE,  capi_source: crm only
+```
+
+### Общее для всех каналов конверсии
+
+| Параметр | Значение |
+|----------|----------|
+| Campaign objective | `OUTCOME_SALES` |
+| AdSet optimization_goal | `OFFSITE_CONVERSIONS` |
+| pixel_id | **обязателен** (из direction или default_ad_settings) |
+| custom_event_type | зависит от `optimization_level` (COMPLETE_REGISTRATION / ADD_TO_CART / PURCHASE) |
+| CAPI tiered events | Level 1/2/3 (как ранее для whatsapp_conversions) |
+
+### Различия по каналам
+
+| Канал | destination_type | promoted_object | Creative | CAPI source |
+|-------|-----------------|-----------------|----------|-------------|
+| **whatsapp** | `WHATSAPP` | pixel_id + page_id + whatsapp_phone_number | fb_creative_id_whatsapp | whatsapp или crm |
+| **lead_form** | `ON_AD` | pixel_id + page_id | fb_creative_id_lead_forms | crm only |
+| **site** | `WEBSITE` | pixel_id (без page_id) | fb_creative_id_site_leads | crm only |
+
+### User matching по каналам
+
+| Канал | Идентификаторы для матчинга |
+|-------|---------------------------|
+| **whatsapp** | phone (hashed), external_id, ctwa_clid (если доступен) |
+| **lead_form** | phone (hashed), external_id |
+| **site** | phone (hashed), external_id, fbclid/fbc/fbp (если настроен на сайте) |
+
+> **Примечание:** `ctwa_clid` (Click-to-WhatsApp Click ID) доступен только для канала whatsapp. Для lead_form и site матчинг происходит через phone + external_id из CRM.
+
+### Обратная совместимость
+
+- Существующие направления с `objective = 'whatsapp_conversions'` автоматически маппятся в `conversions` + `conversion_channel = 'whatsapp'` при чтении через GET API
+- Миграция 200 обновляет данные в БД: `whatsapp_conversions` → `conversions` + `channel = 'whatsapp'`
+- Цели `site_leads` и `lead_forms` **остаются** для простых кейсов без CAPI-оптимизации
+
+### Constraint в БД
+
+```sql
+-- conversion_channel обязателен для conversions, NULL для остальных
+CHECK (
+  (objective = 'conversions' AND conversion_channel IN ('whatsapp', 'lead_form', 'site'))
+  OR (objective != 'conversions' AND conversion_channel IS NULL)
+)
+```
+
 ### Три уровня конверсии
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
@@ -200,7 +256,18 @@ const CAPI_EVENTS = {
 
 ### 1. Настройки CAPI при создании направления
 
-При создании направления в `CreateDirectionDialog.tsx` доступны настройки CAPI:
+При создании направления в `CreateDirectionDialog.tsx` доступны настройки CAPI.
+
+**Для цели "Конверсии" (`conversions`):**
+1. Выбрать канал конверсии (WhatsApp / Lead Form / Сайт)
+2. Включить Meta CAPI
+3. Выбрать/ввести Pixel ID
+4. Для WhatsApp — выбор источника: AI анализ переписок или CRM
+5. Для Lead Form и Сайт — только CRM (автоматически)
+6. Выбрать уровень оптимизации (Level 1/2/3)
+7. Настроить CRM тиеры (если CRM источник)
+
+**Для других целей:**
 
 **Шаг 1: Включение CAPI**
 - Переключатель "Включить Meta CAPI"
@@ -212,8 +279,8 @@ const CAPI_EVENTS = {
 - Или выбор нового пикселя из списка
 
 **Шаг 3: Выбор источника событий**
-- `WhatsApp (AI анализ)` — LLM анализирует переписку
-- `CRM (поля или этапы воронки)` — отслеживание полей/этапов в AMO CRM / Bitrix24
+- `WhatsApp (AI анализ)` — LLM анализирует переписку (только для канала whatsapp)
+- `CRM (поля или этапы воронки)` — отслеживание полей/этапов в AMO CRM / Bitrix24 (для всех каналов)
 
 **Шаг 4 (только для CRM источника):**
 - Выбор типа CRM (AMO CRM или Bitrix24)

@@ -1,6 +1,7 @@
 // Типы данных для направлений бизнеса
 
-export type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type ConversionChannel = 'whatsapp' | 'lead_form' | 'site';
 export type OptimizationLevel = 'level_1' | 'level_2' | 'level_3';
 export type DirectionPlatform = 'facebook' | 'tiktok' | 'both';
 export type DirectionPlatformValue = 'facebook' | 'tiktok' | null;
@@ -57,7 +58,9 @@ export interface Direction {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
-  // WhatsApp-conversions optimization level
+  // Conversions channel (whatsapp, lead_form, site)
+  conversion_channel?: ConversionChannel | null;
+  // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Instagram account usage
   use_instagram?: boolean;
@@ -85,6 +88,8 @@ export interface CreateDirectionPayload {
   default_settings?: DirectionDefaultSettingsInput;
   facebook_default_settings?: DirectionDefaultSettingsInput;
   tiktok_default_settings?: DirectionDefaultSettingsInput;
+  // Conversions channel
+  conversion_channel?: ConversionChannel;
   // CAPI settings (direction-level)
   capi_enabled?: boolean;
   capi_source?: CapiSource | null;
@@ -92,7 +97,7 @@ export interface CreateDirectionPayload {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
-  // WhatsApp-conversions optimization level
+  // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Instagram account usage
   use_instagram?: boolean;
@@ -138,7 +143,7 @@ export interface UpdateDirectionPayload {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
-  // WhatsApp-conversions optimization level
+  // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Audience controls
   advantage_audience_enabled?: boolean;
@@ -213,7 +218,7 @@ export interface UpdateDefaultSettingsInput {
 // Маппинг objective в читаемые названия
 export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp',
-  whatsapp_conversions: 'WhatsApp-конверсии',
+  conversions: 'Конверсии (CAPI)',
   instagram_traffic: 'Instagram Traffic',
   site_leads: 'Site Leads',
   lead_forms: 'Lead Forms',
@@ -222,11 +227,23 @@ export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
 
 export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp (переписки)',
-  whatsapp_conversions: 'WhatsApp-конверсии (оптимизация по CAPI)',
+  conversions: 'Конверсии (CAPI-оптимизация)',
   instagram_traffic: 'Instagram Traffic (переходы)',
   site_leads: 'Site Leads (заявки на сайте)',
   lead_forms: 'Lead Forms (лидформы Facebook)',
   app_installs: 'App Installs (установки приложения)',
+};
+
+export const CONVERSION_CHANNEL_LABELS: Record<ConversionChannel, string> = {
+  whatsapp: 'WhatsApp',
+  lead_form: 'Lead Form',
+  site: 'Сайт',
+};
+
+export const CONVERSION_CHANNEL_DESCRIPTIONS: Record<ConversionChannel, string> = {
+  whatsapp: 'WhatsApp (оптимизация по диалогам или CRM)',
+  lead_form: 'Лидформы Facebook (оптимизация по CRM)',
+  site: 'Конверсии сайта (оптимизация по CRM)',
 };
 
 export const TIKTOK_OBJECTIVE_LABELS: Record<TikTokObjective, string> = {
@@ -243,11 +260,15 @@ export const TIKTOK_OBJECTIVE_DESCRIPTIONS: Record<TikTokObjective, string> = {
 
 export const getDirectionObjectiveLabel = (direction: {
   objective: DirectionObjective;
+  conversion_channel?: ConversionChannel | null;
   platform?: DirectionPlatformValue;
   tiktok_objective?: TikTokObjective | null;
 }) => {
   if (direction.platform === 'tiktok') {
     return TIKTOK_OBJECTIVE_LABELS[direction.tiktok_objective || 'traffic'];
+  }
+  if (direction.objective === 'conversions' && direction.conversion_channel) {
+    return `${OBJECTIVE_LABELS.conversions} / ${CONVERSION_CHANNEL_LABELS[direction.conversion_channel]}`;
   }
   return OBJECTIVE_LABELS[direction.objective];
 };

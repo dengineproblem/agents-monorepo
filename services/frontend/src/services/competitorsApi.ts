@@ -333,6 +333,26 @@ export const competitorsApi = {
   },
 
   /**
+   * Получить актуальный медиа URL креатива (автоматически обновляет если истёк)
+   */
+  async getMediaUrl(creativeId: string): Promise<string | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/competitors/creatives/${creativeId}/media`);
+      const data = await response.json();
+
+      if (data.success && data.url) {
+        return data.url;
+      }
+
+      console.error('[competitorsApi.getMediaUrl] Ошибка:', data.error);
+      return null;
+    } catch (error) {
+      console.error('[competitorsApi.getMediaUrl] Исключение:', error);
+      return null;
+    }
+  },
+
+  /**
    * Извлечь текст из креатива конкурента (OCR для картинок, транскрипция для видео)
    */
   async extractText(creativeId: string): Promise<{

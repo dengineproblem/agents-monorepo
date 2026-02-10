@@ -331,8 +331,26 @@ export async function creativeTestRoutes(app: FastifyInstance) {
 
       const accessToken = credentials.fbAccessToken;
 
+      // Для conversions — загружаем conversion_channel из direction
+      let conversionChannel: string | null = null;
+      if (test.objective === 'conversions' && test.user_creative_id) {
+        const { data: creative } = await supabase
+          .from('user_creatives')
+          .select('direction_id')
+          .eq('id', test.user_creative_id)
+          .maybeSingle();
+        if (creative?.direction_id) {
+          const { data: dir } = await supabase
+            .from('account_directions')
+            .select('conversion_channel')
+            .eq('id', creative.direction_id)
+            .maybeSingle();
+          conversionChannel = dir?.conversion_channel || null;
+        }
+      }
+
       // Получаем insights
-      const insights = await fetchCreativeTestInsights(test.ad_id, accessToken);
+      const insights = await fetchCreativeTestInsights(test.ad_id, accessToken, test.objective, conversionChannel);
 
       // Обновляем метрики
       await supabase

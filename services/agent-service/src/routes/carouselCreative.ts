@@ -328,8 +328,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({
           direction_id,
           appIdEnvKey: appConfig.appIdEnvKey,
-          hasAppStoreUrlInSettings: true,
-          skadEnvKey: appConfig.skadEnvKey || null
+          hasAppStoreUrlInSettings: true
         }, 'Using global app config for app_installs carousel creative');
         const result = await createAppInstallsCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           cards: cardParams,

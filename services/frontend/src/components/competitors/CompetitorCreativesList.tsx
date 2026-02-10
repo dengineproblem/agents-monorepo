@@ -18,6 +18,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { competitorsApi } from '@/services/competitorsApi';
 import type { CompetitorCreative, CompetitorsPagination } from '@/types/competitor';
 import { getScoreCategory, isNewInTop10 } from '@/types/competitor';
 import { cn } from '@/lib/utils';
@@ -107,13 +108,17 @@ export function CompetitorCreativesList({
     navigate(`/creatives?tab=video-scripts&textType=reference&prompt=${encodedText}&competitorCreativeId=${creative.id}`);
   };
 
-  // Открыть оригинал в новой вкладке
-  const handleOpenOriginal = (creative: CompetitorCreative) => {
-    const url = creative.media_urls?.[0];
-    if (url) {
-      window.open(url, '_blank');
-    } else {
-      toast.error('URL медиа не найден');
+  // Открыть оригинал в новой вкладке (через API для получения свежего URL)
+  const handleOpenOriginal = async (creative: CompetitorCreative) => {
+    try {
+      const freshUrl = await competitorsApi.getMediaUrl(creative.id);
+      if (freshUrl) {
+        window.open(freshUrl, '_blank');
+      } else {
+        toast.error('Не удалось получить актуальный URL медиа');
+      }
+    } catch {
+      toast.error('Ошибка при получении URL медиа');
     }
   };
 

@@ -19,7 +19,7 @@ export function startCreativeTestCron(app: FastifyInstance) {
       // Получаем все running тесты (включая account_id для мультиаккаунтности)
       const { data: runningTests, error } = await supabase
         .from('creative_tests')
-        .select('id, campaign_id, adset_id, ad_id, test_impressions_limit, user_id, objective, account_id')
+        .select('id, campaign_id, adset_id, ad_id, test_impressions_limit, user_id, objective, account_id, user_creative_id')
         .eq('status', 'running');
       
       if (error) {
@@ -72,11 +72,30 @@ export function startCreativeTestCron(app: FastifyInstance) {
             accountId: test.account_id || 'legacy'
           }, `[Cron] Fetching insights for ad_id: ${test.ad_id}`);
 
-          // Получаем метрики из Facebook (передаем objective для правильного подсчета лидов)
+          // Для conversions — загружаем conversion_channel из direction
+          let conversionChannel: string | null = null;
+          if (test.objective === 'conversions' && test.user_creative_id) {
+            const { data: creative } = await supabase
+              .from('user_creatives')
+              .select('direction_id')
+              .eq('id', test.user_creative_id)
+              .maybeSingle();
+            if (creative?.direction_id) {
+              const { data: dir } = await supabase
+                .from('account_directions')
+                .select('conversion_channel')
+                .eq('id', creative.direction_id)
+                .maybeSingle();
+              conversionChannel = dir?.conversion_channel || null;
+            }
+          }
+
+          // Получаем метрики из Facebook (передаем objective и conversion_channel для правильного подсчета лидов)
           const insights = await fetchCreativeTestInsights(
             test.ad_id,
             accessToken,
-            test.objective
+            test.objective,
+            conversionChannel
           );
           
           app.log.info(`[Cron] Test ${test.id}: ${insights.impressions}/${test.test_impressions_limit} impressions`);

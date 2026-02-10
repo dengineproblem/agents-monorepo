@@ -1426,4 +1426,90 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
+
+  /**
+   * GET /competitors/creatives/:creativeId/media - Получить актуальный медиа URL
+   *
+   * Проверяет доступность текущего URL (HEAD-запрос).
+   * Если URL истёк (403/404) — обновляет через SearchAPI и возвращает свежий.
+   * Возвращает redirect на рабочий URL.
+   */
+  app.get('/competitors/creatives/:creativeId/media', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { creativeId } = request.params as { creativeId: string };
+
+      // Получаем креатив с данными конкурента
+      const { data: creative, error: fetchError } = await supabase
+        .from('competitor_creatives')
+        .select(`
+          id, media_type, media_urls, thumbnail_url, fb_ad_archive_id, competitor_id,
+          competitor:competitors (name, country_code, fb_page_id)
+        `)
+        .eq('id', creativeId)
+        .single();
+
+      if (fetchError || !creative) {
+        return reply.status(404).send({ success: false, error: 'Креатив не найден' });
+      }
+
+      const mediaUrl = creative.media_urls?.[0];
+      if (!mediaUrl) {
+        return reply.status(400).send({ success: false, error: 'Нет медиа URL' });
+      }
+
+      // Проверяем доступность текущего URL через HEAD-запрос
+      let urlWorks = false;
+      try {
+        const headResponse = await fetch(mediaUrl, {
+          method: 'HEAD',
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          signal: AbortSignal.timeout(10000),
+        });
+        urlWorks = headResponse.ok;
+      } catch {
+        urlWorks = false;
+      }
+
+      if (urlWorks) {
+        return reply.send({ success: true, url: mediaUrl });
+      }
+
+      // URL истёк — пробуем обновить
+      log.info({ creativeId, fbAdArchiveId: creative.fb_ad_archive_id }, '[Media] URL истёк, обновляем через SearchAPI');
+
+      const competitorData = Array.isArray(creative.competitor) ? creative.competitor[0] : creative.competitor;
+      if (!competitorData) {
+        return reply.status(400).send({ success: false, error: 'Нет данных конкурента для обновления URL' });
+      }
+
+      const freshUrls = await refreshCreativeMediaUrl(
+        creative.fb_ad_archive_id,
+        competitorData.name,
+        competitorData.country_code,
+        competitorData.fb_page_id
+      );
+
+      if (!freshUrls || freshUrls.media_urls.length === 0) {
+        log.warn({ creativeId }, '[Media] Не удалось обновить URL');
+        return reply.status(410).send({ success: false, error: 'Медиа URL истёк и не удалось обновить' });
+      }
+
+      // Обновляем URL в БД
+      await supabase
+        .from('competitor_creatives')
+        .update({
+          media_urls: freshUrls.media_urls,
+          thumbnail_url: freshUrls.thumbnail_url,
+        })
+        .eq('id', creativeId);
+
+      log.info({ creativeId, newUrl: freshUrls.media_urls[0] }, '[Media] URL обновлён');
+
+      return reply.send({ success: true, url: freshUrls.media_urls[0] });
+
+    } catch (error: any) {
+      log.error({ err: error }, 'Ошибка в GET /competitors/creatives/:creativeId/media');
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
 }

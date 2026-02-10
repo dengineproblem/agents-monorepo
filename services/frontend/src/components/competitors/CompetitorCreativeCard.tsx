@@ -9,6 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import type { CompetitorCreative } from '@/types/competitor';
 import { getScoreCategory, isNewInTop10 } from '@/types/competitor';
 import { cn } from '@/lib/utils';
+import { competitorsApi } from '@/services/competitorsApi';
 
 interface CompetitorCreativeCardProps {
   creative: CompetitorCreative;
@@ -41,6 +42,7 @@ export function CompetitorCreativeCard({
 }: CompetitorCreativeCardProps) {
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const MediaIcon = mediaTypeIcon[creative.media_type];
 
   // Получаем URL для превью (приоритет: кэш -> оригинал -> первый media_url)
@@ -54,12 +56,23 @@ export function CompetitorCreativeCard({
   const analysisData = Array.isArray(creative.analysis) ? creative.analysis[0] : creative.analysis;
   const transcriptText = analysisData?.transcript || analysisData?.ocr_text;
 
-  // Открываем медиа в новой вкладке
-  const handleClick = () => {
+  // Открываем медиа в новой вкладке (получаем свежий URL через API)
+  const handleClick = async () => {
     if (onClick) {
       onClick();
-    } else if (creative.media_urls?.[0]) {
-      window.open(creative.media_urls[0], '_blank');
+      return;
+    }
+
+    if (!creative.id) return;
+
+    setIsLoadingMedia(true);
+    try {
+      const freshUrl = await competitorsApi.getMediaUrl(creative.id);
+      if (freshUrl) {
+        window.open(freshUrl, '_blank');
+      }
+    } finally {
+      setIsLoadingMedia(false);
     }
   };
 
@@ -92,11 +105,23 @@ export function CompetitorCreativeCard({
           </div>
         )}
 
-        {/* Overlay при hover */}
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        {/* Overlay при hover / загрузке */}
+        <div className={cn(
+          "absolute inset-0 bg-black/60 transition-opacity flex items-center justify-center",
+          isLoadingMedia ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}>
           <div className="flex items-center gap-2 text-white">
-            <Eye className="w-5 h-5" />
-            <span className="text-sm font-medium">Просмотр</span>
+            {isLoadingMedia ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm font-medium">Загрузка...</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-5 h-5" />
+                <span className="text-sm font-medium">Просмотр</span>
+              </>
+            )}
           </div>
         </div>
 

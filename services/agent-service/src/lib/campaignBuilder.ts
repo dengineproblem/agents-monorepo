@@ -73,13 +73,13 @@ const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type CampaignObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Conversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
-    whatsapp_conversions: 'WhatsAppConversions' as const,
+    conversions: 'Conversions' as const,
     instagram_traffic: 'Instagram' as const,
     site_leads: 'SiteLeads' as const,
     lead_forms: 'LeadForms' as const,
@@ -196,7 +196,7 @@ export type CampaignAction = {
     auto_activate?: boolean;
     
     // Legacy поля
-    objective?: 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
+    objective?: 'WhatsApp' | 'Conversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
     campaign_name?: string;
     use_default_settings?: boolean;
     adsets?: Array<{
@@ -244,7 +244,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
    - best_cpl_cents, worst_cpl_cents: диапазон CPL
    Используй эти данные для понимания общего контекста
 3. budget_constraints — ограничения по бюджету пользователя
-4. objective — цель кампании (whatsapp/whatsapp_conversions/instagram_traffic/site_leads/lead_forms/app_installs)
+4. objective — цель кампании (whatsapp/conversions/instagram_traffic/site_leads/lead_forms/app_installs)
 5. user_context — дополнительная информация от пользователя
 6. direction_info — информация о направлении (если работаем с directions)
 
@@ -253,7 +253,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
 В системе используются НАПРАВЛЕНИЯ - логические группы креативов с настройками:
 - У каждого direction уже есть СУЩЕСТВУЮЩАЯ кампания (fb_campaign_id)
 - У каждого direction свой бюджет (daily_budget_cents)
-- У каждого direction свой objective (whatsapp/whatsapp_conversions/instagram_traffic/site_leads/lead_forms/app_installs)
+- У каждого direction свой objective (whatsapp/conversions/instagram_traffic/site_leads/lead_forms/app_installs)
 - Креативы привязаны к directions через direction_id
 
 ДВА РЕЖИМА СОЗДАНИЯ AD SETS:
@@ -688,7 +688,7 @@ $30 (3 adsets), 9 креативов:
    - ИСПОЛЬЗУЙ АДАПТИВНУЮ ЛОГИКУ: бюджет $50 → 5 готовых adsets
 
 ДОПОЛНИТЕЛЬНО:
-- objective в params должен быть одним из: "WhatsApp", "WhatsAppConversions", "Instagram", "SiteLeads", "LeadForms", "AppInstalls"
+- objective в params должен быть одним из: "WhatsApp", "Conversions", "Instagram", "SiteLeads", "LeadForms", "AppInstalls"
 - Минимальный бюджет на каждый adset: 1000 центов ($10)
 - use_default_settings = true (используем дефолтные настройки таргетинга)
 - auto_activate = true (создаем включенными для немедленного запуска)
@@ -1209,7 +1209,7 @@ export async function getAvailableCreatives(
     filteredCreatives = creatives.filter((c) => {
       switch (objective) {
         case 'whatsapp':
-        case 'whatsapp_conversions':
+        case 'conversions':
           return !!c.fb_creative_id_whatsapp;
         case 'instagram_traffic':
           return !!c.fb_creative_id_instagram_traffic;
@@ -1246,7 +1246,7 @@ export async function getAvailableCreatives(
   const fbCreativeIds = filteredCreatives.map((c) => {
     switch (objective) {
       case 'whatsapp':
-      case 'whatsapp_conversions':
+      case 'conversions':
         return c.fb_creative_id_whatsapp;
       case 'instagram_traffic':
         return c.fb_creative_id_instagram_traffic;
@@ -1286,7 +1286,7 @@ export async function getAvailableCreatives(
     let fbCreativeId: string | null = null;
     switch (objective) {
       case 'whatsapp':
-      case 'whatsapp_conversions':
+      case 'conversions':
         fbCreativeId = creative.fb_creative_id_whatsapp;
         break;
       case 'instagram_traffic':
@@ -2228,7 +2228,7 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
   switch (objective) {
     case 'whatsapp':
       return 'CONVERSATIONS';
-    case 'whatsapp_conversions':
+    case 'conversions':
       return 'OFFSITE_CONVERSIONS';
     case 'instagram_traffic':
       return 'LINK_CLICKS';
@@ -2250,7 +2250,7 @@ export function getBillingEvent(objective: CampaignObjective): string {
   switch (objective) {
     case 'whatsapp':
       return 'IMPRESSIONS';
-    case 'whatsapp_conversions':
+    case 'conversions':
       return 'IMPRESSIONS';
     case 'instagram_traffic':
       return 'IMPRESSIONS';
@@ -2279,7 +2279,7 @@ export async function createAdSetInCampaign(params: {
   billing_event: string;
   promoted_object?: any;
   start_mode?: 'now' | 'midnight_almaty';
-  objective?: CampaignObjective; // Добавлен для различения whatsapp_conversions от site_leads
+  objective?: CampaignObjective; // Добавлен для различения conversions от site_leads
   advantageAudienceEnabled?: boolean;
   customAudienceId?: string | null;
 }) {
@@ -2351,8 +2351,8 @@ export async function createAdSetInCampaign(params: {
   }
 
   // WhatsApp-конверсии: OFFSITE_CONVERSIONS + destination WhatsApp
-  // Критично: без objective === 'whatsapp_conversions' будет fallback на WEBSITE
-  if (objective === 'whatsapp_conversions') {
+  // Критично: без objective === 'conversions' будет fallback на WEBSITE
+  if (objective === 'conversions') {
     body.destination_type = 'WHATSAPP';
     log.info({
       campaignId,
@@ -2364,7 +2364,7 @@ export async function createAdSetInCampaign(params: {
       promoted_object_event_type: promoted_object?.custom_event_type,
     }, 'WhatsApp-conversions: setting destination_type=WHATSAPP for CAPI optimization');
   }
-  // Для Site Leads (OFFSITE_CONVERSIONS без whatsapp_conversions) добавляем destination_type WEBSITE
+  // Для Site Leads (OFFSITE_CONVERSIONS без conversions) добавляем destination_type WEBSITE
   else if (optimization_goal === 'OFFSITE_CONVERSIONS') {
     body.destination_type = 'WEBSITE';
   }
@@ -2471,7 +2471,7 @@ export async function createAdSetInCampaign(params: {
 export function getCreativeIdForObjective(creative: AvailableCreative, objective: CampaignObjective): string | null {
   switch (objective) {
     case 'whatsapp':
-    case 'whatsapp_conversions':
+    case 'conversions':
       return creative.fb_creative_id_whatsapp;
     case 'instagram_traffic':
       return creative.fb_creative_id_instagram_traffic;
