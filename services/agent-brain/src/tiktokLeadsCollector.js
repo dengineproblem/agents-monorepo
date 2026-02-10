@@ -485,22 +485,22 @@ export async function collectTikTokLeads(advertiserId, accessToken, userAccountI
 
         // 2c: Извлечь лиды из результата
         // Логируем структуру ответа для диагностики формата API
+        const isArray = Array.isArray(taskData);
         logger.debug({
           where: 'tiktokLeadsCollector',
           correlationId,
           taskId,
-          taskDataKeys: Object.keys(taskData || {}),
-          hasListField: !!taskData?.list,
-          hasLeadsField: !!taskData?.leads,
-          listLength: taskData?.list?.length,
-          leadsLength: taskData?.leads?.length,
-          firstLeadSample: taskData?.list?.[0] || taskData?.leads?.[0]
-            ? Object.keys(taskData?.list?.[0] || taskData?.leads?.[0])
+          isArray,
+          length: isArray ? taskData.length : undefined,
+          taskDataKeys: isArray ? undefined : Object.keys(taskData || {}),
+          firstLeadKeys: (isArray ? taskData[0] : (taskData?.list?.[0] || taskData?.leads?.[0]))
+            ? Object.keys(isArray ? taskData[0] : (taskData?.list?.[0] || taskData?.leads?.[0]))
             : null
         }, 'Task download response structure');
 
-        // TikTok может вернуть данные в разных форматах
-        const leads = taskData?.list || taskData?.leads || [];
+        // downloadTikTokLeadTask returns array of lead objects (parsed from CSV)
+        // or an object with .list/.leads (legacy JSON format)
+        const leads = Array.isArray(taskData) ? taskData : (taskData?.list || taskData?.leads || []);
 
         if (leads.length === 0) {
           logger.info({
@@ -508,7 +508,7 @@ export async function collectTikTokLeads(advertiserId, accessToken, userAccountI
             correlationId,
             taskId,
             pageId,
-            taskDataKeys: Object.keys(taskData || {}),
+            isArray: Array.isArray(taskData),
             action: 'no_leads_in_task'
           }, 'No leads in task result');
           continue;

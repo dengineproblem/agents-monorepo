@@ -353,7 +353,7 @@ export async function collectTikTokMetrics(advertiserId, accessToken, userAccoun
           video_views_75_percent: video75,
           video_views_95_percent: video100, // Using 100% as closest to 95%
           video_avg_watch_time_sec: avgWatchTime,
-          source: 'tiktok_batch'
+          source: 'production'
         };
 
         // Upsert to creative_metrics_history

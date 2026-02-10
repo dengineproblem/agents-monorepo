@@ -317,13 +317,92 @@ export async function createTikTokLeadTask(advertiserId, accessToken, options = 
 /**
  * Helper: Download leads from completed task
  * GET page/lead/task/download/
+ *
+ * TikTok returns CSV (application/octet-stream) when task is ready,
+ * or JSON error when task is not ready yet.
+ * We handle both cases and parse CSV into array of lead objects.
  */
 export async function downloadTikTokLeadTask(advertiserId, accessToken, taskId) {
-  const result = await tikTokGraph('GET', 'page/lead/task/download/', accessToken, {
-    advertiser_id: advertiserId,
-    task_id: taskId
+  const url = `${TIKTOK_API_BASE}/${TIKTOK_API_VERSION}/page/lead/task/download/` +
+    `?advertiser_id=${advertiserId}&task_id=${taskId}`;
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { 'Access-Token': accessToken }
   });
-  return result.data;
+
+  const contentType = res.headers.get('content-type') || '';
+
+  // JSON response — task not ready or error
+  if (contentType.includes('application/json')) {
+    const json = await res.json();
+    if (json.code !== 0) {
+      const error = new Error(json.message || `TikTok API error: code ${json.code}`);
+      error.tikTokError = { code: json.code, message: json.message, request_id: json.request_id };
+      throw error;
+    }
+    return json.data;
+  }
+
+  // CSV response — task is ready, parse CSV into lead objects
+  const csvText = await res.text();
+  if (!csvText || csvText.trim().length === 0) {
+    return [];
+  }
+
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) {
+    return []; // Only header, no leads
+  }
+
+  const headers = parseCSVLine(lines[0]);
+  const leads = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const values = parseCSVLine(lines[i]);
+    const lead = {};
+    for (let j = 0; j < headers.length; j++) {
+      lead[headers[j]] = values[j] || '';
+    }
+    // Map CSV fields to expected format: field_data array
+    lead.field_data = headers
+      .filter(h => !['lead_id', 'created_time', 'ad_id', 'ad_name', 'adgroup_id', 'adgroup_name', 'campaign_id', 'campaign_name', 'form_id', 'form_name'].includes(h))
+      .map(h => ({ field_name: h, field_value: lead[h] || '' }));
+
+    leads.push(lead);
+  }
+
+  logger.debug({ leadsCount: leads.length, headers }, 'Parsed TikTok leads CSV');
+  return leads;
+}
+
+/**
+ * Parse a CSV line handling quoted values with commas inside
+ */
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
+        current += '"';
+        i++; // skip escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
 }
 
 export default tikTokGraph;
