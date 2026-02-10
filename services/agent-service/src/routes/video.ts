@@ -18,6 +18,7 @@ import {
 } from '../adapters/facebook.js';
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
@@ -291,17 +292,18 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = null;
       let utm = null;
       let leadFormId: string | null = null;
-      let appId: string | null = null;
-      let appStoreUrl: string | null = null;
-      let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
+      let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
+      let direction: any = null; // для доступа к conversion_channel
 
       if (body.direction_id) {
-        // Загружаем direction для получения objective
-        const { data: direction } = await supabase
+        // Загружаем direction для получения objective и conversion_channel
+        const { data: directionData } = await supabase
           .from('account_directions')
-          .select('objective, platform')
+          .select('objective, platform, conversion_channel')
           .eq('id', body.direction_id)
           .maybeSingle();
+
+        direction = directionData;
 
         if (direction?.platform === 'tiktok') {
           return reply.status(400).send({
@@ -311,8 +313,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         }
 
         if (direction?.objective) {
-          objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
-          app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
+          objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+          app.log.info({ direction_id: body.direction_id, objective, conversion_channel: direction.conversion_channel }, 'Loaded objective from direction');
         }
 
         // Загружаем настройки из default_ad_settings
@@ -328,8 +330,6 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           siteUrl = defaultSettings.site_url;
           utm = defaultSettings.utm_tag;
           leadFormId = defaultSettings.lead_form_id;
-          appId = defaultSettings.app_id;
-          appStoreUrl = defaultSettings.app_store_url;
 
           app.log.info({
             direction_id: body.direction_id,
@@ -337,9 +337,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             description,
             clientQuestion,
             siteUrl,
-            utm,
-            appId,
-            appStoreUrl
+            utm
           }, 'Using settings from direction for video creative');
         } else {
           app.log.warn({
@@ -358,7 +356,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let fbCreativeId = '';
 
       try {
-        if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+        if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) {
           const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
             pageId: pageId,
@@ -382,7 +380,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = instagramCreative.id;
-        } else if (objective === 'site_leads') {
+        } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {
           if (!siteUrl) {
             app.log.error('site_leads objective requires site_url in direction settings');
             throw new Error('site_url is required for site_leads objective');
@@ -397,7 +395,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = websiteCreative.id;
-        } else if (objective === 'lead_forms') {
+        } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
           if (!leadFormId) {
             app.log.error('lead_forms objective requires lead_form_id in direction settings');
             throw new Error('lead_form_id is required for lead_forms objective');
@@ -412,16 +410,26 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           });
           fbCreativeId = leadFormCreative.id;
         } else if (objective === 'app_installs') {
-          if (!appId || !appStoreUrl) {
-            app.log.error('app_installs objective requires app_id and app_store_url in direction settings');
-            throw new Error('app_id and app_store_url are required for app_installs objective');
+          const appConfig = getAppInstallsConfig();
+          if (!appConfig) {
+            const envHints = getAppInstallsConfigEnvHints();
+            app.log.error({
+              appIdEnvKeys: envHints.appIdEnvKeys,
+              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+            }, 'app_installs objective requires global env config');
+            throw new Error('app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)');
           }
+          app.log.info({
+            appIdEnvKey: appConfig.appIdEnvKey,
+            appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+            skadEnvKey: appConfig.skadEnvKey || null
+          }, 'Using global app config for app_installs video creative');
           const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
             pageId: pageId,
             instagramId: instagramId,
             message: description,
-            appStoreUrl: appStoreUrl,
+            appStoreUrl: appConfig.objectStoreUrl,
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = appInstallCreative.id;
@@ -452,10 +460,10 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           // Thumbnail URL для превью видео
           ...(thumbnailUrl && { thumbnail_url: thumbnailUrl }),
           // Старые поля для обратной совместимости (deprecated)
-          ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...((objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
-          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
+          ...((objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) && { fb_creative_id_site_leads: fbCreativeId }),
+          ...((objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) && { fb_creative_id_lead_forms: fbCreativeId })
         };
 
         const { error: updateError } = await supabase

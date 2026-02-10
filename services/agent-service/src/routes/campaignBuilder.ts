@@ -39,6 +39,7 @@ import { eventLogger } from '../lib/eventLogger.js';
 import { onAdsLaunched } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
@@ -62,7 +63,7 @@ const autoLaunchRequestSchema = {
   properties: {
     user_account_id: { type: 'string', format: 'uuid' },
     userId: { type: 'string', format: 'uuid' }, // Алиас для обратной совместимости
-    objective: { type: 'string', enum: ['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs'] },
+    objective: { type: 'string', enum: ['whatsapp', 'conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs'] },
     campaign_name: { type: 'string' },
     requested_budget_cents: { type: 'number', minimum: 500 }, // Минимум $5
     additional_context: { type: 'string' },
@@ -482,7 +483,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 page_id: credentials.fbPageId,
                 ...(whatsapp_phone_number && { whatsapp_phone_number })
               };
-            } else if (direction.objective === 'whatsapp_conversions') {
+            } else if (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp') {
               // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
               // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
               const pixelId = defaultSettings?.pixel_id;
@@ -491,6 +492,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                   directionId: direction.id,
                   directionName: direction.name,
                   objective: direction.objective,
+                  conversion_channel: direction.conversion_channel,
                 }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен. Пропускаем направление.');
                 results.push({
                   direction_id: direction.id,
@@ -508,6 +510,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 directionId: direction.id,
                 directionName: direction.name,
                 objective: direction.objective,
+                conversion_channel: direction.conversion_channel,
                 optimization_level: direction.optimization_level,
                 custom_event_type: customEventType,
                 pixel_id: pixelId,
@@ -541,31 +544,31 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 page_id: credentials.fbPageId
               };
             } else if (direction.objective === 'app_installs') {
-              const appId = defaultSettings?.app_id;
-              const appStoreUrl = defaultSettings?.app_store_url;
+              const appConfig = getAppInstallsConfig();
 
-              if (!appId || !appStoreUrl) {
+              if (!appConfig) {
+                const envHints = getAppInstallsConfigEnvHints();
                 log.warn({
                   directionId: direction.id,
                   directionName: direction.name,
                   objective: direction.objective,
-                  hasAppId: !!appId,
-                  hasAppStoreUrl: !!appStoreUrl,
-                }, 'app_installs requires app_id and app_store_url, but settings are incomplete. Skipping direction.');
+                  appIdEnvKeys: envHints.appIdEnvKeys,
+                  appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys,
+                }, 'app_installs requires global env config, but it is missing. Skipping direction.');
                 results.push({
                   direction_id: direction.id,
                   direction_name: direction.name,
                   success: false,
-                  error: 'App installs objective requires app_id and app_store_url in direction settings',
+                  error: 'App installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
                 });
                 continue;
               }
 
               promoted_object = {
-                application_id: String(appId),
-                object_store_url: appStoreUrl,
-                ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
-                  is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+                application_id: appConfig.applicationId,
+                object_store_url: appConfig.objectStoreUrl,
+                ...(appConfig.isSkadnetworkAttribution !== undefined && {
+                  is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
                 })
               };
 
@@ -573,9 +576,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 directionId: direction.id,
                 directionName: direction.name,
                 objective: direction.objective,
-                appId: String(appId),
-                appStoreUrl: appStoreUrl,
-                isSkadnetworkAttribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+                appIdEnvKey: appConfig.appIdEnvKey,
+                appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+                skadEnvKey: appConfig.skadEnvKey || null,
+                isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
               }, 'Configured promoted_object for app_installs (deterministic)');
             }
 
@@ -945,7 +949,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             page_id: credentials.fbPageId,
             ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
-        } else if (direction.objective === 'whatsapp_conversions') {
+        } else if (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp') {
           // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
           // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
           const pixelId = defaultSettings?.pixel_id;
@@ -954,6 +958,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               directionId: direction.id,
               directionName: direction.name,
               objective: direction.objective,
+              conversion_channel: direction.conversion_channel,
             }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен');
             return reply.code(400).send({
               success: false,
@@ -968,6 +973,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             directionId: direction.id,
             directionName: direction.name,
             objective: direction.objective,
+            conversion_channel: direction.conversion_channel,
             optimization_level: direction.optimization_level,
             custom_event_type: customEventType,
             pixel_id: pixelId,
@@ -1007,27 +1013,27 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             page_id: credentials.fbPageId
           };
         } else if (direction.objective === 'app_installs') {
-          const appId = defaultSettings?.app_id;
-          const appStoreUrl = defaultSettings?.app_store_url;
-          if (!appId || !appStoreUrl) {
+          const appConfig = getAppInstallsConfig();
+          if (!appConfig) {
+            const envHints = getAppInstallsConfigEnvHints();
             log.error({
               directionId: direction.id,
               directionName: direction.name,
               objective: direction.objective,
-              hasAppId: !!appId,
-              hasAppStoreUrl: !!appStoreUrl,
-            }, 'app_installs requires app_id and app_store_url, but settings are incomplete');
+              appIdEnvKeys: envHints.appIdEnvKeys,
+              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys,
+            }, 'app_installs requires global env config, but it is missing');
             return reply.code(400).send({
               success: false,
-              error: 'app_id and app_store_url are required for app_installs objective. Configure them in direction settings.',
+              error: 'app_installs requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
             });
           }
 
           promoted_object = {
-            application_id: String(appId),
-            object_store_url: appStoreUrl,
-            ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
-              is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+            application_id: appConfig.applicationId,
+            object_store_url: appConfig.objectStoreUrl,
+            ...(appConfig.isSkadnetworkAttribution !== undefined && {
+              is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
             })
           };
 
@@ -1035,9 +1041,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             directionId: direction.id,
             directionName: direction.name,
             objective: direction.objective,
-            appId: String(appId),
-            appStoreUrl: appStoreUrl,
-            isSkadnetworkAttribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+            appIdEnvKey: appConfig.appIdEnvKey,
+            appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+            skadEnvKey: appConfig.skadEnvKey || null,
+            isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
           }, 'Configured promoted_object for app_installs (manual launch)');
         }
 

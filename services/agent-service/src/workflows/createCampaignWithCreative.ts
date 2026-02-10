@@ -7,8 +7,9 @@ import {
 } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
+import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
 
-type ObjectiveType = 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
+type ObjectiveType = 'WhatsApp' | 'Conversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
 
 type CreateCampaignParams = {
   user_creative_ids: string[]; // МАССИВ креативов для создания нескольких ads в одном adset
@@ -21,6 +22,7 @@ type CreateCampaignParams = {
   instagram_id?: string;
   use_default_settings?: boolean; // По умолчанию true
   auto_activate?: boolean; // Если true - сразу активирует кампанию (по умолчанию true)
+  conversion_channel?: 'whatsapp' | 'lead_form' | 'site'; // Канал конверсии для objective=Conversions
 };
 
 type CreateCampaignContext = {
@@ -66,7 +68,8 @@ export async function workflowCreateCampaignWithCreative(
     page_id,
     instagram_id,
     use_default_settings = true,
-    auto_activate = true
+    auto_activate = true,
+    conversion_channel
   } = params;
 
   const { user_account_id, ad_account_id } = context;
@@ -118,7 +121,7 @@ export async function workflowCreateCampaignWithCreative(
       fb_objective = 'OUTCOME_ENGAGEMENT';
       optimization_goal = 'CONVERSATIONS';
       break;
-    case 'WhatsAppConversions':
+    case 'Conversions':
       fb_objective = 'OUTCOME_SALES';
       optimization_goal = 'OFFSITE_CONVERSIONS';
       break;
@@ -149,9 +152,20 @@ export async function workflowCreateCampaignWithCreative(
     if (!fb_creative_id) {
       switch (objective) {
         case 'WhatsApp':
-        case 'WhatsAppConversions':
           fb_creative_id = creative.fb_creative_id_whatsapp;
           break;
+        case 'Conversions': {
+          // Выбираем fb_creative_id по conversion_channel
+          const channel = conversion_channel || 'whatsapp';
+          if (channel === 'whatsapp') {
+            fb_creative_id = creative.fb_creative_id_whatsapp;
+          } else if (channel === 'lead_form') {
+            fb_creative_id = creative.fb_creative_id_lead_forms;
+          } else if (channel === 'site') {
+            fb_creative_id = creative.fb_creative_id_site_leads;
+          }
+          break;
+        }
         case 'Instagram':
           fb_creative_id = creative.fb_creative_id_instagram_traffic;
           break;
@@ -229,7 +243,7 @@ export async function workflowCreateCampaignWithCreative(
     // Преобразуем ObjectiveType в CampaignGoal
     let campaignGoal: CampaignGoal = 'whatsapp';
     if (objective === 'WhatsApp') campaignGoal = 'whatsapp';
-    else if (objective === 'WhatsAppConversions') campaignGoal = 'whatsapp_conversions';
+    else if (objective === 'Conversions') campaignGoal = 'conversions';
     else if (objective === 'Instagram') campaignGoal = 'instagram_traffic';
     else if (objective === 'SiteLeads') campaignGoal = 'site_leads';
     else if (objective === 'LeadForms') campaignGoal = 'lead_forms';
@@ -303,21 +317,60 @@ export async function workflowCreateCampaignWithCreative(
     };
   }
 
-  // Для WhatsApp конверсий добавляем CAPI promoted_object
-  if (objective === 'WhatsAppConversions' && page_id) {
-    adsetBody.destination_type = 'WHATSAPP';
+  // Для Conversions: destination_type и promoted_object зависят от conversion_channel
+  if (objective === 'Conversions') {
+    const channel = conversion_channel || 'whatsapp';
+    if (!conversion_channel) {
+      console.warn('[CreateCampaignWithCreative] Conversions objective missing conversion_channel, falling back to whatsapp');
+    }
 
     const pixelId = defaultSettings?.pixel_id;
     if (!pixelId) {
-      throw new Error('WhatsAppConversions requires pixel_id in default settings');
+      throw new Error('Conversions requires pixel_id in default settings');
     }
 
-    adsetBody.promoted_object = {
-      pixel_id: String(pixelId),
-      custom_event_type: 'LEAD',
-      page_id: String(page_id),
-      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-    };
+    if (channel === 'whatsapp' && page_id) {
+      adsetBody.destination_type = 'WHATSAPP';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: 'LEAD',
+        page_id: String(page_id),
+        ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+      };
+    } else if (channel === 'lead_form' && page_id) {
+      adsetBody.destination_type = 'ON_AD';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: 'LEAD',
+        page_id: String(page_id),
+      };
+    } else if (channel === 'site') {
+      adsetBody.destination_type = 'WEBSITE';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: 'LEAD',
+      };
+    } else {
+      // Fallback на whatsapp
+      if (page_id) {
+        adsetBody.destination_type = 'WHATSAPP';
+        adsetBody.promoted_object = {
+          pixel_id: String(pixelId),
+          custom_event_type: 'LEAD',
+          page_id: String(page_id),
+          ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+        };
+      }
+    }
+
+    console.log('[CreateCampaignWithCreative] Conversions promoted_object configured', {
+      conversion_channel: channel,
+      pixel_id: pixelId,
+      destination_type: adsetBody.destination_type,
+      promoted_object: adsetBody.promoted_object,
+      page_id: page_id || null,
+      whatsapp_phone_number: context.whatsapp_phone_number || null,
+    });
   }
 
   // Для LeadForms добавляем destination_type ON_AD и promoted_object с page_id
@@ -330,27 +383,21 @@ export async function workflowCreateCampaignWithCreative(
   }
 
   if (objective === 'AppInstalls') {
-    if (!defaultSettings?.app_id || !defaultSettings?.app_store_url) {
-      console.error('[CreateCampaignWithCreative] AppInstalls missing required settings', {
-        has_default_settings: Boolean(defaultSettings),
-        has_app_id: Boolean(defaultSettings?.app_id),
-        has_app_store_url: Boolean(defaultSettings?.app_store_url)
-      });
-      throw new Error('AppInstalls requires app_id and app_store_url in default settings');
-    }
+    const appConfig = requireAppInstallsConfig();
 
     adsetBody.promoted_object = {
-      application_id: String(defaultSettings.app_id),
-      object_store_url: defaultSettings.app_store_url,
-      ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
-        is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+      application_id: appConfig.applicationId,
+      object_store_url: appConfig.objectStoreUrl,
+      ...(appConfig.isSkadnetworkAttribution !== undefined && {
+        is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
       })
     };
 
     console.log('[CreateCampaignWithCreative] AppInstalls promoted_object configured', {
-      application_id: String(defaultSettings.app_id),
-      object_store_url: defaultSettings.app_store_url,
-      is_skadnetwork_attribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+      app_id_env_key: appConfig.appIdEnvKey,
+      app_store_url_env_key: appConfig.objectStoreUrlEnvKey,
+      skad_env_key: appConfig.skadEnvKey || null,
+      is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
     });
   }
 
@@ -376,7 +423,7 @@ export async function workflowCreateCampaignWithCreative(
     const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
     const isWhatsAppError = errorSubcode === 2446885;
 
-    if (isWhatsAppError && context.whatsapp_phone_number && (objective === 'WhatsApp' || objective === 'WhatsAppConversions')) {
+    if (isWhatsAppError && context.whatsapp_phone_number && (objective === 'WhatsApp' || objective === 'Conversions')) {
       console.log('[CreateCampaignWithCreative] ⚠️ Facebook API error 2446885 detected - retrying WITHOUT whatsapp_phone_number', {
         error_subcode: errorSubcode,
         whatsapp_number_attempted: context.whatsapp_phone_number
@@ -492,6 +539,7 @@ export async function workflowCreateCampaignWithCreative(
     ads: created_ads,
     ads_count: created_ads.length,
     objective,
+    conversion_channel: conversion_channel || null,
     message: `Campaign "${campaign_name}" created successfully with ${created_ads.length} ad(s) in one adset (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'})`,
   };
 }

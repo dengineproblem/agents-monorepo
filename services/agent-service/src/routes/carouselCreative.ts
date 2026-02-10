@@ -11,6 +11,7 @@ import {
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 
 const CreateCarouselCreativeSchema = z.object({
   user_id: z.string().uuid(),
@@ -77,10 +78,10 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // 2. Загружаем direction для получения objective
+      // 2. Загружаем direction для получения objective и conversion_channel
       const { data: direction, error: directionError } = await supabase
         .from('account_directions')
-        .select('objective, platform')
+        .select('objective, platform, conversion_channel')
         .eq('id', direction_id)
         .single();
 
@@ -99,8 +100,8 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
-      app.log.info({ objective }, 'Direction objective');
+      const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+      app.log.info({ objective, conversion_channel: (direction as any).conversion_channel }, 'Direction objective');
 
       // 3. Загружаем настройки из default_ad_settings
       const { data: defaultSettings } = await supabase
@@ -114,8 +115,6 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
-      const appId = defaultSettings?.app_id || null;
-      const appStoreUrl = defaultSettings?.app_store_url || null;
 
       // 4. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -262,7 +261,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
 
       let fbCreativeId = '';
 
-      if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+      if (objective === 'whatsapp' || (objective === 'conversions' && (direction as any).conversion_channel === 'whatsapp')) {
         const result = await createWhatsAppCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           cards: cardParams,
           pageId: pageId,
@@ -281,7 +280,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           message: description
         });
         fbCreativeId = result.id;
-      } else if (objective === 'site_leads') {
+      } else if (objective === 'site_leads' || (objective === 'conversions' && (direction as any).conversion_channel === 'site')) {
         if (!siteUrl) {
           return reply.status(400).send({
             success: false,
@@ -297,7 +296,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           utm: utm || undefined
         });
         fbCreativeId = result.id;
-      } else if (objective === 'lead_forms') {
+      } else if (objective === 'lead_forms' || (objective === 'conversions' && (direction as any).conversion_channel === 'lead_form')) {
         if (!leadFormId) {
           return reply.status(400).send({
             success: false,
@@ -313,18 +312,30 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
         fbCreativeId = result.id;
       } else if (objective === 'app_installs') {
-        if (!appId || !appStoreUrl) {
+        const appConfig = getAppInstallsConfig();
+        if (!appConfig) {
+          const envHints = getAppInstallsConfigEnvHints();
           return reply.status(400).send({
             success: false,
-            error: 'app_id and app_store_url are required for app_installs objective. Please configure them in direction settings.'
+            error: 'app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL).',
+            details: {
+              appIdEnvKeys: envHints.appIdEnvKeys,
+              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+            }
           });
         }
+        app.log.info({
+          direction_id,
+          appIdEnvKey: appConfig.appIdEnvKey,
+          appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+          skadEnvKey: appConfig.skadEnvKey || null
+        }, 'Using global app config for app_installs carousel creative');
         const result = await createAppInstallsCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           cards: cardParams,
           pageId: pageId,
           instagramId: instagramId,
           message: description,
-          appStoreUrl: appStoreUrl
+          appStoreUrl: appConfig.objectStoreUrl
         });
         fbCreativeId = result.id;
       } else {
@@ -353,10 +364,10 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Данные карусели для отображения миниатюр и текстов
           carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
-          ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...((objective === 'whatsapp' || (objective === 'conversions' && (direction as any).conversion_channel === 'whatsapp')) && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
-          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
+          ...((objective === 'site_leads' || (objective === 'conversions' && (direction as any).conversion_channel === 'site')) && { fb_creative_id_site_leads: fbCreativeId }),
+          ...((objective === 'lead_forms' || (objective === 'conversions' && (direction as any).conversion_channel === 'lead_form')) && { fb_creative_id_lead_forms: fbCreativeId })
         })
         .select()
         .single();

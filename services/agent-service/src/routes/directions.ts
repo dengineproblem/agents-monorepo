@@ -8,6 +8,7 @@ import { onDirectionCreated } from '../lib/onboardingHelper.js';
 import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
 import { getTikTokCredentials, getTikTokObjectiveConfig } from '../lib/tiktokSettings.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { tt } from '../adapters/tiktok.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
@@ -55,7 +56,7 @@ const DefaultSettingsSchema = z.object({
 
 type DirectionPlatform = z.infer<typeof DirectionPlatformSchema>;
 type TikTokObjectiveInput = z.infer<typeof TikTokObjectiveSchema>;
-type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
 const DEFAULT_FB_DAILY_BUDGET_CENTS = 500;
@@ -106,7 +107,8 @@ const CreateDirectionSchema = z.object({
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
   platform: DirectionPlatformSchema.optional(),
   name: z.string().min(2).max(100),
-  objective: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']).optional(),
+  objective: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']).optional(),
+  conversion_channel: z.enum(['whatsapp', 'lead_form', 'site']).optional(),
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
   use_instagram: z.boolean().optional(),
   advantage_audience_enabled: z.boolean().optional(),
@@ -190,6 +192,15 @@ const CreateDirectionSchema = z.object({
       });
     }
   }
+
+  // conversion_channel обязателен для objective=conversions
+  if (data.objective === 'conversions' && !data.conversion_channel) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'conversion_channel is required when objective is conversions',
+      path: ['conversion_channel'],
+    });
+  }
 });
 
 const UpdateDirectionSchema = z.object({
@@ -215,7 +226,7 @@ const UpdateDirectionSchema = z.object({
   capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
-  // WhatsApp-conversions optimization level
+  // Conversions optimization level
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
 });
 
@@ -246,9 +257,9 @@ async function createFacebookCampaign(
       fbObjective = 'OUTCOME_ENGAGEMENT';
       objectiveReadable = 'WhatsApp';
       break;
-    case 'whatsapp_conversions':
+    case 'conversions':
       fbObjective = 'OUTCOME_SALES';
-      objectiveReadable = 'WhatsApp-конверсии';
+      objectiveReadable = 'Conversions';
       break;
     case 'instagram_traffic':
       fbObjective = 'OUTCOME_TRAFFIC';
@@ -529,11 +540,23 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      // Преобразуем вложенный объект в простое поле
-      const directionsWithNumber = (directions || []).map(dir => ({
-        ...dir,
-        whatsapp_phone_number: dir.whatsapp_phone_number?.phone_number || null,
-      }));
+      // Преобразуем вложенный объект в простое поле + маппинг обратной совместимости
+      const directionsWithNumber = (directions || []).map(dir => {
+        // Обратная совместимость: whatsapp_conversions -> conversions + conversion_channel: 'whatsapp'
+        let objective = dir.objective;
+        let conversion_channel = dir.conversion_channel || null;
+        if (objective === 'whatsapp_conversions') {
+          objective = 'conversions';
+          conversion_channel = conversion_channel || 'whatsapp';
+        }
+
+        return {
+          ...dir,
+          objective,
+          conversion_channel,
+          whatsapp_phone_number: dir.whatsapp_phone_number?.phone_number || null,
+        };
+      });
 
       return reply.send({
         success: true,
@@ -956,11 +979,16 @@ export async function directionsRoutes(app: FastifyInstance) {
       }, 'Creating direction');
 
       if (needsFacebook && input.objective === 'app_installs') {
-        const appSettings = input.facebook_default_settings || input.default_settings;
-        if (!appSettings?.app_id || !appSettings?.app_store_url) {
+        const appConfig = getAppInstallsConfig();
+        if (!appConfig) {
+          const envHints = getAppInstallsConfigEnvHints();
           return reply.code(400).send({
             success: false,
-            error: 'app_installs objective requires app_id and app_store_url in default settings',
+            error: 'app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)',
+            details: {
+              appIdEnvKeys: envHints.appIdEnvKeys,
+              appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+            }
           });
         }
       }
@@ -1240,17 +1268,18 @@ export async function directionsRoutes(app: FastifyInstance) {
 
           createdCampaigns.push({ platform: 'facebook', campaignId: fbCampaign.campaign_id });
 
-          // Логируем создание направления WhatsApp-конверсии с деталями CAPI
-          if (input.objective === 'whatsapp_conversions') {
+          // Логируем создание направления конверсии с деталями CAPI
+          if (input.objective === 'conversions') {
             log.info({
               userAccountId,
               directionName: input.name,
               objective: input.objective,
+              conversion_channel: input.conversion_channel,
               optimization_level: input.optimization_level || 'level_1',
               fb_campaign_id: fbCampaign.campaign_id,
               has_capi_enabled: input.capi_enabled,
               capi_source: input.capi_source,
-            }, 'Создаём направление WhatsApp-конверсии с CAPI оптимизацией');
+            }, 'Создаём направление конверсии с CAPI оптимизацией');
           }
 
           const insertResult = await supabase
@@ -1261,6 +1290,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               name: input.name,
               platform: 'facebook',
               objective: input.objective,
+              conversion_channel: input.conversion_channel || null,
               daily_budget_cents: input.daily_budget_cents,
               target_cpl_cents: input.target_cpl_cents,
               advantage_audience_enabled: input.advantage_audience_enabled !== false,
@@ -1276,7 +1306,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               capi_interest_fields: input.capi_interest_fields || [],
               capi_qualified_fields: input.capi_qualified_fields || [],
               capi_scheduled_fields: input.capi_scheduled_fields || [],
-              // WhatsApp-conversions optimization level
+              // Conversions optimization level
               optimization_level: input.optimization_level || 'level_1',
               // Instagram account usage
               use_instagram: input.use_instagram !== undefined ? input.use_instagram : true,
@@ -1325,6 +1355,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               name: input.name,
               platform: 'tiktok',
               objective: mappedObjective,
+              conversion_channel: null,
               daily_budget_cents: DEFAULT_FB_DAILY_BUDGET_CENTS,
               target_cpl_cents: DEFAULT_FB_TARGET_CPL_CENTS,
               advantage_audience_enabled: true,

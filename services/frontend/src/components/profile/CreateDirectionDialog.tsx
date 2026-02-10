@@ -18,12 +18,13 @@ import { Switch } from '@/components/ui/switch';
 import { ChevronDown, AlertCircle, CheckCircle2, QrCode, Cloud } from 'lucide-react';
 import type {
   DirectionObjective,
+  ConversionChannel,
   CreateDefaultSettingsInput,
   DirectionPlatform,
   TikTokObjective,
   OptimizationLevel,
 } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -441,6 +442,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [name, setName] = useState('');
   const [directionPlatform, setDirectionPlatform] = useState<DirectionPlatform>(defaultPlatform);
   const [objective, setObjective] = useState<DirectionObjective>('whatsapp');
+  const [conversionChannel, setConversionChannel] = useState<ConversionChannel>('whatsapp');
   const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
   const [useInstagram, setUseInstagram] = useState(hasInstagramId !== false);
   const [advantageAudienceEnabled, setAdvantageAudienceEnabled] = useState(true);
@@ -488,11 +490,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadFormId, setLeadFormId] = useState('');
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
-
-  // App Installs специфичные (Facebook)
-  const [appId, setAppId] = useState('');
-  const [appStoreUrl, setAppStoreUrl] = useState('');
-  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
 
   // TikTok Instant Page ID (Lead Forms) - ручной ввод
   const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
@@ -626,10 +623,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setTargetCpl(defaultValue);
   }, [objective]);
 
-  // Загрузка лидформ при выборе цели "Lead Forms"
+  // Загрузка лидформ при выборе цели "Lead Forms" или "Конверсии" + канал "lead_form"
+  const needsLeadFormLoad = objective === 'lead_forms' || (objective === 'conversions' && conversionChannel === 'lead_form');
   useEffect(() => {
     const loadLeadForms = async () => {
-      if (!open || !needsFacebook || objective !== 'lead_forms') {
+      if (!open || !needsFacebook || !needsLeadFormLoad) {
         // Сброс лидформ при переключении на другую цель или платформу
         setLeadForms([]);
         setLeadFormId('');
@@ -648,7 +646,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
     loadLeadForms();
-  }, [objective, open, needsFacebook]);
+  }, [objective, conversionChannel, open, needsFacebook, needsLeadFormLoad]);
 
   // Сброс Instant Page ID при смене цели
   useEffect(() => {
@@ -971,7 +969,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
     // Валидация специфичных полей (Facebook)
     if (needsFacebook) {
-      if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+      const needsWhatsAppFields = objective === 'whatsapp' || (objective === 'conversions' && conversionChannel === 'whatsapp');
+      const needsLeadFormFields = objective === 'lead_forms' || (objective === 'conversions' && conversionChannel === 'lead_form');
+      const needsSiteFields = objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site');
+
+      if (needsWhatsAppFields) {
         if (!clientQuestion.trim()) {
           setError('Введите вопрос клиента для WhatsApp');
           return;
@@ -995,26 +997,16 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         return;
       }
 
-      if (objective === 'site_leads' && !siteUrl.trim()) {
+      if (needsSiteFields && !siteUrl.trim()) {
         setError('Введите URL сайта');
         return;
       }
 
-      if (objective === 'lead_forms' && !leadFormId) {
+      if (needsLeadFormFields && !leadFormId) {
         setError('Выберите лидформу');
         return;
       }
 
-      if (objective === 'app_installs') {
-        if (!appId.trim()) {
-          setError('Введите App ID');
-          return;
-        }
-        if (!appStoreUrl.trim()) {
-          setError('Введите ссылку на приложение (App Store / Google Play)');
-          return;
-        }
-      }
     }
 
     setIsSubmitting(true);
@@ -1033,20 +1025,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             // ✅ НОВОЕ: pixel_id передаётся для ВСЕХ типов целей (для Meta CAPI)
             // Для site_leads обязателен, для остальных — опционален
             pixel_id: pixelId || null,
-            ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { client_question: clientQuestion.trim() }),
+            ...((objective === 'whatsapp' || (objective === 'conversions' && conversionChannel === 'whatsapp')) && { client_question: clientQuestion.trim() }),
             ...(objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
-            ...(objective === 'site_leads' && {
+            ...((objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site')) && {
               site_url: siteUrl.trim(),
               utm_tag: utmTag.trim() || DEFAULT_UTM,
             }),
-            ...(objective === 'lead_forms' && {
+            ...((objective === 'lead_forms' || (objective === 'conversions' && conversionChannel === 'lead_form')) && {
               lead_form_id: leadFormId,
               ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
-            }),
-            ...(objective === 'app_installs' && {
-              app_id: appId.trim(),
-              app_store_url: appStoreUrl.trim(),
-              is_skadnetwork_attribution: isSkadnetworkAttribution,
             }),
           }
         : undefined;
@@ -1088,7 +1075,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         platform: directionPlatform,
         ...(needsFacebook && {
           objective,
-          ...(objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
+          ...(objective === 'conversions' && { optimization_level: optimizationLevel, conversion_channel: conversionChannel }),
           use_instagram: useInstagram,
           advantage_audience_enabled: advantageAudienceEnabled,
           custom_audience_id: customAudienceId || null,
@@ -1133,6 +1120,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setName('');
     setDirectionPlatform(defaultPlatform);
     setObjective('whatsapp');
+    setConversionChannel('whatsapp');
     setOptimizationLevel('level_1');
     setAdvantageAudienceEnabled(true);
     setCustomAudienceId('');
@@ -1161,9 +1149,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
-    setAppId('');
-    setAppStoreUrl('');
-    setIsSkadnetworkAttribution(false);
     // CAPI settings
     setCapiEnabled(false);
     setCapiSource('whatsapp');
@@ -1378,9 +1363,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     </Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="whatsapp_conversions" id="obj-whatsapp-conv" />
-                    <Label htmlFor="obj-whatsapp-conv" className="font-normal cursor-pointer">
-                      {OBJECTIVE_DESCRIPTIONS.whatsapp_conversions}
+                    <RadioGroupItem value="conversions" id="obj-conversions" />
+                    <Label htmlFor="obj-conversions" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.conversions}
                     </Label>
                   </div>
                   {hasInstagramId && (
@@ -1413,8 +1398,53 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </div>
             )}
 
-            {/* Уровень оптимизации для WhatsApp-конверсий */}
-            {needsFacebook && objective === 'whatsapp_conversions' && (
+            {/* Канал конверсий */}
+            {needsFacebook && objective === 'conversions' && (
+              <div className="space-y-2">
+                <Label>
+                  Канал конверсий <span className="text-red-500">*</span>
+                </Label>
+                <RadioGroup
+                  value={conversionChannel}
+                  onValueChange={(value) => {
+                    setConversionChannel(value as ConversionChannel);
+                    // Для lead_form и site — только CRM источник CAPI
+                    if (value !== 'whatsapp') {
+                      setCapiSource('crm');
+                    }
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="whatsapp" id="channel-whatsapp" />
+                    <div>
+                      <Label htmlFor="channel-whatsapp" className="font-normal cursor-pointer">
+                        {CONVERSION_CHANNEL_DESCRIPTIONS.whatsapp}
+                      </Label>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="lead_form" id="channel-lead-form" />
+                    <div>
+                      <Label htmlFor="channel-lead-form" className="font-normal cursor-pointer">
+                        {CONVERSION_CHANNEL_DESCRIPTIONS.lead_form}
+                      </Label>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="site" id="channel-site" />
+                    <div>
+                      <Label htmlFor="channel-site" className="font-normal cursor-pointer">
+                        {CONVERSION_CHANNEL_DESCRIPTIONS.site}
+                      </Label>
+                    </div>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
+
+            {/* Уровень оптимизации для конверсий */}
+            {needsFacebook && objective === 'conversions' && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
                   <Label>
@@ -2146,41 +2176,43 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     disabled={isSubmitting}
                   />
                 </div>
+              </div>
+            )}
 
-                <div className="space-y-2">
-                  <Label htmlFor="direction-custom-audience">Custom Audience (опционально)</Label>
-                  <Select
-                    value={customAudienceId || 'none'}
-                    onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
-                    disabled={isSubmitting || isLoadingCustomAudiences}
-                  >
-                    <SelectTrigger id="direction-custom-audience">
-                      <SelectValue placeholder={
-                        isLoadingCustomAudiences
-                          ? 'Загрузка...'
-                          : customAudiences.length === 0
-                            ? 'Аудитории не найдены'
-                            : 'Выберите аудиторию'
-                      } />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Без Custom Audience</SelectItem>
-                      {customAudiences.length === 0 && !isLoadingCustomAudiences && (
-                        <SelectItem value="no-audiences" disabled>
-                          Нет доступных Custom Audience
-                        </SelectItem>
-                      )}
-                      {customAudiences.map((audience) => (
-                        <SelectItem key={audience.id} value={audience.id}>
-                          {audience.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Список подтягивается из текущего рекламного кабинета Meta.
-                  </p>
-                </div>
+            {needsFacebook && (
+              <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                <Label htmlFor="direction-custom-audience">Custom Audience (опционально)</Label>
+                <Select
+                  value={customAudienceId || 'none'}
+                  onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
+                  disabled={isSubmitting || isLoadingCustomAudiences}
+                >
+                  <SelectTrigger id="direction-custom-audience">
+                    <SelectValue placeholder={
+                      isLoadingCustomAudiences
+                        ? 'Загрузка...'
+                        : customAudiences.length === 0
+                          ? 'Аудитории не найдены'
+                          : 'Выберите аудиторию'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без Custom Audience</SelectItem>
+                    {customAudiences.length === 0 && !isLoadingCustomAudiences && (
+                      <SelectItem value="no-audiences" disabled>
+                        Нет доступных Custom Audience
+                      </SelectItem>
+                    )}
+                    {customAudiences.map((audience) => (
+                      <SelectItem key={audience.id} value={audience.id}>
+                        {audience.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Список подтягивается из текущего рекламного кабинета Meta.
+                </p>
               </div>
             )}
           </div>
@@ -2243,7 +2275,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           <Separator />
 
           {/* СЕКЦИЯ 4: Специфичные настройки в зависимости от цели */}
-          {needsFacebook && (objective === 'whatsapp' || objective === 'whatsapp_conversions') && (
+          {needsFacebook && (objective === 'whatsapp' || (objective === 'conversions' && conversionChannel === 'whatsapp')) && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
 
@@ -2370,7 +2402,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {needsFacebook && objective === 'site_leads' && (
+          {needsFacebook && (objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site')) && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">🌐 Лиды на сайте</h3>
               
@@ -2445,7 +2477,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {needsFacebook && objective === 'lead_forms' && (
+          {needsFacebook && (objective === 'lead_forms' || (objective === 'conversions' && conversionChannel === 'lead_form')) && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">📋 Лидформы Facebook</h3>
 
@@ -2516,55 +2548,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           )}
 
           {needsFacebook && objective === 'app_installs' && (
-            <div className="space-y-4">
-              <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
-
-              <div className="space-y-2">
-                <Label htmlFor="app-id">
-                  App ID <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="app-id"
-                  value={appId}
-                  onChange={(e) => setAppId(e.target.value)}
-                  placeholder="123456789012345"
-                  disabled={isSubmitting}
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  ID приложения из Meta App Dashboard.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="app-store-url">
-                  Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="app-store-url"
-                  type="url"
-                  value={appStoreUrl}
-                  onChange={(e) => setAppStoreUrl(e.target.value)}
-                  placeholder="https://apps.apple.com/app/id1234567890"
-                  disabled={isSubmitting}
-                />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="skadnetwork-attribution"
-                  checked={isSkadnetworkAttribution}
-                  onCheckedChange={setIsSkadnetworkAttribution}
-                  disabled={isSubmitting}
-                />
-                <Label htmlFor="skadnetwork-attribution" className="font-normal cursor-pointer">
-                  Включить SKAdNetwork атрибуцию (iOS)
-                </Label>
-              </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <h3 className="font-semibold text-sm text-amber-900">📲 Установки приложения</h3>
+              <p className="mt-1 text-xs text-amber-800">
+                App ID, Store URL и SKAdNetwork берутся из глобальных env на сервере. Для направления эти поля заполнять не нужно.
+              </p>
             </div>
           )}
 
-          {needsFacebook && objective !== 'site_leads' && (
+          {needsFacebook && objective === 'conversions' && (
             <div className="space-y-4">
               <Separator />
               <div className="flex items-center justify-between">
@@ -2676,6 +2668,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   {pixelId && (
                     <div className="space-y-3">
                       <Label>Источник данных для событий</Label>
+                      {conversionChannel !== 'whatsapp' ? (
+                        <p className="text-sm text-muted-foreground">
+                          CRM-система (для канала {CONVERSION_CHANNEL_DESCRIPTIONS[conversionChannel]})
+                        </p>
+                      ) : (
                       <RadioGroup
                         value={capiSource}
                         onValueChange={(value) => setCapiSource(value as CapiSource)}
@@ -2714,9 +2711,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                           </div>
                         </div>
                       </RadioGroup>
+                      )}
 
                       {/* CRM Configuration */}
-                      {capiSource === 'crm' && connectedCrms.length > 0 && (
+                      {(capiSource === 'crm' || conversionChannel !== 'whatsapp') && connectedCrms.length > 0 && (
                         <div className="space-y-4 mt-4">
                           {/* CRM Type Selection */}
                           {connectedCrms.length > 1 && (

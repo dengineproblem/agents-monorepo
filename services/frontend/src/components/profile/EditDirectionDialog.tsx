@@ -24,7 +24,7 @@ import type {
   CapiCrmType,
   OptimizationLevel
 } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -411,9 +411,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
   const [pixelId, setPixelId] = useState('');
-  const [appId, setAppId] = useState('');
-  const [appStoreUrl, setAppStoreUrl] = useState('');
-  const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
   const [utmTag, setUtmTag] = useState(DEFAULT_UTM);
@@ -792,9 +789,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         if (settings.client_question) setClientQuestion(settings.client_question);
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
-        setAppId(settings.app_id || '');
-        setAppStoreUrl(settings.app_store_url || '');
-        setIsSkadnetworkAttribution(Boolean(settings.is_skadnetwork_attribution));
         if (settings.pixel_id) {
           setPixelId(settings.pixel_id);
           setCapiPixelId(settings.pixel_id); // Используем тот же пиксель для CAPI
@@ -824,9 +818,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCapiPixelId('');
     setInstagramUrl('');
     setSiteUrl('');
-    setAppId('');
-    setAppStoreUrl('');
-    setIsSkadnetworkAttribution(false);
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
   };
@@ -1032,16 +1023,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         return;
       }
 
-      if (direction.objective === 'app_installs') {
-        if (!appId.trim()) {
-          setError('Введите App ID');
-          return;
-        }
-        if (!appStoreUrl.trim()) {
-          setError('Введите ссылку на приложение (App Store / Google Play)');
-          return;
-        }
-      }
     }
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
@@ -1116,7 +1097,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               daily_budget_cents: Math.round(budgetValue * 100),
               target_cpl_cents: Math.round(cplValue * 100),
               whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
-              ...(direction.objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
+              ...(direction.objective === 'conversions' && { optimization_level: optimizationLevel }),
               advantage_audience_enabled: advantageAudienceEnabled,
               custom_audience_id: customAudienceId || null,
               capiSettings: {
@@ -1160,9 +1141,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
         ...(!isTikTok && direction.objective === 'app_installs' && {
-          app_id: appId.trim(),
-          app_store_url: appStoreUrl.trim(),
-          is_skadnetwork_attribution: isSkadnetworkAttribution,
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
       };
@@ -1616,9 +1594,16 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 </div>
               )}
 
-              {!isTikTok && direction.objective === 'whatsapp_conversions' && (
+              {!isTikTok && direction.objective === 'conversions' && (
                 <div className="space-y-4">
-                  <h3 className="font-semibold text-sm">📊 WhatsApp-конверсии (CAPI)</h3>
+                  <h3 className="font-semibold text-sm">
+                    Конверсии (CAPI)
+                    {direction.conversion_channel && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        Канал: {CONVERSION_CHANNEL_LABELS[direction.conversion_channel]}
+                      </span>
+                    )}
+                  </h3>
 
                   <div className="space-y-2">
                     <Label>
@@ -1800,48 +1785,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               )}
 
               {!isTikTok && direction.objective === 'app_installs' && (
-                <div className="space-y-4">
-                  <h3 className="font-semibold text-sm">📲 Установки приложения</h3>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-app-id">
-                      App ID <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="edit-app-id"
-                      value={appId}
-                      onChange={(e) => setAppId(e.target.value)}
-                      placeholder="123456789012345"
-                      disabled={isSubmitting}
-                      className="font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-app-store-url">
-                      Ссылка на приложение (App Store / Google Play) <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      id="edit-app-store-url"
-                      type="url"
-                      value={appStoreUrl}
-                      onChange={(e) => setAppStoreUrl(e.target.value)}
-                      placeholder="https://apps.apple.com/app/id1234567890"
-                      disabled={isSubmitting}
-                    />
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="edit-skadnetwork-attribution"
-                      checked={isSkadnetworkAttribution}
-                      onCheckedChange={setIsSkadnetworkAttribution}
-                      disabled={isSubmitting}
-                    />
-                    <Label htmlFor="edit-skadnetwork-attribution" className="font-normal cursor-pointer">
-                      Включить SKAdNetwork атрибуцию (iOS)
-                    </Label>
-                  </div>
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                  <h3 className="font-semibold text-sm text-amber-900">📲 Установки приложения</h3>
+                  <p className="mt-1 text-xs text-amber-800">
+                    App ID, Store URL и SKAdNetwork берутся из глобальных env на сервере. Для направления эти поля заполнять не нужно.
+                  </p>
                 </div>
               )}
 

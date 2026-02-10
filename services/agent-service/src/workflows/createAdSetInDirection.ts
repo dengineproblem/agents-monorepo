@@ -12,6 +12,7 @@ import {
 } from '../lib/directionAdSets.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { generateAdsetName, type AdsetSource } from '../lib/adsetNaming.js';
+import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -174,10 +175,10 @@ export async function workflowCreateAdSetInDirection(
       optimization_goal = 'CONVERSATIONS';
       destination_type = 'WHATSAPP';
       break;
-    case 'whatsapp_conversions':
+    case 'conversions':
       fb_objective = 'OUTCOME_SALES';
       optimization_goal = 'OFFSITE_CONVERSIONS';
-      destination_type = 'WHATSAPP';
+      // destination_type зависит от conversion_channel — устанавливается ниже
       break;
     case 'instagram_traffic':
       fb_objective = 'OUTCOME_TRAFFIC';
@@ -210,9 +211,20 @@ export async function workflowCreateAdSetInDirection(
     if (!fb_creative_id) {
       switch (direction.objective) {
         case 'whatsapp':
-        case 'whatsapp_conversions':
           fb_creative_id = creative.fb_creative_id_whatsapp;
           break;
+        case 'conversions': {
+          // Выбираем fb_creative_id по conversion_channel
+          const channel = direction.conversion_channel || 'whatsapp';
+          if (channel === 'whatsapp') {
+            fb_creative_id = creative.fb_creative_id_whatsapp;
+          } else if (channel === 'lead_form') {
+            fb_creative_id = creative.fb_creative_id_lead_forms;
+          } else if (channel === 'site') {
+            fb_creative_id = creative.fb_creative_id_site_leads;
+          }
+          break;
+        }
         case 'instagram_traffic':
           fb_creative_id = creative.fb_creative_id_instagram_traffic;
           break;
@@ -320,18 +332,24 @@ export async function workflowCreateAdSetInDirection(
   const credentials = await getCredentials(user_account_id, context_account_id || direction.ad_account_id);
   const effective_page_id = credentials.fbPageId;
 
-  // КРИТИЧЕСКАЯ ПРОВЕРКА: для WhatsApp и lead_forms кампаний ОБЯЗАТЕЛЬНО нужен page_id
-  if ((direction.objective === 'whatsapp' || direction.objective === 'lead_forms') && !effective_page_id) {
+  // КРИТИЧЕСКАЯ ПРОВЕРКА: для WhatsApp, lead_forms и conversions (whatsapp/lead_form) кампаний ОБЯЗАТЕЛЬНО нужен page_id
+  const needsPageId = direction.objective === 'whatsapp'
+    || direction.objective === 'lead_forms'
+    || (direction.objective === 'conversions' && (direction.conversion_channel === 'whatsapp' || direction.conversion_channel === 'lead_form'));
+  if (needsPageId && !effective_page_id) {
     throw new Error(
-      `Cannot create ${direction.objective} adset for direction "${direction.name}": page_id not configured. ` +
+      `Cannot create ${direction.objective} (channel: ${direction.conversion_channel || 'N/A'}) adset for direction "${direction.name}": page_id not configured. ` +
       `Please connect Facebook Page in settings.`
     );
   }
 
   // Получаем WhatsApp номер с fallback логикой
+  // Нужен для objective=whatsapp И для conversions+whatsapp (destination_type=WHATSAPP)
   let whatsapp_phone_number = null;
-  
-  if (direction.objective === 'whatsapp') {
+  const needsWhatsAppNumber = direction.objective === 'whatsapp'
+    || (direction.objective === 'conversions' && (direction.conversion_channel === 'whatsapp' || !direction.conversion_channel));
+
+  if (needsWhatsAppNumber) {
     // 1. Приоритет: номер из направления
     if (direction.whatsapp_phone_number_id) {
       const { data: phoneNumber } = await supabase
@@ -424,10 +442,16 @@ export async function workflowCreateAdSetInDirection(
     };
   }
 
-  // Для WhatsApp-конверсий (CAPI): promoted_object с pixel_id и custom_event_type
-  // Это критично для правильной оптимизации по CAPI событиям
-  if (direction.objective === 'whatsapp_conversions' && effective_page_id) {
-    adsetBody.destination_type = 'WHATSAPP';
+  // Для Conversions (CAPI): destination_type и promoted_object зависят от conversion_channel
+  if (direction.objective === 'conversions') {
+    const conversionChannel = direction.conversion_channel || 'whatsapp';
+    if (!direction.conversion_channel) {
+      log.warn({
+        directionId: direction.id,
+        directionName: direction.name,
+        fallbackChannel: 'whatsapp',
+      }, 'Conversions direction missing conversion_channel, falling back to whatsapp');
+    }
 
     const pixelId = direction.pixel_id || defaultSettings?.pixel_id;
     if (!pixelId) {
@@ -435,36 +459,64 @@ export async function workflowCreateAdSetInDirection(
         directionId: direction.id,
         directionName: direction.name,
         objective: direction.objective,
+        conversion_channel: conversionChannel,
         optimization_level: direction.optimization_level,
-      }, 'WhatsApp-conversions requires pixel_id but none configured');
+      }, 'Conversions requires pixel_id but none configured');
 
       throw new Error(
-        `Cannot create whatsapp_conversions adset: pixel_id not configured for direction "${direction.name}". ` +
+        `Cannot create conversions adset: pixel_id not configured for direction "${direction.name}". ` +
         `Please configure Meta Pixel in direction settings.`
       );
     }
 
     const customEventType = getCustomEventType(direction.optimization_level);
 
-    adsetBody.promoted_object = {
-      pixel_id: String(pixelId),
-      custom_event_type: customEventType,
-      page_id: String(effective_page_id),
-      ...(whatsapp_phone_number && { whatsapp_phone_number })
-    };
+    // destination_type зависит от conversion_channel
+    if (conversionChannel === 'whatsapp') {
+      adsetBody.destination_type = 'WHATSAPP';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: customEventType,
+        page_id: String(effective_page_id),
+        ...(whatsapp_phone_number && { whatsapp_phone_number })
+      };
+    } else if (conversionChannel === 'lead_form') {
+      adsetBody.destination_type = 'ON_AD';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: customEventType,
+        page_id: String(effective_page_id),
+      };
+    } else if (conversionChannel === 'site') {
+      adsetBody.destination_type = 'WEBSITE';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: customEventType,
+      };
+    } else {
+      // Fallback на whatsapp для неизвестных каналов
+      adsetBody.destination_type = 'WHATSAPP';
+      adsetBody.promoted_object = {
+        pixel_id: String(pixelId),
+        custom_event_type: customEventType,
+        page_id: String(effective_page_id),
+        ...(whatsapp_phone_number && { whatsapp_phone_number })
+      };
+    }
 
     log.info({
       directionId: direction.id,
       directionName: direction.name,
       objective: direction.objective,
+      conversion_channel: conversionChannel,
       optimization_level: direction.optimization_level,
       pixel_id: pixelId,
       pixel_source: direction.pixel_id ? 'direction' : 'defaultSettings',
       custom_event_type: customEventType,
-      page_id: effective_page_id,
+      page_id: effective_page_id || null,
       whatsapp_phone_number: whatsapp_phone_number || null,
-      destination_type: 'WHATSAPP',
-    }, 'WhatsApp-conversions ad set: promoted_object configured for CAPI optimization');
+      destination_type: adsetBody.destination_type,
+    }, 'Conversions ad set: promoted_object configured for CAPI optimization');
   }
 
   // Для Site Leads добавляем destination_type и promoted_object с pixel_id
@@ -521,28 +573,22 @@ export async function workflowCreateAdSetInDirection(
   }
 
   if (direction.objective === 'app_installs') {
-    const appId = defaultSettings?.app_id;
-    const appStoreUrl = defaultSettings?.app_store_url;
-
-    if (!appId || !appStoreUrl) {
-      throw new Error(
-        `Cannot create app_installs adset for direction "${direction.name}": app_id and app_store_url are required in settings.`
-      );
-    }
+    const appConfig = requireAppInstallsConfig();
 
     adsetBody.promoted_object = {
-      application_id: String(appId),
-      object_store_url: appStoreUrl,
-      ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
-        is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+      application_id: appConfig.applicationId,
+      object_store_url: appConfig.objectStoreUrl,
+      ...(appConfig.isSkadnetworkAttribution !== undefined && {
+        is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
       })
     };
 
     log.info({
       directionId: direction.id,
-      app_id: appId,
-      app_store_url: appStoreUrl,
-      is_skadnetwork_attribution: Boolean(defaultSettings?.is_skadnetwork_attribution)
+      appIdEnvKey: appConfig.appIdEnvKey,
+      appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+      skadEnvKey: appConfig.skadEnvKey || null,
+      is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution ?? null
     }, 'Using promoted_object for app_installs objective');
   }
 
@@ -884,6 +930,7 @@ export async function workflowCreateAdSetInDirection(
     ads: created_ads,
     ads_count: created_ads.length,
     objective: direction.objective,
+    conversion_channel: direction.conversion_channel || null,
     message: `AdSet created in direction "${direction.name}" with ${created_ads.length} ad(s) (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'})`,
   };
 }

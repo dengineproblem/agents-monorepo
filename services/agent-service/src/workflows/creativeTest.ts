@@ -5,6 +5,7 @@ import { createLogger, type AppLogger } from '../lib/logger.js';
 import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
 import { getCustomEventType } from '../lib/campaignBuilder.js';
+import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
 
@@ -129,9 +130,20 @@ export async function workflowStartCreativeTest(
     // Фолбэк на старые поля (deprecated)
     switch (direction.objective) {
       case 'whatsapp':
-      case 'whatsapp_conversions':
         fb_creative_id = creative.fb_creative_id_whatsapp;
         break;
+      case 'conversions': {
+        // Выбираем fb_creative_id по conversion_channel
+        const channel = direction.conversion_channel || 'whatsapp';
+        if (channel === 'whatsapp') {
+          fb_creative_id = creative.fb_creative_id_whatsapp;
+        } else if (channel === 'lead_form') {
+          fb_creative_id = creative.fb_creative_id_lead_forms;
+        } else if (channel === 'site') {
+          fb_creative_id = creative.fb_creative_id_site_leads;
+        }
+        break;
+      }
       case 'instagram_traffic':
         fb_creative_id = creative.fb_creative_id_instagram_traffic;
         break;
@@ -260,52 +272,99 @@ export async function workflowStartCreativeTest(
       log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms (in creative CTA)');
       break;
 
-    case 'whatsapp_conversions':
+    case 'conversions': {
       fb_objective = 'OUTCOME_SALES';
       optimization_goal = 'OFFSITE_CONVERSIONS';
-      destination_type = 'WHATSAPP';
+
+      const conversionChannel = direction.conversion_channel || 'whatsapp';
+      if (!direction.conversion_channel) {
+        log.warn({
+          directionId: direction.id,
+          directionName: direction.name,
+        }, 'Conversions direction missing conversion_channel, falling back to whatsapp');
+      }
 
       if (defaultSettings?.pixel_id) {
         const customEventType = getCustomEventType(direction.optimization_level);
-        promoted_object = {
-          pixel_id: String(defaultSettings.pixel_id),
-          custom_event_type: customEventType
-        };
-        if (context.whatsapp_phone_number) {
-          promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
+
+        if (conversionChannel === 'whatsapp') {
+          destination_type = 'WHATSAPP';
+          promoted_object = {
+            pixel_id: String(defaultSettings.pixel_id),
+            custom_event_type: customEventType,
+            page_id: String(page_id),
+          };
+          if (context.whatsapp_phone_number) {
+            promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
+          }
+        } else if (conversionChannel === 'lead_form') {
+          destination_type = 'ON_AD';
+          promoted_object = {
+            pixel_id: String(defaultSettings.pixel_id),
+            custom_event_type: customEventType,
+            page_id: String(page_id),
+          };
+        } else if (conversionChannel === 'site') {
+          destination_type = 'WEBSITE';
+          promoted_object = {
+            pixel_id: String(defaultSettings.pixel_id),
+            custom_event_type: customEventType,
+          };
+        } else {
+          // Fallback на whatsapp
+          destination_type = 'WHATSAPP';
+          promoted_object = {
+            pixel_id: String(defaultSettings.pixel_id),
+            custom_event_type: customEventType,
+            page_id: String(page_id),
+          };
+          if (context.whatsapp_phone_number) {
+            promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
+          }
         }
+
         log.info({
           pixel_id: defaultSettings.pixel_id,
           optimization_level: direction.optimization_level || 'level_1',
-          custom_event_type: customEventType
-        }, 'Using pixel_id for whatsapp_conversions');
+          custom_event_type: customEventType,
+          conversion_channel: conversionChannel,
+          destination_type,
+        }, 'Using pixel_id for conversions');
       } else {
-        promoted_object = {
-          page_id: String(page_id)
-        };
-        if (context.whatsapp_phone_number) {
-          promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
-        }
-        log.warn('No pixel_id found in default settings for whatsapp_conversions');
+        log.error({
+          directionId: direction.id,
+          directionName: direction.name,
+          conversion_channel: conversionChannel,
+        }, 'Conversions requires pixel_id but none configured');
+        throw new Error(
+          `Cannot create conversions test: pixel_id not configured for direction "${direction.name}". ` +
+          `Please configure Meta Pixel in direction settings.`
+        );
       }
       break;
+    }
 
     case 'app_installs':
       fb_objective = 'OUTCOME_APP_PROMOTION';
       optimization_goal = 'APP_INSTALLS';
       destination_type = undefined;
 
-      if (!defaultSettings?.app_id || !defaultSettings?.app_store_url) {
-        throw new Error('No app_id/app_store_url found in default settings for app_installs objective');
-      }
+      const appConfig = requireAppInstallsConfig();
 
       promoted_object = {
-        application_id: String(defaultSettings.app_id),
-        object_store_url: defaultSettings.app_store_url,
-        ...(defaultSettings?.is_skadnetwork_attribution !== undefined && {
-          is_skadnetwork_attribution: Boolean(defaultSettings.is_skadnetwork_attribution)
+        application_id: appConfig.applicationId,
+        object_store_url: appConfig.objectStoreUrl,
+        ...(appConfig.isSkadnetworkAttribution !== undefined && {
+          is_skadnetwork_attribution: appConfig.isSkadnetworkAttribution
         })
       };
+
+      log.info({
+        appIdEnvKey: appConfig.appIdEnvKey,
+        appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+        skadEnvKey: appConfig.skadEnvKey || null,
+        isSkadnetworkAttribution: appConfig.isSkadnetworkAttribution ?? null
+      }, 'Using global env app config for app_installs creative test');
       break;
 
     default:
@@ -487,8 +546,9 @@ export async function workflowStartCreativeTest(
     ad_id,
     rule_id,
     objective: direction.objective,
+    conversion_channel: direction.conversion_channel || null,
     direction_id: direction.id,
-    message: `Creative test started for ${direction.objective}. Budget: $20/day, Target: 1000 impressions`
+    message: `Creative test started for ${direction.objective}${direction.conversion_channel ? ` (channel: ${direction.conversion_channel})` : ''}. Budget: $20/day, Target: 1000 impressions`
   };
 }
 
@@ -498,7 +558,8 @@ export async function workflowStartCreativeTest(
 export async function fetchCreativeTestInsights(
   ad_id: string,
   accessToken: string,
-  objective?: string
+  objective?: string,
+  conversion_channel?: string | null
 ) {
   try {
     const fields = [
@@ -577,6 +638,27 @@ export async function fetchCreativeTestInsights(
     const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
     leads = messaging_connection || legacy_leads;
     baseLog.debug({ ad_id, objective, messaging_connection, legacy_leads, leads }, 'WhatsApp leads extracted from insights');
+  } else if (objective === 'conversions') {
+    // Для conversions — определяем по conversion_channel
+    const channel = conversion_channel || 'whatsapp';
+    if (channel === 'whatsapp') {
+      // Как whatsapp: messaging connection
+      const messaging_connection = actions.find((a: any) => a.action_type === 'onsite_conversion.total_messaging_connection')?.value || 0;
+      const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+      leads = messaging_connection || legacy_leads;
+    } else if (channel === 'lead_form') {
+      // Как lead_forms: lead action_type
+      const form_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+      leads = form_leads;
+    } else if (channel === 'site') {
+      // Как site_leads: offsite_conversion.fb_pixel_lead
+      const offsite_leads = actions.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_lead')?.value || 0;
+      leads = offsite_leads;
+    } else {
+      const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+      leads = legacy_leads;
+    }
+    baseLog.debug({ ad_id, objective, conversion_channel: channel, leads }, 'Conversions leads extracted from insights');
   } else if (objective === 'app_installs') {
     const appInstalls =
       actions.find((a: any) => a.action_type === 'mobile_app_install')?.value ||

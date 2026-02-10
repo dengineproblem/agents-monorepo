@@ -16,6 +16,7 @@ import {
   createLeadFormVideoCreative,
   createAppInstallsVideoCreative
 } from '../adapters/facebook.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const MIN_LEADS = 5;
@@ -1044,12 +1045,12 @@ async function importSingleCreative(
           // Загружаем настройки направления
           const { data: direction } = await supabase
             .from('account_directions')
-            .select('objective, use_instagram')
+            .select('objective, use_instagram, conversion_channel')
             .eq('id', directionId)
             .maybeSingle();
 
           if (direction?.objective) {
-            const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+            const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
             const useInstagram = direction.use_instagram !== false;
 
             // Загружаем default_ad_settings
@@ -1064,8 +1065,6 @@ async function importSingleCreative(
             const siteUrl = defaultSettings?.site_url;
             const utm = defaultSettings?.utm_tag;
             const leadFormId = defaultSettings?.lead_form_id;
-            const appId = defaultSettings?.app_id;
-            const appStoreUrl = defaultSettings?.app_store_url;
 
             // Создаём креатив в зависимости от objective
             let fbCreativeId = '';
@@ -1073,7 +1072,7 @@ async function importSingleCreative(
               ? fullCredentials.adAccountId
               : `act_${fullCredentials.adAccountId}`;
 
-            if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+            if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) {
               const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, accessToken, {
                 videoId: creative.video_id!,
                 pageId: fullCredentials.pageId,
@@ -1094,7 +1093,7 @@ async function importSingleCreative(
                 imageUrl: creative.thumbnail_url || undefined
               });
               fbCreativeId = instagramCreative.id;
-            } else if (objective === 'site_leads') {
+            } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {
               if (siteUrl) {
                 const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
@@ -1107,7 +1106,7 @@ async function importSingleCreative(
                 });
                 fbCreativeId = websiteCreative.id;
               }
-            } else if (objective === 'lead_forms') {
+            } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
               if (leadFormId) {
                 const leadFormCreative = await createLeadFormVideoCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
@@ -1120,23 +1119,25 @@ async function importSingleCreative(
                 fbCreativeId = leadFormCreative.id;
               }
             } else if (objective === 'app_installs') {
-              if (appId && appStoreUrl) {
+              const appConfig = getAppInstallsConfig();
+              if (appConfig) {
                 const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
                   pageId: fullCredentials.pageId,
                   instagramId: fullCredentials.instagramId,
                   message: description,
-                  appStoreUrl: appStoreUrl,
+                  appStoreUrl: appConfig.objectStoreUrl,
                   imageUrl: creative.thumbnail_url || undefined
                 });
                 fbCreativeId = appInstallCreative.id;
               } else {
+                const envHints = getAppInstallsConfigEnvHints();
                 log.warn({
                   directionId,
                   objective,
-                  hasAppId: !!appId,
-                  hasAppStoreUrl: !!appStoreUrl
-                }, '[IMPORT_DEBUG] Skipping app_installs creative creation: app settings are incomplete');
+                  appIdEnvKeys: envHints.appIdEnvKeys,
+                  appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+                }, '[IMPORT_DEBUG] Skipping app_installs creative creation: global env app settings are incomplete');
               }
             }
 
@@ -1147,13 +1148,13 @@ async function importSingleCreative(
               };
 
               // Сохраняем в соответствующее поле по objective
-              if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+              if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) {
                 updateData.fb_creative_id_whatsapp = fbCreativeId;
               } else if (objective === 'instagram_traffic') {
                 updateData.fb_creative_id_instagram_traffic = fbCreativeId;
-              } else if (objective === 'site_leads') {
+              } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {
                 updateData.fb_creative_id_site_leads = fbCreativeId;
-              } else if (objective === 'lead_forms') {
+              } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
                 updateData.fb_creative_id_lead_forms = fbCreativeId;
               }
 
@@ -1166,10 +1167,11 @@ async function importSingleCreative(
                 creativeId: newCreative.id,
                 fbCreativeId,
                 objective,
-                field: objective === 'whatsapp' || objective === 'whatsapp_conversions' ? 'fb_creative_id_whatsapp' :
+                conversion_channel: direction?.conversion_channel,
+                field: (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) ? 'fb_creative_id_whatsapp' :
                        objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic' :
-                       objective === 'site_leads' ? 'fb_creative_id_site_leads' :
-                       objective === 'lead_forms' ? 'fb_creative_id_lead_forms' : 'fb_creative_id'
+                       (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) ? 'fb_creative_id_site_leads' :
+                       (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) ? 'fb_creative_id_lead_forms' : 'fb_creative_id'
               }, '[IMPORT_DEBUG] ✅✅✅ Facebook Creative created and SAVED to DB!');
             }
           }

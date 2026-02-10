@@ -29,6 +29,7 @@ import { getTikTokCredentials } from '../lib/tiktokSettings.js';
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createLogger } from '../lib/logger.js';
+import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 
 const log = createLogger({ module: 'tusUpload' });
 
@@ -657,17 +658,18 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let siteUrl = null;
     let utm = null;
     let leadFormId: string | null = null;
-    let appId: string | null = null;
-    let appStoreUrl: string | null = null;
-    let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
+    let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
     let useInstagram = true; // По умолчанию используем Instagram
+    let direction: any = null; // для доступа к conversion_channel
 
     if (directionId) {
-      const { data: direction } = await supabase
+      const { data: directionData } = await supabase
         .from('account_directions')
-        .select('objective, use_instagram')
+        .select('objective, use_instagram, conversion_channel')
         .eq('id', directionId)
         .maybeSingle();
+
+      direction = directionData;
 
       if (direction?.objective) {
         objective = direction.objective as typeof objective;
@@ -696,8 +698,6 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         siteUrl = defaultSettings.site_url;
         utm = defaultSettings.utm_tag;
         leadFormId = defaultSettings.lead_form_id;
-        appId = defaultSettings.app_id;
-        appStoreUrl = defaultSettings.app_store_url;
       }
     }
 
@@ -708,9 +708,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       useInstagram,
       hasInstagramId: !!instagramId,
       hasSiteUrl: !!siteUrl,
-      hasLeadFormId: !!leadFormId,
-      hasAppId: !!appId,
-      hasAppStoreUrl: !!appStoreUrl
+      hasLeadFormId: !!leadFormId
     }, '[TUS] Creating FB creative');
 
     if (!instagramId) {
@@ -720,7 +718,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     // Создаём креатив в Facebook
     let fbCreativeId = '';
 
-    if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+    if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) {
       const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,
         pageId: pageId,
@@ -744,7 +742,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = instagramCreative.id;
-    } else if (objective === 'site_leads') {
+    } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {
       if (!siteUrl) {
         throw new Error('site_url is required for site_leads objective');
       }
@@ -758,7 +756,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = websiteCreative.id;
-    } else if (objective === 'lead_forms') {
+    } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
       if (!leadFormId) {
         throw new Error('lead_form_id is required for lead_forms objective');
       }
@@ -772,15 +770,28 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       });
       fbCreativeId = leadFormCreative.id;
     } else if (objective === 'app_installs') {
-      if (!appId || !appStoreUrl) {
-        throw new Error('app_id and app_store_url are required for app_installs objective');
+      const appConfig = getAppInstallsConfig();
+      if (!appConfig) {
+        const envHints = getAppInstallsConfigEnvHints();
+        log.error({
+          uploadId,
+          appIdEnvKeys: envHints.appIdEnvKeys,
+          appStoreUrlEnvKeys: envHints.appStoreUrlEnvKeys
+        }, '[TUS] app_installs objective requires global env config');
+        throw new Error('app_installs objective requires global env config (META_APP_INSTALLS_APP_ID + META_APP_INSTALLS_STORE_URL)');
       }
+      log.info({
+        uploadId,
+        appIdEnvKey: appConfig.appIdEnvKey,
+        appStoreUrlEnvKey: appConfig.objectStoreUrlEnvKey,
+        skadEnvKey: appConfig.skadEnvKey || null
+      }, '[TUS] Using global app config for app_installs video creative');
       const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,
         pageId: pageId,
         instagramId: useInstagram ? (instagramId || undefined) : undefined,
         message: description,
-        appStoreUrl: appStoreUrl,
+        appStoreUrl: appConfig.objectStoreUrl,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = appInstallCreative.id;
@@ -806,10 +817,10 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     };
     if (thumbnailUrl) updateData.thumbnail_url = thumbnailUrl;
     // Сохраняем fb_creative_id в соответствующее поле по типу objective
-    if (objective === 'whatsapp' || objective === 'whatsapp_conversions') updateData.fb_creative_id_whatsapp = fbCreativeId;
+    if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) updateData.fb_creative_id_whatsapp = fbCreativeId;
     else if (objective === 'instagram_traffic') updateData.fb_creative_id_instagram_traffic = fbCreativeId;
-    else if (objective === 'site_leads') updateData.fb_creative_id_site_leads = fbCreativeId;
-    else if (objective === 'lead_forms') updateData.fb_creative_id_lead_forms = fbCreativeId;
+    else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) updateData.fb_creative_id_site_leads = fbCreativeId;
+    else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) updateData.fb_creative_id_lead_forms = fbCreativeId;
 
     await supabase
       .from('user_creatives')
