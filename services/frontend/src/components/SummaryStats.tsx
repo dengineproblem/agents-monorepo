@@ -172,7 +172,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
             tooltipKey={TooltipKeys.DASHBOARD_SPEND}
           />
           <StatCard
-            title={platform === 'tiktok' ? 'Лиды/клики' : t('stats.totalLeads')}
+            title={platform === 'tiktok' ? 'Лиды' : t('stats.totalLeads')}
             value={formatNumber(stats.totalLeads)}
             icon={<Target className="w-4 h-4 text-blue-600 dark:text-gray-500/70" />}
             loading={loading}
@@ -181,7 +181,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
             tooltipKey={TooltipKeys.DASHBOARD_LEADS}
           />
           <StatCard
-            title={platform === 'tiktok' ? 'Средняя стоимость клика' : t('stats.avgCPL')}
+            title={platform === 'tiktok' ? 'Средняя стоимость лида' : t('stats.avgCPL')}
             value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)}
             icon={<MousePointerClick className="w-5 h-5 text-purple-600 dark:text-purple-500/70" />}
             loading={loading}
@@ -217,7 +217,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         tooltipKey={TooltipKeys.DASHBOARD_SPEND}
       />
       <StatCard
-        title={platform === 'tiktok' ? 'Лиды/клики' : t('stats.totalLeads')}
+        title={platform === 'tiktok' ? 'Лиды' : t('stats.totalLeads')}
         value={formatNumber(stats.totalLeads)}
         icon={<Target className="w-4 h-4 text-blue-600 dark:text-blue-500/70" />}
         loading={loading}
@@ -226,7 +226,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         tooltipKey={TooltipKeys.DASHBOARD_LEADS}
       />
       <StatCard
-        title={platform === 'tiktok' ? 'Средняя стоимость перехода' : t('stats.avgCPL')}
+        title={platform === 'tiktok' ? 'Средняя стоимость лида' : t('stats.avgCPL')}
         value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)}
         icon={<MousePointerClick className="w-4 h-4 text-purple-600 dark:text-purple-500/70" />}
         loading={loading}

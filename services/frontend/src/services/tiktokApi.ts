@@ -474,7 +474,7 @@ export const tiktokApi = {
           until: params.end_date
         });
 
-        const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+        const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
         if (response.code !== 0) {
           console.error('TikTok API вернул ошибку:', response.message);
           throw new Error(`TikTok API Error: ${response.message}`);
@@ -490,15 +490,13 @@ export const tiktokApi = {
       if (allItems.length > 0) {
         console.log('Обрабатываем агрегированные данные статистики TikTok (все окна)');
         const result = allItems.map((stat: any) => {
-          // Для TikTok считаем «переходы в WhatsApp» по кликам
           const clicks = parseInt(stat.metrics?.clicks || "0", 10);
-          const leads = clicks; // переиспользуем поле leads как «переходы» для совместимости UI
-          
-          // Расчёт производных метрик
+          const leads = parseInt(stat.metrics?.conversion || "0", 10);
+
           const spend = parseFloat(stat.metrics?.spend || "0");
           const impressions = parseInt(stat.metrics?.impressions || "0", 10);
           const ctr = parseFloat(stat.metrics?.ctr || "0");
-          const cpl = clicks > 0 ? spend / clicks : 0; // фактически CPC
+          const cpl = leads > 0 ? spend / leads : 0;
           
           return {
             campaign_id: stat.dimensions?.campaign_id,
@@ -814,7 +812,7 @@ export const tiktokApi = {
           page_size: 1000
         } as any;
 
-        const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+        const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
         if (response.code !== 0) {
           throw new Error(`TikTok API Error: ${response.message}`);
         }
@@ -836,11 +834,13 @@ export const tiktokApi = {
         const impressions = parseInt(stat.metrics?.impressions || '0', 10);
         const clicks = parseInt(stat.metrics?.clicks || '0', 10);
 
+        const conversions = parseInt(stat.metrics?.conversion || '0', 10);
+
         if (existing) {
           existing.spend += spend;
           existing.impressions += impressions;
           existing.clicks += clicks;
-          existing.leads += clicks; // Используем clicks как leads для TikTok
+          existing.leads += conversions;
         } else {
           statsMap.set(adgroupId, {
             adgroup_id: adgroupId,
@@ -850,8 +850,8 @@ export const tiktokApi = {
             impressions,
             clicks,
             ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-            leads: clicks,
-            cpl: clicks > 0 ? spend / clicks : 0,
+            leads: conversions,
+            cpl: conversions > 0 ? spend / conversions : 0,
             _is_real_data: true
           });
         }
@@ -959,7 +959,7 @@ export const tiktokApi = {
           page_size: 1000
         } as any;
 
-        const response = await fetchFromTikTokAPI(endpoint, params, 'POST');
+        const response = await fetchFromTikTokAPI(endpoint, params, 'GET');
         if (response.code !== 0) {
           throw new Error(`TikTok API Error: ${response.message}`);
         }
@@ -980,12 +980,13 @@ export const tiktokApi = {
         const spend = parseFloat(stat.metrics?.spend || '0');
         const impressions = parseInt(stat.metrics?.impressions || '0', 10);
         const clicks = parseInt(stat.metrics?.clicks || '0', 10);
+        const conversions = parseInt(stat.metrics?.conversion || '0', 10);
 
         if (existing) {
           existing.spend += spend;
           existing.impressions += impressions;
           existing.clicks += clicks;
-          existing.leads += clicks;
+          existing.leads += conversions;
         } else {
           statsMap.set(adId, {
             ad_id: adId,
@@ -995,8 +996,8 @@ export const tiktokApi = {
             impressions,
             clicks,
             ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-            leads: clicks,
-            cpl: clicks > 0 ? spend / clicks : 0,
+            leads: conversions,
+            cpl: conversions > 0 ? spend / conversions : 0,
             _is_real_data: true
           });
         }
