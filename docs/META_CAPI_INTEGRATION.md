@@ -65,17 +65,25 @@ CHECK (
 )
 ```
 
-### Три уровня конверсии
+### Единое событие Lead (Messaging dataset)
+
+С миграции `203_capi_messaging_upgrade.sql` все три уровня отправляют **одно и то же** событие `Lead` в Meta (вместо 3 разных). Пользователь выбирает, на каком уровне воронки оно срабатывает через настройку `capi_event_level`.
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `CompleteRegistration` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
-| 2 | `AddToCart`/`Subscribe` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
-| 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
+| 1 | `Lead` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
+| 2 | `Lead` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
+| 3 | `Lead` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
 
-> Уровень 3 использует `event_name = Purchase`, даже если фактически это "запись".
+**Фильтрация по уровню (`capi_event_level`):**
+- `NULL` — отправлять Lead на ВСЕХ уровнях (backward compat, 3 события)
+- `1` — только на уровне Интерес
+- `2` — только на уровне Квалификация
+- `3` — только на уровне Запись/покупка
 
 **Важно:** Level 1 (Interest) определяется детерминированно по счётчику сообщений, а Level 2 и 3 — через AI анализ переписки.
+
+> **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде как константы для обратной совместимости, но все новые направления используют `Lead`.
 
 ## Архитектура
 
@@ -171,19 +179,24 @@ AMO CRM / Bitrix24
 **Особенности:**
 - Хеширование телефона (SHA256), email — опционально
 - external_id для дедупликации и матчинга
+- `ctwa_clid` в `user_data` (не top-level) — требование Messaging dataset
+- `page_id` в `user_data` — обязателен для Messaging dataset (авто из ad_accounts/user_accounts)
+- `country` hash в `user_data` — для лучшего матчинга
 - action_source: `business_messaging` при наличии `ctwa_clid`, иначе fallback `system_generated`
+- `messaging_channel: 'whatsapp'` — top-level параметр для business_messaging
 
 **Типы событий:**
 
 ```typescript
 const CAPI_EVENTS = {
-  INTEREST: 'CompleteRegistration',  // Level 1
-  QUALIFIED: 'AddToCart' | 'Subscribe', // Level 2 (configurable)
-  SCHEDULED: 'Purchase',             // Level 3
+  LEAD: 'Lead',                      // Unified event (Messaging dataset)
+  INTEREST: 'CompleteRegistration',   // Legacy Level 1
+  QUALIFIED: 'AddToCart' | 'Subscribe', // Legacy Level 2 (configurable)
+  SCHEDULED: 'Purchase',             // Legacy Level 3
 };
 ```
 
-Для `Purchase`, если сумма неизвестна, отправляется `value=1` и `currency=KZT` по умолчанию.
+Все новые направления используют `CAPI_EVENTS.LEAD` для всех уровней.
 
 ## База данных
 
@@ -219,9 +232,16 @@ const CAPI_EVENTS = {
 - `capi_enabled` (BOOLEAN) - включен ли CAPI для направления
 - `capi_source` (TEXT) - источник событий: `whatsapp` или `crm`
 - `capi_crm_type` (TEXT) - тип CRM: `amocrm` или `bitrix24`
-- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/CompleteRegistration)
-- `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/AddToCart или Subscribe)
--- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled → Purchase event_name)
+- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest)
+- `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified)
+- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled)
+
+### Миграция 203_capi_messaging_upgrade.sql
+
+**account_directions (Messaging dataset поля):**
+- `capi_access_token` (TEXT) - pixel-specific токен (из Events Manager), приоритет над ad_accounts.access_token
+- `capi_page_id` (TEXT) - override Page ID (по умолчанию берётся из ad_accounts.page_id)
+- `capi_event_level` (INTEGER, 1-3, NULL) - на каком уровне воронки отправлять Lead event (NULL = все)
 
 **Формат JSONB для CRM-полей:**
 ```json
@@ -312,9 +332,12 @@ META_CAPI_ENABLE_BUSINESS_MESSAGING=true  # при наличии ctwa_clid
 
 ### 3. Access Token
 
-Берётся из:
-1. `ad_accounts.access_token` (multi-account mode)
-2. `user_accounts.access_token` (fallback)
+Приоритет:
+1. `account_directions.capi_access_token` (pixel-specific, генерируется в Events Manager)
+2. `ad_accounts.access_token` (multi-account mode)
+3. `user_accounts.access_token` (fallback)
+
+> **Рекомендация:** Для Messaging dataset пикселей рекомендуется генерировать отдельный токен в Events Manager и указывать в настройках направления (`capi_access_token`).
 
 ### 4. ctwa_clid (Click-to-WhatsApp Click ID)
 
@@ -524,8 +547,8 @@ Body:
 Response (success):
 {
   "success": true,
-  "event": "CompleteRegistration",
-  "eventId": "abc123..."
+  "event": "Lead",
+  "eventId": "wa_abc123_lead_l1"
 }
 
 Response (already sent):
@@ -539,8 +562,9 @@ Response (already sent):
 
 - Флаги `capi_*_sent` предотвращают повторную отправку
 - `event_id` генерируется детерминированно:
-  - Level 1 с `ctwa_clid`: `wa_{ctwa_clid}_interest_v2`
-  - Остальные случаи: `wa_{leadId|dialogId|phoneHash|emailHash(optional)}_{level}_v1`
+  - Level 1: `wa_{leadId|dialogId|phoneHash}_{lead_l1}`
+  - Level 2: `wa_{leadId|dialogId|phoneHash}_{lead_l2}`
+  - Level 3: `wa_{leadId|dialogId|phoneHash}_{lead_l3}`
 - Facebook использует event_id для дедупликации на своей стороне
 - **Interest:** сбрасывается при повторном клике на рекламу (новый цикл воронки)
 
@@ -582,18 +606,49 @@ Response (already sent):
 
 ## Пример CAPI запроса
 
+### Messaging dataset (новый формат)
+
 ```json
 POST /v20.0/{pixel_id}/events
 {
   "data": [{
-    "event_name": "CompleteRegistration",
+    "event_name": "Lead",
     "event_time": 1703520000,
-    "event_id": "abc123...",
+    "event_id": "wa_abc123_lead_l1",
+    "action_source": "business_messaging",
+    "messaging_channel": "whatsapp",
+    "user_data": {
+      "ph": ["a1b2c3..."],
+      "external_id": ["91991aa6..."],
+      "country": ["d4e5f6..."],
+      "ctwa_clid": "ARAk...",
+      "page_id": "123456789012345"
+    },
+    "custom_data": {
+      "event_level": 1,
+      "channel": "whatsapp",
+      "stage": "interest"
+    }
+  }],
+  "access_token": "EAA..."
+}
+```
+
+### Legacy формат (без ctwa_clid)
+
+```json
+POST /v20.0/{pixel_id}/events
+{
+  "data": [{
+    "event_name": "Lead",
+    "event_time": 1703520000,
+    "event_id": "wa_abc123_lead_l1",
     "event_source_url": "https://wa.me/",
     "action_source": "system_generated",
     "user_data": {
       "ph": ["a1b2c3..."],
-      "external_id": "91991aa6"
+      "external_id": ["91991aa6..."],
+      "country": ["d4e5f6..."]
     },
     "custom_data": {
       "event_level": 1
@@ -919,12 +974,12 @@ docker logs -f chatbot-service 2>&1 | grep "Interest CAPI"
 
 ### Стратегия по неделям
 
-| Неделя | Событие для оптимизации |
-|--------|------------------------|
-| 1 | CompleteRegistration (если 50+ событий) |
-| 2 | CompleteRegistration → AddToCart/Subscribe (если 50+) |
-| 3 | AddToCart/Subscribe → Purchase |
+С единым событием `Lead` оптимизация упрощается:
 
-Переключение на следующий уровень когда:
-- Накоплено 50+ событий текущего уровня
-- Стоимость события стабильна
+| Неделя | capi_event_level | Описание |
+|--------|-----------------|----------|
+| 1 | `1` (Интерес) | Оптимизация по быстрым сигналам (3+ сообщения) |
+| 2 | `2` (Квалификация) | Переключить если 50+ Lead событий на уровне 1 |
+| 3 | `3` (Запись) | Переключить если 50+ Lead событий на уровне 2 |
+
+Переключение `capi_event_level` через UI направления — не требует пересоздания пикселя или кампании.
