@@ -755,6 +755,62 @@ export async function createWhatsAppCreative(
       });
     }
 
+    // Если невалидный instagram_user_id (code 100) — пробуем без него
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({
+        adAccountId,
+        instagramId: params.instagramId,
+        msg: 'instagram_user_id invalid, retrying without it'
+      }, 'WhatsApp creative: невалидный instagram_user_id, создаем без него (только Facebook)');
+
+      const videoDataWithoutIg: any = {
+        video_id: params.videoId,
+        message: params.message,
+        call_to_action: callToAction,
+        page_welcome_message: pageWelcomeMessage
+      };
+
+      if (params.thumbnailHash) {
+        videoDataWithoutIg.image_hash = params.thumbnailHash;
+      } else if (params.imageUrl) {
+        videoDataWithoutIg.image_url = params.imageUrl;
+      }
+
+      const objectStorySpecWithoutIg: any = {
+        page_id: params.pageId,
+        video_data: videoDataWithoutIg
+        // instagram_user_id убран
+      };
+
+      try {
+        return await graph('POST', `${adAccountId}/adcreatives`, token, {
+          name: "Video CTWA – WhatsApp",
+          object_story_spec: JSON.stringify(objectStorySpecWithoutIg)
+        });
+      } catch (retryError: any) {
+        // Если и без instagram не работает с welcome_message — пробуем без обоих
+        const isWelcomeError = retryError?.fb?.error_subcode === 1815166 || retryError?.fb?.error_subcode === 1487194;
+        if (isWelcomeError) {
+          const videoDataMinimal: any = {
+            video_id: params.videoId,
+            message: params.message,
+            call_to_action: callToAction
+          };
+          if (params.thumbnailHash) {
+            videoDataMinimal.image_hash = params.thumbnailHash;
+          } else if (params.imageUrl) {
+            videoDataMinimal.image_url = params.imageUrl;
+          }
+          return await graph('POST', `${adAccountId}/adcreatives`, token, {
+            name: "Video CTWA – WhatsApp",
+            object_story_spec: JSON.stringify({ page_id: params.pageId, video_data: videoDataMinimal })
+          });
+        }
+        throw retryError;
+      }
+    }
+
     // Другие ошибки пробрасываем дальше
     throw error;
   }

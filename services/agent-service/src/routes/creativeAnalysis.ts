@@ -191,7 +191,7 @@ async function getFullCredentials(
   accessToken: string;
   adAccountId: string;
   pageId: string;
-  instagramId: string;
+  instagramId: string | null;
   instagramUsername: string | null;
   whatsappPhoneNumber: string | null;
 } | null> {
@@ -220,7 +220,7 @@ async function getFullCredentials(
       return null;
     }
 
-    if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+    if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id) {
       log.warn({ userId, accountId }, 'Ad account has incomplete credentials');
       return null;
     }
@@ -229,14 +229,14 @@ async function getFullCredentials(
       accessToken: adAccount.access_token,
       adAccountId: adAccount.ad_account_id,
       pageId: adAccount.page_id,
-      instagramId: adAccount.instagram_id,
+      instagramId: adAccount.instagram_id || null,
       instagramUsername: adAccount.instagram_username || null,
       whatsappPhoneNumber: adAccount.whatsapp_phone_number || null
     };
   }
 
   // Legacy режим (один аккаунт)
-  if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+  if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id) {
     log.warn({ userId }, 'User account has incomplete credentials');
     return null;
   }
@@ -245,7 +245,7 @@ async function getFullCredentials(
     accessToken: userAccount.access_token,
     adAccountId: userAccount.ad_account_id,
     pageId: userAccount.page_id,
-    instagramId: userAccount.instagram_id,
+    instagramId: userAccount.instagram_id || null,
     instagramUsername: userAccount.instagram_username || null,
     whatsappPhoneNumber: userAccount.whatsapp_phone_number || null
   };
@@ -1077,14 +1077,14 @@ async function importSingleCreative(
               const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, accessToken, {
                 videoId: creative.video_id!,
                 pageId: fullCredentials.pageId,
-                instagramId: useInstagram ? fullCredentials.instagramId : undefined,
+                instagramId: useInstagram ? (fullCredentials.instagramId || undefined) : undefined,
                 message: description,
                 clientQuestion: clientQuestion,
                 whatsappPhoneNumber: fullCredentials.whatsappPhoneNumber || undefined,
                 imageUrl: creative.thumbnail_url || undefined // используем thumbnail_url из Facebook
               });
               fbCreativeId = whatsappCreative.id;
-            } else if (objective === 'instagram_traffic') {
+            } else if (objective === 'instagram_traffic' && fullCredentials.instagramId) {
               const instagramCreative = await createInstagramCreative(normalizedAdAccountId, accessToken, {
                 videoId: creative.video_id!,
                 pageId: fullCredentials.pageId,
@@ -1099,7 +1099,7 @@ async function importSingleCreative(
                 const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
                   pageId: fullCredentials.pageId,
-                  instagramId: fullCredentials.instagramId,
+                  instagramId: fullCredentials.instagramId || undefined,
                   message: description,
                   siteUrl: siteUrl,
                   utm: utm,
@@ -1112,7 +1112,7 @@ async function importSingleCreative(
                 const leadFormCreative = await createLeadFormVideoCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
                   pageId: fullCredentials.pageId,
-                  instagramId: fullCredentials.instagramId,
+                  instagramId: fullCredentials.instagramId || undefined,
                   message: description,
                   leadFormId: leadFormId,
                   imageUrl: creative.thumbnail_url || undefined
@@ -1125,7 +1125,7 @@ async function importSingleCreative(
                 const appInstallCreative = await createAppInstallsVideoCreative(normalizedAdAccountId, accessToken, {
                   videoId: creative.video_id!,
                   pageId: fullCredentials.pageId,
-                  instagramId: fullCredentials.instagramId,
+                  instagramId: fullCredentials.instagramId || undefined,
                   message: description,
                   appStoreUrl: appStoreUrl,
                   imageUrl: creative.thumbnail_url || undefined
