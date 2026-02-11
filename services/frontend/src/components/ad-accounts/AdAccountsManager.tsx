@@ -39,6 +39,7 @@ import {
   Clock,
   Settings,
   Facebook,
+  MessageSquare,
   Key,
   Building2,
   Brain,
@@ -587,10 +588,11 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
 
   return (
     <Tabs defaultValue="basic" className="w-full">
-      <TabsList className="grid w-full grid-cols-5">
+      <TabsList className="grid w-full grid-cols-6">
         <TabsTrigger value="basic">Основное</TabsTrigger>
         <TabsTrigger value="facebook">Facebook</TabsTrigger>
         <TabsTrigger value="tiktok">TikTok</TabsTrigger>
+        <TabsTrigger value="notifications">Уведомления</TabsTrigger>
         <TabsTrigger value="brain">Оптимизация</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
       </TabsList>
@@ -744,6 +746,50 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
         </p>
       </TabsContent>
 
+      <TabsContent value="notifications" className="space-y-4 mt-4">
+        <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
+          <MessageSquare className="h-4 w-4" />
+          <span>Telegram ID для уведомлений</span>
+        </div>
+        <div className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="telegram_id">Telegram ID #1</Label>
+            <Input
+              id="telegram_id"
+              value={formData.telegram_id || ''}
+              onChange={(e) => updateField('telegram_id', e.target.value)}
+              placeholder="123456789"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="telegram_id_2">Telegram ID #2</Label>
+            <Input
+              id="telegram_id_2"
+              value={formData.telegram_id_2 || ''}
+              onChange={(e) => updateField('telegram_id_2', e.target.value)}
+              placeholder="123456789"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="telegram_id_3">Telegram ID #3</Label>
+            <Input
+              id="telegram_id_3"
+              value={formData.telegram_id_3 || ''}
+              onChange={(e) => updateField('telegram_id_3', e.target.value)}
+              placeholder="123456789"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="telegram_id_4">Telegram ID #4</Label>
+            <Input
+              id="telegram_id_4"
+              value={formData.telegram_id_4 || ''}
+              onChange={(e) => updateField('telegram_id_4', e.target.value)}
+              placeholder="123456789"
+            />
+          </div>
+        </div>
+      </TabsContent>
 
       <TabsContent value="brain" className="space-y-4 mt-4">
         <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">

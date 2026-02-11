@@ -1318,8 +1318,9 @@ const Profile: React.FC = () => {
               {/* Ad Accounts Manager - только для мультиаккаунтности */}
               {multiAccountEnabled && <AdAccountsManager />}
 
-              {/* Telegram ID Card - общие настройки для всех режимов, сохраняются в user_accounts */}
-              <Card>
+              {/* Telegram ID Card - только для обычного режима, в мультиаккаунтном настраивается через AdAccountsManager */}
+              {!multiAccountEnabled && (
+                <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">
                       <MessageCircle className="h-5 w-5" />
@@ -1380,6 +1381,7 @@ const Profile: React.FC = () => {
                     </div>
                   </CardContent>
                 </Card>
+              )}
 
               {/* Brain Settings Card убран для legacy режима:
                   - Legacy (multi_account_enabled=false) использует user_accounts.autopilot (toggle on/off)

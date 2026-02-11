@@ -409,23 +409,6 @@ services:
     depends_on:
       - agent-brain
 
-  subscription-bot:
-    build: ./services/subscription-bot
-    container_name: subscription-bot
-    labels:
-      logging: "promtail"
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    env_file:
-      - ./services/subscription-bot/.env
-    environment:
-      - NODE_ENV=production
-      - PORT=8087
-    ports:
-      - "8087:8087"
-    restart: unless-stopped
-
   fake-reports-service:
     build: ./services/fake-reports-service
     labels:

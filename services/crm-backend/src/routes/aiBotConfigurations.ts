@@ -1043,14 +1043,13 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
   /**
    * GET /whatsapp-instances
-   * Get WhatsApp instances for a user (Evolution by default, optional WABA)
+   * Get all WhatsApp instances for a user (with linked bot info)
    */
   app.get('/whatsapp-instances', async (request, reply) => {
     const startTime = Date.now();
-    const { userId, includeWaba } = request.query as { userId: string; includeWaba?: string | boolean };
-    const includeWabaInstances = includeWaba === true || includeWaba === 'true';
+    const { userId } = request.query as { userId: string };
 
-    app.log.info({ userId, includeWaba: includeWabaInstances }, '[GET /whatsapp-instances] Request received');
+    app.log.info({ userId }, '[GET /whatsapp-instances] Request received');
 
     try {
       if (!userId) {
@@ -1058,91 +1057,9 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'userId is required' });
       }
 
-      // Fetch active WABA numbers to optionally expose/sync them as logical instances
-      const { data: wabaNumbers, error: wabaNumbersError } = await supabase
-        .from('whatsapp_phone_numbers')
-        .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_status')
-        .eq('user_account_id', userId)
-        .eq('connection_type', 'waba')
-        .eq('is_active', true);
+      app.log.debug({ userId }, '[GET /whatsapp-instances] Querying instances with bot info');
 
-      if (wabaNumbersError) {
-        app.log.error({
-          error: wabaNumbersError.message,
-          code: wabaNumbersError.code,
-          userId,
-          elapsed: Date.now() - startTime
-        }, '[GET /whatsapp-instances] Failed to load WABA numbers');
-        throw wabaNumbersError;
-      }
-
-      const wabaInstanceNames = new Set<string>();
-      for (const number of wabaNumbers || []) {
-        const fallbackName = number.waba_phone_id ? `waba_${number.waba_phone_id}` : null;
-        const resolvedName = number.instance_name || fallbackName;
-        if (resolvedName) {
-          wabaInstanceNames.add(resolvedName);
-        }
-      }
-
-      // If requested, ensure WABA numbers are represented in whatsapp_instances
-      if (includeWabaInstances && (wabaNumbers?.length || 0) > 0) {
-        const nowIso = new Date().toISOString();
-        const wabaInstanceUpsertPayload: Array<Record<string, any>> = [];
-
-        for (const number of wabaNumbers || []) {
-          const fallbackName = number.waba_phone_id ? `waba_${number.waba_phone_id}` : null;
-          const resolvedName = number.instance_name || fallbackName;
-
-          if (!resolvedName) {
-            app.log.warn({
-              userId,
-              whatsappNumberId: number.id,
-            }, '[GET /whatsapp-instances] WABA number has no instance_name and no waba_phone_id, skipping sync');
-            continue;
-          }
-
-          // Keep whatsapp_phone_numbers in sync for deterministic routing
-          if (number.instance_name !== resolvedName || number.connection_status !== 'connected') {
-            await supabase
-              .from('whatsapp_phone_numbers')
-              .update({
-                instance_name: resolvedName,
-                connection_status: 'connected',
-                updated_at: nowIso
-              })
-              .eq('id', number.id);
-          }
-
-          wabaInstanceUpsertPayload.push({
-            user_account_id: number.user_account_id,
-            account_id: number.account_id,
-            instance_name: resolvedName,
-            phone_number: number.phone_number,
-            status: 'connected',
-            last_connected_at: nowIso,
-            updated_at: nowIso
-          });
-        }
-
-        if (wabaInstanceUpsertPayload.length > 0) {
-          const { error: upsertError } = await supabase
-            .from('whatsapp_instances')
-            .upsert(wabaInstanceUpsertPayload, { onConflict: 'instance_name' });
-
-          if (upsertError) {
-            app.log.error({
-              error: upsertError.message,
-              code: upsertError.code,
-              userId,
-              syncedRows: wabaInstanceUpsertPayload.length
-            }, '[GET /whatsapp-instances] Failed to upsert WABA logical instances');
-            throw upsertError;
-          }
-        }
-      }
-
-      // Fetch instances after optional WABA sync
+      // Fetch instances
       const { data: instances, error } = await supabase
         .from('whatsapp_instances')
         .select(`
@@ -1171,14 +1088,14 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         throw error;
       }
 
+      // Fetch phone numbers from whatsapp_phone_numbers to get actual phone
       const instanceNames = (instances || []).map((i: any) => i.instance_name).filter(Boolean);
       let phoneNumbersMap: Record<string, string> = {};
-      let connectionTypeMap: Record<string, 'evolution' | 'waba'> = {};
 
       if (instanceNames.length > 0) {
         const { data: phoneNumbers } = await supabase
           .from('whatsapp_phone_numbers')
-          .select('instance_name, phone_number, connection_type')
+          .select('instance_name, phone_number')
           .in('instance_name', instanceNames);
 
         if (phoneNumbers) {
@@ -1188,42 +1105,22 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
             }
             return acc;
           }, {});
-
-          connectionTypeMap = phoneNumbers.reduce((acc: Record<string, 'evolution' | 'waba'>, pn: any) => {
-            if (pn.instance_name && (pn.connection_type === 'waba' || pn.connection_type === 'evolution')) {
-              acc[pn.instance_name] = pn.connection_type;
-            }
-            return acc;
-          }, {});
         }
       }
 
-      // Get instance statuses from Evolution PostgreSQL for Evolution instances only
+      // Get instance statuses from Evolution PostgreSQL
       const evolutionInstances = await getEvolutionInstances();
       const evolutionStatusMap = new Map(
         evolutionInstances.map(inst => [inst.instanceName, inst.connected])
       );
 
-      const instancesWithStatus = await Promise.all(
+      // Update statuses in DB and filter connected instances
+      const instancesWithRealStatus = await Promise.all(
         (instances || []).map(async (inst: any) => {
-          const isWabaInstance = wabaInstanceNames.has(inst.instance_name) || connectionTypeMap[inst.instance_name] === 'waba';
-          const connectionType: 'evolution' | 'waba' = isWabaInstance ? 'waba' : 'evolution';
-
-          if (isWabaInstance) {
-            const newStatus = 'connected';
-            if (inst.status !== newStatus && includeWabaInstances) {
-              await supabase
-                .from('whatsapp_instances')
-                .update({ status: newStatus })
-                .eq('id', inst.id);
-            }
-
-            return { ...inst, status: newStatus, connectionType };
-          }
-
           const isConnected = evolutionStatusMap.get(inst.instance_name);
           const newStatus = isConnected === true ? 'connected' : 'disconnected';
 
+          // Update status in DB if changed
           if (inst.status !== newStatus) {
             await supabase
               .from('whatsapp_instances')
@@ -1231,28 +1128,22 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
               .eq('id', inst.id);
           }
 
-          return { ...inst, status: newStatus, connectionType };
+          return { ...inst, status: newStatus };
         })
       );
 
-      // Keep old behavior by default: only connected Evolution instances.
-      // includeWaba=true is used by Bot Editor to allow WABA bot linking.
-      const visibleInstances = instancesWithStatus.filter((inst: any) => {
-        if (inst.connectionType === 'waba') {
-          return includeWabaInstances;
-        }
-        return inst.status === 'connected';
-      });
+      // Filter only connected instances
+      const connectedInstances = instancesWithRealStatus.filter((inst: any) => inst.status === 'connected');
 
-      const instancesCount = visibleInstances.length;
-      const linkedCount = visibleInstances.filter((i: any) => i.ai_bot_id).length;
+      const instancesCount = connectedInstances.length;
+      const linkedCount = connectedInstances.filter((i: any) => i.ai_bot_id).length;
 
-      const result = visibleInstances.map((inst: any) => ({
+      // Transform response - use phone from whatsapp_phone_numbers if available
+      const result = connectedInstances.map((inst: any) => ({
         id: inst.id,
         instanceName: inst.instance_name,
         phoneNumber: phoneNumbersMap[inst.instance_name] || inst.phone_number,
         status: inst.status,
-        connectionType: inst.connectionType,
         aiBotId: inst.ai_bot_id,
         createdAt: inst.created_at,
         linkedBot: inst.ai_bot_configurations ? {
@@ -1264,11 +1155,9 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       app.log.info({
         userId,
-        includeWaba: includeWabaInstances,
         totalInstances: instances?.length || 0,
-        visibleInstances: instancesCount,
+        connectedInstances: instancesCount,
         linkedCount,
-        wabaNumbers: wabaNumbers?.length || 0,
         elapsed: Date.now() - startTime
       }, '[GET /whatsapp-instances] Successfully fetched instances');
 
@@ -1281,7 +1170,6 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         error: error.message,
         stack: error.stack,
         userId,
-        includeWaba: includeWabaInstances,
         elapsed: Date.now() - startTime
       }, '[GET /whatsapp-instances] Failed to fetch WhatsApp instances');
       return reply.status(500).send({

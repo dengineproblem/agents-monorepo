@@ -91,7 +91,7 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
 /**
  * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
  *
- * Для Messaging dataset (WhatsApp): все уровни используют LEAD
+ * Для Messaging dataset (WhatsApp): все уровни используют LEAD_SUBMITTED
  * Для Website/legacy: level_1=COMPLETE_REGISTRATION, level_2=ADD_TO_CART/SUBSCRIBE, level_3=PURCHASE
  *
  * @param level - уровень оптимизации из направления (level_1, level_2, level_3)
@@ -99,7 +99,7 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
  * @returns custom_event_type для FB API promoted_object
  */
 export function getCustomEventType(level: string | undefined, conversionChannel?: string | null): string {
-  // Messaging dataset (WhatsApp) — LEAD_SUBMITTED (требует настроенный Messaging dataset на пикселе)
+  // Messaging dataset (WhatsApp) — единое событие LeadSubmitted на всех уровнях
   if (conversionChannel === 'whatsapp') {
     log.debug({
       input_level: level,
