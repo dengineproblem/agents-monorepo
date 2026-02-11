@@ -440,7 +440,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiAccessToken, setCapiAccessToken] = useState('');
   const [capiPageId, setCapiPageId] = useState('');
-  const [capiEventLevel, setCapiEventLevel] = useState<number | null>(null);
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
   const [isLoadingCrms, setIsLoadingCrms] = useState(false);
   const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
@@ -741,7 +740,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCapiCrmType(initialCrmType);
     setCapiAccessToken(direction.capi_access_token || '');
     setCapiPageId(direction.capi_page_id || '');
-    setCapiEventLevel(direction.capi_event_level ?? null);
 
     const interestParsed = parseLevelConfig(direction.capi_interest_fields, initialCrmType);
     const qualifiedParsed = parseLevelConfig(direction.capi_qualified_fields, initialCrmType);
@@ -1130,7 +1128,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 pixel_id: capiEnabled ? capiPixelId || null : null,
                 capi_access_token: capiAccessToken.trim() || null,
                 capi_page_id: capiPageId.trim() || null,
-                capi_event_level: capiEventLevel,
+                capi_event_level: null,
               },
             }),
         is_active: isActive,
@@ -1914,27 +1912,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                             </p>
                           </div>
 
-                          <div className="space-y-2">
-                            <Label>Уровень события Lead</Label>
-                            <Select
-                              value={capiEventLevel === null ? 'all' : String(capiEventLevel)}
-                              onValueChange={(value) => setCapiEventLevel(value === 'all' ? null : Number(value))}
-                              disabled={isSubmitting}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">Все уровни (3 события)</SelectItem>
-                                <SelectItem value="1">Интерес (3+ сообщений)</SelectItem>
-                                <SelectItem value="2">Квалификация (AI)</SelectItem>
-                                <SelectItem value="3">Запись/покупка (AI)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-muted-foreground">
-                              На каком уровне воронки отправлять событие Lead в Meta
-                            </p>
-                          </div>
                         </div>
                       )}
 

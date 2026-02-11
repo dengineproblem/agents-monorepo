@@ -410,6 +410,7 @@ export interface CreateDirectionFormData {
   name: string;
   platform: DirectionPlatform;
   objective?: DirectionObjective;
+  conversion_channel?: ConversionChannel;
   optimization_level?: OptimizationLevel;
   use_instagram?: boolean;
   advantage_audience_enabled?: boolean;
@@ -518,7 +519,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // CAPI Messaging dataset fields
   const [capiAccessToken, setCapiAccessToken] = useState('');
   const [capiPageId, setCapiPageId] = useState('');
-  const [capiEventLevel, setCapiEventLevel] = useState<number | null>(null);
+
 
   // Connected CRMs
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
@@ -1089,7 +1090,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         capi_scheduled_fields: capiSource === 'crm' ? scheduledConfig : [],
         capi_access_token: capiAccessToken.trim() || null,
         capi_page_id: capiPageId.trim() || null,
-        capi_event_level: capiEventLevel,
+        capi_event_level: null,
       } : undefined;
 
       await onSubmit({
@@ -1179,7 +1180,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setCapiCrmType('amocrm');
     setCapiAccessToken('');
     setCapiPageId('');
-    setCapiEventLevel(null);
+
     setCapiInterestMode('fields');
     setCapiQualifiedMode('fields');
     setCapiScheduledMode('fields');
@@ -2734,27 +2735,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         </p>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>Уровень события Lead</Label>
-                        <Select
-                          value={capiEventLevel === null ? 'all' : String(capiEventLevel)}
-                          onValueChange={(value) => setCapiEventLevel(value === 'all' ? null : Number(value))}
-                          disabled={isSubmitting}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">Все уровни (3 события)</SelectItem>
-                            <SelectItem value="1">Интерес (3+ сообщений)</SelectItem>
-                            <SelectItem value="2">Квалификация (AI)</SelectItem>
-                            <SelectItem value="3">Запись/покупка (AI)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          На каком уровне воронки отправлять событие Lead в Meta
-                        </p>
-                      </div>
                     </div>
                   )}
 

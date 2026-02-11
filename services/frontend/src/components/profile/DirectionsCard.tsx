@@ -91,6 +91,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       name: data.name,
       platform: data.platform,
       ...(data.objective && { objective: data.objective }),
+      ...(data.conversion_channel && { conversion_channel: data.conversion_channel }),
       ...(data.optimization_level && { optimization_level: data.optimization_level }),
       ...(data.use_instagram !== undefined && { use_instagram: data.use_instagram }),
       ...(data.advantage_audience_enabled !== undefined && { advantage_audience_enabled: data.advantage_audience_enabled }),

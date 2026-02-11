@@ -831,6 +831,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Валидация входных данных
       const validationResult = CreateDirectionSchema.safeParse(body);
       if (!validationResult.success) {
+        app.log.warn({ zodErrors: validationResult.error.errors, bodyKeys: Object.keys(body) }, 'Direction creation validation failed');
         return reply.code(400).send({
           success: false,
           error: 'Validation error',

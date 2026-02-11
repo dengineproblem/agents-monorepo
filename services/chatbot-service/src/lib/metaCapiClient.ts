@@ -882,6 +882,7 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
         id,
         user_account_id,
         account_id,
+        optimization_level,
         capi_access_token,
         capi_page_id,
         capi_event_level,
@@ -933,8 +934,12 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       || (Array.isArray(userAccount) ? userAccount[0]?.page_id : userAccount?.page_id)
       || null;
 
-    // Event level: which level triggers the Lead event
-    const capiEventLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
+    // Event level: derive from optimization_level (level_1→1, level_2→2, level_3→3)
+    // capi_event_level overrides if explicitly set (legacy/admin use)
+    const explicitLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
+    const optimizationLevel = (direction as Record<string, unknown>).optimization_level as string | null;
+    const optimizationLevelMap: Record<string, number> = { level_1: 1, level_2: 2, level_3: 3 };
+    const capiEventLevel = explicitLevel ?? (optimizationLevel ? optimizationLevelMap[optimizationLevel] ?? null : null);
 
     return { pixelId, accessToken, pageId, capiEventLevel };
   } catch (error) {
