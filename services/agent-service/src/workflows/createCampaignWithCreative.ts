@@ -329,8 +329,9 @@ export async function workflowCreateCampaignWithCreative(
       throw new Error('Conversions requires pixel_id in default settings');
     }
 
-    // WhatsApp (Messaging dataset) → LEAD_SUBMITTED, остальные → LEAD
-    const eventType = channel === 'whatsapp' ? 'LEAD_SUBMITTED' : 'LEAD';
+    // FB API promoted_object принимает только стандартные события (LEAD, COMPLETE_REGISTRATION и т.д.)
+    // Примечание: CAPI event_name = 'LeadSubmitted', но custom_event_type в ad set = 'LEAD'
+    const eventType = 'LEAD';
 
     if (channel === 'whatsapp' && page_id) {
       adsetBody.destination_type = 'WHATSAPP';
