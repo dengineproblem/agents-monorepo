@@ -26,18 +26,24 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
    * Receives WhatsApp message events from Evolution API
    */
   app.post('/webhooks/evolution', async (request, reply) => {
+    const event = request.body as any;
+
+    app.log.info({
+      event: event.event,
+      instance: event.instance,
+      hasData: !!event.data,
+      hasMessages: !!(event.data?.messages),
+      messagesLength: event.data?.messages?.length || 0,
+      dataKeys: event.data ? Object.keys(event.data) : []
+    }, 'Evolution webhook received');
+
+    // Ответить Evolution API сразу — не ждать обработки.
+    // Иначе при долгой обработке (DB + OpenAI) Evolution ретраит вебхук,
+    // chatbot-service видит дубликат и пропускает сообщение.
+    reply.send({ success: true });
+
+    // Обработка в фоне (fire-and-forget)
     try {
-      const event = request.body as any;
-
-      app.log.info({
-        event: event.event,
-        instance: event.instance,
-        hasData: !!event.data,
-        hasMessages: !!(event.data?.messages),
-        messagesLength: event.data?.messages?.length || 0,
-        dataKeys: event.data ? Object.keys(event.data) : []
-      }, 'Evolution webhook received');
-
       switch (event.event) {
         case 'messages.upsert':
           await handleIncomingMessage(event, app);
@@ -66,8 +72,6 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
             app.log.warn({ event: event.event }, 'Unknown Evolution event type');
           }
       }
-
-      return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error: error.message, stack: error.stack }, 'Error processing Evolution webhook');
 
@@ -79,8 +83,6 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
         endpoint: '/webhooks/evolution',
         severity: 'critical'
       }).catch(() => {});
-
-      return reply.status(500).send({ error: 'Internal server error' });
     }
   });
 }
