@@ -1409,11 +1409,9 @@ const AccountRow: React.FC<AccountRowProps> = ({
         {/* Бюджет */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm whitespace-nowrap">
-            {accountBudget !== undefined && accountBudget > 0
-              ? formatCurrency(accountBudget)
-              : campaigns.length > 0
-                ? formatCurrency(campaigns.reduce((sum, c) => sum + c.daily_budget, 0))
-                : '—'}
+            {directions.length > 0
+              ? formatCurrency(directions.filter(d => d.is_active).reduce((sum, d) => sum + d.daily_budget_cents / 100, 0))
+              : '—'}
           </span>
         </div>
 
@@ -1643,7 +1641,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
 
         {/* Бюджет */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
-          <span className="text-sm">{fmt(campaign.daily_budget)}</span>
+          <span className="text-sm">{fmt(direction ? direction.daily_budget_cents / 100 : 0)}</span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
