@@ -1490,7 +1490,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         Level 1: Интерес
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        CompleteRegistration — 3+ сообщения от клиента
+                        LeadSubmitted — 3+ сообщения от клиента
                       </p>
                     </div>
                   </div>
@@ -1501,7 +1501,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         Level 2: Квалификация
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        AddToCart/Subscribe — клиент квалифицирован
+                        LeadSubmitted — клиент квалифицирован
                       </p>
                     </div>
                   </div>
@@ -1512,7 +1512,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         Level 3: Запись/Покупка
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        Purchase — клиент записался или купил
+                        LeadSubmitted — клиент записался или купил
                       </p>
                     </div>
                   </div>
@@ -2905,10 +2905,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                             )}
                           </div>
 
-                          {/* Level 2: Qualified (AddToCart/Subscribe) */}
+                          {/* Level 2: Qualified (LeadSubmitted) */}
                           <div className="space-y-3 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
                             <div className="flex items-center gap-2">
-                              <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (AddToCart/Subscribe)</span>
+                              <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (LeadSubmitted)</span>
                             </div>
                             <div className="space-y-2">
                               <Label className="text-xs">Триггер CAPI</Label>
