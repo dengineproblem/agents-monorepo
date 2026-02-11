@@ -470,6 +470,14 @@ async function llmPlanMini(systemPrompt, userPayload, openaiApiKey) {
               );
             }
           }
+
+          // Валидация минимального бюджета — клэмп до $3 если LLM выдал ниже
+          if (newBudget > 0 && newBudget < BUDGET_LIMITS.MIN_CENTS) {
+            validation.warnings.push(
+              `proposals[${idx}] "${p.entity_name}": new_budget_cents ${newBudget}c ниже минимума ${BUDGET_LIMITS.MIN_CENTS}c ($${BUDGET_LIMITS.MIN_CENTS/100}). Исправлено на ${BUDGET_LIMITS.MIN_CENTS}c.`
+            );
+            params.new_budget_cents = BUDGET_LIMITS.MIN_CENTS;
+          }
         }
 
         // Валидация pauseAd - обязательно нужен adset_id
@@ -3860,7 +3868,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         // CPL/CPC критически высокий → пауза или сильное снижение (-50%)
         const cplMultiple = todayCPL && targetCPL ? todayCPL / targetCPL : null;
         const decreasePercent = BUDGET_LIMITS.MAX_DECREASE_PCT;
-        const newBudgetCents = currentBudgetCents ? Math.round(currentBudgetCents * (1 - decreasePercent / 100)) : null;
+        const newBudgetCents = currentBudgetCents
+          ? Math.max(BUDGET_LIMITS.MIN_CENTS, Math.round(currentBudgetCents * (1 - decreasePercent / 100)))
+          : null;
         const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
 
         if (cplMultiple && cplMultiple > 3) {
@@ -3879,6 +3889,28 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             hs_class: hsClass,
             reason: `«${adsetName}»${campaignNote}: КРИТИЧНО! ${humanReason}${dataNote}. ${metricName} превышает цель в ${cplMultiple.toFixed(1)}x раз. Рекомендую поставить на паузу.`,
             confidence: 0.9,
+            suggested_action_params: {
+              current_budget_cents: currentBudgetCents
+            },
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
+          });
+        } else if (currentBudgetCents && currentBudgetCents <= BUDGET_LIMITS.MIN_CENTS) {
+          // Уже на минимуме $3 и результаты bad — ставим на паузу, снижать некуда
+          proposals.push({
+            action: 'pauseAdSet',
+            priority: 'high',
+            entity_type: 'adset',
+            entity_id: adsetId,
+            entity_name: adsetName,
+            campaign_id: campaignId,
+            campaign_type: isExternalCampaign ? 'external' : 'internal',
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            target_cpl_source: targetCPLSource,
+            health_score: healthScore,
+            hs_class: hsClass,
+            reason: `«${adsetName}»${campaignNote}: ${humanReason}${dataNote}. Бюджет уже на минимуме $${BUDGET_LIMITS.MIN_CENTS/100}, снижать некуда — рекомендую паузу.`,
+            confidence: 0.8,
             suggested_action_params: {
               current_budget_cents: currentBudgetCents
             },
@@ -3915,38 +3947,45 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         }
       }
       else if (hsClass === 'slightly_bad' && !recentActionOnAdset) {
-        // Снижать -25%
-        const decreasePercent = 25;
-        const newBudgetCents = currentBudgetCents ? Math.round(currentBudgetCents * (1 - decreasePercent / 100)) : null;
-        const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
+        // Уже на минимуме $3 — нечего снижать
+        if (currentBudgetCents && currentBudgetCents <= BUDGET_LIMITS.MIN_CENTS) {
+          // Пропускаем decrease proposal
+        } else {
+          // Снижать -25%
+          const decreasePercent = 25;
+          const newBudgetCents = currentBudgetCents
+            ? Math.max(BUDGET_LIMITS.MIN_CENTS, Math.round(currentBudgetCents * (1 - decreasePercent / 100)))
+            : null;
+          const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
 
-        const budgetChangeText = currentBudgetDollars && newBudgetDollars
-          ? `Снизить бюджет с $${currentBudgetDollars} до $${newBudgetDollars} (-${decreasePercent}%).`
-          : `Снизить бюджет на ${decreasePercent}%.`;
+          const budgetChangeText = currentBudgetDollars && newBudgetDollars
+            ? `Снизить бюджет с $${currentBudgetDollars} до $${newBudgetDollars} (-${decreasePercent}%).`
+            : `Снизить бюджет на ${decreasePercent}%.`;
 
-        proposals.push({
-          action: 'updateBudget',
-          priority: 'medium',
-          entity_type: 'adset',
-          entity_id: adsetId,
-          entity_name: adsetName,
-          campaign_id: campaignId,
-          campaign_type: isExternalCampaign ? 'external' : 'internal',
-          direction_id: direction?.id || null,
-          direction_name: direction?.name || null,
-          target_cpl_source: targetCPLSource,
-          health_score: healthScore,
-          hs_class: hsClass,
-          reason: `«${adsetName}»${campaignNote}: ${humanReason || 'результаты ниже нормы'}${dataNote}. ${budgetChangeText}`,
-          confidence: 0.7,
-          suggested_action_params: {
-            decrease_percent: decreasePercent,
-            current_budget_cents: currentBudgetCents,
-            new_budget_cents: newBudgetCents,
-            min_budget_cents: BUDGET_LIMITS.MIN_CENTS
-          },
-          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
-        });
+          proposals.push({
+            action: 'updateBudget',
+            priority: 'medium',
+            entity_type: 'adset',
+            entity_id: adsetId,
+            entity_name: adsetName,
+            campaign_id: campaignId,
+            campaign_type: isExternalCampaign ? 'external' : 'internal',
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            target_cpl_source: targetCPLSource,
+            health_score: healthScore,
+            hs_class: hsClass,
+            reason: `«${adsetName}»${campaignNote}: ${humanReason || 'результаты ниже нормы'}${dataNote}. ${budgetChangeText}`,
+            confidence: 0.7,
+            suggested_action_params: {
+              decrease_percent: decreasePercent,
+              current_budget_cents: currentBudgetCents,
+              new_budget_cents: newBudgetCents,
+              min_budget_cents: BUDGET_LIMITS.MIN_CENTS
+            },
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
+          });
+        }
       }
       // good и neutral — не предлагаем изменений (наблюдаем)
 
@@ -4443,7 +4482,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
                 for (const p of llmProposals) {
                   if (p.action === 'updateBudget' && p.suggested_action_params) {
                     const current = p.suggested_action_params.current_budget_cents || 0;
-                    const newBudget = p.suggested_action_params.new_budget_cents || 0;
+                    const newBudget = Math.max(BUDGET_LIMITS.MIN_CENTS, p.suggested_action_params.new_budget_cents || 0);
                     if (newBudget > current) totalIncrease += (newBudget - current);
                     else totalDecrease += (current - newBudget);
                   } else if (p.action === 'pauseAdSet' && p.suggested_action_params?.current_budget_cents) {
@@ -4590,8 +4629,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     const totalSavingsCents = decreaseProposals.reduce((sum, p) => {
       const current = p.suggested_action_params.current_budget_cents;
-      const newBudget = p.suggested_action_params.new_budget_cents || 0;
-      return sum + (current - newBudget);
+      const newBudget = Math.max(BUDGET_LIMITS.MIN_CENTS, p.suggested_action_params.new_budget_cents || 0);
+      return sum + Math.max(0, current - newBudget);
     }, 0);
 
     // Находим адсеты с хорошими результатами, куда можно перераспределить
