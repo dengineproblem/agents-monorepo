@@ -210,6 +210,304 @@ export interface LeadInfo {
   messages?: any[];
 }
 
+const INTERNAL_TOOL_NAME_PATTERNS: Array<{ canonical: string; regex: RegExp }> = [
+  { canonical: 'get_nearest_slots', regex: /\bget[_\s-]?nearest[_\s-]?slots\b/i },
+  { canonical: 'get_slots_for_date', regex: /\bget[_\s-]?slots[_\s-]?for[_\s-]?date\b/i },
+  { canonical: 'book_consultation', regex: /\bbook[_\s-]?consultation\b/i },
+  { canonical: 'cancel_consultation', regex: /\bcancel[_\s-]?consultation\b/i },
+  { canonical: 'reschedule_consultation', regex: /\breschedule[_\s-]?consultation\b/i },
+  { canonical: 'get_my_consultations', regex: /\bget[_\s-]?my[_\s-]?consultations\b/i },
+  { canonical: 'get_consultant_info', regex: /\bget[_\s-]?consultant[_\s-]?info\b/i },
+  { canonical: 'get_consultant_schedule', regex: /\bget[_\s-]?consultant[_\s-]?schedule\b/i },
+  { canonical: 'get_consultation_history', regex: /\bget[_\s-]?consultation[_\s-]?history\b/i },
+  { canonical: 'update_lead_info', regex: /\bupdate[_\s-]?lead[_\s-]?info\b/i },
+  { canonical: 'set_funnel_stage', regex: /\bset[_\s-]?funnel[_\s-]?stage\b/i },
+  { canonical: 'set_lead_interest', regex: /\bset[_\s-]?lead[_\s-]?interest\b/i },
+  { canonical: 'send_capi_event', regex: /\bsend[_\s-]?capi[_\s-]?event\b/i },
+  { canonical: 'get_capi_status', regex: /\bget[_\s-]?capi[_\s-]?status\b/i },
+  { canonical: 'pause_bot', regex: /\bpause[_\s-]?bot\b/i },
+  { canonical: 'get_dialog_summary', regex: /\bget[_\s-]?dialog[_\s-]?summary\b/i }
+];
+
+const SLOT_TOOL_NAMES = new Set(['get_nearest_slots', 'get_slots_for_date']);
+
+function normalizeToolCallName(toolName: string): string {
+  if (!toolName) return '';
+  return toolName.startsWith('fallback:') ? toolName.slice('fallback:'.length) : toolName;
+}
+
+function extractLeakedInternalToolNames(text: string): string[] {
+  if (!text) return [];
+  const leaked = new Set<string>();
+
+  for (const pattern of INTERNAL_TOOL_NAME_PATTERNS) {
+    if (pattern.regex.test(text)) {
+      leaked.add(pattern.canonical);
+    }
+  }
+
+  return Array.from(leaked);
+}
+
+function extractToolCallNamesFromDebug(debug?: AIDebugInfo): string[] {
+  if (!debug?.toolCalls?.length) return [];
+  return debug.toolCalls
+    .map(call => normalizeToolCallName(call.name))
+    .filter(Boolean);
+}
+
+function isConsultationContextMessage(messageText: string): boolean {
+  if (!messageText) return false;
+  return /(запис|слот|время|дата|консульт|когда можно|когда свободно|book|appointment|slot|consultation)/i.test(messageText);
+}
+
+function getDatePartsInTimezone(timezone: string, baseDate: Date = new Date()): { year: number; month: number; day: number } {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  const parts = formatter.formatToParts(baseDate);
+  const year = Number(parts.find(p => p.type === 'year')?.value || baseDate.getUTCFullYear());
+  const month = Number(parts.find(p => p.type === 'month')?.value || (baseDate.getUTCMonth() + 1));
+  const day = Number(parts.find(p => p.type === 'day')?.value || baseDate.getUTCDate());
+
+  return { year, month, day };
+}
+
+function getIsoDateInTimezone(timezone: string, offsetDays: number = 0): string {
+  const { year, month, day } = getDatePartsInTimezone(timezone);
+  const normalizedDate = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  normalizedDate.setUTCDate(normalizedDate.getUTCDate() + offsetDays);
+  return normalizedDate.toISOString().slice(0, 10);
+}
+
+function getTodayIsoInTimezone(timezone: string): string {
+  return getIsoDateInTimezone(timezone, 0);
+}
+
+function isValidIsoDate(dateStr: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toISOString().slice(0, 10) === dateStr;
+}
+
+function getWeekdayInTimezone(timezone: string): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short'
+  });
+  const parts = formatter.formatToParts(new Date());
+  const weekdayToken = parts.find(p => p.type === 'weekday')?.value || '';
+
+  const dayMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7
+  };
+
+  return dayMap[weekdayToken] || 1;
+}
+
+function extractRequestedConsultationDate(messageText: string, timezone: string): string | null {
+  if (!messageText) return null;
+  const lowerMessage = messageText.toLowerCase();
+
+  const isoMatch = messageText.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (isoMatch?.[1] && isValidIsoDate(isoMatch[1])) {
+    return isoMatch[1];
+  }
+
+  if (/(послезавтра|day after tomorrow)/i.test(lowerMessage)) {
+    return getIsoDateInTimezone(timezone, 2);
+  }
+  if (/(завтра|tomorrow)/i.test(lowerMessage)) {
+    return getIsoDateInTimezone(timezone, 1);
+  }
+  if (/(сегодня|today)/i.test(lowerMessage)) {
+    return getIsoDateInTimezone(timezone, 0);
+  }
+
+  const dayMonthMatch = lowerMessage.match(/\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b/);
+  if (dayMonthMatch) {
+    const day = Number(dayMonthMatch[1]);
+    const month = Number(dayMonthMatch[2]);
+    const currentYear = getDatePartsInTimezone(timezone).year;
+    const yearToken = dayMonthMatch[3];
+    const parsedYear = yearToken
+      ? Number(yearToken.length === 2 ? `20${yearToken}` : yearToken)
+      : currentYear;
+
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && parsedYear >= 2000 && parsedYear <= 2100) {
+      let candidate = `${parsedYear.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+      if (isValidIsoDate(candidate)) {
+        if (!yearToken && candidate < getTodayIsoInTimezone(timezone)) {
+          const nextYearCandidate = `${(parsedYear + 1).toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+          if (isValidIsoDate(nextYearCandidate)) {
+            candidate = nextYearCandidate;
+          }
+        }
+        return candidate;
+      }
+    }
+  }
+
+  const weekdayPatterns: Array<{ day: number; regex: RegExp }> = [
+    { day: 1, regex: /\b(понедельник|пн|monday|mon)\b/i },
+    { day: 2, regex: /\b(вторник|вт|tuesday|tue)\b/i },
+    { day: 3, regex: /\b(среда|ср|wednesday|wed)\b/i },
+    { day: 4, regex: /\b(четверг|чт|thursday|thu)\b/i },
+    { day: 5, regex: /\b(пятница|пт|friday|fri)\b/i },
+    { day: 6, regex: /\b(суббота|сб|saturday|sat)\b/i },
+    { day: 7, regex: /\b(воскресенье|вс|sunday|sun)\b/i }
+  ];
+
+  const weekdayMatch = weekdayPatterns.find(({ regex }) => regex.test(lowerMessage));
+  if (weekdayMatch) {
+    const currentDay = getWeekdayInTimezone(timezone);
+    let offset = (weekdayMatch.day - currentDay + 7) % 7;
+    if (offset === 0) offset = 7;
+    return getIsoDateInTimezone(timezone, offset);
+  }
+
+  return null;
+}
+
+function formatConsultationSlotsForClient(toolResult: string, requestedDate?: string): string | null {
+  if (!toolResult) return null;
+
+  const slotTimeLines = Array.from(toolResult.matchAll(/^\s*Время:\s*(.+)$/gm))
+    .map(match => match[1]?.trim())
+    .filter((line): line is string => Boolean(line));
+
+  if (!slotTimeLines.length) {
+    return null;
+  }
+
+  const uniqueSlots = Array.from(new Set(slotTimeLines)).slice(0, 5);
+  if (!uniqueSlots.length) {
+    return null;
+  }
+
+  const header = requestedDate
+    ? `Вот свободные слоты на ${requestedDate}:`
+    : 'Вот ближайшие свободные слоты:';
+  const slotList = uniqueSlots.map(slot => `• ${slot}`).join('\n');
+
+  return `${header}\n${slotList}\n\nКакое время вам удобно?`;
+}
+
+function sanitizeConsultationToolResultForClient(toolResult: string): string {
+  const sanitized = toolResult
+    .replace(/Для записи используй consultant_id[^\n]*/gi, '')
+    .replace(/^\[Слот\s+\d+\]\s*$/gim, '')
+    .replace(/^Консультант:\s*.*$/gim, '')
+    .replace(/^date:\s*\d{4}-\d{2}-\d{2}\s*$/gim, '')
+    .replace(/^start_time:\s*\d{2}:\d{2}\s*$/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (extractLeakedInternalToolNames(sanitized).length > 0) {
+    return 'Секунду, уточняю доступные слоты. Подскажите, на какой день вам удобно?';
+  }
+
+  return sanitized || 'Секунду, уточняю доступные слоты. Подскажите, на какой день вам удобно?';
+}
+
+function shouldUseConsultationSlotsFallback(
+  messageText: string,
+  leakedToolNames: string[],
+  toolCallsExecuted: string[]
+): boolean {
+  const normalizedLeakedToolNames = leakedToolNames.map(normalizeToolCallName);
+  const normalizedToolCallsExecuted = toolCallsExecuted.map(normalizeToolCallName);
+
+  if (normalizedLeakedToolNames.some(name => SLOT_TOOL_NAMES.has(name))) {
+    return true;
+  }
+  if (normalizedToolCallsExecuted.some(name => SLOT_TOOL_NAMES.has(name))) {
+    return true;
+  }
+  return isConsultationContextMessage(messageText);
+}
+
+async function buildConsultationSlotsFallbackText(
+  lead: LeadInfo,
+  messageText: string,
+  config: AIBotConfig,
+  log: ContextLogger
+): Promise<{ text: string; toolName: 'get_nearest_slots' | 'get_slots_for_date'; requestedDate?: string } | null> {
+  if (!config.consultation_integration_enabled || !config.consultation_settings) {
+    log.debug({}, '[buildConsultationSlotsFallbackText] Consultation integration disabled, fallback skipped', ['consultation']);
+    return null;
+  }
+
+  const startTime = Date.now();
+  const settingsWithUserId: ConsultationIntegrationSettings = {
+    ...config.consultation_settings,
+    user_account_id: config.consultation_settings.user_account_id || config.user_account_id
+  };
+
+  const timezone = settingsWithUserId.timezone || config.timezone || 'Europe/Moscow';
+  const requestedDate = extractRequestedConsultationDate(messageText, timezone);
+  const toolName: 'get_nearest_slots' | 'get_slots_for_date' = requestedDate
+    ? 'get_slots_for_date'
+    : 'get_nearest_slots';
+
+  log.info({
+    timezone,
+    requestedDate: requestedDate || null,
+    selectedTool: toolName,
+    messagePreview: truncateText(messageText, 100)
+  }, '[buildConsultationSlotsFallbackText] Building consultation fallback response', ['consultation']);
+
+  const toolArgs = requestedDate ? { date: requestedDate } : {};
+  const leadInfo = {
+    id: lead.id,
+    contact_phone: lead.contact_phone,
+    contact_name: lead.contact_name,
+    assigned_consultant_id: lead.assigned_consultant_id ?? undefined
+  };
+
+  const rawToolResult = await handleConsultationTool(
+    toolName,
+    toolArgs,
+    leadInfo,
+    settingsWithUserId,
+    log
+  );
+
+  log.debug({
+    toolName,
+    toolResultLen: rawToolResult.length,
+    toolResultPreview: truncateText(rawToolResult, 140)
+  }, '[buildConsultationSlotsFallbackText] Consultation tool returned result', ['consultation']);
+
+  const slotFormattedText = formatConsultationSlotsForClient(rawToolResult, requestedDate || undefined);
+  const finalText = slotFormattedText || sanitizeConsultationToolResultForClient(rawToolResult);
+
+  log.info({
+    toolName,
+    requestedDate: requestedDate || null,
+    usedStructuredFormatter: !!slotFormattedText,
+    finalTextLen: finalText.length,
+    elapsedMs: Date.now() - startTime
+  }, '[buildConsultationSlotsFallbackText] Consultation fallback response built', ['consultation']);
+
+  return {
+    text: finalText,
+    toolName,
+    requestedDate: requestedDate || undefined
+  };
+}
+
 /**
  * Получить конфигурацию бота для инстанса WhatsApp
  */
@@ -718,6 +1016,46 @@ async function processAIBotResponse(
 
     // Очистить markdown если нужно
     let finalText = response.text;
+
+    // Дополнительный safeguard: никогда не отправляем клиенту внутренние имена tools
+    const leakedToolNames = extractLeakedInternalToolNames(finalText);
+    if (leakedToolNames.length > 0) {
+      const debugToolCalls = extractToolCallNamesFromDebug(response.debug);
+      const shouldConsultationFallback = shouldUseConsultationSlotsFallback(messageText, leakedToolNames, debugToolCalls);
+
+      ctxLog.error({
+        leakedToolNames,
+        debugToolCalls,
+        shouldConsultationFallback,
+        responsePreview: truncateText(finalText, 120)
+      }, '[processAIBotResponse] Blocking leaked internal tool names in outbound message', ['validation', 'openai']);
+
+      if (shouldConsultationFallback) {
+        try {
+          const fallbackInfo = await buildConsultationSlotsFallbackText(lead, messageText, botConfig, ctxLog);
+          if (fallbackInfo?.text) {
+            finalText = fallbackInfo.text;
+            ctxLog.warn({
+              fallbackTool: fallbackInfo.toolName,
+              requestedDate: fallbackInfo.requestedDate || null,
+              responsePreview: truncateText(finalText, 120)
+            }, '[processAIBotResponse] Replaced leaked response with consultation fallback');
+          } else {
+            finalText = 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+          }
+        } catch (fallbackError: any) {
+          ctxLog.error(fallbackError, '[processAIBotResponse] Failed to build fallback response after tool leak');
+          finalText = 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+        }
+      } else {
+        finalText = botConfig.error_message || 'Секунду, уточняю детали и скоро вернусь с ответом.';
+        ctxLog.warn({
+          leakedToolNames,
+          responsePreview: truncateText(finalText, 120)
+        }, '[processAIBotResponse] Replaced leaked response with generic safe message');
+      }
+    }
+
     if (botConfig.clean_markdown) {
       const beforeLen = finalText.length;
       finalText = cleanMarkdown(finalText);
@@ -727,6 +1065,29 @@ async function processAIBotResponse(
         removed: beforeLen - finalText.length
       }, '[processAIBotResponse] Markdown cleaned');
     }
+
+    // Повторная валидация после cleanMarkdown (на случай маскировки текста до очистки)
+    const leakedAfterCleaning = extractLeakedInternalToolNames(finalText);
+    if (leakedAfterCleaning.length > 0) {
+      ctxLog.error({
+        leakedToolNames: leakedAfterCleaning,
+        responsePreview: truncateText(finalText, 120)
+      }, '[processAIBotResponse] Tool name leak detected after markdown clean, replacing response');
+      finalText = 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+    }
+
+    if (!finalText.trim()) {
+      finalText = botConfig.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+      ctxLog.warn({
+        fallbackApplied: true,
+        responsePreview: truncateText(finalText, 120)
+      }, '[processAIBotResponse] Empty outbound text replaced with safe fallback');
+    }
+
+    ctxLog.info({
+      finalResponseLen: finalText.length,
+      responsePreview: truncateText(finalText, 120)
+    }, '[processAIBotResponse] Outbound response passed safety checks', ['validation']);
 
     // Разбить на части если нужно
     let chunks: string[];
@@ -1300,7 +1661,22 @@ async function generateAIResponse(
 
   // Используем модель напрямую из конфига
   const model = config.model || 'gpt-4o-mini';
-  log.debug({ model }, '[generateAIResponse] Using model', ['openai']);
+
+  // Для консультационного контекста прижимаем temperature, чтобы снизить "болтовню" и утечки tool-названий
+  const consultationStages = ['qualified', 'consultation_scheduled', 'consultation_booked'];
+  const isConsultationContext = Boolean(config.consultation_integration_enabled) && (
+    consultationStages.includes(lead.funnel_stage) || isConsultationContextMessage(messageText)
+  );
+  const effectiveTemperature = isConsultationContext
+    ? Math.min(config.temperature, 0.2)
+    : config.temperature;
+
+  log.debug({
+    model,
+    configuredTemp: config.temperature,
+    effectiveTemp: effectiveTemperature,
+    isConsultationContext
+  }, '[generateAIResponse] Using model and effective temperature', ['openai']);
 
   // Инициализация debug info (до try блока для доступа в catch)
   const debugInfo: AIDebugInfo = {
@@ -1342,12 +1718,14 @@ async function generateAIResponse(
     // GPT-5 модели (reasoning) не поддерживают temperature и max_tokens
     const isGpt5Model = model.startsWith('gpt-5') || model.startsWith('o3') || model.startsWith('o4');
 
+    const requestTemperature = isGpt5Model ? undefined : effectiveTemperature;
+
     const completionParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model,
       messages,
       ...(isGpt5Model
         ? { max_completion_tokens: 10000 }  // GPT-5: без temperature, используем max_completion_tokens
-        : { temperature: config.temperature, max_tokens: 1000 }  // GPT-4: стандартные параметры
+        : { temperature: requestTemperature, max_tokens: 1000 }  // GPT-4: стандартные параметры
       )
     };
 
@@ -1362,7 +1740,7 @@ async function generateAIResponse(
       isGpt5Model,
       ...(isGpt5Model
         ? { maxCompletionTokens: 4096 }
-        : { temp: config.temperature, maxTokens: 1000 }
+        : { temp: requestTemperature, maxTokens: 1000 }
       ),
       msgsCount: messages.length,
       toolsCount: tools.length
@@ -1542,7 +1920,7 @@ async function generateAIResponse(
         messages,
         ...(isGpt5Model
           ? { max_completion_tokens: 10000 }
-          : { temperature: config.temperature, max_tokens: 1000 }
+          : { temperature: requestTemperature, max_tokens: 1000 }
         ),
         tools: tools.length > 0 ? tools : undefined,
         tool_choice: tools.length > 0 ? 'auto' : undefined
@@ -1589,7 +1967,7 @@ async function generateAIResponse(
         messages,
         ...(isGpt5Model
           ? { max_completion_tokens: 10000 }
-          : { temperature: config.temperature, max_tokens: 1000 }
+          : { temperature: requestTemperature, max_tokens: 1000 }
         )
         // Без tools - просто текстовый ответ
       };
@@ -1609,11 +1987,165 @@ async function generateAIResponse(
       }, '[generateAIResponse] Retry response received');
     }
 
+    let finalResponseText = choice.message.content || '';
+    const leakedToolNames = extractLeakedInternalToolNames(finalResponseText);
+
+    if (leakedToolNames.length > 0) {
+      log.warn({
+        leakedToolNames,
+        responsePreview: truncateText(finalResponseText, 120),
+        toolCallsExecuted
+      }, '[generateAIResponse] Detected leaked internal tool names in final response');
+
+      let repairedResponseText = '';
+
+      try {
+        const repairInstruction = 'Перепиши последнее сообщение для клиента естественным языком. КРИТИЧНО: не упоминай названия функций, tools, function call, JSON или технические команды. Если нужно предложить время консультации — покажи конкретные слоты и попроси выбрать удобный.';
+        const repairMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+          ...messages,
+          { role: 'assistant', content: finalResponseText },
+          { role: 'user', content: repairInstruction }
+        ];
+
+        const repairStartTime = Date.now();
+        const repairCompletion = await openai.chat.completions.create({
+          model,
+          messages: repairMessages,
+          ...(isGpt5Model
+            ? { max_completion_tokens: 10000 }
+            : { temperature: requestTemperature, max_tokens: 1000 }
+          )
+        });
+        const repairElapsed = Date.now() - repairStartTime;
+        const repairChoice = repairCompletion.choices[0];
+        repairedResponseText = repairChoice.message.content || '';
+
+        logOpenAiCallWithCost(log, {
+          model,
+          promptTokens: repairCompletion.usage?.prompt_tokens,
+          completionTokens: repairCompletion.usage?.completion_tokens,
+          totalTokens: repairCompletion.usage?.total_tokens,
+          latencyMs: repairElapsed,
+          success: true
+        });
+
+        debugInfo.promptTokens += repairCompletion.usage?.prompt_tokens || 0;
+        debugInfo.completionTokens += repairCompletion.usage?.completion_tokens || 0;
+        debugInfo.totalTokens += repairCompletion.usage?.total_tokens || 0;
+        debugInfo.aiLatencyMs += repairElapsed;
+
+        log.info({
+          leakedToolNames,
+          repairResponseLen: repairedResponseText.length
+        }, '[generateAIResponse] Repair pass completed for leaked tool names');
+      } catch (repairError: any) {
+        log.error(repairError, '[generateAIResponse] Repair pass failed after leaked tool names', {
+          leakedToolNames
+        }, ['openai']);
+      }
+
+      if (repairedResponseText.trim()) {
+        finalResponseText = repairedResponseText;
+      }
+
+      const leakedAfterRepair = extractLeakedInternalToolNames(finalResponseText);
+      if (leakedAfterRepair.length > 0 || !finalResponseText.trim()) {
+        const shouldConsultationFallback = shouldUseConsultationSlotsFallback(
+          messageText,
+          leakedAfterRepair,
+          toolCallsExecuted
+        );
+
+        log.warn({
+          leakedAfterRepair,
+          hasTextAfterRepair: !!finalResponseText.trim(),
+          shouldConsultationFallback,
+          toolCallsExecuted
+        }, '[generateAIResponse] Repair result still unsafe, evaluating fallback strategy');
+
+        if (shouldConsultationFallback) {
+          try {
+            const fallbackStartTime = Date.now();
+            const fallbackInfo = await buildConsultationSlotsFallbackText(lead, messageText, config, log);
+            const fallbackElapsed = Date.now() - fallbackStartTime;
+
+            if (fallbackInfo?.text) {
+              finalResponseText = fallbackInfo.text;
+              toolCallsExecuted.push(fallbackInfo.toolName);
+
+              debugInfo.toolCalls.push({
+                name: `fallback:${fallbackInfo.toolName}`,
+                arguments: fallbackInfo.requestedDate ? { date: fallbackInfo.requestedDate } : {},
+                result: fallbackInfo.text,
+                durationMs: fallbackElapsed
+              });
+
+              log.warn({
+                fallbackTool: fallbackInfo.toolName,
+                requestedDate: fallbackInfo.requestedDate || null,
+                finalResponsePreview: truncateText(finalResponseText, 120)
+              }, '[generateAIResponse] Applied consultation fallback after leaked tool response');
+            } else {
+              finalResponseText = config.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+              log.warn({
+                fallbackTool: null,
+                finalResponsePreview: truncateText(finalResponseText, 120)
+              }, '[generateAIResponse] Consultation fallback returned empty result, using generic safe response');
+            }
+          } catch (fallbackError: any) {
+            log.error(fallbackError, '[generateAIResponse] Failed to build consultation fallback after leaked tool response');
+            finalResponseText = config.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+          }
+        } else {
+          finalResponseText = config.error_message || 'Секунду, уточняю детали и скоро вернусь с ответом.';
+          log.warn({
+            leakedAfterRepair,
+            finalResponsePreview: truncateText(finalResponseText, 120)
+          }, '[generateAIResponse] Skipping consultation fallback and using generic safe response');
+        }
+      } else {
+        log.info({
+          repairedResponseLen: finalResponseText.length
+        }, '[generateAIResponse] Repair output is safe, fallback not required');
+      }
+
+      const leakedAfterFallback = extractLeakedInternalToolNames(finalResponseText);
+      if (leakedAfterFallback.length > 0) {
+        log.error({
+          leakedToolNames: leakedAfterFallback,
+          responsePreview: truncateText(finalResponseText, 120)
+        }, '[generateAIResponse] Leak still present after fallback stage, forcing safe response');
+        finalResponseText = config.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+      } else {
+        log.info({
+          finalResponseLen: finalResponseText.length
+        }, '[generateAIResponse] Leak recovery finished successfully');
+      }
+    }
+
+    const leakedAtExit = extractLeakedInternalToolNames(finalResponseText);
+    if (leakedAtExit.length > 0) {
+      log.error({
+        leakedToolNames: leakedAtExit,
+        responsePreview: truncateText(finalResponseText, 120)
+      }, '[generateAIResponse] Internal tool names still present after repair and fallback, replacing response');
+      finalResponseText = config.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+    }
+
+    // Последний safeguard: не возвращаем пустой ответ
+    if (!finalResponseText.trim()) {
+      finalResponseText = config.error_message || 'Секунду, уточняю доступные варианты. Подскажите, на какой день вам удобно?';
+      log.warn({
+        fallbackApplied: true,
+        finalResponsePreview: truncateText(finalResponseText, 120)
+      }, '[generateAIResponse] Empty final response replaced with safe fallback');
+    }
+
     if (toolCallsExecuted.length > 0) {
       log.info({
         toolCallsExecuted,
         iterations,
-        finalResponseLen: choice.message.content?.length || 0
+        finalResponseLen: finalResponseText.length
       }, '[generateAIResponse] Completed with tool calls executed');
     }
 
@@ -1623,13 +2155,13 @@ async function generateAIResponse(
     debugInfo.costCents = costResult.totalCostCents;
 
     log.info({
-      responseLen: choice.message.content?.length || 0,
-      responsePreview: truncateText(choice.message.content || '', 100),
+      responseLen: finalResponseText.length,
+      responsePreview: truncateText(finalResponseText, 100),
       ...log.getTimings()
     }, '[generateAIResponse] Completed with text response', ['openai']);
 
     return {
-      text: choice.message.content || '',
+      text: finalResponseText,
       debug: debugInfo
     };
 

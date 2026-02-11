@@ -142,10 +142,11 @@ export async function getCredentials(
       prompt3: adAccount.prompt3,
       prompt4: adAccount.prompt4,
 
-      telegramId: adAccount.telegram_id,
-      telegramId2: adAccount.telegram_id_2,
-      telegramId3: adAccount.telegram_id_3,
-      telegramId4: adAccount.telegram_id_4,
+      // Telegram IDs — общие настройки, всегда из user_accounts
+      telegramId: user.telegram_id,
+      telegramId2: user.telegram_id_2,
+      telegramId3: user.telegram_id_3,
+      telegramId4: user.telegram_id_4,
 
       openaiApiKey: adAccount.openai_api_key,
       geminiApiKey: adAccount.gemini_api_key,
