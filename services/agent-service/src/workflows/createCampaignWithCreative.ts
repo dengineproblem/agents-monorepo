@@ -329,11 +329,14 @@ export async function workflowCreateCampaignWithCreative(
       throw new Error('Conversions requires pixel_id in default settings');
     }
 
+    // WhatsApp (Messaging dataset) → LEAD_SUBMITTED, остальные → LEAD
+    const eventType = channel === 'whatsapp' ? 'LEAD_SUBMITTED' : 'LEAD';
+
     if (channel === 'whatsapp' && page_id) {
       adsetBody.destination_type = 'WHATSAPP';
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
-        custom_event_type: 'LEAD',
+        custom_event_type: eventType,
         page_id: String(page_id),
         ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
       };
@@ -341,14 +344,14 @@ export async function workflowCreateCampaignWithCreative(
       adsetBody.destination_type = 'ON_AD';
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
-        custom_event_type: 'LEAD',
+        custom_event_type: eventType,
         page_id: String(page_id),
       };
     } else if (channel === 'site') {
       adsetBody.destination_type = 'WEBSITE';
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
-        custom_event_type: 'LEAD',
+        custom_event_type: eventType,
       };
     } else {
       // Fallback на whatsapp
@@ -356,7 +359,7 @@ export async function workflowCreateCampaignWithCreative(
         adsetBody.destination_type = 'WHATSAPP';
         adsetBody.promoted_object = {
           pixel_id: String(pixelId),
-          custom_event_type: 'LEAD',
+          custom_event_type: eventType,
           page_id: String(page_id),
           ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
         };
