@@ -113,6 +113,9 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         capi_interest_fields: data.capiSettings.capi_interest_fields,
         capi_qualified_fields: data.capiSettings.capi_qualified_fields,
         capi_scheduled_fields: data.capiSettings.capi_scheduled_fields,
+        capi_access_token: data.capiSettings.capi_access_token,
+        capi_page_id: data.capiSettings.capi_page_id,
+        capi_event_level: data.capiSettings.capi_event_level,
       }),
     });
 
@@ -168,6 +171,9 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         capi_interest_fields: data.capiSettings.capi_interest_fields,
         capi_qualified_fields: data.capiSettings.capi_qualified_fields,
         capi_scheduled_fields: data.capiSettings.capi_scheduled_fields,
+        capi_access_token: data.capiSettings.capi_access_token,
+        capi_page_id: data.capiSettings.capi_page_id,
+        capi_event_level: data.capiSettings.capi_event_level,
       }),
     };
 

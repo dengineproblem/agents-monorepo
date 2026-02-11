@@ -58,6 +58,9 @@ export interface Direction {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
+  capi_access_token?: string | null;
+  capi_page_id?: string | null;
+  capi_event_level?: number | null; // 1=Интерес, 2=Квалификация, 3=Запись
   // Conversions channel (whatsapp, lead_form, site)
   conversion_channel?: ConversionChannel | null;
   // Conversions optimization level
@@ -97,6 +100,9 @@ export interface CreateDirectionPayload {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
+  capi_access_token?: string | null;
+  capi_page_id?: string | null;
+  capi_event_level?: number | null;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Instagram account usage
@@ -143,6 +149,9 @@ export interface UpdateDirectionPayload {
   capi_interest_fields?: CapiFieldConfig[];
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
+  capi_access_token?: string | null;
+  capi_page_id?: string | null;
+  capi_event_level?: number | null;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Audience controls

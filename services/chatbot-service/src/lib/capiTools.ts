@@ -338,7 +338,7 @@ async function handleSendCapiEvent(
   } else {
     // Meta CAPI (Facebook)
     const pixelStartTime = Date.now();
-    const { pixelId, accessToken } = await getDirectionPixelInfo(lead.direction_id);
+    const { pixelId, accessToken, pageId, capiEventLevel } = await getDirectionPixelInfo(lead.direction_id);
     const pixelLatencyMs = Date.now() - pixelStartTime;
 
     log.debug({
@@ -358,9 +358,18 @@ async function handleSendCapiEvent(
       return 'CAPI не настроен для этого направления (отсутствует пиксель или токен).';
     }
 
-    eventName = level === 1 ? CAPI_EVENTS.INTEREST :
-                level === 2 ? CAPI_EVENTS.QUALIFIED :
-                CAPI_EVENTS.SCHEDULED;
+    // Filter by capiEventLevel: if set, only send for that specific level
+    if (capiEventLevel !== null && capiEventLevel !== level) {
+      log.info({
+        level,
+        capiEventLevel,
+        directionId: maskUuid(lead.direction_id),
+        elapsedMs: Date.now() - startTime
+      }, '[handleSendCapiEvent] Level filtered by capi_event_level setting', ['api']);
+      return `Уровень ${level} не соответствует настройке направления (capi_event_level=${capiEventLevel}).`;
+    }
+
+    eventName = CAPI_EVENTS.LEAD;
 
     log.info({
       level,
@@ -377,6 +386,7 @@ async function handleSendCapiEvent(
       eventLevel: level,
       phone: lead.contact_phone,
       ctwaClid: lead.ctwa_clid || undefined,
+      pageId: pageId || undefined,
       dialogAnalysisId: lead.id,
       leadId: lead.lead_id ? String(lead.lead_id) : undefined,
       userAccountId: lead.user_account_id || '',

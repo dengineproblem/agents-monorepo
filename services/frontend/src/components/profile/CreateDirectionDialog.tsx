@@ -391,6 +391,9 @@ export interface DirectionCapiSettings {
   capi_interest_fields: CapiFieldConfig[];
   capi_qualified_fields: CapiFieldConfig[];
   capi_scheduled_fields: CapiFieldConfig[];
+  capi_access_token?: string | null;
+  capi_page_id?: string | null;
+  capi_event_level?: number | null;
 }
 
 interface CreateDirectionDialogProps {
@@ -511,6 +514,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [capiInterestStages, setCapiInterestStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiQualifiedStages, setCapiQualifiedStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+
+  // CAPI Messaging dataset fields
+  const [capiAccessToken, setCapiAccessToken] = useState('');
+  const [capiPageId, setCapiPageId] = useState('');
+  const [capiEventLevel, setCapiEventLevel] = useState<number | null>(null);
 
   // Connected CRMs
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
@@ -1079,6 +1087,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         capi_interest_fields: capiSource === 'crm' ? interestConfig : [],
         capi_qualified_fields: capiSource === 'crm' ? qualifiedConfig : [],
         capi_scheduled_fields: capiSource === 'crm' ? scheduledConfig : [],
+        capi_access_token: capiAccessToken.trim() || null,
+        capi_page_id: capiPageId.trim() || null,
+        capi_event_level: capiEventLevel,
       } : undefined;
 
       await onSubmit({
@@ -1166,6 +1177,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setCapiEnabled(false);
     setCapiSource('whatsapp');
     setCapiCrmType('amocrm');
+    setCapiAccessToken('');
+    setCapiPageId('');
+    setCapiEventLevel(null);
     setCapiInterestMode('fields');
     setCapiQualifiedMode('fields');
     setCapiScheduledMode('fields');
@@ -2700,6 +2714,49 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {/* Messaging dataset: Access Token, Page ID, Event Level */}
+                  {pixelId && (
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <Label>Токен доступа пикселя</Label>
+                        </div>
+                        <Input
+                          type="password"
+                          placeholder="EAA..."
+                          value={capiAccessToken}
+                          onChange={(e) => setCapiAccessToken(e.target.value)}
+                          disabled={isSubmitting}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Сгенерируйте в Events Manager при создании Messaging пикселя. Если не указан — используется токен аккаунта.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Уровень события Lead</Label>
+                        <Select
+                          value={capiEventLevel === null ? 'all' : String(capiEventLevel)}
+                          onValueChange={(value) => setCapiEventLevel(value === 'all' ? null : Number(value))}
+                          disabled={isSubmitting}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Все уровни (3 события)</SelectItem>
+                            <SelectItem value="1">Интерес (3+ сообщений)</SelectItem>
+                            <SelectItem value="2">Квалификация (AI)</SelectItem>
+                            <SelectItem value="3">Запись/покупка (AI)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          На каком уровне воронки отправлять событие Lead в Meta
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Источник данных */}
                   {pixelId && (

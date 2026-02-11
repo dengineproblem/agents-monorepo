@@ -593,11 +593,15 @@ export async function processDialogForCapi(
   // Get pixel info for CAPI
   let pixelId: string | null = null;
   let accessToken: string | null = null;
+  let pageId: string | null = null;
+  let capiEventLevel: number | null = null;
 
   if (dialog.direction_id) {
     const pixelInfo = await getDirectionPixelInfo(dialog.direction_id);
     pixelId = pixelInfo.pixelId;
     accessToken = pixelInfo.accessToken;
+    pageId = pixelInfo.pageId;
+    capiEventLevel = pixelInfo.capiEventLevel;
   }
 
   // If no pixel configured, skip CAPI
@@ -610,37 +614,38 @@ export async function processDialogForCapi(
   }
 
   // Send CAPI events based on levels (highest first)
+  // Filter by capiEventLevel: if set, only send for that specific level
   // Level 3: Schedule
-  if (result.is_scheduled && !dialog.capi_scheduled_sent) {
+  if (result.is_scheduled && !dialog.capi_scheduled_sent && (capiEventLevel === null || capiEventLevel === 3)) {
     log.info({
       correlationId,
       dialogId: dialog.id,
       source: scheduledSource,
       action: 'capi_send_scheduled_start',
     }, 'Sending CAPI Schedule event');
-    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken, result, correlationId);
+    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken, pageId, result, correlationId);
   }
 
   // Level 2: Qualified
-  if (result.is_qualified && !dialog.capi_qualified_sent) {
+  if (result.is_qualified && !dialog.capi_qualified_sent && (capiEventLevel === null || capiEventLevel === 2)) {
     log.info({
       correlationId,
       dialogId: dialog.id,
       source: qualifiedSource,
       action: 'capi_send_qualified_start',
     }, 'Sending CAPI Qualified event');
-    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken, result, correlationId);
+    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken, pageId, result, correlationId);
   }
 
   // Level 1: Interested
-  if (result.is_interested && !dialog.capi_interest_sent) {
+  if (result.is_interested && !dialog.capi_interest_sent && (capiEventLevel === null || capiEventLevel === 1)) {
     log.info({
       correlationId,
       dialogId: dialog.id,
       source: interestSource,
       action: 'capi_send_interest_start',
     }, 'Sending CAPI Interest event');
-    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken, result, correlationId);
+    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken, pageId, result, correlationId);
   }
 }
 
@@ -653,14 +658,11 @@ async function sendCapiEventForLevel(
   level: CapiEventLevel,
   pixelId: string,
   accessToken: string,
+  pageId: string | null,
   result?: QualificationResult,
   correlationId?: string
 ): Promise<void> {
-  const eventName = {
-    1: CAPI_EVENTS.INTEREST,
-    2: CAPI_EVENTS.QUALIFIED,
-    3: CAPI_EVENTS.SCHEDULED,
-  }[level];
+  const eventName = CAPI_EVENTS.LEAD;
 
   const baseCustomData = {
     channel: CAPI_CHANNEL,
@@ -699,6 +701,7 @@ async function sendCapiEventForLevel(
     eventLevel: level,
     phone: dialog.contact_phone,
     ctwaClid: dialog.ctwa_clid,
+    pageId: pageId || undefined,
     dialogAnalysisId: dialog.id,
     leadId: dialog.lead_id ? String(dialog.lead_id) : undefined,
     userAccountId: dialog.user_account_id,

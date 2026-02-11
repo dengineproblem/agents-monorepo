@@ -89,12 +89,14 @@ const ALLOWED_ACTION_SOURCES = new Set([
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
+  LEAD: 'Lead',                      // Unified event for Messaging dataset (all levels)
+  // Legacy (kept for backward compatibility with logs/DB)
   INTEREST: 'CompleteRegistration',  // Level 1: 3+ inbound messages
   QUALIFIED: level2Event,           // Level 2: Passed qualification
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
 
-export type CapiEventName = typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
+export type CapiEventName = 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
 export type CapiEventLevel = 1 | 2 | 3;
 const PURCHASE_CURRENCY = 'KZT';
 const PURCHASE_DEFAULT_VALUE = 1;
@@ -122,7 +124,8 @@ export interface CapiEventParams {
   // User data for matching (at least one required)
   phone?: string;        // Will be hashed
   email?: string;        // Will be hashed
-  ctwaClid?: string;     // Click-to-WhatsApp Click ID (passed to payload for business_messaging)
+  ctwaClid?: string;     // Click-to-WhatsApp Click ID (in user_data for Messaging dataset)
+  pageId?: string;       // Facebook Page ID (in user_data for Messaging dataset)
 
   // Context
   dialogAnalysisId?: string;
@@ -183,9 +186,9 @@ function normalizeCtwaClid(value: unknown): string | undefined {
  */
 function generateEventId(params: CapiEventParams): { eventId: string; strategy: string } {
   const levelSuffix = {
-    1: 'interest',
-    2: 'qualified',
-    3: 'purchase',
+    1: 'lead_l1',
+    2: 'lead_l2',
+    3: 'lead_l3',
   }[params.eventLevel];
   const normalizedCtwaClid = normalizeCtwaClid(params.ctwaClid);
 
@@ -423,6 +426,19 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       userData.external_id = String(leadId);
     }
 
+    // Messaging dataset: ctwa_clid in user_data (NOT top-level)
+    if (normalizedCtwaClid) {
+      userData.ctwa_clid = normalizedCtwaClid;
+    }
+
+    // page_id in user_data (required for Messaging dataset)
+    if (params.pageId) {
+      userData.page_id = params.pageId;
+    }
+
+    // Country hash for better matching (Kazakhstan)
+    userData.country = [hashForCapi('kz')];
+
     const mergedCustomData: Record<string, unknown> = {
       event_level: eventLevel,
       ...customData,
@@ -460,7 +476,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
 
     if (useBusinessMessaging) {
       eventPayload.messaging_channel = 'whatsapp';
-      eventPayload.ctwa_clid = normalizedCtwaClid;
+      // ctwa_clid is now in user_data (per Meta Messaging dataset spec)
     } else if (normalizedCtwaClid && !businessMessagingEnabled) {
       log.info({
         correlationId,
@@ -854,6 +870,8 @@ export async function sendCapiEventAtomic(params: CapiEventParams): Promise<Capi
 export async function getDirectionPixelInfo(directionId: string): Promise<{
   pixelId: string | null;
   accessToken: string | null;
+  pageId: string | null;
+  capiEventLevel: number | null;
 }> {
   try {
     // Single query with all necessary JOINs
@@ -863,21 +881,24 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
         id,
         user_account_id,
         account_id,
+        capi_access_token,
+        capi_page_id,
+        capi_event_level,
         default_ad_settings(pixel_id),
-        ad_accounts(access_token),
-        user_accounts(access_token)
+        ad_accounts(access_token, page_id),
+        user_accounts(access_token, page_id)
       `)
       .eq('id', directionId)
       .single();
 
     if (error) {
       log.warn({ error: error.message, directionId }, 'Error fetching direction pixel info');
-      return { pixelId: null, accessToken: null };
+      return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
     if (!direction) {
       log.debug({ directionId }, 'Direction not found');
-      return { pixelId: null, accessToken: null };
+      return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
     // Extract pixel_id from default_ad_settings (could be array or object)
@@ -889,15 +910,15 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
 
     if (!pixelId) {
       log.debug({ directionId }, 'No pixel_id found for direction');
-      return { pixelId: null, accessToken: null };
+      return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
-    // Get access token: prefer ad_accounts, fallback to user_accounts
-    // Type assertions for JOIN relations
-    const adAccount = direction.ad_accounts as { access_token?: string } | { access_token?: string }[] | null;
-    const userAccount = direction.user_accounts as { access_token?: string } | { access_token?: string }[] | null;
+    // Get access token: prefer capi_access_token (pixel-specific), then ad_accounts, then user_accounts
+    const adAccount = direction.ad_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
+    const userAccount = direction.user_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
 
-    const accessToken = (Array.isArray(adAccount) ? adAccount[0]?.access_token : adAccount?.access_token)
+    const accessToken = (direction as Record<string, unknown>).capi_access_token as string
+      || (Array.isArray(adAccount) ? adAccount[0]?.access_token : adAccount?.access_token)
       || (Array.isArray(userAccount) ? userAccount[0]?.access_token : userAccount?.access_token)
       || null;
 
@@ -905,12 +926,21 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       log.warn({ directionId, pixelId }, 'Found pixel but no access_token');
     }
 
-    return { pixelId, accessToken };
+    // Page ID for Messaging dataset: prefer capi_page_id (override), then ad_accounts.page_id, then user_accounts.page_id
+    const pageId = ((direction as Record<string, unknown>).capi_page_id as string)
+      || (Array.isArray(adAccount) ? adAccount[0]?.page_id : adAccount?.page_id)
+      || (Array.isArray(userAccount) ? userAccount[0]?.page_id : userAccount?.page_id)
+      || null;
+
+    // Event level: which level triggers the Lead event
+    const capiEventLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
+
+    return { pixelId, accessToken, pageId, capiEventLevel };
   } catch (error) {
     log.error({
       error: error instanceof Error ? error.message : String(error),
       directionId,
     }, 'Error getting direction pixel info');
-    return { pixelId: null, accessToken: null };
+    return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
   }
 }

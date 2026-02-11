@@ -349,6 +349,9 @@ export interface EditDirectionCapiSettings {
   capi_qualified_fields: CapiFieldConfig[];
   capi_scheduled_fields: CapiFieldConfig[];
   pixel_id: string | null;
+  capi_access_token?: string | null;
+  capi_page_id?: string | null;
+  capi_event_level?: number | null;
 }
 
 interface EditDirectionDialogProps {
@@ -435,6 +438,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [capiInterestStages, setCapiInterestStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiQualifiedStages, setCapiQualifiedStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
+  const [capiAccessToken, setCapiAccessToken] = useState('');
+  const [capiPageId, setCapiPageId] = useState('');
+  const [capiEventLevel, setCapiEventLevel] = useState<number | null>(null);
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
   const [isLoadingCrms, setIsLoadingCrms] = useState(false);
   const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
@@ -733,6 +739,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCapiSource(!isTikTok ? (direction.capi_source || 'whatsapp') : 'whatsapp');
     const initialCrmType: CrmType = direction.capi_crm_type || 'amocrm';
     setCapiCrmType(initialCrmType);
+    setCapiAccessToken(direction.capi_access_token || '');
+    setCapiPageId(direction.capi_page_id || '');
+    setCapiEventLevel(direction.capi_event_level ?? null);
 
     const interestParsed = parseLevelConfig(direction.capi_interest_fields, initialCrmType);
     const qualifiedParsed = parseLevelConfig(direction.capi_qualified_fields, initialCrmType);
@@ -1119,6 +1128,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 capi_qualified_fields: isCrmCapiActive ? qualifiedConfig : [],
                 capi_scheduled_fields: isCrmCapiActive ? scheduledConfig : [],
                 pixel_id: capiEnabled ? capiPixelId || null : null,
+                capi_access_token: capiAccessToken.trim() || null,
+                capi_page_id: capiPageId.trim() || null,
+                capi_event_level: capiEventLevel,
               },
             }),
         is_active: isActive,
@@ -1882,6 +1894,49 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                           </p>
                         )}
                       </div>
+
+                      {/* Messaging dataset: Access Token, Page ID, Event Level */}
+                      {capiPixelId && (
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1.5">
+                              <Label>Токен доступа пикселя</Label>
+                            </div>
+                            <Input
+                              type="password"
+                              placeholder="EAA..."
+                              value={capiAccessToken}
+                              onChange={(e) => setCapiAccessToken(e.target.value)}
+                              disabled={isSubmitting}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Сгенерируйте в Events Manager при создании Messaging пикселя. Если не указан — используется токен аккаунта.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Уровень события Lead</Label>
+                            <Select
+                              value={capiEventLevel === null ? 'all' : String(capiEventLevel)}
+                              onValueChange={(value) => setCapiEventLevel(value === 'all' ? null : Number(value))}
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">Все уровни (3 события)</SelectItem>
+                                <SelectItem value="1">Интерес (3+ сообщений)</SelectItem>
+                                <SelectItem value="2">Квалификация (AI)</SelectItem>
+                                <SelectItem value="3">Запись/покупка (AI)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                              На каком уровне воронки отправлять событие Lead в Meta
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Источник данных - показываем только если выбран пиксель */}
                       {capiPixelId && (

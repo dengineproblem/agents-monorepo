@@ -234,18 +234,16 @@ app.post('/capi/resend', async (request, reply) => {
 
     for (const dialog of dialogs) {
       // Get pixel info for this direction
-      const { pixelId, accessToken } = await getDirectionPixelInfo(dialog.direction_id!);
+      const { pixelId, accessToken, pageId } = await getDirectionPixelInfo(dialog.direction_id!);
 
       if (!pixelId || !accessToken) {
         results.push({ dialogId: dialog.id, level: 0, success: false, error: 'No pixel or token' });
         continue;
       }
 
-      // Send events for requested levels
+      // Send events for requested levels (resend = admin override, no capiEventLevel filter)
       for (const level of levels) {
-        const eventName = level === 1 ? CAPI_EVENTS.INTEREST
-          : level === 2 ? CAPI_EVENTS.QUALIFIED
-          : CAPI_EVENTS.SCHEDULED;
+        const eventName = CAPI_EVENTS.LEAD;
 
         const { data: leadRecord } = await supabase
           .from('leads')
@@ -261,6 +259,7 @@ app.post('/capi/resend', async (request, reply) => {
           eventLevel: level as 1 | 2 | 3,
           phone: dialog.contact_phone,
           ctwaClid: dialog.ctwa_clid,
+          pageId: pageId || undefined,
           dialogAnalysisId: dialog.id,
           leadId: leadRecord?.id,
           userAccountId: dialog.user_account_id,
@@ -426,6 +425,8 @@ app.post('/capi/crm-event', async (request, reply) => {
       });
     }
 
+    const { pageId: directionPageId, capiEventLevel } = pixelInfo;
+
     const phoneCandidates = buildPhoneCandidates(contactPhone);
     const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
 
@@ -511,11 +512,19 @@ app.post('/capi/crm-event', async (request, reply) => {
     }> = [];
 
     for (const requestedLevel of requestedLevels) {
-      const eventName = {
-        1: CAPI_EVENTS.INTEREST,
-        2: CAPI_EVENTS.QUALIFIED,
-        3: CAPI_EVENTS.SCHEDULED,
-      }[requestedLevel.level];
+      // Filter by capiEventLevel: if set, only send for that specific level
+      if (capiEventLevel !== null && capiEventLevel !== requestedLevel.level) {
+        results.push({
+          level: requestedLevel.level,
+          eventName: CAPI_EVENTS.LEAD,
+          success: false,
+          alreadySent: false,
+          error: `Level ${requestedLevel.level} filtered by capi_event_level=${capiEventLevel}`
+        });
+        continue;
+      }
+
+      const eventName = CAPI_EVENTS.LEAD;
 
       const response = await sendCapiEventAtomic({
         pixelId: pixelInfo.pixelId,
@@ -524,6 +533,7 @@ app.post('/capi/crm-event', async (request, reply) => {
         eventLevel: requestedLevel.level,
         phone: resolvedPhone,
         ctwaClid,
+        pageId: directionPageId || undefined,
         dialogAnalysisId,
         leadId,
         userAccountId,
@@ -668,6 +678,13 @@ app.post('/capi/interest-event', async (request, reply) => {
       return reply.status(400).send({ error: 'No pixel or access_token configured for direction', correlationId });
     }
 
+    // Filter by capiEventLevel: if set and not level 1, skip
+    if (pixelInfo.capiEventLevel !== null && pixelInfo.capiEventLevel !== 1) {
+      const durationMs = Date.now() - startTime;
+      app.log.info({ correlationId, directionId: dialog.direction_id, capiEventLevel: pixelInfo.capiEventLevel, durationMs, action: 'capi_interest_level_filtered' }, 'Interest level filtered by capi_event_level');
+      return reply.send({ success: false, error: `Level 1 filtered by capi_event_level=${pixelInfo.capiEventLevel}`, correlationId });
+    }
+
     // Получить lead_id для логов
     const { data: leadRecord } = await supabase
       .from('leads')
@@ -676,19 +693,20 @@ app.post('/capi/interest-event', async (request, reply) => {
       .eq('user_account_id', dialog.user_account_id)
       .maybeSingle();
 
-    // Отправить Level 1 событие
+    // Отправить Level 1 событие (Lead)
     const response = await sendCapiEventAtomic({
       pixelId: pixelInfo.pixelId,
       accessToken: pixelInfo.accessToken,
-      eventName: CAPI_EVENTS.INTEREST,
+      eventName: CAPI_EVENTS.LEAD,
       eventLevel: 1,
       phone: contactPhone,
       ctwaClid: dialog.ctwa_clid || undefined,
+      pageId: pixelInfo.pageId || undefined,
       dialogAnalysisId: dialog.id,
       leadId: leadRecord?.id,
       userAccountId: dialog.user_account_id,
       directionId: dialog.direction_id,
-      correlationId,  // Передаём для трассировки
+      correlationId,
     });
 
     const durationMs = Date.now() - startTime;
@@ -699,13 +717,13 @@ app.post('/capi/interest-event', async (request, reply) => {
         contactPhone,
         dialogId: dialog.id,
         directionId: dialog.direction_id,
-        eventName: CAPI_EVENTS.INTEREST,
+        eventName: CAPI_EVENTS.LEAD,
         eventId: response.eventId,
         durationMs,
         action: 'capi_interest_success'
       }, 'Interest CAPI event sent successfully');
 
-      return reply.send({ success: true, event: CAPI_EVENTS.INTEREST, eventId: response.eventId, correlationId });
+      return reply.send({ success: true, event: CAPI_EVENTS.LEAD, eventId: response.eventId, correlationId });
     } else {
       const normalizedError = (response.error || '').toLowerCase();
       const statusCode = normalizedError.includes('already sent') ? 409 : 502;
