@@ -71,9 +71,9 @@ CHECK (
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `Lead` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
-| 2 | `Lead` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
-| 3 | `Lead` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
+| 1 | `LeadSubmitted` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
+| 2 | `LeadSubmitted` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
+| 3 | `LeadSubmitted` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
 
 **Фильтрация по уровню (`capi_event_level`):**
 - `NULL` — отправлять Lead на ВСЕХ уровнях (backward compat, 3 события)
@@ -83,7 +83,7 @@ CHECK (
 
 **Важно:** Level 1 (Interest) определяется детерминированно по счётчику сообщений, а Level 2 и 3 — через AI анализ переписки.
 
-> **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде как константы для обратной совместимости, но все новые направления используют `Lead`.
+> **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде как константы для обратной совместимости, но все новые направления используют `LeadSubmitted` (Messaging) или `Lead` (Website).
 
 ## Архитектура
 
@@ -189,14 +189,25 @@ AMO CRM / Bitrix24
 
 ```typescript
 const CAPI_EVENTS = {
-  LEAD: 'Lead',                      // Unified event (Messaging dataset)
+  LEAD_SUBMITTED: 'LeadSubmitted',   // Messaging dataset: lead (messaging_channel, page_id, phone)
+  LEAD: 'Lead',                      // Website/CRM dataset: lead (event_transaction_time)
   INTEREST: 'CompleteRegistration',   // Legacy Level 1
   QUALIFIED: 'AddToCart' | 'Subscribe', // Legacy Level 2 (configurable)
   SCHEDULED: 'Purchase',             // Legacy Level 3
 };
 ```
 
-Все новые направления используют `CAPI_EVENTS.LEAD` для всех уровней.
+Для WhatsApp (Messaging dataset) используется `CAPI_EVENTS.LEAD_SUBMITTED`. Для Website/CRM — `CAPI_EVENTS.LEAD`.
+
+**Различия между LeadSubmitted и Lead:**
+
+| Параметр | LeadSubmitted (Messaging) | Lead (Website) |
+|----------|:-------------------------:|:--------------:|
+| messaging_channel | да | нет |
+| page_id (user_data) | да | нет |
+| phone (user_data) | да | нет |
+| event_transaction_time | нет | да |
+| event_source_url | нет | да |
 
 ## База данных
 
@@ -547,7 +558,7 @@ Body:
 Response (success):
 {
   "success": true,
-  "event": "Lead",
+  "event": "LeadSubmitted",
   "eventId": "wa_abc123_lead_l1"
 }
 
@@ -606,13 +617,13 @@ Response (already sent):
 
 ## Пример CAPI запроса
 
-### Messaging dataset (новый формат)
+### LeadSubmitted — Messaging dataset (WhatsApp)
 
 ```json
 POST /v20.0/{pixel_id}/events
 {
   "data": [{
-    "event_name": "Lead",
+    "event_name": "LeadSubmitted",
     "event_time": 1703520000,
     "event_id": "wa_abc123_lead_l1",
     "action_source": "business_messaging",
@@ -634,7 +645,7 @@ POST /v20.0/{pixel_id}/events
 }
 ```
 
-### Legacy формат (без ctwa_clid)
+### Lead — Website/CRM dataset
 
 ```json
 POST /v20.0/{pixel_id}/events
@@ -643,7 +654,7 @@ POST /v20.0/{pixel_id}/events
     "event_name": "Lead",
     "event_time": 1703520000,
     "event_id": "wa_abc123_lead_l1",
-    "event_source_url": "https://wa.me/",
+    "event_source_url": "https://example.com/",
     "action_source": "system_generated",
     "user_data": {
       "ph": ["a1b2c3..."],

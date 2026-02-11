@@ -243,7 +243,7 @@ app.post('/capi/resend', async (request, reply) => {
 
       // Send events for requested levels (resend = admin override, no capiEventLevel filter)
       for (const level of levels) {
-        const eventName = CAPI_EVENTS.LEAD;
+        const eventName = CAPI_EVENTS.LEAD_SUBMITTED;
 
         const { data: leadRecord } = await supabase
           .from('leads')
@@ -516,7 +516,7 @@ app.post('/capi/crm-event', async (request, reply) => {
       if (capiEventLevel !== null && capiEventLevel !== requestedLevel.level) {
         results.push({
           level: requestedLevel.level,
-          eventName: CAPI_EVENTS.LEAD,
+          eventName: CAPI_EVENTS.LEAD_SUBMITTED,
           success: false,
           alreadySent: false,
           error: `Level ${requestedLevel.level} filtered by capi_event_level=${capiEventLevel}`
@@ -524,7 +524,7 @@ app.post('/capi/crm-event', async (request, reply) => {
         continue;
       }
 
-      const eventName = CAPI_EVENTS.LEAD;
+      const eventName = CAPI_EVENTS.LEAD_SUBMITTED;
 
       const response = await sendCapiEventAtomic({
         pixelId: pixelInfo.pixelId,
@@ -697,7 +697,7 @@ app.post('/capi/interest-event', async (request, reply) => {
     const response = await sendCapiEventAtomic({
       pixelId: pixelInfo.pixelId,
       accessToken: pixelInfo.accessToken,
-      eventName: CAPI_EVENTS.LEAD,
+      eventName: CAPI_EVENTS.LEAD_SUBMITTED,
       eventLevel: 1,
       phone: contactPhone,
       ctwaClid: dialog.ctwa_clid || undefined,
@@ -717,13 +717,13 @@ app.post('/capi/interest-event', async (request, reply) => {
         contactPhone,
         dialogId: dialog.id,
         directionId: dialog.direction_id,
-        eventName: CAPI_EVENTS.LEAD,
+        eventName: CAPI_EVENTS.LEAD_SUBMITTED,
         eventId: response.eventId,
         durationMs,
         action: 'capi_interest_success'
       }, 'Interest CAPI event sent successfully');
 
-      return reply.send({ success: true, event: CAPI_EVENTS.LEAD, eventId: response.eventId, correlationId });
+      return reply.send({ success: true, event: CAPI_EVENTS.LEAD_SUBMITTED, eventId: response.eventId, correlationId });
     } else {
       const normalizedError = (response.error || '').toLowerCase();
       const statusCode = normalizedError.includes('already sent') ? 409 : 502;

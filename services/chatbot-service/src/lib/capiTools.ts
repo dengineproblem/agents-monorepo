@@ -369,7 +369,7 @@ async function handleSendCapiEvent(
       return `Уровень ${level} не соответствует настройке направления (capi_event_level=${capiEventLevel}).`;
     }
 
-    eventName = CAPI_EVENTS.LEAD;
+    eventName = CAPI_EVENTS.LEAD_SUBMITTED;
 
     log.info({
       level,

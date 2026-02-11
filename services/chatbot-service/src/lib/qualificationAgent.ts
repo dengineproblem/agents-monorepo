@@ -662,7 +662,7 @@ async function sendCapiEventForLevel(
   result?: QualificationResult,
   correlationId?: string
 ): Promise<void> {
-  const eventName = CAPI_EVENTS.LEAD;
+  const eventName = CAPI_EVENTS.LEAD_SUBMITTED;
 
   const baseCustomData = {
     channel: CAPI_CHANNEL,

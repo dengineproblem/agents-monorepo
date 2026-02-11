@@ -89,14 +89,15 @@ const ALLOWED_ACTION_SOURCES = new Set([
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  LEAD: 'Lead',                      // Unified event for Messaging dataset (all levels)
+  LEAD_SUBMITTED: 'LeadSubmitted',  // Messaging dataset: lead event (with messaging_channel, page_id, phone)
+  LEAD: 'Lead',                      // Website/CRM dataset: lead event (with event_transaction_time)
   // Legacy (kept for backward compatibility with logs/DB)
   INTEREST: 'CompleteRegistration',  // Level 1: 3+ inbound messages
   QUALIFIED: level2Event,           // Level 2: Passed qualification
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
 
-export type CapiEventName = 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
+export type CapiEventName = 'LeadSubmitted' | 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
 export type CapiEventLevel = 1 | 2 | 3;
 const PURCHASE_CURRENCY = 'KZT';
 const PURCHASE_DEFAULT_VALUE = 1;
