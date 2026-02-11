@@ -285,7 +285,7 @@ export async function workflowStartCreativeTest(
       }
 
       if (defaultSettings?.pixel_id) {
-        const customEventType = getCustomEventType(direction.optimization_level);
+        const customEventType = getCustomEventType(direction.optimization_level, conversionChannel);
 
         if (conversionChannel === 'whatsapp') {
           destination_type = 'WHATSAPP';

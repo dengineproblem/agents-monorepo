@@ -469,7 +469,7 @@ export async function workflowCreateAdSetInDirection(
       );
     }
 
-    const customEventType = getCustomEventType(direction.optimization_level);
+    const customEventType = getCustomEventType(direction.optimization_level, conversionChannel);
 
     // destination_type зависит от conversion_channel
     if (conversionChannel === 'whatsapp') {

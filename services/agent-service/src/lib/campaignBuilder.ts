@@ -91,15 +91,25 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
 /**
  * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
  *
- * Соответствие уровней оптимизации и событий CAPI:
- * - level_1: COMPLETE_REGISTRATION (CompleteRegistration) — Интерес, 3+ сообщения от клиента
- * - level_2: ADD_TO_CART или SUBSCRIBE — Клиент квалифицирован
- * - level_3: PURCHASE (Purchase) — Клиент записался или совершил покупку
+ * Для Messaging dataset (WhatsApp): все уровни используют LEAD_SUBMITTED
+ * Для Website/legacy: level_1=COMPLETE_REGISTRATION, level_2=ADD_TO_CART/SUBSCRIBE, level_3=PURCHASE
  *
  * @param level - уровень оптимизации из направления (level_1, level_2, level_3)
+ * @param conversionChannel - канал конверсии (whatsapp, lead_form, site)
  * @returns custom_event_type для FB API promoted_object
  */
-export function getCustomEventType(level: string | undefined): string {
+export function getCustomEventType(level: string | undefined, conversionChannel?: string | null): string {
+  // Messaging dataset (WhatsApp) — единое событие LeadSubmitted на всех уровнях
+  if (conversionChannel === 'whatsapp') {
+    log.debug({
+      input_level: level,
+      conversionChannel,
+      custom_event_type: 'LEAD_SUBMITTED',
+    }, 'getCustomEventType: Messaging dataset → LEAD_SUBMITTED');
+    return 'LEAD_SUBMITTED';
+  }
+
+  // Legacy/Website — старый маппинг
   const level2EventRaw = (process.env.WHATSAPP_CONVERSIONS_LEVEL2_EVENT || process.env.META_CAPI_LEVEL2_EVENT || 'ADD_TO_CART')
     .trim()
     .toUpperCase();

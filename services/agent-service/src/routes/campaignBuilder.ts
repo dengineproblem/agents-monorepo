@@ -504,7 +504,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               }
 
               const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
-              const customEventType = getCustomEventType(direction.optimization_level);
+              const customEventType = getCustomEventType(direction.optimization_level, direction.conversion_channel);
 
               log.info({
                 directionId: direction.id,
@@ -967,7 +967,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           }
 
           const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || credentials.whatsappPhoneNumber || undefined;
-          const customEventType = getCustomEventType(direction.optimization_level);
+          const customEventType = getCustomEventType(direction.optimization_level, direction.conversion_channel);
 
           log.info({
             directionId: direction.id,
