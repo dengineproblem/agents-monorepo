@@ -250,9 +250,9 @@ const CAPI_EVENTS = {
 ### Миграция 203_capi_messaging_upgrade.sql
 
 **account_directions (Messaging dataset поля):**
-- `capi_access_token` (TEXT) - pixel-specific токен (из Events Manager), приоритет над ad_accounts.access_token
-- `capi_page_id` (TEXT) - override Page ID (по умолчанию берётся из ad_accounts.page_id)
+- `capi_access_token` (TEXT) - pixel-specific токен (из Events Manager), приоритет над ad_accounts/user_accounts.access_token
 - `capi_event_level` (INTEGER, 1-3, NULL) - на каком уровне воронки отправлять Lead event (NULL = все)
+- Page ID определяется автоматически по типу аккаунта: legacy → user_accounts.page_id, multi-account → ad_accounts.page_id
 
 **Формат JSONB для CRM-полей:**
 ```json

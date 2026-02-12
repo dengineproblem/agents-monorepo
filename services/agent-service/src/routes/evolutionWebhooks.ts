@@ -581,7 +581,8 @@ async function processAdLead(params: {
         whatsapp_phone_number_id: whatsappPhoneNumberId,
         user_account_id: userAccountId,
         account_id: accountId || null,  // UUID для мультиаккаунтности
-        ctwa_clid: ctwaClid || existingLead.ctwa_clid,  // ✅ НОВОЕ: сохраняем ctwa_clid (не перезаписываем если уже есть)
+        ctwa_clid: ctwaClid || existingLead.ctwa_clid,
+        created_at: timestamp,  // Обновляем дату при повторном рекламном клике
         updated_at: timestamp
       })
       .eq('id', existingLead.id);

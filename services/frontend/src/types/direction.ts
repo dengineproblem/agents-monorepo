@@ -59,7 +59,6 @@ export interface Direction {
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
   capi_access_token?: string | null;
-  capi_page_id?: string | null;
   capi_event_level?: number | null; // 1=Интерес, 2=Квалификация, 3=Запись
   // Conversions channel (whatsapp, lead_form, site)
   conversion_channel?: ConversionChannel | null;
@@ -101,7 +100,6 @@ export interface CreateDirectionPayload {
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
   capi_access_token?: string | null;
-  capi_page_id?: string | null;
   capi_event_level?: number | null;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;
@@ -150,7 +148,6 @@ export interface UpdateDirectionPayload {
   capi_qualified_fields?: CapiFieldConfig[];
   capi_scheduled_fields?: CapiFieldConfig[];
   capi_access_token?: string | null;
-  capi_page_id?: string | null;
   capi_event_level?: number | null;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;

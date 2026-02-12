@@ -350,7 +350,6 @@ export interface EditDirectionCapiSettings {
   capi_scheduled_fields: CapiFieldConfig[];
   pixel_id: string | null;
   capi_access_token?: string | null;
-  capi_page_id?: string | null;
   capi_event_level?: number | null;
 }
 
@@ -439,7 +438,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [capiQualifiedStages, setCapiQualifiedStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiScheduledStages, setCapiScheduledStages] = useState<SelectedCapiStage[]>([{ stageKey: null }]);
   const [capiAccessToken, setCapiAccessToken] = useState('');
-  const [capiPageId, setCapiPageId] = useState('');
   const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
   const [isLoadingCrms, setIsLoadingCrms] = useState(false);
   const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
@@ -739,7 +737,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     const initialCrmType: CrmType = direction.capi_crm_type || 'amocrm';
     setCapiCrmType(initialCrmType);
     setCapiAccessToken(direction.capi_access_token || '');
-    setCapiPageId(direction.capi_page_id || '');
 
     const interestParsed = parseLevelConfig(direction.capi_interest_fields, initialCrmType);
     const qualifiedParsed = parseLevelConfig(direction.capi_qualified_fields, initialCrmType);
@@ -1127,7 +1124,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 capi_scheduled_fields: isCrmCapiActive ? scheduledConfig : [],
                 pixel_id: capiEnabled ? capiPixelId || null : null,
                 capi_access_token: capiAccessToken.trim() || null,
-                capi_page_id: capiPageId.trim() || null,
                 capi_event_level: null,
               },
             }),

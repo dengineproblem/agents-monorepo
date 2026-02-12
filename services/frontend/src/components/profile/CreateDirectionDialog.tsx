@@ -392,7 +392,6 @@ export interface DirectionCapiSettings {
   capi_qualified_fields: CapiFieldConfig[];
   capi_scheduled_fields: CapiFieldConfig[];
   capi_access_token?: string | null;
-  capi_page_id?: string | null;
   capi_event_level?: number | null;
 }
 
@@ -518,7 +517,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
   // CAPI Messaging dataset fields
   const [capiAccessToken, setCapiAccessToken] = useState('');
-  const [capiPageId, setCapiPageId] = useState('');
 
 
   // Connected CRMs
@@ -1089,7 +1087,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         capi_qualified_fields: capiSource === 'crm' ? qualifiedConfig : [],
         capi_scheduled_fields: capiSource === 'crm' ? scheduledConfig : [],
         capi_access_token: capiAccessToken.trim() || null,
-        capi_page_id: capiPageId.trim() || null,
         capi_event_level: null,
       } : undefined;
 
@@ -1179,7 +1176,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setCapiSource('whatsapp');
     setCapiCrmType('amocrm');
     setCapiAccessToken('');
-    setCapiPageId('');
 
     setCapiInterestMode('fields');
     setCapiQualifiedMode('fields');

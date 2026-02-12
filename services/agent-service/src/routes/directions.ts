@@ -136,7 +136,6 @@ const CreateDirectionSchema = z.object({
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_access_token: z.string().nullable().optional(),
-  capi_page_id: z.string().nullable().optional(),
   capi_event_level: z.number().int().min(1).max(3).nullable().optional(),
 }).superRefine((data, ctx) => {
   const platform = data.platform || 'facebook';
@@ -230,7 +229,6 @@ const UpdateDirectionSchema = z.object({
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_access_token: z.string().nullable().optional(),
-  capi_page_id: z.string().nullable().optional(),
   capi_event_level: z.number().int().min(1).max(3).nullable().optional(),
   // Conversions optimization level
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
@@ -1321,7 +1319,6 @@ export async function directionsRoutes(app: FastifyInstance) {
               capi_qualified_fields: input.capi_qualified_fields || [],
               capi_scheduled_fields: input.capi_scheduled_fields || [],
               capi_access_token: input.capi_access_token || null,
-              capi_page_id: input.capi_page_id || null,
               capi_event_level: input.capi_event_level ?? null,
               // Conversions optimization level
               optimization_level: input.optimization_level || 'level_1',
@@ -1396,7 +1393,6 @@ export async function directionsRoutes(app: FastifyInstance) {
               capi_qualified_fields: [],
               capi_scheduled_fields: [],
               capi_access_token: null,
-              capi_page_id: null,
               capi_event_level: null,
               optimization_level: 'level_1',
             })

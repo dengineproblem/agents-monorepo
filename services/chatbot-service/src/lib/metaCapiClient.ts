@@ -884,11 +884,10 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
         account_id,
         optimization_level,
         capi_access_token,
-        capi_page_id,
         capi_event_level,
         default_ad_settings(pixel_id),
         ad_accounts(access_token, page_id),
-        user_accounts(access_token, page_id)
+        user_accounts(access_token, page_id, multi_account_enabled)
       `)
       .eq('id', directionId)
       .single();
@@ -915,24 +914,27 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
-    // Get access token: prefer capi_access_token (pixel-specific), then ad_accounts, then user_accounts
+    // Determine account type and get access_token + page_id from the correct table
     const adAccount = direction.ad_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
-    const userAccount = direction.user_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
+    const userAccount = direction.user_accounts as { access_token?: string; page_id?: string; multi_account_enabled?: boolean } | { access_token?: string; page_id?: string; multi_account_enabled?: boolean }[] | null;
 
+    const userAccountData = Array.isArray(userAccount) ? userAccount[0] : userAccount;
+    const adAccountData = Array.isArray(adAccount) ? adAccount[0] : adAccount;
+    const isMultiAccount = userAccountData?.multi_account_enabled === true;
+
+    // Access token: prefer capi_access_token (pixel-specific), then resolve by account type
     const accessToken = (direction as Record<string, unknown>).capi_access_token as string
-      || (Array.isArray(adAccount) ? adAccount[0]?.access_token : adAccount?.access_token)
-      || (Array.isArray(userAccount) ? userAccount[0]?.access_token : userAccount?.access_token)
+      || (isMultiAccount ? adAccountData?.access_token : userAccountData?.access_token)
       || null;
 
     if (!accessToken) {
       log.warn({ directionId, pixelId }, 'Found pixel but no access_token');
     }
 
-    // Page ID for Messaging dataset: prefer capi_page_id (override), then ad_accounts.page_id, then user_accounts.page_id
-    const pageId = ((direction as Record<string, unknown>).capi_page_id as string)
-      || (Array.isArray(adAccount) ? adAccount[0]?.page_id : adAccount?.page_id)
-      || (Array.isArray(userAccount) ? userAccount[0]?.page_id : userAccount?.page_id)
-      || null;
+    // Page ID: resolve by account type (legacy → user_accounts, multi-account → ad_accounts)
+    const pageId = isMultiAccount
+      ? (adAccountData?.page_id || null)
+      : (userAccountData?.page_id || null);
 
     // Event level: derive from optimization_level (level_1→1, level_2→2, level_3→3)
     // capi_event_level overrides if explicitly set (legacy/admin use)
