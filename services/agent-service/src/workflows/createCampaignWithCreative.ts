@@ -29,6 +29,7 @@ type CreateCampaignContext = {
   user_account_id: string;
   ad_account_id: string;
   whatsapp_phone_number?: string; // Номер WhatsApp из Supabase (если есть)
+  account_id?: string; // UUID из ad_accounts.id для мультиаккаунтности
 };
 
 // Helpers from campaignDuplicate
@@ -329,15 +330,17 @@ export async function workflowCreateCampaignWithCreative(
       throw new Error('Conversions requires pixel_id in default settings');
     }
 
-    // FB API promoted_object принимает только стандартные события (LEAD, COMPLETE_REGISTRATION и т.д.)
-    // Примечание: CAPI event_name = 'LeadSubmitted', но custom_event_type в ad set = 'LEAD'
-    const eventType = 'LEAD';
+    // WhatsApp: LeadSubmitted — кастомное messaging событие, нужен OTHER + custom_event_str
+    // Остальные каналы: стандартный LEAD
+    const isWhatsApp = channel === 'whatsapp';
+    const eventType = isWhatsApp ? 'OTHER' : 'LEAD';
 
-    if (channel === 'whatsapp' && page_id) {
+    if (isWhatsApp && page_id) {
       adsetBody.destination_type = 'WHATSAPP';
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
         custom_event_type: eventType,
+        custom_event_str: 'LeadSubmitted',
         page_id: String(page_id),
         ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
       };
@@ -360,7 +363,8 @@ export async function workflowCreateCampaignWithCreative(
         adsetBody.destination_type = 'WHATSAPP';
         adsetBody.promoted_object = {
           pixel_id: String(pixelId),
-          custom_event_type: eventType,
+          custom_event_type: 'OTHER',
+          custom_event_str: 'LeadSubmitted',
           page_id: String(page_id),
           ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
         };
@@ -529,7 +533,7 @@ export async function workflowCreateCampaignWithCreative(
       user_creative_id: ad.user_creative_id,
       direction_id: null, // В этом workflow нет direction
       user_id: context.user_account_id,
-      account_id: null, // Legacy workflow без мультиаккаунтности
+      account_id: context.account_id || null,
       adset_id: String(adset_id),
       campaign_id: String(campaign_id),
       fb_creative_id: ad.fb_creative_id,

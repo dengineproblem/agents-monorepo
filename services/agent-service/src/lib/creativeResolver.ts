@@ -69,25 +69,47 @@ export async function resolveCreativeAndDirection(
 }> {
 
   // PRIMARY LOOKUP: Find in ad_creative_mapping by ad_id
-  let mappingQuery = supabase
-    .from('ad_creative_mapping')
-    .select(`
+  // ad_id has UNIQUE constraint, so at most one row exists
+  const mappingSelect = `
       user_creative_id,
       direction_id,
       account_directions(whatsapp_phone_number_id)
-    `)
+    `;
+
+  let mappingQuery = supabase
+    .from('ad_creative_mapping')
+    .select(mappingSelect)
     .eq('ad_id', sourceId)
     .eq('user_id', userAccountId);
 
   // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
-  if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
+  const useAccountFilter = await shouldFilterByAccountId(supabase, userAccountId, accountId);
+  if (useAccountFilter) {
     mappingQuery = mappingQuery.eq('account_id', accountId);
   }
 
-  const { data: adMapping, error: mappingError } = await mappingQuery.maybeSingle();
+  let { data: adMapping, error: mappingError } = await mappingQuery.maybeSingle();
 
   if (mappingError) {
     app.log.error({ error: mappingError.message, sourceId }, 'Error looking up ad_creative_mapping');
+  }
+
+  // Fallback: маппинг мог быть создан с account_id=NULL — ищем без фильтра по account_id
+  if (!adMapping && !mappingError && useAccountFilter) {
+    const fallback = await supabase
+      .from('ad_creative_mapping')
+      .select(mappingSelect)
+      .eq('ad_id', sourceId)
+      .eq('user_id', userAccountId)
+      .is('account_id', null)
+      .maybeSingle();
+
+    if (fallback.error) {
+      app.log.error({ error: fallback.error.message, sourceId }, 'Error in ad_creative_mapping fallback lookup');
+    } else if (fallback.data) {
+      adMapping = fallback.data;
+      app.log.info({ sourceId, accountId }, 'Found creative via ad_creative_mapping fallback (mapping has account_id=NULL)');
+    }
   }
 
   if (adMapping) {

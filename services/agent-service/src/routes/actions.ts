@@ -444,12 +444,13 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         {
           user_account_id: ctx.userAccountId,
           ad_account_id: ctx.adAccountId,
-          whatsapp_phone_number
+          whatsapp_phone_number,
+          account_id: ctx.accountId, // UUID из ad_accounts для multi-account
         },
         token
       );
     }
-    
+
     case 'StartCreativeTest': {
       const p = (action as any).params as {
         user_creative_id: string;
