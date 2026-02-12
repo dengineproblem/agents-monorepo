@@ -1423,8 +1423,8 @@ const Profile: React.FC = () => {
                   </CardContent>
                 </Card>
 
-              {/* API ключи — shared на уровне user_accounts */}
-              <Card>
+              {/* API ключи — только для мультиаккаунтов */}
+              {multiAccountEnabled && <Card>
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Key className="h-5 w-5" />
@@ -1461,7 +1461,7 @@ const Profile: React.FC = () => {
                     ))}
                   </div>
                 </CardContent>
-              </Card>
+              </Card>}
 
               {/* Ad Accounts Manager - только для мультиаккаунтности */}
               {multiAccountEnabled && <AdAccountsManager />}

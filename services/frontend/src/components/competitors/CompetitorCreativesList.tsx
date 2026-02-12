@@ -207,17 +207,7 @@ export function CompetitorCreativesList({
                     </div>
                   )}
 
-                  {/* Score badge */}
-                  {creative.score !== undefined && (
-                    <div className="flex-shrink-0">
-                      <Badge
-                        variant="outline"
-                        className={cn('text-xs font-bold', scoreColorClasses[scoreCategory.color])}
-                      >
-                        {scoreCategory.emoji} {creative.score}
-                      </Badge>
-                    </div>
-                  )}
+                  {/* Score badge — скрыт из интерфейса */}
                 </div>
 
                 {/* Дата */}
