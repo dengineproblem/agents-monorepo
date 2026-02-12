@@ -43,6 +43,7 @@ import {
   getBitrix24Status,
   getBitrix24Pipelines,
   getBitrix24LeadCustomFields,
+  getBitrix24DealCustomFields,
   type CustomField as Bitrix24CustomField,
   type Bitrix24Pipelines,
 } from '@/services/bitrix24Api';
@@ -728,10 +729,14 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           const response = await getAmocrmFields(userAccountId);
           setCrmFields(response.fields || []);
         } else if (capiCrmType === 'bitrix24') {
-          // Load lead or deal fields based on entity type preference
-          // For now, load lead fields
-          const response = await getBitrix24LeadCustomFields(userAccountId);
-          setCrmFields(response.fields || []);
+          // Load both lead and deal fields, tag each with entity_type
+          const [leadResp, dealResp] = await Promise.all([
+            getBitrix24LeadCustomFields(userAccountId).catch(() => ({ fields: [] })),
+            getBitrix24DealCustomFields(userAccountId).catch(() => ({ fields: [] })),
+          ]);
+          const leadFields = (leadResp.fields || []).map((f) => ({ ...f, _entityType: 'lead' as const }));
+          const dealFields = (dealResp.fields || []).map((f) => ({ ...f, _entityType: 'deal' as const }));
+          setCrmFields([...leadFields, ...dealFields]);
         }
       } catch (err) {
         console.error('Failed to load CRM fields:', err);
@@ -1275,7 +1280,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           field_type: getFieldType(field),
           enum_id: sf.enumId,
           enum_value: enumValue,
-          ...(capiCrmType === 'bitrix24' && { entity_type: 'lead' }),
+          ...(capiCrmType === 'bitrix24' && {
+            entity_type: (field as any)._entityType || 'lead',
+          }),
         };
       })
       .filter(Boolean) as CapiFieldConfig[];
@@ -2712,12 +2719,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     )}
                   </div>
 
-                  {/* Messaging dataset: Access Token, Page ID, Event Level */}
+                  {/* CAPI Access Token */}
                   {pixelId && (
                     <div className="space-y-3">
                       <div className="space-y-2">
                         <div className="flex items-center gap-1.5">
-                          <Label>Токен доступа пикселя</Label>
+                          <Label>Токен доступа набора данных (CAPI)</Label>
                         </div>
                         <Input
                           type="password"
@@ -2727,7 +2734,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                           disabled={isSubmitting}
                         />
                         <p className="text-xs text-muted-foreground">
-                          Сгенерируйте в Events Manager при создании Messaging пикселя. Если не указан — используется токен аккаунта.
+                          Сгенерируйте в Events Manager → Настройки набора данных → Маркер доступа. Если не указан — используется токен аккаунта.
                         </p>
                       </div>
 

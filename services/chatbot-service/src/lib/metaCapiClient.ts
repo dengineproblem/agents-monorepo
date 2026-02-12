@@ -127,6 +127,7 @@ export interface CapiEventParams {
   email?: string;        // Will be hashed
   ctwaClid?: string;     // Click-to-WhatsApp Click ID (in user_data for Messaging dataset)
   pageId?: string;       // Facebook Page ID (in user_data for Messaging dataset)
+  leadgenId?: string;    // Meta's lead form ID (15-17 digits, highest priority for CRM matching)
 
   // Context
   dialogAnalysisId?: string;
@@ -413,7 +414,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     }, 'Generated deterministic CAPI event_id');
 
     // Build user_data object
-    const userData: Record<string, string | string[]> = {};
+    const userData: Record<string, string | string[] | number> = {};
 
     if (phone) {
       userData.ph = [hashPhone(phone)];
@@ -425,6 +426,15 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
 
     if (leadId) {
       userData.external_id = String(leadId);
+    }
+
+    // Meta's lead form ID (highest priority for CRM dataset matching per Meta docs)
+    // Must be a number per Meta's payload spec
+    if (params.leadgenId) {
+      const numericLeadId = Number(params.leadgenId);
+      if (Number.isFinite(numericLeadId)) {
+        userData.lead_id = numericLeadId;
+      }
     }
 
     // Messaging dataset: ctwa_clid in user_data (NOT top-level)

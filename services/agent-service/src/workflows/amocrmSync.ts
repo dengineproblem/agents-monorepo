@@ -178,7 +178,7 @@ async function syncDirectionCrmCapiForAmoLead(params: {
   const { userAccountId, lead, amocrmLeadId, app, preparedAmoLead } = params;
 
   if (!lead?.direction_id) {
-    app.log.debug({
+    app.log.warn({
       userAccountId,
       leadId: lead?.id || null,
       amocrmLeadId
@@ -188,7 +188,7 @@ async function syncDirectionCrmCapiForAmoLead(params: {
 
   const capiSettings = await getDirectionCapiSettings(lead.direction_id);
   if (!capiSettings) {
-    app.log.debug({
+    app.log.warn({
       userAccountId,
       leadId: lead.id,
       directionId: lead.direction_id

@@ -379,7 +379,7 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     const { data: directionSettings, error: directionError } = await supabase
       .from('account_directions')
-      .select('id, capi_enabled, capi_source, capi_crm_type')
+      .select('id, capi_enabled, capi_source, capi_crm_type, conversion_channel')
       .eq('id', directionId)
       .eq('user_account_id', userAccountId)
       .maybeSingle();
@@ -427,13 +427,18 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     const { pageId: directionPageId, capiEventLevel } = pixelInfo;
 
+    // Choose event name based on conversion channel:
+    // WhatsApp → LeadSubmitted (Messaging dataset), lead_form/site → Lead (Website dataset)
+    const isMessagingDataset = directionSettings.conversion_channel === 'whatsapp';
+    const channelEventName = isMessagingDataset ? CAPI_EVENTS.LEAD_SUBMITTED : CAPI_EVENTS.LEAD;
+
     const phoneCandidates = buildPhoneCandidates(contactPhone);
     const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
 
-    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; ctwa_clid?: string | null } | null = null;
+    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; email?: string | null; ctwa_clid?: string | null; leadgen_id?: string | null } | null = null;
     const { data: leadByChat } = await supabase
       .from('leads')
-      .select('id, chat_id, phone, ctwa_clid')
+      .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
       .eq('user_account_id', userAccountId)
       .eq('direction_id', directionId)
       .in('chat_id', phoneCandidates)
@@ -446,7 +451,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord) {
       const { data: leadByPhone } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, ctwa_clid')
+        .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .in('phone', phoneCandidates)
@@ -459,7 +464,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord && digitsCandidate) {
       const { data: leadByLike } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, ctwa_clid')
+        .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .ilike('chat_id', `%${digitsCandidate}%`)
@@ -500,6 +505,8 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     const ctwaClid = dialogRecord?.ctwa_clid || leadRecord?.ctwa_clid || undefined;
     const leadId = leadRecord?.id ? String(leadRecord.id) : undefined;
+    const leadgenId = leadRecord?.leadgen_id || undefined; // Meta's lead form ID (15-17 digits)
+    const leadEmail = leadRecord?.email || undefined;
     const dialogAnalysisId = dialogRecord?.id;
 
     const results: Array<{
@@ -516,7 +523,7 @@ app.post('/capi/crm-event', async (request, reply) => {
       if (capiEventLevel !== null && capiEventLevel !== requestedLevel.level) {
         results.push({
           level: requestedLevel.level,
-          eventName: CAPI_EVENTS.LEAD_SUBMITTED,
+          eventName: channelEventName,
           success: false,
           alreadySent: false,
           error: `Level ${requestedLevel.level} filtered by capi_event_level=${capiEventLevel}`
@@ -524,7 +531,46 @@ app.post('/capi/crm-event', async (request, reply) => {
         continue;
       }
 
-      const eventName = CAPI_EVENTS.LEAD_SUBMITTED;
+      const eventName = channelEventName;
+
+      // Deduplication fallback: when no dialogAnalysisId (e.g. lead_form leads without WhatsApp dialog),
+      // sendCapiEventAtomic falls back to non-atomic send. Check capi_events_log to prevent duplicates.
+      if (!dialogAnalysisId && leadId) {
+        const { data: existingEvent } = await supabase
+          .from('capi_events_log')
+          .select('id')
+          .eq('lead_id', leadId)
+          .eq('event_level', requestedLevel.level)
+          .eq('direction_id', directionId)
+          .eq('capi_status', 'success')
+          .limit(1)
+          .maybeSingle();
+
+        if (existingEvent) {
+          results.push({
+            level: requestedLevel.level,
+            eventName,
+            success: false,
+            alreadySent: true,
+            error: 'Already sent (dedup via capi_events_log)'
+          });
+          continue;
+        }
+      }
+
+      // For CRM dataset: pass Meta's leadgen_id and CRM-specific fields per Meta docs
+      const crmCustomData: Record<string, unknown> = {
+        channel: 'crm',
+        crm_source: crmType,
+        level: requestedLevel.key,
+        conversion_channel: directionSettings.conversion_channel || undefined,
+      };
+
+      // Meta CRM integration requires event_source='crm' and lead_event_source in custom_data
+      if (!isMessagingDataset) {
+        crmCustomData.event_source = 'crm';
+        crmCustomData.lead_event_source = crmType === 'amocrm' ? 'AmoCRM' : 'Bitrix24';
+      }
 
       const response = await sendCapiEventAtomic({
         pixelId: pixelInfo.pixelId,
@@ -532,17 +578,17 @@ app.post('/capi/crm-event', async (request, reply) => {
         eventName,
         eventLevel: requestedLevel.level,
         phone: resolvedPhone,
-        ctwaClid,
-        pageId: directionPageId || undefined,
+        email: leadEmail,
+        // Messaging dataset fields only for WhatsApp channel
+        ctwaClid: isMessagingDataset ? ctwaClid : undefined,
+        pageId: isMessagingDataset ? (directionPageId || undefined) : undefined,
+        // Meta's lead form ID for matching (highest priority per Meta docs)
+        leadgenId: leadgenId || undefined,
         dialogAnalysisId,
         leadId,
         userAccountId,
         directionId,
-        customData: {
-          channel: 'crm',
-          crm_source: crmType,
-          level: requestedLevel.key
-        },
+        customData: crmCustomData,
         correlationId
       });
 

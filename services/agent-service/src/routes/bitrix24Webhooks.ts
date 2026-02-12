@@ -264,7 +264,8 @@ async function handleLeadEvent(
         app,
         userAccountId,
         localLead,
-        entity: bitrixLead
+        entity: bitrixLead,
+        entityType: 'lead'
       });
     } catch (crmCapiError: any) {
       app.log.error({
@@ -369,7 +370,8 @@ async function handleDealEvent(
         app,
         userAccountId,
         localLead,
-        entity: bitrixDeal
+        entity: bitrixDeal,
+        entityType: 'deal'
       });
     } catch (crmCapiError: any) {
       app.log.error({
@@ -489,23 +491,26 @@ async function syncDirectionCrmCapiForBitrixEntity(params: {
   userAccountId: string;
   localLead: any;
   entity: any;
+  entityType: 'lead' | 'deal';
 }): Promise<void> {
-  const { app, userAccountId, localLead, entity } = params;
+  const { app, userAccountId, localLead, entity, entityType } = params;
 
   if (!localLead?.direction_id) {
-    app.log.debug({
+    app.log.warn({
       userAccountId,
-      leadId: localLead?.id || null
+      leadId: localLead?.id || null,
+      entityType
     }, 'CRM CAPI: skip Bitrix sync (lead has no direction_id)');
     return;
   }
 
   const capiSettings = await getDirectionCapiSettings(localLead.direction_id);
   if (!capiSettings) {
-    app.log.debug({
+    app.log.warn({
       userAccountId,
       leadId: localLead.id,
-      directionId: localLead.direction_id
+      directionId: localLead.direction_id,
+      entityType
     }, 'CRM CAPI: skip Bitrix sync (direction settings not found)');
     return;
   }
@@ -520,7 +525,24 @@ async function syncDirectionCrmCapiForBitrixEntity(params: {
     return;
   }
 
-  const evaluation = evaluateBitrixCapiLevelsWithDiagnostics(entity, capiSettings);
+  // Filter CAPI field configs to only match configs for the current entity type.
+  // E.g. when processing a deal webhook, skip configs meant for leads and vice versa.
+  const filterByEntityType = (fields: typeof capiSettings.interestFields) =>
+    fields.filter((config) => {
+      const configEntityType = String(config.entity_type || '').trim().toLowerCase();
+      // If config has no entity_type, allow it (backward compat)
+      if (!configEntityType) return true;
+      return configEntityType === entityType;
+    });
+
+  const filteredSettings = {
+    ...capiSettings,
+    interestFields: filterByEntityType(capiSettings.interestFields),
+    qualifiedFields: filterByEntityType(capiSettings.qualifiedFields),
+    scheduledFields: filterByEntityType(capiSettings.scheduledFields),
+  };
+
+  const evaluation = evaluateBitrixCapiLevelsWithDiagnostics(entity, filteredSettings);
   const matches = evaluation.levels;
   const hasAnyMatch = matches.interest || matches.qualified || matches.scheduled;
 
@@ -528,6 +550,7 @@ async function syncDirectionCrmCapiForBitrixEntity(params: {
     userAccountId,
     leadId: localLead.id,
     directionId: localLead.direction_id,
+    entityType,
     bitrixEntityId: entity?.ID || null,
     bitrixEntityStatus: entity?.STATUS_ID || entity?.STAGE_ID || null,
     matches,
