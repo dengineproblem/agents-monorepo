@@ -152,11 +152,19 @@ export const aiBotApi = {
   /**
    * Get all WhatsApp instances for a user
    */
-  async getWhatsAppInstances(userId: string): Promise<{
+  async getWhatsAppInstances(
+    userId: string,
+    options?: { includeWaba?: boolean }
+  ): Promise<{
     success: boolean;
     instances: WhatsAppInstance[];
   }> {
-    const response = await fetch(`${API_BASE_URL}/whatsapp-instances?userId=${userId}`);
+    const params = new URLSearchParams({ userId });
+    if (options?.includeWaba) {
+      params.set('includeWaba', 'true');
+    }
+
+    const response = await fetch(`${API_BASE_URL}/whatsapp-instances?${params.toString()}`);
     if (!response.ok) throw new Error('Failed to fetch instances');
     return response.json();
   },
@@ -196,6 +204,7 @@ export interface WhatsAppInstance {
   instanceName: string;
   phoneNumber: string | null;
   status: string;
+  connectionType?: 'evolution' | 'waba';
   aiBotId: string | null;
   createdAt: string;
   linkedBot: {

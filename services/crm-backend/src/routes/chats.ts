@@ -58,7 +58,10 @@ interface ChatMessage {
   fromMe: boolean;
   pushName: string | null;
   messageType: string;
+  debug?: any;
 }
+
+type ChannelType = 'evolution' | 'waba';
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -130,6 +133,213 @@ function getMessageType(messageData: any): string {
   return 'unknown';
 }
 
+function normalizePhoneVariants(rawPhone: string): string[] {
+  const digits = rawPhone.replace(/\D/g, '');
+  const withPlus = `+${digits}`;
+  return [digits, withPlus];
+}
+
+function resolveRemoteJidFromPhone(rawPhone: string): string {
+  const digits = rawPhone.replace(/\D/g, '');
+  return `${digits}@s.whatsapp.net`;
+}
+
+function parseTimestampToUnix(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+  if (typeof value === 'string') {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) {
+      return Math.floor(parsed / 1000);
+    }
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
+function normalizeDialogMessages(rawMessages: unknown[]): ChatMessage[] {
+  return rawMessages
+    .map((msg: any, index: number) => {
+      const content = typeof msg?.content === 'string'
+        ? msg.content
+        : (typeof msg?.text === 'string' ? msg.text : null);
+
+      const sender = typeof msg?.sender === 'string' ? msg.sender.toLowerCase() : null;
+      const fromMe = typeof msg?.from_me === 'boolean'
+        ? msg.from_me
+        : (sender === 'bot' || sender === 'assistant' || msg?.sent_by_consultant === true);
+
+      const timestamp = parseTimestampToUnix(msg?.timestamp);
+      const id = typeof msg?.id === 'string' && msg.id.trim().length > 0
+        ? msg.id
+        : `da_${timestamp}_${index}`;
+      const messageType = typeof msg?.messageType === 'string' ? msg.messageType : 'text';
+
+      return {
+        id,
+        text: content,
+        timestamp,
+        fromMe,
+        pushName: fromMe ? null : (typeof msg?.push_name === 'string' ? msg.push_name : null),
+        messageType,
+        debug: msg?.debug || undefined
+      } as ChatMessage;
+    })
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function paginateMessages(
+  messages: ChatMessage[],
+  limit: number,
+  offset: number
+): { page: ChatMessage[]; hasMore: boolean } {
+  const total = messages.length;
+  const end = Math.max(total - offset, 0);
+  const start = Math.max(end - limit, 0);
+  return {
+    page: messages.slice(start, end),
+    hasMore: start > 0
+  };
+}
+
+async function resolveChannelType(instanceName: string): Promise<ChannelType> {
+  const normalizedInstance = instanceName.trim();
+  if (!normalizedInstance) return 'evolution';
+
+  const { data: byInstance } = await supabase
+    .from('whatsapp_phone_numbers')
+    .select('connection_type')
+    .eq('instance_name', normalizedInstance)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (byInstance?.connection_type === 'waba') {
+    return 'waba';
+  }
+
+  if (normalizedInstance.startsWith('waba_')) {
+    const wabaPhoneId = normalizedInstance.slice('waba_'.length);
+    if (wabaPhoneId) {
+      const { data: byPhoneId } = await supabase
+        .from('whatsapp_phone_numbers')
+        .select('connection_type')
+        .eq('waba_phone_id', wabaPhoneId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (byPhoneId?.connection_type === 'waba') {
+        return 'waba';
+      }
+    }
+
+    // Safety fallback: synthetic waba_* names are considered WABA even if mapping is missing.
+    return 'waba';
+  }
+
+  return 'evolution';
+}
+
+async function appendOutgoingToDialogHistory(
+  instanceName: string,
+  phone: string,
+  text: string,
+  app: FastifyInstance
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const phoneVariants = normalizePhoneVariants(phone);
+
+  const { data: existing } = await supabase
+    .from('dialog_analysis')
+    .select('id, user_account_id, account_id, messages, outgoing_count')
+    .eq('instance_name', instanceName)
+    .in('contact_phone', phoneVariants)
+    .maybeSingle();
+
+  const outgoingMessage = {
+    text,
+    timestamp: nowIso,
+    from_me: true,
+    is_system: false,
+    sent_by_consultant: true,
+    consultant_id: null
+  };
+
+  if (existing) {
+    const currentMessages = Array.isArray(existing.messages) ? existing.messages : [];
+    const nextMessages = [...currentMessages, outgoingMessage].slice(-100);
+
+    const { error: updateError } = await supabase
+      .from('dialog_analysis')
+      .update({
+        messages: nextMessages,
+        last_message: nowIso,
+        outgoing_count: (existing.outgoing_count || 0) + 1,
+        assigned_to_human: true,
+        last_consultant_message_at: nowIso,
+        has_unread: false,
+        updated_at: nowIso
+      })
+      .eq('id', existing.id);
+
+    if (updateError) {
+      app.log.warn({
+        instanceName,
+        phone,
+        leadId: existing.id,
+        error: updateError.message
+      }, '[Chats] Failed to append outgoing message to existing dialog');
+    }
+
+    return;
+  }
+
+  const { data: instanceData } = await supabase
+    .from('whatsapp_instances')
+    .select('user_account_id, account_id')
+    .eq('instance_name', instanceName)
+    .maybeSingle();
+
+  if (!instanceData?.user_account_id) {
+    app.log.warn({
+      instanceName,
+      phone
+    }, '[Chats] Cannot create dialog history record without whatsapp_instances row');
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from('dialog_analysis')
+    .insert({
+      user_account_id: instanceData.user_account_id,
+      account_id: instanceData.account_id || null,
+      instance_name: instanceName,
+      contact_phone: phoneVariants[1],
+      contact_name: null,
+      first_message: nowIso,
+      last_message: nowIso,
+      messages: [outgoingMessage],
+      outgoing_count: 1,
+      incoming_count: 0,
+      assigned_to_human: true,
+      last_consultant_message_at: nowIso,
+      has_unread: false,
+      funnel_stage: 'new_lead',
+      analyzed_at: nowIso
+    });
+
+  if (insertError) {
+    app.log.warn({
+      instanceName,
+      phone,
+      error: insertError.message
+    }, '[Chats] Failed to create dialog history record for outgoing message');
+  }
+}
+
 // ==================== ROUTES ====================
 
 export async function chatsRoutes(app: FastifyInstance) {
@@ -165,92 +375,130 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
 
       const { instanceName } = validationResult.data;
+      const channelType = await resolveChannelType(instanceName);
 
       app.log.debug({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         tags: ['db']
-      }, '[GET /chats] Querying Evolution DB for chats');
+      }, '[GET /chats] Loading chats by channel type');
 
-      // Get all messages grouped by contact with latest message info
-      // IMPORTANT: Use remoteJidAlt for LID messages (@lid) to group with real phone
-      const query = `
-        WITH instance_data AS (
-          SELECT id FROM "Instance" WHERE name = $1
-        ),
-        chat_summary AS (
-          SELECT
-            -- If remoteJid ends with @lid, use remoteJidAlt (real phone), otherwise use remoteJid
-            CASE
-              WHEN "key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
-              ELSE "key"->>'remoteJid'
-            END as remote_jid,
-            MAX("pushName") as contact_name,
-            MAX("messageTimestamp") as last_message_time,
-            COUNT(*) as message_count
-          FROM "Message"
-          WHERE "instanceId" IN (SELECT id FROM instance_data)
-            AND "key"->>'remoteJid' NOT LIKE '%@g.us'
-            AND "key"->>'remoteJid' NOT LIKE '%@broadcast'
-            AND "key"->>'remoteJid' NOT LIKE 'status@%'
-          GROUP BY CASE
-              WHEN "key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
-              ELSE "key"->>'remoteJid'
-            END
-          ORDER BY last_message_time DESC
-          LIMIT 100
-        ),
-        latest_messages AS (
-          SELECT DISTINCT ON (
-            CASE
-              WHEN m."key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
-              ELSE m."key"->>'remoteJid'
-            END
+      let chats: ChatListItem[] = [];
+
+      if (channelType === 'waba') {
+        const { data: dialogs, error: dialogsError } = await supabase
+          .from('dialog_analysis')
+          .select('contact_phone, contact_name, last_message, messages, has_unread')
+          .eq('instance_name', instanceName)
+          .order('last_message', { ascending: false })
+          .limit(100);
+
+        if (dialogsError) {
+          throw dialogsError;
+        }
+
+        chats = (dialogs || [])
+          .filter((dialog: any) => typeof dialog.contact_phone === 'string' && dialog.contact_phone.trim().length > 0)
+          .map((dialog: any) => {
+            const normalizedMessages = Array.isArray(dialog.messages)
+              ? normalizeDialogMessages(dialog.messages)
+              : [];
+            const lastMessage = normalizedMessages.length > 0
+              ? normalizedMessages[normalizedMessages.length - 1]
+              : null;
+
+            return {
+              remoteJid: resolveRemoteJidFromPhone(dialog.contact_phone),
+              contactName: dialog.contact_name || null,
+              lastMessage: lastMessage?.text || null,
+              lastMessageTime: lastMessage?.timestamp || parseTimestampToUnix(dialog.last_message),
+              unreadCount: dialog.has_unread ? 1 : 0,
+              isFromMe: lastMessage?.fromMe || false
+            };
+          });
+      } else {
+        // Get all messages grouped by contact with latest message info
+        // IMPORTANT: Use remoteJidAlt for LID messages (@lid) to group with real phone
+        const query = `
+          WITH instance_data AS (
+            SELECT id FROM "Instance" WHERE name = $1
+          ),
+          chat_summary AS (
+            SELECT
+              -- If remoteJid ends with @lid, use remoteJidAlt (real phone), otherwise use remoteJid
+              CASE
+                WHEN "key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+                ELSE "key"->>'remoteJid'
+              END as remote_jid,
+              MAX("pushName") as contact_name,
+              MAX("messageTimestamp") as last_message_time,
+              COUNT(*) as message_count
+            FROM "Message"
+            WHERE "instanceId" IN (SELECT id FROM instance_data)
+              AND "key"->>'remoteJid' NOT LIKE '%@g.us'
+              AND "key"->>'remoteJid' NOT LIKE '%@broadcast'
+              AND "key"->>'remoteJid' NOT LIKE 'status@%'
+            GROUP BY CASE
+                WHEN "key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+                ELSE "key"->>'remoteJid'
+              END
+            ORDER BY last_message_time DESC
+            LIMIT 100
+          ),
+          latest_messages AS (
+            SELECT DISTINCT ON (
+              CASE
+                WHEN m."key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+                ELSE m."key"->>'remoteJid'
+              END
+            )
+              CASE
+                WHEN m."key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+                ELSE m."key"->>'remoteJid'
+              END as remote_jid,
+              m."message" as message_data,
+              m."key"->>'fromMe' as from_me
+            FROM "Message" m
+            WHERE m."instanceId" IN (SELECT id FROM instance_data)
+            ORDER BY CASE
+                WHEN m."key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+                ELSE m."key"->>'remoteJid'
+              END, m."messageTimestamp" DESC
           )
-            CASE
-              WHEN m."key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
-              ELSE m."key"->>'remoteJid'
-            END as remote_jid,
-            m."message" as message_data,
-            m."key"->>'fromMe' as from_me
-          FROM "Message" m
-          WHERE m."instanceId" IN (SELECT id FROM instance_data)
-          ORDER BY CASE
-              WHEN m."key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
-              ELSE m."key"->>'remoteJid'
-            END, m."messageTimestamp" DESC
-        )
-        SELECT
-          cs.remote_jid,
-          cs.contact_name,
-          cs.last_message_time,
-          cs.message_count,
-          lm.message_data,
-          lm.from_me
-        FROM chat_summary cs
-        LEFT JOIN latest_messages lm ON cs.remote_jid = lm.remote_jid
-        ORDER BY cs.last_message_time DESC
-      `;
+          SELECT
+            cs.remote_jid,
+            cs.contact_name,
+            cs.last_message_time,
+            cs.message_count,
+            lm.message_data,
+            lm.from_me
+          FROM chat_summary cs
+          LEFT JOIN latest_messages lm ON cs.remote_jid = lm.remote_jid
+          ORDER BY cs.last_message_time DESC
+        `;
 
-      const result = await evolutionQuery(query, [instanceName]);
+        const result = await evolutionQuery(query, [instanceName]);
 
-      const chats: ChatListItem[] = result.rows.map(row => ({
-        remoteJid: row.remote_jid,
-        contactName: row.contact_name,
-        lastMessage: extractMessageText(row.message_data),
-        lastMessageTime: parseInt(row.last_message_time) || 0,
-        unreadCount: 0,
-        isFromMe: row.from_me === 'true'
-      }));
+        chats = result.rows.map(row => ({
+          remoteJid: row.remote_jid,
+          contactName: row.contact_name,
+          lastMessage: extractMessageText(row.message_data),
+          lastMessageTime: parseInt(row.last_message_time) || 0,
+          unreadCount: 0,
+          isFromMe: row.from_me === 'true'
+        }));
+      }
 
       app.log.info({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         chatsCount: chats.length,
         elapsedMs: getElapsedMs(startTime),
         tags
@@ -318,63 +566,93 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
 
       const { instanceName, limit, offset } = validationResult.data;
+      const channelType = await resolveChannelType(instanceName);
 
       app.log.debug({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         phone: maskedPhone,
         limit,
         offset,
         tags: ['db']
-      }, '[GET /chats/:remoteJid/messages] Querying messages');
+      }, '[GET /chats/:remoteJid/messages] Querying messages by channel');
 
-      // Get messages for this contact
-      // Include messages where remoteJid matches OR remoteJidAlt matches (for LID messages)
-      const query = `
-        SELECT
-          m."key"->>'id' as message_id,
-          m."key"->>'fromMe' as from_me,
-          m."message" as message_data,
-          m."messageTimestamp" as timestamp,
-          m."pushName" as push_name
-        FROM "Message" m
-        WHERE m."instanceId" = (
-          SELECT id FROM "Instance" WHERE name = $1
-        )
-        AND (
-          m."key"->>'remoteJid' = $2
-          OR m."key"->>'remoteJidAlt' = $2
-        )
-        ORDER BY m."messageTimestamp" DESC
-        LIMIT $3 OFFSET $4
-      `;
-
-      const result = await evolutionQuery(query, [instanceName, remoteJid, limit, offset]);
-
-      // Reverse to get chronological order (oldest first)
-      const messages: ChatMessage[] = result.rows.reverse().map(row => ({
-        id: row.message_id || `msg_${row.timestamp}`,
-        text: extractMessageText(row.message_data),
-        timestamp: parseInt(row.timestamp) || 0,
-        fromMe: row.from_me === 'true',
-        pushName: row.push_name,
-        messageType: getMessageType(row.message_data)
-      }));
-
-      // Get contact name from first incoming message
+      let messages: ChatMessage[] = [];
       let contactName: string | null = null;
-      const incomingMsg = result.rows.find(r => r.from_me === 'false' && r.push_name);
-      if (incomingMsg) {
-        contactName = incomingMsg.push_name;
+      let hasMore = false;
+
+      if (channelType === 'waba') {
+        const phone = extractPhoneFromJid(remoteJid);
+        const phoneVariants = normalizePhoneVariants(phone);
+
+        const { data: dialog, error: dialogError } = await supabase
+          .from('dialog_analysis')
+          .select('contact_name, messages')
+          .eq('instance_name', instanceName)
+          .in('contact_phone', phoneVariants)
+          .maybeSingle();
+
+        if (dialogError) {
+          throw dialogError;
+        }
+
+        const normalizedMessages = dialog?.messages && Array.isArray(dialog.messages)
+          ? normalizeDialogMessages(dialog.messages)
+          : [];
+        const pageData = paginateMessages(normalizedMessages, limit, offset);
+        messages = pageData.page;
+        hasMore = pageData.hasMore;
+        contactName = dialog?.contact_name || null;
+      } else {
+        // Get messages for this contact
+        // Include messages where remoteJid matches OR remoteJidAlt matches (for LID messages)
+        const query = `
+          SELECT
+            m."key"->>'id' as message_id,
+            m."key"->>'fromMe' as from_me,
+            m."message" as message_data,
+            m."messageTimestamp" as timestamp,
+            m."pushName" as push_name
+          FROM "Message" m
+          WHERE m."instanceId" = (
+            SELECT id FROM "Instance" WHERE name = $1
+          )
+          AND (
+            m."key"->>'remoteJid' = $2
+            OR m."key"->>'remoteJidAlt' = $2
+          )
+          ORDER BY m."messageTimestamp" DESC
+          LIMIT $3 OFFSET $4
+        `;
+
+        const result = await evolutionQuery(query, [instanceName, remoteJid, limit, offset]);
+
+        // Reverse to get chronological order (oldest first)
+        messages = result.rows.reverse().map(row => ({
+          id: row.message_id || `msg_${row.timestamp}`,
+          text: extractMessageText(row.message_data),
+          timestamp: parseInt(row.timestamp) || 0,
+          fromMe: row.from_me === 'true',
+          pushName: row.push_name,
+          messageType: getMessageType(row.message_data)
+        }));
+
+        const incomingMsg = result.rows.find(r => r.from_me === 'false' && r.push_name);
+        if (incomingMsg) {
+          contactName = incomingMsg.push_name;
+        }
+        hasMore = result.rows.length === limit;
       }
 
       app.log.info({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         phone: maskedPhone,
         messagesCount: messages.length,
         contactName,
-        hasMore: result.rows.length === limit,
+        hasMore,
         elapsedMs: getElapsedMs(startTime),
         tags
       }, '[GET /chats/:remoteJid/messages] Successfully fetched messages');
@@ -384,7 +662,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         remoteJid,
         contactName,
         messages,
-        hasMore: result.rows.length === limit
+        hasMore
       });
 
     } catch (error: any) {
@@ -445,101 +723,125 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
 
       const { instanceName, limit, offset } = validationResult.data;
+      const channelType = await resolveChannelType(instanceName);
+      const phoneVariants = normalizePhoneVariants(phone);
 
-      // 1. Get messages from Evolution DB
-      const evolutionQuery_ = `
-        SELECT
-          m."key"->>'id' as message_id,
-          m."key"->>'fromMe' as from_me,
-          m."message" as message_data,
-          m."messageTimestamp" as timestamp,
-          m."pushName" as push_name
-        FROM "Message" m
-        WHERE m."instanceId" = (
-          SELECT id FROM "Instance" WHERE name = $1
-        )
-        AND (
-          m."key"->>'remoteJid' = $2
-          OR m."key"->>'remoteJidAlt' = $2
-        )
-        ORDER BY m."messageTimestamp" DESC
-        LIMIT $3 OFFSET $4
-      `;
+      let messages: any[] = [];
+      let contactName: string | null = null;
+      let debugCount = 0;
+      let hasMore = false;
 
-      const evolutionResult = await evolutionQuery(evolutionQuery_, [instanceName, remoteJid, limit, offset]);
+      if (channelType === 'waba') {
+        const { data: dialog, error: dialogError } = await supabase
+          .from('dialog_analysis')
+          .select('contact_name, messages')
+          .eq('instance_name', instanceName)
+          .in('contact_phone', phoneVariants)
+          .maybeSingle();
 
-      // 2. Get debug info from dialog_analysis
-      const phoneVariants = [
-        phone,
-        `+${phone}`,
-        phone.replace(/^\+/, '')
-      ];
-
-      const { data: lead } = await supabase
-        .from('dialog_analysis')
-        .select('messages')
-        .eq('instance_name', instanceName)
-        .in('contact_phone', phoneVariants)
-        .maybeSingle();
-
-      // 3. Collect debug info with exact timestamps for precise matching
-      const debugEntries: Array<{ timestamp: number; debug: any }> = [];
-      if (lead?.messages && Array.isArray(lead.messages)) {
-        for (const msg of lead.messages) {
-          if (msg.sender === 'bot' && msg.debug) {
-            const ts = new Date(msg.timestamp).getTime() / 1000;
-            debugEntries.push({ timestamp: ts, debug: msg.debug });
-          }
+        if (dialogError) {
+          throw dialogError;
         }
-        // Sort by timestamp for efficient searching
-        debugEntries.sort((a, b) => a.timestamp - b.timestamp);
-      }
 
-      // 4. Merge Evolution messages with debug
-      const MATCH_TOLERANCE_SECONDS = 120; // 2 minutes tolerance
-      const usedDebugTimestamps = new Set<number>();
-      const messages = evolutionResult.rows.reverse().map(row => {
-        const timestamp = parseInt(row.timestamp) || 0;
-        const fromMe = row.from_me === 'true';
+        const normalizedMessages = dialog?.messages && Array.isArray(dialog.messages)
+          ? normalizeDialogMessages(dialog.messages)
+          : [];
+        const pageData = paginateMessages(normalizedMessages, limit, offset);
+        messages = pageData.page;
+        hasMore = pageData.hasMore;
+        contactName = dialog?.contact_name || null;
+        debugCount = messages.filter((m) => !!m.debug).length;
+      } else {
+        // 1. Get messages from Evolution DB
+        const evolutionQuery_ = `
+          SELECT
+            m."key"->>'id' as message_id,
+            m."key"->>'fromMe' as from_me,
+            m."message" as message_data,
+            m."messageTimestamp" as timestamp,
+            m."pushName" as push_name
+          FROM "Message" m
+          WHERE m."instanceId" = (
+            SELECT id FROM "Instance" WHERE name = $1
+          )
+          AND (
+            m."key"->>'remoteJid' = $2
+            OR m."key"->>'remoteJidAlt' = $2
+          )
+          ORDER BY m."messageTimestamp" DESC
+          LIMIT $3 OFFSET $4
+        `;
 
-        const message: any = {
-          id: row.message_id || `msg_${timestamp}`,
-          text: extractMessageText(row.message_data),
-          timestamp,
-          fromMe,
-          pushName: row.push_name,
-          messageType: getMessageType(row.message_data)
-        };
+        const evolutionResult = await evolutionQuery(evolutionQuery_, [instanceName, remoteJid, limit, offset]);
 
-        // Match debug by finding closest entry within tolerance
-        if (fromMe) {
-          // Find closest debug that hasn't been used yet (prevent double-matching)
-          for (const entry of debugEntries) {
-            const diff = Math.abs(entry.timestamp - timestamp);
-            if (diff <= MATCH_TOLERANCE_SECONDS && !usedDebugTimestamps.has(entry.timestamp)) {
-              message.debug = entry.debug;
-              usedDebugTimestamps.add(entry.timestamp);
-              break;
+        // 2. Get debug info from dialog_analysis
+        const { data: lead } = await supabase
+          .from('dialog_analysis')
+          .select('messages')
+          .eq('instance_name', instanceName)
+          .in('contact_phone', phoneVariants)
+          .maybeSingle();
+
+        // 3. Collect debug info with exact timestamps for precise matching
+        const debugEntries: Array<{ timestamp: number; debug: any }> = [];
+        if (lead?.messages && Array.isArray(lead.messages)) {
+          for (const msg of lead.messages) {
+            if (msg.sender === 'bot' && msg.debug) {
+              const ts = new Date(msg.timestamp).getTime() / 1000;
+              debugEntries.push({ timestamp: ts, debug: msg.debug });
             }
           }
+          // Sort by timestamp for efficient searching
+          debugEntries.sort((a, b) => a.timestamp - b.timestamp);
         }
 
-        return message;
-      });
+        // 4. Merge Evolution messages with debug
+        const MATCH_TOLERANCE_SECONDS = 120; // 2 minutes tolerance
+        const usedDebugTimestamps = new Set<number>();
+        messages = evolutionResult.rows.reverse().map(row => {
+          const timestamp = parseInt(row.timestamp) || 0;
+          const fromMe = row.from_me === 'true';
 
-      // Get contact name
-      let contactName: string | null = null;
-      const incomingMsg = evolutionResult.rows.find(r => r.from_me === 'false' && r.push_name);
-      if (incomingMsg) {
-        contactName = incomingMsg.push_name;
+          const message: any = {
+            id: row.message_id || `msg_${timestamp}`,
+            text: extractMessageText(row.message_data),
+            timestamp,
+            fromMe,
+            pushName: row.push_name,
+            messageType: getMessageType(row.message_data)
+          };
+
+          // Match debug by finding closest entry within tolerance
+          if (fromMe) {
+            for (const entry of debugEntries) {
+              const diff = Math.abs(entry.timestamp - timestamp);
+              if (diff <= MATCH_TOLERANCE_SECONDS && !usedDebugTimestamps.has(entry.timestamp)) {
+                message.debug = entry.debug;
+                usedDebugTimestamps.add(entry.timestamp);
+                break;
+              }
+            }
+          }
+
+          return message;
+        });
+
+        const incomingMsg = evolutionResult.rows.find(r => r.from_me === 'false' && r.push_name);
+        if (incomingMsg) {
+          contactName = incomingMsg.push_name;
+        }
+
+        debugCount = debugEntries.length;
+        hasMore = evolutionResult.rows.length === limit;
       }
 
       app.log.info({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         phone: maskedPhone,
         messagesCount: messages.length,
-        debugMessagesCount: debugEntries.length,
+        debugMessagesCount: debugCount,
         elapsedMs: getElapsedMs(startTime),
         tags
       }, '[GET /chats/:remoteJid/messages-with-debug] Successfully fetched messages with debug');
@@ -549,7 +851,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         remoteJid,
         contactName,
         messages,
-        hasMore: evolutionResult.rows.length === limit
+        hasMore
       });
 
     } catch (error: any) {
@@ -610,14 +912,16 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
 
       const { instanceName, text } = validationResult.data;
+      const channelType = await resolveChannelType(instanceName);
 
       app.log.debug({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         phone: maskedPhone,
         textLength: text.length,
         tags: ['external']
-      }, '[POST /chats/:remoteJid/send] Sending message via Evolution API');
+      }, '[POST /chats/:remoteJid/send] Sending message via delivery API');
 
       const result = await sendWhatsAppMessage({
         instanceName,
@@ -629,11 +933,12 @@ export async function chatsRoutes(app: FastifyInstance) {
         app.log.error({
           cid: shortCorrelationId(cid),
           instanceName,
+          channelType,
           phone: maskedPhone,
           error: result.error,
           elapsedMs: getElapsedMs(startTime),
           tags: ['api', 'chats', 'external']
-        }, '[POST /chats/:remoteJid/send] Evolution API returned error');
+        }, '[POST /chats/:remoteJid/send] Delivery API returned error');
 
         return reply.status(500).send({
           error: 'Failed to send message',
@@ -641,9 +946,14 @@ export async function chatsRoutes(app: FastifyInstance) {
         });
       }
 
+      if (channelType === 'waba') {
+        await appendOutgoingToDialogHistory(instanceName, phone, text.trim(), app);
+      }
+
       app.log.info({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         phone: maskedPhone,
         messageId: result.key?.id,
         elapsedMs: getElapsedMs(startTime),
@@ -709,6 +1019,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       }
 
       const { instanceName, query: searchQuery } = validationResult.data;
+      const channelType = await resolveChannelType(instanceName);
 
       // Sanitize search query to prevent SQL injection
       const sanitizedQuery = sanitizeSearchQuery(searchQuery);
@@ -717,55 +1028,92 @@ export async function chatsRoutes(app: FastifyInstance) {
       app.log.debug({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         searchQueryLength: searchQuery.length,
         tags: ['db']
       }, '[GET /chats/search] Searching chats');
 
-      const query = `
-        WITH instance_data AS (
-          SELECT id FROM "Instance" WHERE name = $1
-        ),
-        matching_chats AS (
-          SELECT DISTINCT
-            -- Use remoteJidAlt for LID messages to group with real phone
-            CASE
-              WHEN "key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
-              ELSE "key"->>'remoteJid'
-            END as remote_jid,
-            MAX("pushName") as contact_name,
-            MAX("messageTimestamp") as last_message_time
-          FROM "Message"
-          WHERE "instanceId" IN (SELECT id FROM instance_data)
-            AND "key"->>'remoteJid' NOT LIKE '%@g.us'
-            AND "key"->>'remoteJid' NOT LIKE '%@broadcast'
-            AND (
-              "pushName" ILIKE $2 ESCAPE '\\'
-              OR "key"->>'remoteJid' LIKE $2 ESCAPE '\\'
-              OR "key"->>'remoteJidAlt' LIKE $2 ESCAPE '\\'
-            )
-          GROUP BY CASE
-              WHEN "key"->>'remoteJid' LIKE '%@lid'
-              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
-              ELSE "key"->>'remoteJid'
-            END
-          ORDER BY last_message_time DESC
-          LIMIT 20
-        )
-        SELECT * FROM matching_chats
-      `;
+      let chats: Array<{
+        remoteJid: string;
+        contactName: string | null;
+        lastMessageTime: number;
+      }> = [];
 
-      const result = await evolutionQuery(query, [instanceName, searchPattern]);
+      if (channelType === 'waba') {
+        const { data: dialogs, error: dialogsError } = await supabase
+          .from('dialog_analysis')
+          .select('contact_phone, contact_name, last_message')
+          .eq('instance_name', instanceName)
+          .order('last_message', { ascending: false })
+          .limit(300);
 
-      const chats = result.rows.map(row => ({
-        remoteJid: row.remote_jid,
-        contactName: row.contact_name,
-        lastMessageTime: parseInt(row.last_message_time) || 0
-      }));
+        if (dialogsError) {
+          throw dialogsError;
+        }
+
+        const queryLower = searchQuery.toLowerCase();
+
+        chats = (dialogs || [])
+          .filter((dialog: any) => typeof dialog.contact_phone === 'string' && dialog.contact_phone.trim().length > 0)
+          .filter((dialog: any) => {
+            const phoneRaw = String(dialog.contact_phone || '').toLowerCase();
+            const nameRaw = String(dialog.contact_name || '').toLowerCase();
+            return phoneRaw.includes(queryLower) || nameRaw.includes(queryLower);
+          })
+          .slice(0, 20)
+          .map((dialog: any) => ({
+            remoteJid: resolveRemoteJidFromPhone(dialog.contact_phone),
+            contactName: dialog.contact_name || null,
+            lastMessageTime: parseTimestampToUnix(dialog.last_message)
+          }));
+      } else {
+        const query = `
+          WITH instance_data AS (
+            SELECT id FROM "Instance" WHERE name = $1
+          ),
+          matching_chats AS (
+            SELECT DISTINCT
+              -- Use remoteJidAlt for LID messages to group with real phone
+              CASE
+                WHEN "key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+                ELSE "key"->>'remoteJid'
+              END as remote_jid,
+              MAX("pushName") as contact_name,
+              MAX("messageTimestamp") as last_message_time
+            FROM "Message"
+            WHERE "instanceId" IN (SELECT id FROM instance_data)
+              AND "key"->>'remoteJid' NOT LIKE '%@g.us'
+              AND "key"->>'remoteJid' NOT LIKE '%@broadcast'
+              AND (
+                "pushName" ILIKE $2 ESCAPE '\\'
+                OR "key"->>'remoteJid' LIKE $2 ESCAPE '\\'
+                OR "key"->>'remoteJidAlt' LIKE $2 ESCAPE '\\'
+              )
+            GROUP BY CASE
+                WHEN "key"->>'remoteJid' LIKE '%@lid'
+                THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+                ELSE "key"->>'remoteJid'
+              END
+            ORDER BY last_message_time DESC
+            LIMIT 20
+          )
+          SELECT * FROM matching_chats
+        `;
+
+        const result = await evolutionQuery(query, [instanceName, searchPattern]);
+
+        chats = result.rows.map(row => ({
+          remoteJid: row.remote_jid,
+          contactName: row.contact_name,
+          lastMessageTime: parseInt(row.last_message_time) || 0
+        }));
+      }
 
       app.log.info({
         cid: shortCorrelationId(cid),
         instanceName,
+        channelType,
         resultsCount: chats.length,
         elapsedMs: getElapsedMs(startTime),
         tags

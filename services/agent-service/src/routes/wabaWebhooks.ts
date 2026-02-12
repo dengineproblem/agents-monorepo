@@ -22,14 +22,81 @@ const WABA_APP_SECRET = process.env.WABA_APP_SECRET || '';
 const WABA_ENABLED = process.env.WABA_WEBHOOK_ENABLED === 'true';
 const CAPI_INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
+const CHATBOT_REQUEST_TIMEOUT_MS = 10000;
+const CHATBOT_RETRY_DELAYS_MS = [1000, 2000, 3000];
 
 // Forwarding to ad-analytics
 const AD_ANALYTICS_WEBHOOK_URL = process.env.AD_ANALYTICS_WEBHOOK_URL || '';
+
+const PROCESSED_WABA_MESSAGES = new Map<string, number>();
+const WABA_MESSAGE_ID_TTL_MS = 10 * 60 * 1000;
+
+type BotMessageType = 'text' | 'audio' | 'image' | 'document' | 'file';
 
 function normalizeCtwaClid(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeWabaMessageType(type: WabaMessage['type']): BotMessageType {
+  switch (type) {
+    case 'audio':
+      return 'audio';
+    case 'image':
+      return 'image';
+    case 'document':
+      return 'document';
+    case 'text':
+    case 'button':
+    case 'interactive':
+      return 'text';
+    default:
+      return 'file';
+  }
+}
+
+function getMessagePreviewForLogs(message: WabaMessage): string {
+  const text = normalizeText(extractMessageText(message));
+  if (text) {
+    return text.slice(0, 80);
+  }
+
+  switch (message.type) {
+    case 'audio':
+      return '[audio]';
+    case 'image':
+      return '[image]';
+    case 'document':
+      return '[document]';
+    case 'video':
+      return '[video]';
+    case 'sticker':
+      return '[sticker]';
+    default:
+      return `[${message.type}]`;
+  }
+}
+
+function markAndCheckDuplicateMessageId(messageId: string): boolean {
+  const now = Date.now();
+
+  for (const [id, ts] of PROCESSED_WABA_MESSAGES.entries()) {
+    if (now - ts > WABA_MESSAGE_ID_TTL_MS) {
+      PROCESSED_WABA_MESSAGES.delete(id);
+    }
+  }
+
+  if (PROCESSED_WABA_MESSAGES.has(messageId)) {
+    return true;
+  }
+
+  PROCESSED_WABA_MESSAGES.set(messageId, now);
+  return false;
 }
 
 // ============================================
@@ -167,60 +234,128 @@ async function handleWabaMessages(value: WabaValue, app: FastifyInstance) {
   const contactName = contacts?.[0]?.profile?.name;
 
   for (const message of messages) {
-    // Only process messages with ad referral
-    if (!hasAdReferral(message)) {
-      app.log.debug({
+    if (!message.id) {
+      app.log.warn({
         from: message.from,
-        type: message.type,
-        hasReferral: !!message.referral
-      }, 'WABA: No ad referral, skipping');
+        type: message.type
+      }, 'WABA: Message without id, skipping');
       continue;
     }
 
-    const referral = message.referral!;
-    const normalizedCtwaClid = normalizeCtwaClid(referral.ctwa_clid);
-    const normalizedSourceType = (referral.source_type || '').toLowerCase();
-
-    if (normalizedSourceType && normalizedSourceType !== 'ad' && normalizedSourceType !== 'advertisement') {
+    if (markAndCheckDuplicateMessageId(message.id)) {
       app.log.debug({
+        messageId: message.id,
         from: message.from,
-        sourceId: referral.source_id,
-        sourceType: referral.source_type
-      }, 'WABA: Referral source_type is not ad, skipping');
+        type: message.type
+      }, 'WABA: Duplicate webhook message skipped');
       continue;
     }
+
+    const hasReferral = hasAdReferral(message);
+    const clientPhone = normalizeWabaPhone(message.from);
+    const messageText = normalizeText(extractMessageText(message));
+    const messageType = normalizeWabaMessageType(message.type);
+    const timestampRaw = parseInt(message.timestamp, 10);
+    const timestamp = Number.isFinite(timestampRaw) && timestampRaw > 0
+      ? new Date(timestampRaw * 1000)
+      : new Date();
 
     app.log.info({
+      messageId: message.id,
       from: message.from,
-      sourceId: referral.source_id,
-      sourceType: referral.source_type || null,
-      hasCtwaClid: !!normalizedCtwaClid,
-      ctwaClidPrefix: normalizedCtwaClid ? normalizedCtwaClid.slice(0, 10) : null,
-      sourceUrl: referral.source_url,
+      clientPhone,
+      type: message.type,
+      normalizedType: messageType,
+      hasReferral,
+      textLen: messageText.length,
+      textPreview: getMessagePreviewForLogs(message),
       phoneNumberId,
       displayPhoneNumber
-    }, 'WABA: Processing ad lead');
+    }, 'WABA: Incoming message received');
 
-    if (!normalizedCtwaClid) {
-      app.log.debug({
-        from: message.from,
+    if (hasReferral) {
+      const referral = message.referral!;
+      const normalizedCtwaClid = normalizeCtwaClid(referral.ctwa_clid);
+      const normalizedSourceType = (referral.source_type || '').toLowerCase();
+      const skipBotForAdLead = !messageText && messageType !== 'audio';
+
+      if (normalizedSourceType && normalizedSourceType !== 'ad' && normalizedSourceType !== 'advertisement') {
+        app.log.debug({
+          messageId: message.id,
+          from: message.from,
+          sourceId: referral.source_id,
+          sourceType: referral.source_type
+        }, 'WABA: Referral source_type is not ad, skipping');
+        continue;
+      }
+
+      if (!normalizedCtwaClid) {
+        app.log.debug({
+          messageId: message.id,
+          from: message.from,
+          sourceId: referral.source_id,
+          referralKeys: Object.keys(referral)
+        }, 'WABA: Ad referral without ctwa_clid');
+      }
+
+      if (skipBotForAdLead) {
+        app.log.debug({
+          messageId: message.id,
+          sourceId: referral.source_id,
+          clientPhone,
+          type: message.type
+        }, 'WABA: Ad lead with empty non-audio content, bot call will be skipped');
+      }
+
+      await processWabaAdLead({
+        phoneNumberId,
+        displayPhoneNumber,
+        clientPhone,
+        contactName,
         sourceId: referral.source_id,
-        referralKeys: Object.keys(referral)
-      }, 'WABA: Ad referral without ctwa_clid');
+        sourceUrl: referral.source_url,
+        ctwaClid: normalizedCtwaClid,
+        messageText: skipBotForAdLead ? getMessagePreviewForLogs(message) : messageText,
+        messageType,
+        timestamp,
+        rawMessage: message,
+        skipBotCall: skipBotForAdLead,
+        skipBotReason: skipBotForAdLead ? 'empty_non_audio' : undefined
+      }, app);
+      continue;
     }
 
-    await processWabaAdLead({
+    if (!messageText && messageType !== 'audio') {
+      app.log.debug({
+        messageId: message.id,
+        from: message.from,
+        clientPhone,
+        type: message.type,
+        normalizedType: messageType
+      }, 'WABA: Empty non-audio message skipped for bot');
+      await processWabaRegularInbound({
+        phoneNumberId,
+        displayPhoneNumber,
+        clientPhone,
+        contactName,
+        messageText: getMessagePreviewForLogs(message),
+        messageType,
+        timestamp
+      }, app, {
+        shouldCallBot: false,
+        reason: 'empty_non_audio'
+      });
+      continue;
+    }
+
+    await processWabaRegularInbound({
       phoneNumberId,
       displayPhoneNumber,
-      clientPhone: normalizeWabaPhone(message.from),
+      clientPhone,
       contactName,
-      sourceId: referral.source_id,
-      sourceUrl: referral.source_url,
-      ctwaClid: normalizedCtwaClid,
-      messageText: extractMessageText(message),
-      messageType: message.type,
-      timestamp: new Date(parseInt(message.timestamp) * 1000),
-      rawMessage: message
+      messageText,
+      messageType,
+      timestamp
     }, app);
   }
 }
@@ -228,6 +363,16 @@ async function handleWabaMessages(value: WabaValue, app: FastifyInstance) {
 // ============================================
 // Ad Lead Processor
 // ============================================
+
+interface WabaRegularInboundParams {
+  phoneNumberId: string;
+  displayPhoneNumber: string;
+  clientPhone: string;
+  contactName?: string;
+  messageText: string;
+  messageType: BotMessageType;
+  timestamp: Date;
+}
 
 interface WabaLeadParams {
   phoneNumberId: string;
@@ -238,9 +383,74 @@ interface WabaLeadParams {
   sourceUrl?: string;
   ctwaClid: string | null;
   messageText: string;
-  messageType: string;
+  messageType: BotMessageType;
   timestamp: Date;
   rawMessage: any;
+  skipBotCall?: boolean;
+  skipBotReason?: string;
+}
+
+async function processWabaRegularInbound(
+  params: WabaRegularInboundParams,
+  app: FastifyInstance,
+  options?: { shouldCallBot?: boolean; reason?: string }
+) {
+  const {
+    phoneNumberId,
+    displayPhoneNumber,
+    clientPhone,
+    contactName,
+    messageText,
+    messageType,
+    timestamp
+  } = params;
+
+  const shouldCallBot = options?.shouldCallBot !== false;
+
+  const whatsappNumber = await findWhatsAppNumber(phoneNumberId, displayPhoneNumber, app);
+  if (!whatsappNumber) {
+    app.log.warn({
+      phoneNumberId,
+      displayPhoneNumber,
+      clientPhone
+    }, 'WABA: Regular inbound - WhatsApp number not found');
+    return;
+  }
+
+  const instanceName = resolveInstanceName(whatsappNumber, phoneNumberId);
+
+  await ensureWabaLogicalInstance(whatsappNumber, instanceName, app);
+
+  await upsertDialogAnalysis({
+    userAccountId: whatsappNumber.user_account_id,
+    accountId: whatsappNumber.account_id,
+    instanceName,
+    contactPhone: clientPhone,
+    contactName,
+    messageText,
+    timestamp
+  }, app);
+
+  if (!shouldCallBot) {
+    app.log.debug({
+      instanceName,
+      clientPhone,
+      messageType,
+      reason: options?.reason || 'skip'
+    }, 'WABA: Skipping chatbot call for regular inbound');
+    return;
+  }
+
+  const hasBot = await hasBotForInstance(instanceName, app);
+  if (!hasBot) {
+    app.log.debug({
+      instanceName,
+      clientPhone
+    }, 'WABA: No bot configured, skipping chatbot call');
+    return;
+  }
+
+  await tryBotResponse(clientPhone, instanceName, messageText, messageType, app);
 }
 
 async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
@@ -253,7 +463,10 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
     sourceUrl,
     ctwaClid,
     messageText,
-    timestamp
+    messageType,
+    timestamp,
+    skipBotCall,
+    skipBotReason
   } = params;
 
   // 1. Find WhatsApp number by waba_phone_id or phone_number (fallback)
@@ -269,7 +482,9 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
 
   const userAccountId = whatsappNumber.user_account_id;
   const accountId = whatsappNumber.account_id;
-  const instanceName = whatsappNumber.instance_name || `waba_${phoneNumberId}`;
+  const instanceName = resolveInstanceName(whatsappNumber, phoneNumberId);
+
+  await ensureWabaLogicalInstance(whatsappNumber, instanceName, app);
 
   // 2. Resolve creative and direction
   const { creativeId, directionId, whatsappPhoneNumberId } =
@@ -383,6 +598,27 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
     directionId,
     timestamp
   }, app);
+
+  if (skipBotCall) {
+    app.log.debug({
+      instanceName,
+      clientPhone,
+      messageType,
+      reason: skipBotReason || 'skip'
+    }, 'WABA: Skipping chatbot call for ad lead');
+    return;
+  }
+
+  const hasBot = await hasBotForInstance(instanceName, app);
+  if (!hasBot) {
+    app.log.debug({
+      instanceName,
+      clientPhone
+    }, 'WABA: No bot configured for ad lead, skipping chatbot call');
+    return;
+  }
+
+  await tryBotResponse(clientPhone, instanceName, messageText, messageType, app);
 }
 
 // ============================================
@@ -396,6 +632,16 @@ interface WhatsAppNumberRecord {
   phone_number: string;
   instance_name: string | null;
   waba_phone_id: string | null;
+  connection_type: string | null;
+  connection_status: string | null;
+}
+
+function resolveInstanceName(record: WhatsAppNumberRecord, phoneNumberId: string): string {
+  const normalized = normalizeText(record.instance_name);
+  if (normalized) {
+    return normalized;
+  }
+  return `waba_${phoneNumberId}`;
 }
 
 async function findWhatsAppNumber(
@@ -406,8 +652,9 @@ async function findWhatsAppNumber(
   // 1. Try by waba_phone_id first (exact match)
   const { data: byWabaId } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id')
+    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status')
     .eq('waba_phone_id', phoneNumberId)
+    .eq('connection_type', 'waba')
     .eq('is_active', true)
     .maybeSingle();
 
@@ -419,8 +666,9 @@ async function findWhatsAppNumber(
   // 2. Fallback: by phone_number
   const { data: byPhone } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id')
+    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status')
     .eq('phone_number', displayPhoneNumber)
+    .eq('connection_type', 'waba')
     .eq('is_active', true)
     .maybeSingle();
 
@@ -430,6 +678,69 @@ async function findWhatsAppNumber(
   }
 
   return null;
+}
+
+async function ensureWabaLogicalInstance(
+  whatsappNumber: WhatsAppNumberRecord,
+  instanceName: string,
+  app: FastifyInstance
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const needsPhoneNumberSync =
+    whatsappNumber.instance_name !== instanceName ||
+    whatsappNumber.connection_status !== 'connected';
+
+  try {
+    if (needsPhoneNumberSync) {
+      const { error: updatePhoneError } = await supabase
+        .from('whatsapp_phone_numbers')
+        .update({
+          instance_name: instanceName,
+          connection_status: 'connected',
+          updated_at: nowIso
+        })
+        .eq('id', whatsappNumber.id);
+
+      if (updatePhoneError) {
+        app.log.warn({
+          whatsappNumberId: whatsappNumber.id,
+          instanceName,
+          error: updatePhoneError.message
+        }, 'WABA: Failed to sync instance_name in whatsapp_phone_numbers');
+      } else {
+        app.log.debug({
+          whatsappNumberId: whatsappNumber.id,
+          instanceName,
+          needsPhoneNumberSync
+        }, 'WABA: Synced whatsapp_phone_numbers state');
+      }
+    }
+
+    const { error: upsertError } = await supabase
+      .from('whatsapp_instances')
+      .upsert({
+        user_account_id: whatsappNumber.user_account_id,
+        account_id: whatsappNumber.account_id,
+        instance_name: instanceName,
+        phone_number: whatsappNumber.phone_number,
+        status: 'connected',
+        last_connected_at: nowIso,
+        updated_at: nowIso
+      }, { onConflict: 'instance_name' });
+
+    if (upsertError) {
+      app.log.warn({
+        instanceName,
+        phone: whatsappNumber.phone_number,
+        error: upsertError.message
+      }, 'WABA: Failed to upsert logical instance');
+    }
+  } catch (error: any) {
+    app.log.warn({
+      instanceName,
+      error: error.message
+    }, 'WABA: Failed to ensure logical instance (non-fatal)');
+  }
 }
 
 async function getLeadAttribution(contactPhone: string, userAccountId: string): Promise<{
@@ -569,6 +880,198 @@ async function upsertDialogAnalysis(params: {
         analyzed_at: timestamp.toISOString()
       });
   }
+}
+
+async function hasBotForInstance(instanceName: string, app: FastifyInstance): Promise<boolean> {
+  const { data: instanceData, error: instanceError } = await supabase
+    .from('whatsapp_instances')
+    .select('user_account_id, ai_bot_id')
+    .eq('instance_name', instanceName)
+    .maybeSingle();
+
+  let effectiveUserAccountId: string | null = instanceData?.user_account_id || null;
+
+  if (instanceError || !instanceData) {
+    app.log.debug({
+      instanceName,
+      hasInstanceData: !!instanceData,
+      error: instanceError?.message || null
+    }, 'WABA: hasBotForInstance instance lookup failed, trying whatsapp_phone_numbers fallback');
+
+    const { data: phoneRecord } = await supabase
+      .from('whatsapp_phone_numbers')
+      .select('user_account_id')
+      .eq('instance_name', instanceName)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    effectiveUserAccountId = phoneRecord?.user_account_id || null;
+    if (!effectiveUserAccountId) {
+      return false;
+    }
+  }
+
+  if (instanceData?.ai_bot_id) {
+    const { data: linkedBot } = await supabase
+      .from('ai_bot_configurations')
+      .select('id')
+      .eq('id', instanceData.ai_bot_id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (linkedBot) {
+      return true;
+    }
+  }
+
+  if (!effectiveUserAccountId) {
+    return false;
+  }
+
+  const { data: fallbackBot } = await supabase
+    .from('ai_bot_configurations')
+    .select('id')
+    .eq('user_account_id', effectiveUserAccountId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  return !!fallbackBot;
+}
+
+async function callChatbotProcessMessage(payload: {
+  contactPhone: string;
+  instanceName: string;
+  messageText: string;
+  messageType: BotMessageType;
+  correlationId: string;
+}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CHATBOT_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${CHATBOT_SERVICE_URL}/process-message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Correlation-ID': payload.correlationId
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    const responseBody = await response.text().catch(() => '');
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body: responseBody
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function tryBotResponse(
+  contactPhone: string,
+  instanceName: string,
+  messageText: string,
+  messageType: BotMessageType,
+  app: FastifyInstance
+) {
+  const correlationId = randomUUID();
+  let lastError: Error | null = null;
+  const attempts = CHATBOT_RETRY_DELAYS_MS.length + 1;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const result = await callChatbotProcessMessage({
+        contactPhone,
+        instanceName,
+        messageText,
+        messageType,
+        correlationId
+      });
+
+      if (result.ok) {
+        app.log.info({
+          correlationId,
+          contactPhone,
+          instanceName,
+          messageType,
+          attempt,
+          responseStatus: result.status,
+          responsePreview: result.body.slice(0, 200)
+        }, 'WABA: Chatbot call succeeded');
+        return;
+      }
+
+      lastError = new Error(`HTTP ${result.status}: ${result.body.slice(0, 400)}`);
+
+      const isNonRetryableClientError =
+        result.status >= 400 &&
+        result.status < 500 &&
+        result.status !== 408 &&
+        result.status !== 429;
+
+      if (isNonRetryableClientError) {
+        app.log.warn({
+          correlationId,
+          contactPhone,
+          instanceName,
+          messageType,
+          attempt,
+          status: result.status,
+          responsePreview: result.body.slice(0, 200)
+        }, 'WABA: Non-retriable chatbot client error');
+        break;
+      }
+    } catch (error: any) {
+      const isAbort = error?.name === 'AbortError';
+      const message = isAbort
+        ? `Timeout after ${CHATBOT_REQUEST_TIMEOUT_MS}ms`
+        : (error?.message || 'Unknown chatbot error');
+      lastError = new Error(message);
+    }
+
+    if (attempt < attempts) {
+      const delayMs = CHATBOT_RETRY_DELAYS_MS[attempt - 1] || 1000;
+      app.log.warn({
+        correlationId,
+        contactPhone,
+        instanceName,
+        messageType,
+        attempt,
+        attempts,
+        delayMs,
+        error: lastError?.message
+      }, 'WABA: Chatbot call failed, retrying');
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  app.log.error({
+    correlationId,
+    contactPhone,
+    instanceName,
+    messageType,
+    attempts,
+    error: lastError?.message || 'Unknown error'
+  }, 'WABA: Chatbot call failed after retries');
+
+  await logErrorToAdmin({
+    error_type: 'chatbot_service',
+    raw_error: lastError?.message || 'Unknown error',
+    action: 'waba_tryBotResponse',
+    endpoint: '/process-message',
+    request_data: {
+      correlationId,
+      contactPhone,
+      instanceName,
+      messageType,
+      messageText: messageText.slice(0, 200)
+    },
+    severity: 'critical'
+  }).catch(() => {});
 }
 
 // ============================================

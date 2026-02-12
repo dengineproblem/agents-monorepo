@@ -118,8 +118,8 @@ export function BotEditor() {
 
   // Fetch all user's WhatsApp instances
   const { data: allInstancesData } = useQuery({
-    queryKey: ['whatsapp-instances', USER_ID],
-    queryFn: () => aiBotApi.getWhatsAppInstances(USER_ID),
+    queryKey: ['whatsapp-instances', USER_ID, 'include-waba'],
+    queryFn: () => aiBotApi.getWhatsAppInstances(USER_ID, { includeWaba: true }),
   });
 
   const allInstances = allInstancesData?.instances || [];

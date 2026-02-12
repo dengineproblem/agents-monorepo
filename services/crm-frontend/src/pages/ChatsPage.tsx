@@ -68,8 +68,8 @@ export function ChatsPage() {
     isLoading: instancesLoading,
     error: instancesError
   } = useQuery({
-    queryKey: ['whatsapp-instances', USER_ID],
-    queryFn: () => aiBotApi.getWhatsAppInstances(USER_ID),
+    queryKey: ['whatsapp-instances', USER_ID, 'include-waba'],
+    queryFn: () => aiBotApi.getWhatsAppInstances(USER_ID, { includeWaba: true }),
     staleTime: 60000, // 1 minute
     retry: 2,
   });
