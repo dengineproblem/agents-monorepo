@@ -477,6 +477,7 @@ export async function workflowCreateAdSetInDirection(
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
         custom_event_type: customEventType,
+        custom_event_str: 'LeadSubmitted',
         page_id: String(effective_page_id),
         ...(whatsapp_phone_number && { whatsapp_phone_number })
       };
@@ -499,6 +500,7 @@ export async function workflowCreateAdSetInDirection(
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
         custom_event_type: customEventType,
+        custom_event_str: 'LeadSubmitted',
         page_id: String(effective_page_id),
         ...(whatsapp_phone_number && { whatsapp_phone_number })
       };

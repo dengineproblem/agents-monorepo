@@ -20,11 +20,12 @@ export interface WhatsAppInstanceResponse {
     instance_name: string;
     status: string;
   };
-  qrcode: {
+  qrcode?: {
     base64?: string;
     code?: string;
     count: number;
   };
+  alreadyConnected?: boolean;
 }
 
 export const whatsappApi = {

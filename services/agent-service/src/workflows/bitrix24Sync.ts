@@ -733,9 +733,11 @@ export async function syncLeadToBitrix24(
 
     if (bitrix24LeadId) {
       updateData.bitrix24_lead_id = bitrix24LeadId;
+      updateData.bitrix24_entity_type = 'lead';
     }
     if (bitrix24DealId) {
       updateData.bitrix24_deal_id = bitrix24DealId;
+      updateData.bitrix24_entity_type = 'deal';
     }
     if (bitrix24ContactId) {
       updateData.bitrix24_contact_id = bitrix24ContactId;

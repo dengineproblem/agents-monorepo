@@ -467,8 +467,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           // Update lead with Bitrix24 IDs if push was successful
           if (bitrix24Result) {
             const updateData: Record<string, any> = {};
-            if (bitrix24Result.bitrix24LeadId) updateData.bitrix24_lead_id = bitrix24Result.bitrix24LeadId;
-            if (bitrix24Result.bitrix24DealId) updateData.bitrix24_deal_id = bitrix24Result.bitrix24DealId;
+            if (bitrix24Result.bitrix24LeadId) {
+              updateData.bitrix24_lead_id = bitrix24Result.bitrix24LeadId;
+              updateData.bitrix24_entity_type = 'lead';
+            }
+            if (bitrix24Result.bitrix24DealId) {
+              updateData.bitrix24_deal_id = bitrix24Result.bitrix24DealId;
+              updateData.bitrix24_entity_type = 'deal';
+            }
             if (bitrix24Result.bitrix24ContactId) updateData.bitrix24_contact_id = bitrix24Result.bitrix24ContactId;
 
             if (Object.keys(updateData).length > 0) {

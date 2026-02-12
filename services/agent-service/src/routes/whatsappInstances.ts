@@ -25,6 +25,38 @@ export default async function whatsappInstances(app: FastifyInstance) {
       const body = CreateInstanceSchema.parse(request.body);
       const { userAccountId } = body;
 
+      // Проверить, есть ли уже подключённый инстанс для этого номера
+      if (body.phoneNumberId) {
+        const { data: existingPhone } = await supabase
+          .from('whatsapp_phone_numbers')
+          .select('instance_name, connection_status, phone_number')
+          .eq('id', body.phoneNumberId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (existingPhone?.instance_name) {
+          const { data: existingInstance } = await supabase
+            .from('whatsapp_instances')
+            .select('id, instance_name, status')
+            .eq('instance_name', existingPhone.instance_name)
+            .single();
+
+          if (existingInstance && existingInstance.status === 'connected') {
+            app.log.info({
+              instanceName: existingInstance.instance_name,
+              phoneNumberId: body.phoneNumberId,
+              phoneNumber: existingPhone.phone_number
+            }, 'Instance already connected, reusing existing');
+
+            return reply.send({
+              success: true,
+              instance: existingInstance,
+              alreadyConnected: true
+            });
+          }
+        }
+      }
+
       // Генерировать уникальное имя instance
       const instanceName = `instance_${userAccountId.slice(0, 8)}_${Date.now()}`;
 

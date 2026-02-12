@@ -56,7 +56,18 @@ export const WhatsAppQRDialog: React.FC<WhatsAppQRDialogProps> = ({
 
       const result = await whatsappApi.createInstance(userAccountId, phoneNumberId, accountId);
 
-      if (result.qrcode.count === 0) {
+      // Номер уже подключён к рабочему инстансу — не создаём новый
+      if (result.alreadyConnected) {
+        setInstanceName(result.instance.instance_name);
+        setStatus('connected');
+        setTimeout(() => {
+          onConnected();
+          onOpenChange(false);
+        }, 1500);
+        return;
+      }
+
+      if (!result.qrcode || result.qrcode.count === 0) {
         setError('QR-код не сгенерирован. Попробуйте еще раз.');
         setStatus('error');
         return;
