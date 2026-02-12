@@ -26,9 +26,8 @@ This document describes how WABA is now supported as a first-class chatbot chann
 
 1. Meta webhook hits `POST /webhooks/waba`.
 2. Message is deduplicated by `message.id` in a short in-memory TTL window.
-3. Agent resolves WhatsApp number by:
-   - `waba_phone_id` first
-   - then fallback by `phone_number`
+3. Agent resolves WhatsApp number strictly by `waba_phone_id` (Meta `metadata.phone_number_id`).
+   - No fallback by `phone_number` (prevents wrong routing to an unrelated record).
 4. Agent ensures a logical `whatsapp_instances` row exists for that WABA channel.
 5. Agent updates/upserts `dialog_analysis`.
 6. If bot is configured, agent calls chatbot `/process-message`.

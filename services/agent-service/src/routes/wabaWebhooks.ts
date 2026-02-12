@@ -407,7 +407,7 @@ async function processWabaRegularInbound(
 
   const shouldCallBot = options?.shouldCallBot !== false;
 
-  const whatsappNumber = await findWhatsAppNumber(phoneNumberId, displayPhoneNumber, app);
+  const whatsappNumber = await findWhatsAppNumber(phoneNumberId, app);
   if (!whatsappNumber) {
     app.log.warn({
       phoneNumberId,
@@ -469,8 +469,8 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
     skipBotReason
   } = params;
 
-  // 1. Find WhatsApp number by waba_phone_id or phone_number (fallback)
-  let whatsappNumber = await findWhatsAppNumber(phoneNumberId, displayPhoneNumber, app);
+  // 1. Find WhatsApp number strictly by waba_phone_id
+  let whatsappNumber = await findWhatsAppNumber(phoneNumberId, app);
 
   if (!whatsappNumber) {
     app.log.warn({
@@ -646,10 +646,9 @@ function resolveInstanceName(record: WhatsAppNumberRecord, phoneNumberId: string
 
 async function findWhatsAppNumber(
   phoneNumberId: string,
-  displayPhoneNumber: string,
   app: FastifyInstance
 ): Promise<WhatsAppNumberRecord | null> {
-  // 1. Try by waba_phone_id first (exact match)
+  // Strict mode: resolve WABA channel only by phone_number_id (waba_phone_id).
   const { data: byWabaId } = await supabase
     .from('whatsapp_phone_numbers')
     .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status')
@@ -661,20 +660,6 @@ async function findWhatsAppNumber(
   if (byWabaId) {
     app.log.debug({ phoneNumberId }, 'WABA: Found by waba_phone_id');
     return byWabaId;
-  }
-
-  // 2. Fallback: by phone_number
-  const { data: byPhone } = await supabase
-    .from('whatsapp_phone_numbers')
-    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status')
-    .eq('phone_number', displayPhoneNumber)
-    .eq('connection_type', 'waba')
-    .eq('is_active', true)
-    .maybeSingle();
-
-  if (byPhone) {
-    app.log.debug({ displayPhoneNumber }, 'WABA: Found by phone_number (fallback)');
-    return byPhone;
   }
 
   return null;
