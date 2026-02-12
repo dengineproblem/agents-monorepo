@@ -9,81 +9,103 @@
 1. **WhatsApp (LLM)** — автоматический анализ переписок с помощью GPT-4o-mini
 2. **CRM (field/stage mapping)** — отслеживание изменений полей и этапов воронки в AMO CRM / Bitrix24
 
-## Объединённая цель "Конверсии" (multi-channel)
+## Каналы CAPI и цели (objectives)
 
-С миграции `200_conversions_objective.sql` цель `whatsapp_conversions` заменена на универсальную **`conversions`** с выбором канала (`conversion_channel`):
+CAPI поддерживается для двух типов целей:
+
+### 1. Цель "Конверсии" (`conversions`) — WhatsApp и Сайт
+
+С миграции `200_conversions_objective.sql` цель `whatsapp_conversions` заменена на **`conversions`** с выбором канала:
 
 ```
 objective = 'conversions'
   └── conversion_channel:
       ├── 'whatsapp'   → destination_type=WHATSAPP, capi_source: whatsapp|crm
-      ├── 'lead_form'  → destination_type=ON_AD,    capi_source: crm only
       └── 'site'       → destination_type=WEBSITE,  capi_source: crm only
 ```
 
-### Общее для всех каналов конверсии
+| Параметр | WhatsApp | Сайт |
+|----------|----------|------|
+| Campaign objective | `OUTCOME_SALES` | `OUTCOME_SALES` |
+| AdSet optimization_goal | `OFFSITE_CONVERSIONS` | `OFFSITE_CONVERSIONS` |
+| destination_type | `WHATSAPP` | `WEBSITE` |
+| promoted_object | pixel_id + page_id + whatsapp_phone_number | pixel_id + custom_event_type |
+| Creative | fb_creative_id_whatsapp | fb_creative_id_site_leads |
+| CAPI source | whatsapp (AI) или crm | crm only |
+
+### 2. Цель "Lead Forms" (`lead_forms`) — CRM CAPI оптимизация
+
+Lead Forms используют отдельную цель `lead_forms` с опциональным CAPI toggle для CRM-оптимизации (Meta "Conversion Leads"):
+
+```
+objective = 'lead_forms'
+  └── capi_enabled: true/false
+      └── capi_source: 'crm' (единственный вариант)
+```
 
 | Параметр | Значение |
 |----------|----------|
-| Campaign objective | `OUTCOME_SALES` |
-| AdSet optimization_goal | `OFFSITE_CONVERSIONS` |
-| pixel_id | **обязателен** (из direction или default_ad_settings) |
-| custom_event_type | зависит от `optimization_level` (COMPLETE_REGISTRATION / ADD_TO_CART / PURCHASE) |
-| CAPI tiered events | Level 1/2/3 (как ранее для whatsapp_conversions) |
+| Campaign objective | `OUTCOME_LEADS` |
+| AdSet optimization_goal | `LEAD_GENERATION` |
+| destination_type | `ON_AD` |
+| promoted_object | `{ page_id }` (БЕЗ pixel_id) |
+| Creative | fb_creative_id_lead_forms |
+| CAPI source | crm only |
 
-### Различия по каналам
+> **Важно:** Для Lead Forms `pixel_id` НЕ передаётся в `promoted_object`. Адсет настраивается как обычная лидформа. Оптимизация по CRM событиям происходит через CAPI события в датасет, матчинг по `leadgen_id`.
 
-| Канал | destination_type | promoted_object | Creative | CAPI source |
-|-------|-----------------|-----------------|----------|-------------|
-| **whatsapp** | `WHATSAPP` | pixel_id + page_id + whatsapp_phone_number | fb_creative_id_whatsapp | whatsapp или crm |
-| **lead_form** | `ON_AD` | pixel_id + page_id | fb_creative_id_lead_forms | crm only |
-| **site** | `WEBSITE` | pixel_id (без page_id) | fb_creative_id_site_leads | crm only |
+> **Ранее** Lead Form + CRM CAPI был реализован как `objective='conversions'` + `conversion_channel='lead_form'`. Сейчас это вынесено в отдельную цель `lead_forms` с CAPI toggle, т.к. на уровне Facebook API параметры кампании/адсета идентичны обычным лидформам.
 
 ### User matching по каналам
 
 | Канал | Идентификаторы для матчинга |
 |-------|---------------------------|
 | **whatsapp** | phone (hashed), external_id, ctwa_clid (если доступен) |
-| **lead_form** | phone (hashed), external_id |
+| **lead_form** | leadgen_id (высший приоритет), phone (hashed), external_id |
 | **site** | phone (hashed), external_id, fbclid/fbc/fbp (если настроен на сайте) |
-
-> **Примечание:** `ctwa_clid` (Click-to-WhatsApp Click ID) доступен только для канала whatsapp. Для lead_form и site матчинг происходит через phone + external_id из CRM.
 
 ### Обратная совместимость
 
-- Существующие направления с `objective = 'whatsapp_conversions'` автоматически маппятся в `conversions` + `conversion_channel = 'whatsapp'` при чтении через GET API
-- Миграция 200 обновляет данные в БД: `whatsapp_conversions` → `conversions` + `channel = 'whatsapp'`
-- Цели `site_leads` и `lead_forms` **остаются** для простых кейсов без CAPI-оптимизации
+- Существующие направления с `objective = 'whatsapp_conversions'` маппятся в `conversions` + `conversion_channel = 'whatsapp'`
+- Legacy направления с `objective = 'conversions'` + `conversion_channel = 'lead_form'` продолжают работать (creative routes поддерживают оба варианта)
+- `conversion_channel` обязателен для `conversions`, NULL для остальных
 
-### Constraint в БД
+### События по уровням
 
-```sql
--- conversion_channel обязателен для conversions, NULL для остальных
-CHECK (
-  (objective = 'conversions' AND conversion_channel IN ('whatsapp', 'lead_form', 'site'))
-  OR (objective != 'conversions' AND conversion_channel IS NULL)
-)
+Система отправляет **разные события в зависимости от канала и уровня**:
+
+**WhatsApp (Messaging dataset)** — все уровни отправляют одно событие:
+
+| Уровень | event_name | Условие |
+|---------|------------|---------|
+| 1 | `LeadSubmitted` | **Счётчик:** клиент с рекламы отправил 3+ сообщения |
+| 2 | `LeadSubmitted` | **AI анализ:** ответил на квалификационные вопросы |
+| 3 | `LeadSubmitted` | **AI анализ:** записался на ключевой этап |
+
+**CRM dataset (Lead Forms, Сайт)** — разные события по уровням для качественной оптимизации Meta:
+
+| Уровень | event_name | Описание |
+|---------|------------|----------|
+| 1 | `Contact` | Первый контакт / проявление интереса |
+| 2 | `Schedule` | Квалифицирован / назначена встреча |
+| 3 | `StartTrial` | Закрыт / начало использования |
+
+```typescript
+// metaCapiClient.ts
+export const CRM_LEVEL_EVENTS: Record<number, string> = {
+  1: 'Contact',     // L1
+  2: 'Schedule',    // L2
+  3: 'StartTrial',  // L3
+};
 ```
 
-### Единое событие Lead (Messaging dataset)
-
-С миграции `203_capi_messaging_upgrade.sql` все три уровня отправляют **одно и то же** событие `Lead` в Meta (вместо 3 разных). Пользователь выбирает, на каком уровне воронки оно срабатывает через настройку `capi_event_level`.
-
-| Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
-|---------|---------|---------------------|---------------|
-| 1 | `LeadSubmitted` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM **или** этап воронки совпал с настройкой |
-| 2 | `LeadSubmitted` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM **или** этап воронки совпал с настройкой |
-| 3 | `LeadSubmitted` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM **или** этап воронки совпал с настройкой |
-
 **Фильтрация по уровню (`capi_event_level`):**
-- `NULL` — отправлять Lead на ВСЕХ уровнях (backward compat, 3 события)
-- `1` — только на уровне Интерес
-- `2` — только на уровне Квалификация
-- `3` — только на уровне Запись/покупка
+- `NULL` — отправлять на ВСЕХ уровнях (3 разных события)
+- `1` — только Level 1 (Contact)
+- `2` — только Level 2 (Schedule)
+- `3` — только Level 3 (StartTrial)
 
-**Важно:** Level 1 (Interest) определяется детерминированно по счётчику сообщений, а Level 2 и 3 — через AI анализ переписки.
-
-> **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде как константы для обратной совместимости, но все новые направления используют `LeadSubmitted` (Messaging) или `Lead` (Website).
+> **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде для обратной совместимости WhatsApp конверсий.
 
 ## Архитектура
 
@@ -188,16 +210,25 @@ AMO CRM / Bitrix24
 **Типы событий:**
 
 ```typescript
+// Константы базовых событий
 const CAPI_EVENTS = {
-  LEAD_SUBMITTED: 'LeadSubmitted',   // Messaging dataset: lead (messaging_channel, page_id, phone)
-  LEAD: 'Lead',                      // Website/CRM dataset: lead (event_transaction_time)
+  LEAD_SUBMITTED: 'LeadSubmitted',   // Messaging dataset (WhatsApp)
+  LEAD: 'Lead',                      // Website/CRM dataset (legacy, единое событие)
   INTEREST: 'CompleteRegistration',   // Legacy Level 1
   QUALIFIED: 'AddToCart' | 'Subscribe', // Legacy Level 2 (configurable)
   SCHEDULED: 'Purchase',             // Legacy Level 3
 };
+
+// Per-level события для CRM dataset (lead_form, site)
+const CRM_LEVEL_EVENTS = {
+  1: 'Contact',     // L1: первый контакт
+  2: 'Schedule',    // L2: квалифицирован
+  3: 'StartTrial',  // L3: закрыт/оплата
+};
 ```
 
-Для WhatsApp (Messaging dataset) используется `CAPI_EVENTS.LEAD_SUBMITTED`. Для Website/CRM — `CAPI_EVENTS.LEAD`.
+- **WhatsApp** (Messaging dataset) → `LeadSubmitted` для всех уровней
+- **CRM** (Lead Forms, Сайт) → per-level: `Contact` / `Schedule` / `StartTrial`
 
 **Различия между LeadSubmitted и Lead:**
 
@@ -290,15 +321,26 @@ const CAPI_EVENTS = {
 При создании направления в `CreateDirectionDialog.tsx` доступны настройки CAPI.
 
 **Для цели "Конверсии" (`conversions`):**
-1. Выбрать канал конверсии (WhatsApp / Lead Form / Сайт)
+1. Выбрать канал конверсии (WhatsApp / Сайт)
 2. Включить Meta CAPI
 3. Выбрать/ввести Pixel ID
 4. Для WhatsApp — выбор источника: AI анализ переписок или CRM
-5. Для Lead Form и Сайт — только CRM (автоматически)
+5. Для Сайт — только CRM (автоматически)
 6. Выбрать уровень оптимизации (Level 1/2/3)
 7. Настроить CRM тиеры (если CRM источник)
 
-**Для других целей:**
+**Для цели "Lead Forms" (`lead_forms`):**
+1. Включить Meta CAPI (toggle)
+2. Выбрать/ввести Pixel ID (Dataset ID)
+3. Ввести CAPI Access Token
+4. Источник — только CRM (автоматически)
+5. Настроить CRM тиеры:
+   - Level 1 (Интерес → событие `Contact`)
+   - Level 2 (Квалифицирован → событие `Schedule`)
+   - Level 3 (Закрыт → событие `StartTrial`)
+6. До 5 этапов воронки / полей CRM на каждый уровень
+
+**Общие шаги для CAPI:**
 
 **Шаг 1: Включение CAPI**
 - Переключатель "Включить Meta CAPI"
@@ -310,18 +352,20 @@ const CAPI_EVENTS = {
 - Или выбор нового пикселя из списка
 
 **Шаг 3: Выбор источника событий**
-- `WhatsApp (AI анализ)` — LLM анализирует переписку (только для канала whatsapp)
+- `WhatsApp (AI анализ)` — LLM анализирует переписку (только для `conversions` + `whatsapp`)
 - `CRM (поля или этапы воронки)` — отслеживание полей/этапов в AMO CRM / Bitrix24 (для всех каналов)
+- Для `lead_forms` — только CRM (автоматически, без выбора)
 
 **Шаг 4 (только для CRM источника):**
 - Выбор типа CRM (AMO CRM или Bitrix24)
   - Для каждого уровня конверсии выбирается тип триггера:
     - `Поля CRM`
     - `Этапы воронки`
-  - Уровни:
-    - Level 1 (Интерес / CompleteRegistration)
-    - Level 2 (Квалифицирован / AddToCart или Subscribe)
-    - Level 3 (Записался / Purchase)
+  - До 5 полей/этапов на каждый уровень (OR логика)
+  - Уровни с per-level событиями для CRM dataset:
+    - Level 1 (Интерес → `Contact`)
+    - Level 2 (Квалифицирован → `Schedule`)
+    - Level 3 (Закрыт → `StartTrial`)
   - Настройка доступна как при создании, так и при редактировании направления.
 
 **Логика проверки CRM триггеров:**
@@ -645,29 +689,48 @@ POST /v20.0/{pixel_id}/events
 }
 ```
 
-### Lead — Website/CRM dataset
+### CRM dataset — per-level events (Lead Forms / Сайт)
 
+Для CRM dataset каждый уровень отправляет **разное событие**:
+
+**Level 1 — Contact:**
 ```json
-POST /v20.0/{pixel_id}/events
+POST /v24.0/{dataset_id}/events
 {
   "data": [{
-    "event_name": "Lead",
+    "event_name": "Contact",
     "event_time": 1703520000,
     "event_id": "wa_abc123_lead_l1",
-    "event_source_url": "https://example.com/",
     "action_source": "system_generated",
     "user_data": {
       "ph": ["a1b2c3..."],
+      "lead_id": 12345678901234567,
       "external_id": ["91991aa6..."],
       "country": ["d4e5f6..."]
     },
     "custom_data": {
-      "event_level": 1
+      "event_source": "crm",
+      "lead_event_source": "Bitrix24",
+      "level": "interest",
+      "channel": "crm",
+      "crm_source": "bitrix24"
     }
   }],
   "access_token": "..."
 }
 ```
+
+**Level 2 — Schedule:**
+```json
+{ "event_name": "Schedule", ... "custom_data": { "level": "qualified", ... } }
+```
+
+**Level 3 — StartTrial:**
+```json
+{ "event_name": "StartTrial", ... "custom_data": { "level": "scheduled", ... } }
+```
+
+> **Матчинг:** Для Lead Forms Meta матчит по `lead_id` (leadgen_id, 15-17 цифр) — это высший приоритет. Fallback на `ph` (hashed phone).
 
 ## Мульти-направления в отчётах
 
