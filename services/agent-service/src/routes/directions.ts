@@ -1060,7 +1060,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             .insert([
               {
                 user_account_id: userAccountId,
-                account_id: input.accountId || null, // UUID для мультиаккаунтности
+                account_id: userAccountCheck.multi_account_enabled ? (input.accountId || null) : null, // UUID для мультиаккаунтности
                 phone_number: phoneNumber,
                 is_active: true,
                 is_default: false,
@@ -1300,7 +1300,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             .from('account_directions')
             .insert({
               user_account_id: userAccountId,
-              account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
+              account_id: userAccountCheck.multi_account_enabled ? (input.accountId || null) : null, // UUID из ad_accounts.id для мультиаккаунтности
               name: input.name,
               platform: 'facebook',
               objective: input.objective,
@@ -1368,7 +1368,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             .from('account_directions')
             .insert({
               user_account_id: userAccountId,
-              account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
+              account_id: userAccountCheck.multi_account_enabled ? (input.accountId || null) : null, // UUID из ad_accounts.id для мультиаккаунтности
               name: input.name,
               platform: 'tiktok',
               objective: mappedObjective,

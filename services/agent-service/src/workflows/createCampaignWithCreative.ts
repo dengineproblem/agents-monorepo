@@ -30,6 +30,7 @@ type CreateCampaignContext = {
   ad_account_id: string;
   whatsapp_phone_number?: string; // Номер WhatsApp из Supabase (если есть)
   account_id?: string; // UUID из ad_accounts.id для мультиаккаунтности
+  direction_id?: string; // UUID из account_directions.id
 };
 
 // Helpers from campaignDuplicate
@@ -531,7 +532,7 @@ export async function workflowCreateCampaignWithCreative(
     created_ads.map(ad => ({
       ad_id: ad.ad_id,
       user_creative_id: ad.user_creative_id,
-      direction_id: null, // В этом workflow нет direction
+      direction_id: context.direction_id || null,
       user_id: context.user_account_id,
       account_id: context.account_id || null,
       adset_id: String(adset_id),

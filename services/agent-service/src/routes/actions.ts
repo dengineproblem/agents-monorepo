@@ -375,52 +375,55 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
       }
 
-      // Получаем WhatsApp номер из направления (если есть)
-      let whatsapp_phone_number;
-      if ((p.objective === 'WhatsApp' || p.objective === 'Conversions') && creative_ids.length > 0) {
+      // Получаем direction_id из первого креатива (для ВСЕХ objectives)
+      let directionIdFromCreative: string | null = null;
+      if (creative_ids.length > 0) {
         const { data: firstCreative } = await supabase
           .from('user_creatives')
           .select('direction_id')
           .eq('id', creative_ids[0])
           .single();
+        directionIdFromCreative = firstCreative?.direction_id || null;
+      }
 
-        if (firstCreative?.direction_id) {
-          const { data: direction } = await supabase
-            .from('account_directions')
-            .select('whatsapp_phone_number_id')
-            .eq('id', firstCreative.direction_id)
+      // Получаем WhatsApp номер из направления (если есть)
+      let whatsapp_phone_number;
+      if ((p.objective === 'WhatsApp' || p.objective === 'Conversions') && directionIdFromCreative) {
+        const { data: direction } = await supabase
+          .from('account_directions')
+          .select('whatsapp_phone_number_id')
+          .eq('id', directionIdFromCreative)
+          .single();
+
+        if (direction?.whatsapp_phone_number_id) {
+          const { data: phoneNumber } = await supabase
+            .from('whatsapp_phone_numbers')
+            .select('phone_number')
+            .eq('id', direction.whatsapp_phone_number_id)
+            .eq('is_active', true)
             .single();
 
-          if (direction?.whatsapp_phone_number_id) {
-            const { data: phoneNumber } = await supabase
-              .from('whatsapp_phone_numbers')
-              .select('phone_number')
-              .eq('id', direction.whatsapp_phone_number_id)
-              .eq('is_active', true)
-              .single();
-
-            if (phoneNumber?.phone_number) {
-              whatsapp_phone_number = phoneNumber.phone_number;
-            }
+          if (phoneNumber?.phone_number) {
+            whatsapp_phone_number = phoneNumber.phone_number;
           }
+        }
 
-          if (!whatsapp_phone_number) {
-            const { data: defaultNumber } = await supabase
-              .from('whatsapp_phone_numbers')
-              .select('phone_number')
-              .eq('user_account_id', ctx.userAccountId)
-              .eq('is_default', true)
-              .eq('is_active', true)
-              .single();
+        if (!whatsapp_phone_number) {
+          const { data: defaultNumber } = await supabase
+            .from('whatsapp_phone_numbers')
+            .select('phone_number')
+            .eq('user_account_id', ctx.userAccountId)
+            .eq('is_default', true)
+            .eq('is_active', true)
+            .single();
 
-            if (defaultNumber?.phone_number) {
-              whatsapp_phone_number = defaultNumber.phone_number;
-            }
+          if (defaultNumber?.phone_number) {
+            whatsapp_phone_number = defaultNumber.phone_number;
           }
+        }
 
-          if (!whatsapp_phone_number) {
-            whatsapp_phone_number = ctx.whatsappPhoneNumber;
-          }
+        if (!whatsapp_phone_number) {
+          whatsapp_phone_number = ctx.whatsappPhoneNumber;
         }
       }
 
@@ -446,6 +449,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           ad_account_id: ctx.adAccountId,
           whatsapp_phone_number,
           account_id: ctx.accountId, // UUID из ad_accounts для multi-account
+          direction_id: directionIdFromCreative || undefined,
         },
         token
       );
