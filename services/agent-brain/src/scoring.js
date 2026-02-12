@@ -85,16 +85,16 @@ async function responsesCreateMini(payload, openaiApiKey) {
   const startTime = Date.now();
   const { model, input, reasoning, temperature, top_p, metadata } = payload || {};
 
-  // Per-account ключ или глобальный из env
-  const apiKey = openaiApiKey || process.env.OPENAI_API_KEY;
+  // Только per-account ключ из user_accounts (НЕ fallback на ENV — multi-account only)
+  const apiKey = openaiApiKey;
 
   if (!apiKey) {
-    const err = new Error('OPENAI_API_KEY not configured');
+    const err = new Error('OpenAI API key not configured in user profile');
     err.status = 500;
     logger.error({
       where: 'responsesCreateMini',
       phase: 'config_error',
-      error: 'OPENAI_API_KEY environment variable is not set and no per-account key provided'
+      error: 'No OpenAI API key in user_accounts — set it in Profile settings'
     });
     throw err;
   }

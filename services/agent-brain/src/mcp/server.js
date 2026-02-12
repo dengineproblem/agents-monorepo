@@ -40,7 +40,7 @@ async function getCredentials(userAccountId, accountId) {
       .select(`
         id, multi_account_enabled,
         access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id,
-        openai_api_key, anthropic_api_key
+        openai_api_key, gemini_api_key, anthropic_api_key
       `)
       .eq('id', userAccountId)
       .single();
@@ -63,8 +63,7 @@ async function getCredentials(userAccountId, accountId) {
       const { data: adAccount, error: adError } = await supabase
         .from('ad_accounts')
         .select(`
-          id, access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id,
-          openai_api_key, gemini_api_key, anthropic_api_key
+          id, access_token, ad_account_id, page_id, instagram_id, instagram_username, business_id
         `)
         .eq('id', accountId)
         .eq('user_account_id', userAccountId)  // Security: verify ownership
@@ -87,9 +86,10 @@ async function getCredentials(userAccountId, accountId) {
           instagramId: adAccount.instagram_id,
           instagramUsername: adAccount.instagram_username,
           businessId: adAccount.business_id,
-          openaiApiKey: adAccount.openai_api_key || null,
-          geminiApiKey: adAccount.gemini_api_key || null,
-          anthropicApiKey: adAccount.anthropic_api_key || null,
+          // API ключи — из user_accounts (shared, верхний уровень)
+          openaiApiKey: user.openai_api_key || null,
+          geminiApiKey: user.gemini_api_key || null,
+          anthropicApiKey: user.anthropic_api_key || null,
           // Meta
           isMultiAccountMode: true,
           dbAccountId: adAccount.id,  // UUID for internal queries
@@ -110,7 +110,7 @@ async function getCredentials(userAccountId, accountId) {
         instagramUsername: user.instagram_username,
         businessId: user.business_id,
         openaiApiKey: user.openai_api_key || null,
-        geminiApiKey: null,
+        geminiApiKey: user.gemini_api_key || null,
         anthropicApiKey: user.anthropic_api_key || null,
         // Meta
         isMultiAccountMode: false,
@@ -407,7 +407,7 @@ export function registerMCPRoutes(fastify) {
       if (user.multi_account_enabled) {
         const { data: accounts, error: accError } = await supabase
           .from('ad_accounts')
-          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default, anthropic_api_key')
+          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default')
           .eq('user_account_id', user.id)
           .eq('is_active', true);
 
@@ -423,13 +423,12 @@ export function registerMCPRoutes(fastify) {
               adAccountId: acc.ad_account_id,
               isDefault: !!acc.is_default,
               stack: accStack,
-              anthropicApiKey: acc.anthropic_api_key || null,
+              // anthropicApiKey берётся из user_accounts (shared) — result.anthropicApiKey
             };
           });
         }
       }
 
-      const accountsWithAnthropicKey = result.adAccounts.filter(a => !!a.anthropicApiKey).length;
       fastify.log.info({
         telegramId: telegram_id,
         userId: user.id,
@@ -437,7 +436,6 @@ export function registerMCPRoutes(fastify) {
         multiAccount: !!user.multi_account_enabled,
         adAccountCount: result.adAccounts.length,
         hasAnthropicKey: !!result.anthropicApiKey,
-        accountsWithAnthropicKey,
       }, 'resolve-user: success');
 
       return reply.send(result);

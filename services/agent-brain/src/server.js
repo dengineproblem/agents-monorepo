@@ -744,7 +744,7 @@ async function getUserAccount(userAccountId) {
   return await supabaseQuery('user_accounts',
     async () => await supabase
       .from('user_accounts')
-      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode, multi_account_enabled, account_timezone, tiktok_access_token, tiktok_business_id, tiktok_account_id, autopilot_tiktok')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode, multi_account_enabled, account_timezone, tiktok_access_token, tiktok_business_id, tiktok_account_id, autopilot_tiktok, openai_api_key, gemini_api_key, anthropic_api_key')
       .eq('id', userAccountId)
       .single(),
     { userAccountId }
@@ -2252,8 +2252,8 @@ const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyRe
     '📊 СИТУАЦИЯ: TikTok рекламный кабинет неактивен (status != STATUS_ENABLE).',
     '',
     '📋 ТВОЯ ЗАДАЧА:',
-    '  1. ✅ СОЗДАТЬ ОТЧЕТ о затратах и результатах за вчера',
-    '  2. ℹ️ Указать, что аккаунт TikTok сейчас неактивен',
+    '  1. ✅ СОЗДАТЬ ПОЛНЫЙ ОТЧЕТ о затратах и результатах за вчера',
+    '  2. ℹ️ Явно указать, что аккаунт TikTok сейчас неактивен',
     '  3. ⚙️ actions массив должен быть ПУСТЫМ: []',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '',
@@ -2264,14 +2264,27 @@ const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyRe
     '📊 СИТУАЦИЯ: За вчера были затраты, НО все кампании TikTok неактивны.',
     '',
     '📋 ТВОЯ ЗАДАЧА:',
-    '  1. ✅ СОЗДАТЬ ОТЧЕТ о затратах и результатах за вчера',
-    '  2. ℹ️ Упомяни, что кампании выключены пользователем',
+    '  1. ✅ СОЗДАТЬ ПОЛНЫЙ ОТЧЕТ о затратах и результатах за вчера',
+    '  2. ℹ️ Упомянуть, что кампании выключены пользователем',
+    '  3. ⚙️ actions массив должен быть ПУСТЫМ: []',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+  ] : []),
+  ...(reportOnlyMode && (reportOnlyReason === 'account_status_error' || reportOnlyReason === 'account_status_missing') ? [
+    '💡 ВАЖНО: РЕЖИМ "ТОЛЬКО ОТЧЕТ" - НЕТ НАДЕЖНОГО СТАТУСА КАБИНЕТА',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '📊 СИТУАЦИЯ: Не удалось надежно определить статус TikTok кабинета.',
+    '',
+    '📋 ТВОЯ ЗАДАЧА:',
+    '  1. ✅ СОЗДАТЬ ПОЛНЫЙ ОТЧЕТ о затратах и результатах за вчера',
+    '  2. ℹ️ Указать, что статус кабинета нужно перепроверить вручную',
     '  3. ⚙️ actions массив должен быть ПУСТЫМ: []',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '',
   ] : []),
   'ОБЩИЙ КОНТЕКСТ',
   '- Ты — таргетолог-агент, управляющий рекламой в TikTok Ads.',
+  '- Цель: (1) соблюдать плановые бюджеты по направлениям; (2) снижать CPL/CPA в рамках целей направления; (3) предлагать понятный детальный отчёт в том же формате, что и у Facebook-ветки.',
   '- Бюджеты и CPL считаем в тенге (KZT).',
   minBudgetKzt ? `- Минимальный дневной бюджет TikTok: ${minBudgetKzt} ₸` : `- Минимальный дневной бюджет TikTok: ${TIKTOK_MIN_DAILY_BUDGET_KZT} ₸.`,
   '',
@@ -2279,25 +2292,54 @@ const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyRe
   '- Каждое направление = отдельная TikTok Campaign (tiktok_campaign_id).',
   '- У каждого направления свой дневной бюджет и целевой CPL.',
   '- Внутри кампании несколько AdGroups (adgroup_id).',
-  '- Сумма бюджетов активных AdGroups не должна превышать дневной бюджет направления.',
+  '- Сумма бюджетов активных AdGroups направления НЕ должна превышать бюджет направления.',
+  '- При недоборе по направлению (бюджет установлен заметно ниже плана) нужно добавить действия: увеличение бюджета эффективных AdGroups и/или создание нового AdGroup с креативами.',
+  '',
+  'ОСНОВНЫЕ ПРАВИЛА УПРАВЛЕНИЯ:',
+  '- Работай только с активными сущностями для действий (кампании/AdGroups/Ads).',
+  '- Шаг изменения бюджета: максимум +30% вверх и -50% вниз за запуск.',
+  '- При сильной неэффективности (CPL/CPA выше цели) допускается снижение бюджета и пауза самых дорогих объявлений.',
+  '- Если есть свободный бюджет направления и есть креативы — используй TikTok.Direction.CreateAdGroupWithCreatives.',
+  '- Перед действиями по кампании добавляй TikTok.GetCampaignStatus для этой кампании.',
   '',
   'ЦЕЛИ И ЛИДЫ:',
-  '- lead_generation / conversions (Leadform / Website Conversions) → лиды считаем по conversions.',
-  '- traffic (Traffic Clicky) → лиды считаем по clicks (стоимость действия = CPC).',
-  '- Качество лидов для TikTok пока не рассчитывается — укажи это текстом, без числовых значений.',
+  '- lead_generation / conversions: лиды считаем по conversions.',
+  '- traffic: лиды считаем по clicks (стоимость действия = CPC).',
+  '- Для каждого направления сравнивай фактический CPL с direction_target_cpl_kzt.',
+  '- Качество лидов для TikTok пока не рассчитывается: в отчёте укажи это текстом и ставь "н/д" в числовых полях quality.',
   '',
-  'РАЗРЕШЕННЫЕ ДЕЙСТВИЯ:',
+  'ДОСТУПНЫЕ ДЕЙСТВИЯ (ТОЛЬКО ОТСЮДА):',
   '- TikTok.GetCampaignStatus',
   '- TikTok.PauseCampaign / TikTok.ResumeCampaign',
   '- TikTok.PauseAdGroup / TikTok.ResumeAdGroup',
   '- TikTok.UpdateAdGroupBudget',
   '- TikTok.PauseAd / TikTok.ResumeAd',
-  '- TikTok.Direction.CreateAdGroupWithCreatives (создает новый AdGroup + объявления)',
+  '- TikTok.Direction.CreateAdGroupWithCreatives',
   '',
   'ФОРМАТ ОТВЕТА:',
   '- Выведи ОДИН JSON: { "planNote": string, "actions": Action[], "reportText": string }',
   '- Если reportOnlyMode=true → actions обязательно пустой массив.',
-  '- reportText использует шаблон из входных данных report.report_template или report.header_first_lines.'
+  '- reportText использует report.header_first_lines и report.report_template как жёсткий каркас.',
+  '',
+  'САМОПРОВЕРКА ПЕРЕД ВЫВОДОМ:',
+  '- reportText начинается с "📅 Дата отчета:".',
+  '- Если передан report.header_first_lines — начни reportText РОВНО с этого блока, без изменений.',
+  '- Если передан report_template — копируй структуру и заполняй значения без изменения секций.',
+  '- reportText содержит ВСЕ разделы в этом порядке:',
+  '  • "🏢 Статус рекламного кабинета:"',
+  '  • "📈 Общая сводка:" (ровно 5 строк показателей)',
+  '  • "📊 Сводка по отдельным кампаниям:"',
+  '  • "📊 Качество лидов:"',
+  '  • "✅ Выполненные действия:"',
+  '  • "📊 Аналитика в динамике:"',
+  '  • "Для дальнейшей оптимизации обращаем внимание на:"',
+  '- В общей сводке 5 строк: затраты, лиды/клики, CPL/CPA, качественные лиды (н/д), CPL качественного лида (н/д).',
+  '- Не оставляй плейсхолдеры <...>; подставляй реальные значения или "н/д".',
+  '- Если нет действий — раздел "✅ Выполненные действия" всё равно обязателен.',
+  '- Для каждого направления проверь итоговую сумму бюджетов активных AdGroups после твоих действий:',
+  '  • при обычном режиме стремись к коридору 95%-105% от direction_daily_budget_kzt;',
+  '  • если недобор >5% и reportOnlyMode=false — добавь действия до попадания в коридор.',
+  '- Язык ответа — русский; никаких пояснений вне JSON.'
 ].join('\n');
 
 function validateAndNormalizeActions(actions) {
@@ -2942,7 +2984,9 @@ function buildTikTokReport({ date, accountStatusText, campaigns, actions, totalS
         `   - Статус: ${c.status || 'н/д'}`,
         `   - Затраты: ${formatKztAmount(c.spend)}`,
         `   - Лидов/кликов: ${c.leads}`,
-        `   - CPL/СРА: ${cpl !== null ? formatKztAmount(cpl) : 'н/д'}`
+        `   - CPL/СРА: ${cpl !== null ? formatKztAmount(cpl) : 'н/д'}`,
+        '   - Качественных лидов: н/д',
+        '   - CPL качественного лида: н/д'
       ].join('\n');
     }).join('\n')
     : 'Нет кампаний с результатами';
@@ -2960,6 +3004,8 @@ function buildTikTokReport({ date, accountStatusText, campaigns, actions, totalS
     `- Общие затраты по всем кампаниям: ${formatKztAmount(totalSpend)}`,
     `- Общее количество полученных лидов/кликов: ${totalLeads}`,
     `- Средняя стоимость действия: ${avgCpl !== null ? formatKztAmount(avgCpl) : 'н/д'}`,
+    '- Общее количество качественных лидов: н/д',
+    '- Общий CPL качественного лида: н/д',
     '',
     '📊 Сводка по отдельным кампаниям:',
     campaignLines,
@@ -3177,10 +3223,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         ad_account_id: adAccount.ad_account_id,
         page_id: adAccount.page_id,
         whatsapp_phone_number: adAccount.whatsapp_phone_number,
-        telegram_id: adAccount.telegram_id || null,
-        telegram_id_2: adAccount.telegram_id_2 || null,
-        telegram_id_3: adAccount.telegram_id_3 || null,
-        telegram_id_4: adAccount.telegram_id_4 || null,
+        // telegram_id — НЕ перезаписываем, берём из user_accounts (shared, верхний уровень)
         prompt3: adAccount.prompt3 || ua.prompt3,
         ig_seed_audience_id: adAccount.ig_seed_audience_id || ua.ig_seed_audience_id,
         default_cpl_target_cents: adAccount.default_cpl_target_cents ?? ua.default_cpl_target_cents,
@@ -4381,10 +4424,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         tiktok_business_id: adAccount.tiktok_business_id || ua.tiktok_business_id,
         tiktok_account_id: adAccount.tiktok_account_id || ua.tiktok_account_id,
         autopilot_tiktok: adAccount.autopilot_tiktok ?? ua.autopilot_tiktok,
-        telegram_id: adAccount.telegram_id || ua.telegram_id,
-        telegram_id_2: adAccount.telegram_id_2 || ua.telegram_id_2,
-        telegram_id_3: adAccount.telegram_id_3 || ua.telegram_id_3,
-        telegram_id_4: adAccount.telegram_id_4 || ua.telegram_id_4,
+        // telegram_id — НЕ перезаписываем, берём из user_accounts (shared, верхний уровень)
         accountName: adAccount.name || ua.accountName || null,
         accountUsername: adAccount.username || ua.accountUsername || null,
         account_timezone: adAccount.brain_timezone || ua.account_timezone
@@ -4491,6 +4531,10 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
     const reportMetrics = ['spend', 'impressions', 'clicks', 'conversion'];
     const [
       yCampaignRows,
+      d3CampaignRows,
+      d7CampaignRows,
+      d30CampaignRows,
+      todayCampaignRows,
       yAdgroupRows,
       d3AdgroupRows,
       d7AdgroupRows,
@@ -4502,6 +4546,46 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         advertiserId: tikTokAdvertiserId,
         accessToken: tikTokAccessToken,
         preset: 'yesterday',
+        dataLevel: 'AUCTION_CAMPAIGN',
+        dimensions: ['campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_3d',
+        dataLevel: 'AUCTION_CAMPAIGN',
+        dimensions: ['campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_7d',
+        dataLevel: 'AUCTION_CAMPAIGN',
+        dimensions: ['campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_30d',
+        dataLevel: 'AUCTION_CAMPAIGN',
+        dimensions: ['campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'today',
         dataLevel: 'AUCTION_CAMPAIGN',
         dimensions: ['campaign_id'],
         metrics: reportMetrics,
@@ -4571,6 +4655,10 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
     ]);
 
     const byCampaignY = indexTikTokReportBy(yCampaignRows, 'campaign_id');
+    const byCampaign3 = indexTikTokReportBy(d3CampaignRows, 'campaign_id');
+    const byCampaign7 = indexTikTokReportBy(d7CampaignRows, 'campaign_id');
+    const byCampaign30 = indexTikTokReportBy(d30CampaignRows, 'campaign_id');
+    const byCampaignToday = indexTikTokReportBy(todayCampaignRows, 'campaign_id');
     const byAdgroupY = indexTikTokReportBy(yAdgroupRows, 'adgroup_id');
     const byAdgroup3 = indexTikTokReportBy(d3AdgroupRows, 'adgroup_id');
     const byAdgroup7 = indexTikTokReportBy(d7AdgroupRows, 'adgroup_id');
@@ -4620,13 +4708,14 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
       })
       .filter(c => c.spend > 0 || c.leads > 0);
 
-    const totalSpend = campaignsWithResults.reduce((s, c) => s + (c.spend || 0), 0);
-    const totalLeads = campaignsWithResults.reduce((s, c) => s + (c.leads || 0), 0);
-
     if (!reportOnlyMode && campaignsWithResults.length > 0 && activeCampaigns.length === 0) {
       reportOnlyMode = true;
       reportOnlyReason = 'campaigns_inactive';
     }
+
+    const campaignsForReport = campaignsWithResults.filter(c => reportOnlyMode ? true : isActiveStatus(c.status));
+    const totalSpend = campaignsForReport.reduce((s, c) => s + (c.spend || 0), 0);
+    const totalLeads = campaignsForReport.reduce((s, c) => s + (c.leads || 0), 0);
 
     const weights = { cpl_gap: 45, trend: 15, ctr_penalty: 8, cpm_penalty: 12, freq_penalty: 10 };
     const classes = { very_good: 25, good: 5, neutral_low: -5, bad: -25 };
@@ -4637,6 +4726,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
 
     const hsSummary = [];
     const decisions = [];
+    const touchedCampaignIds = new Set();
     for (const ag of adgroups || []) {
       const id = ag.adgroup_id;
       const metricsY = byAdgroupY.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
@@ -4685,6 +4775,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         const normalized = normalizeTikTokBudget(nextBudget, budgetBounds);
         if (normalized !== null && normalized !== currentBudget) {
           decisions.push({ type: 'TikTok.UpdateAdGroupBudget', params: { adgroup_id: id, new_budget: normalized } });
+          if (ag.campaign_id) touchedCampaignIds.add(String(ag.campaign_id));
         }
       }
 
@@ -4696,12 +4787,18 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         const cplTop = leadsTop > 0 ? (top.spend / leadsTop) : Infinity;
         if (!Number.isFinite(cplTop) || cplTop > targetCplKzt * 1.3) {
           decisions.push({ type: 'TikTok.PauseAd', params: { ad_id: top.ad_id } });
+          if (ag.campaign_id) touchedCampaignIds.add(String(ag.campaign_id));
         }
       }
     }
 
+    for (const cid of Array.from(touchedCampaignIds)) {
+      decisions.unshift({ type: 'TikTok.GetCampaignStatus', params: { campaign_id: cid } });
+    }
+
     if (reportOnlyMode) {
       decisions.length = 0;
+      touchedCampaignIds.clear();
     }
 
     const directionsWithAdGroups = await Promise.all((tiktokDirections || []).map(async (d) => {
@@ -4734,6 +4831,47 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
       };
     }));
 
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    let actionHistory = [];
+    try {
+      let historyQuery = supabase
+        .from('brain_executions')
+        .select('created_at, status, plan_json, actions_json')
+        .eq('user_account_id', userAccountId)
+        .eq('platform', 'tiktok')
+        .gte('created_at', threeDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      historyQuery = accountUUID ? historyQuery.eq('account_id', accountUUID) : historyQuery.is('account_id', null);
+
+      const { data: recentTikTokHistory, error: historyError } = await historyQuery;
+      if (historyError) {
+        fastify.log.warn({
+          where: 'tiktok_brain_run',
+          phase: 'history_load_failed',
+          userId: userAccountId,
+          accountId: accountUUID,
+          error: historyError.message
+        });
+      } else if (Array.isArray(recentTikTokHistory) && recentTikTokHistory.length > 0) {
+        actionHistory = recentTikTokHistory.map(item => ({
+          date: String(item.created_at || '').split('T')[0],
+          status: item.status || 'unknown',
+          plan_note: item.plan_json?.planNote || null,
+          actions: Array.isArray(item.actions_json) ? item.actions_json : []
+        }));
+      }
+    } catch (historyErr) {
+      fastify.log.warn({
+        where: 'tiktok_brain_run',
+        phase: 'history_load_exception',
+        userId: userAccountId,
+        accountId: accountUUID,
+        error: String(historyErr?.message || historyErr)
+      });
+    }
+
     const llmInput = {
       platform: 'tiktok',
       userAccountId,
@@ -4757,63 +4895,89 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
       directions: directionsWithAdGroups,
       analysis: {
         hsSummary,
+        touchedCampaignIds: Array.from(touchedCampaignIds),
         totals: {
           installed_daily_budget_kzt_all: (adgroups || []).reduce((s, a) => s + (Number(a.budget) || 0), 0),
           installed_daily_budget_kzt_active: (adgroups || []).filter(a => isActiveStatus(getTikTokStatus(a))).reduce((s, a) => s + (Number(a.budget) || 0), 0)
         },
-        campaigns: (campaigns || []).map(c => {
-          const direction = directionByCampaignId.get(String(c.campaign_id));
-          return {
-            campaign_id: c.campaign_id,
-            name: c.campaign_name || c.name,
-            status: getTikTokStatus(c),
-            objective: direction?.tiktok_objective || direction?.objective || c.objective_type || null,
-            direction_id: direction?.id || null,
-            direction_name: direction?.name || null,
-            direction_daily_budget_kzt: getDirectionBudgetKzt(direction),
-            direction_target_cpl_kzt: getTargetCplKzt(direction),
-            windows: {
-              yesterday: byCampaignY.get(c.campaign_id) || {},
-              last_3d: {},
-              last_7d: {},
-              last_30d: {},
-              today: {}
-            }
-          };
-        }),
-        adgroups: (adgroups || []).map(ag => {
-          const direction = directionByCampaignId.get(String(ag.campaign_id));
-          const objective = direction?.tiktok_objective || direction?.objective || 'traffic';
-          const current = Number(ag.budget) || 0;
-          const maxUp = Math.max(0, Math.round(current * 1.3) - current);
-          const maxDown = Math.max(0, current - Math.round(current * 0.5));
-          const adsForAdgroup = (adsByAdgroupY.get(ag.adgroup_id) || []).map(ad => ({
-            ad_id: ad.ad_id,
-            spend: ad.spend || 0,
-            impressions: ad.impressions || 0,
-            clicks: ad.clicks || 0,
-            conversions: ad.conversions || 0
-          }));
+        campaigns: (campaigns || [])
+          .filter(c => {
+            const status = getTikTokStatus(c);
+            const metrics = byCampaignY.get(c.campaign_id) || {};
+            const direction = directionByCampaignId.get(String(c.campaign_id));
+            const objective = direction?.tiktok_objective || direction?.objective || c.objective_type || 'traffic';
+            const leads = computeTikTokLeads(metrics, objective).leads || 0;
+            const hasResults = (Number(metrics.spend) || 0) > 0 || leads > 0;
+            if (reportOnlyMode) return hasResults;
+            return hasResults && isActiveStatus(status);
+          })
+          .map(c => {
+            const direction = directionByCampaignId.get(String(c.campaign_id));
+            return {
+              campaign_id: c.campaign_id,
+              name: c.campaign_name || c.name,
+              status: getTikTokStatus(c),
+              objective: direction?.tiktok_objective || direction?.objective || c.objective_type || null,
+              direction_id: direction?.id || null,
+              direction_name: direction?.name || null,
+              direction_daily_budget_kzt: getDirectionBudgetKzt(direction),
+              direction_target_cpl_kzt: getTargetCplKzt(direction),
+              windows: {
+                yesterday: byCampaignY.get(c.campaign_id) || {},
+                last_3d: byCampaign3.get(c.campaign_id) || {},
+                last_7d: byCampaign7.get(c.campaign_id) || {},
+                last_30d: byCampaign30.get(c.campaign_id) || {},
+                today: byCampaignToday.get(c.campaign_id) || {}
+              }
+            };
+          }),
+        adgroups: (adgroups || [])
+          .filter(ag => {
+            const direction = directionByCampaignId.get(String(ag.campaign_id));
+            const objective = direction?.tiktok_objective || direction?.objective || 'traffic';
+            const metricsY = byAdgroupY.get(ag.adgroup_id) || {};
+            const leadsY = computeTikTokLeads(metricsY, objective).leads || 0;
+            const hasResults = (Number(metricsY.spend) || 0) > 0 || leadsY > 0;
+            if (reportOnlyMode) return hasResults;
+            return hasResults && isActiveStatus(getTikTokStatus(ag));
+          })
+          .map(ag => {
+            const direction = directionByCampaignId.get(String(ag.campaign_id));
+            const objective = direction?.tiktok_objective || direction?.objective || 'traffic';
+            const current = Number(ag.budget) || 0;
+            const maxUp = Math.max(0, Math.round(current * 1.3) - current);
+            const maxDown = Math.max(0, current - Math.round(current * 0.5));
+            const adsForAdgroup = (adsByAdgroupY.get(ag.adgroup_id) || []).map(ad => ({
+              ad_id: ad.ad_id,
+              spend: ad.spend || 0,
+              impressions: ad.impressions || 0,
+              clicks: ad.clicks || 0,
+              conversions: ad.conversions || 0
+            }));
 
-          return {
-            adgroup_id: ag.adgroup_id,
-            name: ag.adgroup_name,
-            campaign_id: ag.campaign_id,
-            objective,
-            daily_budget_kzt: current,
-            status: getTikTokStatus(ag),
-            step_constraints: { step_up_max_pct: 0.30, step_down_max_pct: 0.50 },
-            step_bounds_kzt: { max_increase: maxUp, max_decrease: maxDown },
-            windows: {
-              yesterday: byAdgroupY.get(ag.adgroup_id) || {},
-              last_3d: byAdgroup3.get(ag.adgroup_id) || {},
-              last_7d: byAdgroup7.get(ag.adgroup_id) || {},
-              last_30d: byAdgroup30.get(ag.adgroup_id) || {},
-              today: byAdgroupToday.get(ag.adgroup_id) || {}
-            },
-            ads: adsForAdgroup
-          };
-        })
+            return {
+              adgroup_id: ag.adgroup_id,
+              name: ag.adgroup_name,
+              campaign_id: ag.campaign_id,
+              objective,
+              direction_id: direction?.id || null,
+              direction_name: direction?.name || null,
+              direction_daily_budget_kzt: getDirectionBudgetKzt(direction),
+              direction_target_cpl_kzt: getTargetCplKzt(direction),
+              daily_budget_kzt: current,
+              status: getTikTokStatus(ag),
+              step_constraints: { step_up_max_pct: 0.30, step_down_max_pct: 0.50 },
+              step_bounds_kzt: { max_increase: maxUp, max_decrease: maxDown },
+              windows: {
+                yesterday: byAdgroupY.get(ag.adgroup_id) || {},
+                last_3d: byAdgroup3.get(ag.adgroup_id) || {},
+                last_7d: byAdgroup7.get(ag.adgroup_id) || {},
+                last_30d: byAdgroup30.get(ag.adgroup_id) || {},
+                today: byAdgroupToday.get(ag.adgroup_id) || {}
+              },
+              ads: adsForAdgroup
+            };
+          })
       },
       report: {
         report_date: date,
@@ -4822,7 +4986,9 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         yesterday_totals: {
           spend_kzt: Math.round(totalSpend),
           leads_total: totalLeads,
-          avg_cpl_kzt: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : null
+          avg_cpl_kzt: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : null,
+          quality_leads_total: null,
+          quality_cpl_kzt: null
         },
         header_first_lines: [
           `📅 Дата отчета: ${date}`,
@@ -4832,18 +4998,23 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
           '📈 Общая сводка:',
           `- Общие затраты по всем кампаниям: ${formatKztAmount(totalSpend)}`,
           `- Общее количество полученных лидов/кликов: ${totalLeads}`,
-          `- Средняя стоимость действия: ${totalLeads > 0 ? formatKztAmount(totalSpend / totalLeads) : 'н/д'}`
+          `- Средняя стоимость действия: ${totalLeads > 0 ? formatKztAmount(totalSpend / totalLeads) : 'н/д'}`,
+          '- Общее количество качественных лидов: н/д',
+          '- Общий CPL качественного лида: н/д'
         ].join('\n'),
-        campaigns_yesterday: campaignsWithResults.map(c => ({
+        campaigns_yesterday: campaignsForReport.map(c => ({
           id: c.id,
           name: c.name,
           status: c.status,
           spend_kzt: Math.round(c.spend || 0),
-          leads: c.leads || 0
+          leads: c.leads || 0,
+          cpl_kzt: c.leads > 0 ? Math.round(c.spend / c.leads) : null,
+          quality_leads: null,
+          quality_cpl_kzt: null
         })),
-        report_template: '📅 Дата отчета: <YYYY-MM-DD>\\n\\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\\n\\n📈 Общая сводка:\\n- Общие затраты по всем кампаниям: <amount> ₸\\n- Общее количество полученных лидов/кликов: <int>\\n- Средняя стоимость действия: <amount> ₸\\n\\n📊 Сводка по отдельным кампаниям:\\n<n>. Кампания \"<name>\" (ID: <id>)\\n   - Статус: <Активна|Неактивна>\\n   - Затраты: <amount> ₸\\n   - Лидов/кликов: <int>\\n   - CPL/СРА: <amount> ₸\\n\\n📊 Качество лидов:\\n- Качество лидов для TikTok пока не рассчитывается.\\n\\n✅ Выполненные действия:\\n1. Кампания \"<name>\":\\n   - <краткая причина/действие>\\n\\n📊 Аналитика в динамике:\\n- <наблюдение 1>\\n- <наблюдение 2>\\n\\nДля дальнейшей оптимизации обращаем внимание на:\\n- <рекомендация 1>\\n- <рекомендация 2>'
+        report_template: '📅 Дата отчета: <YYYY-MM-DD>\\n\\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\\n\\n📈 Общая сводка:\\n- Общие затраты по всем кампаниям: <amount> ₸\\n- Общее количество полученных лидов/кликов: <int>\\n- Средняя стоимость действия: <amount> ₸\\n- Общее количество качественных лидов: н/д\\n- Общий CPL качественного лида: н/д\\n\\n📊 Сводка по отдельным кампаниям:\\n<n>. Кампания \"<name>\" (ID: <id>)\\n   - Статус: <Активна|Неактивна>\\n   - Затраты: <amount> ₸\\n   - Лидов/кликов: <int>\\n   - CPL/СРА: <amount> ₸\\n   - Качественных лидов: н/д\\n   - CPL качественного лида: н/д\\n\\n📊 Качество лидов:\\n- Качество лидов для TikTok пока не рассчитывается.\\n\\n✅ Выполненные действия:\\n1. Кампания \"<name>\":\\n   - <краткая причина/действие>\\n\\n📊 Аналитика в динамике:\\n- <наблюдение 1>\\n- <наблюдение 2>\\n\\nДля дальнейшей оптимизации обращаем внимание на:\\n- <рекомендация 1>\\n- <рекомендация 2>'
       },
-      action_history: []
+      action_history: actionHistory
     };
 
     let actions;
@@ -4872,11 +5043,21 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
         });
 
         const limited = Array.isArray(decisions) ? decisions.slice(0, Math.max(0, BRAIN_MAX_ACTIONS_PER_RUN)) : [];
+        for (const cid of Array.from(touchedCampaignIds)) {
+          if (!limited.some(a => a?.type === 'TikTok.GetCampaignStatus' && a?.params?.campaign_id === cid)) {
+            limited.unshift({ type: 'TikTok.GetCampaignStatus', params: { campaign_id: cid } });
+          }
+        }
         actions = validateAndNormalizeTikTokActions(limited, budgetBounds);
         planNote = 'tiktok_deterministic_fallback_v1';
       }
     } else {
       const limited = Array.isArray(decisions) ? decisions.slice(0, Math.max(0, BRAIN_MAX_ACTIONS_PER_RUN)) : [];
+      for (const cid of Array.from(touchedCampaignIds)) {
+        if (!limited.some(a => a?.type === 'TikTok.GetCampaignStatus' && a?.params?.campaign_id === cid)) {
+          limited.unshift({ type: 'TikTok.GetCampaignStatus', params: { campaign_id: cid } });
+        }
+      }
       actions = validateAndNormalizeTikTokActions(limited, budgetBounds);
       planNote = 'tiktok_deterministic_plan_v1';
     }
@@ -4920,7 +5101,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
       : buildTikTokReport({
         date,
         accountStatusText,
-        campaigns: campaignsWithResults,
+        campaigns: campaignsForReport,
         actions: inputs?.dispatch ? actions : [],
         totalSpend,
         totalLeads
@@ -5460,13 +5641,14 @@ async function getAccountsForCurrentHour(utcHour) {
     .select(`
       id, user_account_id, name, ad_account_id, page_id, access_token,
       brain_mode, brain_schedule_hour, brain_timezone, autopilot,
-      telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
       default_cpl_target_cents, plan_daily_budget_cents,
       last_brain_batch_run_at,
       prompt3, whatsapp_phone_number, ig_seed_audience_id,
       openai_api_key,
       user_accounts!inner(
-        id, username, access_token, multi_account_enabled, optimization, is_active
+        id, username, access_token, multi_account_enabled, optimization, is_active,
+        telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
+        openai_api_key, gemini_api_key, anthropic_api_key
       )
     `)
     .eq('is_active', true)
@@ -5541,7 +5723,20 @@ async function getAccountsForCurrentHour(utcHour) {
     status: 'completed'
   });
 
-  return accountsToProcess;
+  // Shared поля (telegram_id, API ключи) берём из user_accounts, а не из ad_accounts
+  return accountsToProcess.map(acc => {
+    const ua = acc.user_accounts;
+    return {
+      ...acc,
+      telegram_id: ua?.telegram_id || null,
+      telegram_id_2: ua?.telegram_id_2 || null,
+      telegram_id_3: ua?.telegram_id_3 || null,
+      telegram_id_4: ua?.telegram_id_4 || null,
+      openai_api_key: ua?.openai_api_key || null,
+      gemini_api_key: ua?.gemini_api_key || null,
+      anthropic_api_key: ua?.anthropic_api_key || null,
+    };
+  });
 }
 
 /**
@@ -5570,9 +5765,9 @@ async function getTikTokAccountsForCurrentHour(utcHour) {
     .select(`
       id, user_account_id, name, tiktok_access_token, tiktok_business_id, tiktok_account_id,
       autopilot_tiktok, brain_schedule_hour, brain_timezone,
-      telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
       user_accounts!inner(
-        id, username, multi_account_enabled, optimization, is_active
+        id, username, multi_account_enabled, optimization, is_active,
+        telegram_id, telegram_id_2, telegram_id_3, telegram_id_4
       )
     `)
     .eq('is_active', true)
@@ -5619,7 +5814,17 @@ async function getTikTokAccountsForCurrentHour(utcHour) {
     status: 'completed'
   });
 
-  return accountsToProcess;
+  // Shared поля (telegram_id) берём из user_accounts
+  return accountsToProcess.map(acc => {
+    const ua = acc.user_accounts;
+    return {
+      ...acc,
+      telegram_id: ua?.telegram_id || null,
+      telegram_id_2: ua?.telegram_id_2 || null,
+      telegram_id_3: ua?.telegram_id_3 || null,
+      telegram_id_4: ua?.telegram_id_4 || null,
+    };
+  });
 }
 
 /**
@@ -5998,7 +6203,8 @@ function buildUserAccountForBrain(account, userAccount) {
     prompt3: account.prompt3,
     whatsapp_phone_number: account.whatsapp_phone_number,
     ig_seed_audience_id: account.ig_seed_audience_id,
-    multi_account_enabled: userAccount.multi_account_enabled
+    multi_account_enabled: userAccount.multi_account_enabled,
+    openai_api_key: account.openai_api_key || null
   };
 }
 
@@ -7316,7 +7522,7 @@ async function processDailyBatch() {
         // Загружаем только активные ad_accounts с включённым автопилотом
         const { data: adAccounts, error: adAccountsError } = await supabase
           .from('ad_accounts')
-          .select('id, ad_account_id, name, autopilot, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, default_cpl_target_cents, plan_daily_budget_cents')
+          .select('id, ad_account_id, name, autopilot, default_cpl_target_cents, plan_daily_budget_cents')
           .eq('user_account_id', user.id)
           .eq('is_active', true)
           .eq('autopilot', true);  // ← КРИТИЧНО: только аккаунты с включённым автопилотом!
@@ -7345,7 +7551,8 @@ async function processDailyBatch() {
 
         // Создаём отдельную задачу для каждого ad_account
         for (const adAccount of adAccounts) {
-          const hasTelegramIds = !!(adAccount.telegram_id || adAccount.telegram_id_2 || adAccount.telegram_id_3 || adAccount.telegram_id_4);
+          // telegram_id берём из user (user_accounts) — shared, верхний уровень
+          const hasTelegramIds = !!(user.telegram_id || user.telegram_id_2 || user.telegram_id_3 || user.telegram_id_4);
 
           fastify.log.info({
             where: 'processDailyBatch',
@@ -7355,7 +7562,7 @@ async function processDailyBatch() {
             accountId: adAccount.id,
             accountName: adAccount.name || adAccount.ad_account_id,
             hasTelegramIds,
-            telegramIdCount: [adAccount.telegram_id, adAccount.telegram_id_2, adAccount.telegram_id_3, adAccount.telegram_id_4].filter(Boolean).length,
+            telegramIdCount: [user.telegram_id, user.telegram_id_2, user.telegram_id_3, user.telegram_id_4].filter(Boolean).length,
             defaultCplCents: adAccount.default_cpl_target_cents || null,
             planBudgetCents: adAccount.plan_daily_budget_cents || null,
             autopilot: adAccount.autopilot
@@ -7365,11 +7572,7 @@ async function processDailyBatch() {
             ...user,
             accountId: adAccount.id,  // UUID из ad_accounts.id
             accountName: adAccount.name || adAccount.ad_account_id,
-            // Переопределяем telegram_id из ad_accounts (БЕЗ fallback на user_accounts!)
-            telegram_id: adAccount.telegram_id || null,
-            telegram_id_2: adAccount.telegram_id_2 || null,
-            telegram_id_3: adAccount.telegram_id_3 || null,
-            telegram_id_4: adAccount.telegram_id_4 || null,
+            // telegram_id остаётся из ...user (user_accounts, shared)
             // Добавляем CPL и budget из ad_accounts
             default_cpl_target_cents: adAccount.default_cpl_target_cents,
             plan_daily_budget_cents: adAccount.plan_daily_budget_cents

@@ -885,42 +885,12 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
       <TabsContent value="ai" className="space-y-4 mt-4">
         <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
           <Key className="h-4 w-4" />
-          <span>API ключи и промпты для AI</span>
+          <span>Промпты для AI</span>
         </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          API ключи (OpenAI, Gemini, Anthropic) настраиваются в профиле — они общие для всех аккаунтов.
+        </p>
         <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="openai_api_key">OpenAI API Key</Label>
-            <Input
-              id="openai_api_key"
-              type="password"
-              value={formData.openai_api_key || ''}
-              onChange={(e) => updateField('openai_api_key', e.target.value)}
-              placeholder="sk-..."
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="gemini_api_key">Gemini API Key</Label>
-            <Input
-              id="gemini_api_key"
-              type="password"
-              value={formData.gemini_api_key || ''}
-              onChange={(e) => updateField('gemini_api_key', e.target.value)}
-              placeholder="AIza..."
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="anthropic_api_key">Anthropic API Key (Claude бот)</Label>
-            <Input
-              id="anthropic_api_key"
-              type="password"
-              value={formData.anthropic_api_key || ''}
-              onChange={(e) => updateField('anthropic_api_key', e.target.value)}
-              placeholder="sk-ant-..."
-            />
-            <p className="text-xs text-muted-foreground">
-              Ключ для Telegram бота. Если пуст — используется системный ключ.
-            </p>
-          </div>
           <div className="grid gap-2">
             <Label htmlFor="prompt1">Контекст бизнеса (для текстов)</Label>
             <Textarea

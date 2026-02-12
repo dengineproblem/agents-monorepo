@@ -169,8 +169,16 @@ const Profile: React.FC = () => {
   const [isSavingMaxBudget, setIsSavingMaxBudget] = useState(false);
   const [isSavingPlannedCpl, setIsSavingPlannedCpl] = useState(false);
   
-  // OpenAI API Key
+  // API Keys (shared, верхний уровень)
   const [openaiApiKey, setOpenaiApiKey] = useState<string>('');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [anthropicApiKey, setAnthropicApiKey] = useState<string>('');
+  const [apiKeyModal, setApiKeyModal] = useState(false);
+  const [editingApiKeyField, setEditingApiKeyField] = useState<'openai_api_key' | 'gemini_api_key' | 'anthropic_api_key'>('openai_api_key');
+  const [newApiKeyValue, setNewApiKeyValue] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [isSavingApiKey, setIsSavingApiKey] = useState(false);
+  // Legacy compatibility
   const [openaiModal, setOpenaiModal] = useState(false);
   const [newOpenaiKey, setNewOpenaiKey] = useState('');
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
@@ -305,7 +313,7 @@ const Profile: React.FC = () => {
         // Загружаем актуальные данные из Supabase
         const { data, error } = await (supabase
           .from('user_accounts')
-          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id, tilda_utm_field')
+          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, gemini_api_key, anthropic_api_key, ig_seed_audience_id, tilda_utm_field')
           .eq('id', user.id)
           .single() as any);
 
@@ -339,6 +347,8 @@ const Profile: React.FC = () => {
           setMaxBudgetCents(data.plan_daily_budget_cents ?? null);
           setPlannedCplCents(data.default_cpl_target_cents ?? null);
           setOpenaiApiKey(data.openai_api_key || '');
+          setGeminiApiKey(data.gemini_api_key || '');
+          setAnthropicApiKey(data.anthropic_api_key || '');
           setAudienceId(data.ig_seed_audience_id || '');
           setTildaConnected(Boolean(data.tilda_utm_field));
 
@@ -945,6 +955,41 @@ const Profile: React.FC = () => {
     }
   };
 
+  const handleSaveApiKey = async () => {
+    if (!user?.id) return;
+    setIsSavingApiKey(true);
+    try {
+      const keyToSave = newApiKeyValue.trim();
+
+      const { error } = await (supabase
+        .from('user_accounts')
+        .update({ [editingApiKeyField]: keyToSave || null } as any)
+        .eq('id', user.id));
+
+      if (error) {
+        toast.error('Ошибка при сохранении: ' + error.message);
+        return;
+      }
+
+      const updatedUser = { ...user, [editingApiKeyField]: keyToSave || null };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+
+      if (editingApiKeyField === 'openai_api_key') setOpenaiApiKey(keyToSave);
+      if (editingApiKeyField === 'gemini_api_key') setGeminiApiKey(keyToSave);
+      if (editingApiKeyField === 'anthropic_api_key') setAnthropicApiKey(keyToSave);
+
+      toast.success('API ключ успешно сохранён');
+      setApiKeyModal(false);
+      setNewApiKeyValue('');
+      setShowApiKey(false);
+    } catch (error) {
+      console.error('Ошибка при сохранении:', error);
+      toast.error('Произошла ошибка при сохранении');
+    } finally {
+      setIsSavingApiKey(false);
+    }
+  };
+
   const handleSaveAudienceId = async () => {
     if (!user?.id) return;
     
@@ -1315,12 +1360,8 @@ const Profile: React.FC = () => {
               }}
             />
 
-              {/* Ad Accounts Manager - только для мультиаккаунтности */}
-              {multiAccountEnabled && <AdAccountsManager />}
-
-              {/* Telegram ID Card - только для обычного режима, в мультиаккаунтном настраивается через AdAccountsManager */}
-              {!multiAccountEnabled && (
-                <Card>
+              {/* Telegram ID Card - общий для всех режимов (shared на уровне user_accounts) */}
+              <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">
                       <MessageCircle className="h-5 w-5" />
@@ -1357,9 +1398,9 @@ const Profile: React.FC = () => {
                         );
                       })}
 
-                      {/* Кнопка добавить еще ID (показывается если есть свободный слот) */}
-                      {telegramIds.filter(id => id !== null).length < 4 && telegramIds[0] && (
-                        <div className="pt-2 border-t">
+                      {/* Кнопка добавить ID (показывается если есть свободный слот) */}
+                      {telegramIds.filter(id => id !== null).length < 4 && (
+                        <div className={telegramIds[0] ? "pt-2 border-t" : ""}>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1381,7 +1422,49 @@ const Profile: React.FC = () => {
                     </div>
                   </CardContent>
                 </Card>
-              )}
+
+              {/* API ключи — shared на уровне user_accounts */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Key className="h-5 w-5" />
+                    API ключи
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {([
+                      { field: 'openai_api_key' as const, label: 'OpenAI', value: openaiApiKey, placeholder: 'sk-...' },
+                      { field: 'gemini_api_key' as const, label: 'Gemini', value: geminiApiKey, placeholder: 'AIza...' },
+                      { field: 'anthropic_api_key' as const, label: 'Anthropic (Claude бот)', value: anthropicApiKey, placeholder: 'sk-ant-...' },
+                    ]).map(({ field, label, value, placeholder }) => (
+                      <div key={field} className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-sm text-muted-foreground mb-1">{label}</div>
+                          <div className="font-medium font-mono text-sm">
+                            {value ? `${value.substring(0, 7)}...${value.substring(value.length - 4)}` : 'Не установлен'}
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditingApiKeyField(field);
+                            setNewApiKeyValue(value);
+                            setShowApiKey(false);
+                            setApiKeyModal(true);
+                          }}
+                        >
+                          {value ? 'Изменить' : 'Добавить'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Ad Accounts Manager - только для мультиаккаунтности */}
+              {multiAccountEnabled && <AdAccountsManager />}
 
               {/* Brain Settings Card убран для legacy режима:
                   - Legacy (multi_account_enabled=false) использует user_accounts.autopilot (toggle on/off)
@@ -1432,43 +1515,6 @@ const Profile: React.FC = () => {
                   </CardContent>
                 </Card>
               )}
-
-              {/* OpenAI API Key - скрыт (не используется в данной версии) */}
-              {/* 
-              {FEATURES.SHOW_DIRECTIONS && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Key className="h-5 w-5" />
-                      {t('profile.openaiKey')}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="text-sm text-muted-foreground mb-1">
-                          {t('profile.apiKeyDescription')}
-                        </div>
-                        <div className="font-medium font-mono">
-                          {openaiApiKey ? `${openaiApiKey.substring(0, 7)}...${openaiApiKey.substring(openaiApiKey.length - 4)}` : t('profile.notSet')}
-                        </div>
-                      </div>
-                      <Button 
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setNewOpenaiKey(openaiApiKey);
-                          setShowOpenaiKey(false);
-                          setOpenaiModal(true);
-                        }}
-                      >
-                        {openaiApiKey ? t('action.change') : t('action.add')}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-              */}
 
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && (
@@ -1846,29 +1892,34 @@ const Profile: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Диалог изменения OpenAI API ключа */}
-        <Dialog open={openaiModal} onOpenChange={setOpenaiModal}>
+        {/* Диалог изменения API ключа (универсальный) */}
+        <Dialog open={apiKeyModal} onOpenChange={setApiKeyModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>{appReviewText('OpenAI API key', 'OpenAI API ключ')}</DialogTitle>
+              <DialogTitle>
+                {editingApiKeyField === 'openai_api_key' ? 'OpenAI API ключ' :
+                 editingApiKeyField === 'gemini_api_key' ? 'Gemini API ключ' :
+                 'Anthropic API ключ'}
+              </DialogTitle>
               <DialogDescription>
-                {appReviewText('Provide your OpenAI API key for content generation. The key must start with "sk-".', 'Укажите ваш API ключ OpenAI для генерации контента. Ключ должен начинаться с "sk-".')}
+                Оставьте пустым, чтобы удалить ключ.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="openai-key" className="flex items-center gap-1">
-                  {appReviewText('API key', 'API ключ')}
-                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_OPENAI_KEY} iconSize="sm" />
-                </Label>
+                <Label htmlFor="api-key">API ключ</Label>
                 <div className="relative">
                   <Input
-                    id="openai-key"
-                    type={showOpenaiKey ? "text" : "password"}
-                    placeholder={appReviewText('sk-...', 'sk-...')}
-                    value={newOpenaiKey}
-                    onChange={(e) => setNewOpenaiKey(e.target.value)}
-                    disabled={isSavingOpenaiKey}
+                    id="api-key"
+                    type={showApiKey ? "text" : "password"}
+                    placeholder={
+                      editingApiKeyField === 'openai_api_key' ? 'sk-...' :
+                      editingApiKeyField === 'gemini_api_key' ? 'AIza...' :
+                      'sk-ant-...'
+                    }
+                    value={newApiKeyValue}
+                    onChange={(e) => setNewApiKeyValue(e.target.value)}
+                    disabled={isSavingApiKey}
                     className="pr-10"
                   />
                   <Button
@@ -1876,32 +1927,29 @@ const Profile: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                    onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                    onClick={() => setShowApiKey(!showApiKey)}
                   >
-                    {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {appReviewText('Leave empty to remove the key.', 'Оставьте пустым, чтобы удалить ключ.')}
-                </p>
               </div>
               <div className="flex justify-end gap-2">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setOpenaiModal(false);
-                    setNewOpenaiKey('');
-                    setShowOpenaiKey(false);
+                    setApiKeyModal(false);
+                    setNewApiKeyValue('');
+                    setShowApiKey(false);
                   }}
-                  disabled={isSavingOpenaiKey}
+                  disabled={isSavingApiKey}
                 >
                   {t('action.cancel')}
                 </Button>
                 <Button
-                  onClick={handleSaveOpenaiKey}
-                  disabled={isSavingOpenaiKey}
+                  onClick={handleSaveApiKey}
+                  disabled={isSavingApiKey}
                 >
-                  {isSavingOpenaiKey ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
+                  {isSavingApiKey ? 'Сохранение...' : t('action.save')}
                 </Button>
               </div>
             </div>
