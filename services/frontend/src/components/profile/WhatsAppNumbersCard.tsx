@@ -38,6 +38,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
     is_default: false,
     connection_type: 'evolution' as ConnectionType,
     waba_phone_id: '',
+    waba_access_token: '',
   });
 
   // Загрузка номеров
@@ -87,6 +88,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
           is_default: formData.is_default,
           connection_type: formData.connection_type,
           waba_phone_id: formData.connection_type === 'waba' ? formData.waba_phone_id : undefined,
+          waba_access_token: formData.connection_type === 'waba' && formData.waba_access_token.trim() ? formData.waba_access_token.trim() : undefined,
         }),
       });
 
@@ -97,7 +99,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
 
       toast.success('Номер добавлен');
       setAddDialogOpen(false);
-      setFormData({ phone_number: '', label: '', is_default: false, connection_type: 'evolution', waba_phone_id: '' });
+      setFormData({ phone_number: '', label: '', is_default: false, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '' });
       loadNumbers();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось добавить номер');
@@ -315,7 +317,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, connection_type: 'evolution', waba_phone_id: '' })}
+                  onClick={() => setFormData({ ...formData, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '' })}
                   className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
                     formData.connection_type === 'evolution'
                       ? 'border-primary bg-primary/5'
@@ -360,21 +362,38 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
               </p>
             </div>
 
-            {/* WABA Phone ID - только для WABA */}
+            {/* WABA fields - только для WABA */}
             {formData.connection_type === 'waba' && (
-              <div className="space-y-2">
-                <Label htmlFor="waba_phone_id">WABA Phone Number ID*</Label>
-                <Input
-                  id="waba_phone_id"
-                  value={formData.waba_phone_id}
-                  onChange={(e) => setFormData({ ...formData, waba_phone_id: e.target.value })}
-                  placeholder="123456789012345"
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
-                </p>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="waba_phone_id">WABA Phone Number ID*</Label>
+                  <Input
+                    id="waba_phone_id"
+                    value={formData.waba_phone_id}
+                    onChange={(e) => setFormData({ ...formData, waba_phone_id: e.target.value })}
+                    placeholder="123456789012345"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="waba_access_token">WABA Access Token</Label>
+                  <Input
+                    id="waba_access_token"
+                    type="password"
+                    value={formData.waba_access_token}
+                    onChange={(e) => setFormData({ ...formData, waba_access_token: e.target.value })}
+                    placeholder="System User Token"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
+                  </p>
+                </div>
+              </>
             )}
 
             <div className="space-y-2">

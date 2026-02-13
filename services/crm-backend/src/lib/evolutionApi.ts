@@ -78,7 +78,15 @@ function sanitizeErrorPayload(payload: string): string {
     .slice(0, 1200);
 }
 
-async function resolveWabaAccessToken(userAccountId: string, accountId: string | null): Promise<string | null> {
+async function resolveWabaAccessToken(userAccountId: string, accountId: string | null, wabaAccessToken?: string | null): Promise<string | null> {
+  // Priority 1: WABA-specific token from whatsapp_phone_numbers
+  const tokenFromWaba = extractNonEmptyString(wabaAccessToken);
+  if (tokenFromWaba) {
+    logger.debug({ userAccountId }, '[EvolutionAPI] Using waba_access_token from whatsapp_phone_numbers');
+    return tokenFromWaba;
+  }
+
+  // Priority 2: ad_accounts.access_token (multi-account)
   if (accountId) {
     const { data: adAccount, error: adAccountError } = await supabase
       .from('ad_accounts')
@@ -115,6 +123,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
   user_account_id: string;
   account_id: string | null;
   connection_type: string | null;
+  waba_access_token: string | null;
 } | null> {
   const normalizedInstanceName = instanceName.trim();
 
@@ -124,7 +133,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
 
   const { data: byInstanceName, error: byInstanceNameError } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('waba_phone_id, user_account_id, account_id, connection_type')
+    .select('waba_phone_id, user_account_id, account_id, connection_type, waba_access_token')
     .eq('instance_name', normalizedInstanceName)
     .eq('is_active', true)
     .maybeSingle();
@@ -142,6 +151,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
       user_account_id: string;
       account_id: string | null;
       connection_type: string | null;
+      waba_access_token: string | null;
     };
   }
 
@@ -151,7 +161,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
 
     const { data: byWabaPhoneId, error: byWabaPhoneIdError } = await supabase
       .from('whatsapp_phone_numbers')
-      .select('waba_phone_id, user_account_id, account_id, connection_type')
+      .select('waba_phone_id, user_account_id, account_id, connection_type, waba_access_token')
       .eq('waba_phone_id', fallbackWabaPhoneId)
       .eq('is_active', true)
       .maybeSingle();
@@ -170,6 +180,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
         user_account_id: string;
         account_id: string | null;
         connection_type: string | null;
+        waba_access_token: string | null;
       };
     }
   }
@@ -194,7 +205,7 @@ async function resolveDeliveryChannel(instanceName: string): Promise<DeliveryCha
     return { type: 'evolution' };
   }
 
-  const accessToken = await resolveWabaAccessToken(wabaRecord.user_account_id, wabaRecord.account_id);
+  const accessToken = await resolveWabaAccessToken(wabaRecord.user_account_id, wabaRecord.account_id, wabaRecord.waba_access_token);
   if (!accessToken) {
     logger.warn({ instanceName, wabaPhoneId }, '[EvolutionAPI] WABA access token not found, fallback to Evolution');
     return { type: 'evolution' };

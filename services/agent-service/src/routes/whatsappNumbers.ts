@@ -19,6 +19,7 @@ const CreateWhatsAppNumberSchema = z.object({
   is_default: z.boolean().default(false),
   connection_type: ConnectionTypeSchema,
   waba_phone_id: z.string().max(50).optional(),  // Meta Cloud API Phone Number ID
+  waba_access_token: z.string().optional(),  // WABA System User Token
 }).refine(
   (data) => {
     // Если тип WABA, то waba_phone_id обязателен
@@ -36,6 +37,7 @@ const UpdateWhatsAppNumberSchema = z.object({
   is_active: z.boolean().optional(),
   connection_type: z.enum(['evolution', 'waba']).optional(),
   waba_phone_id: z.string().max(50).nullable().optional(),  // null для очистки
+  waba_access_token: z.string().nullable().optional(),  // WABA System User Token
 });
 
 export default async function whatsappNumbersRoutes(app: FastifyInstance) {
@@ -113,6 +115,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
           is_active: true,
           connection_type: body.connection_type || 'evolution',
           waba_phone_id: body.waba_phone_id || null,
+          waba_access_token: body.connection_type === 'waba' ? (body.waba_access_token || null) : null,
         })
         .select()
         .single();

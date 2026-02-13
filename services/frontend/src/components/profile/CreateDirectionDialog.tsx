@@ -65,6 +65,7 @@ export interface CreateDirectionFormData {
   whatsapp_phone_number?: string;
   whatsapp_connection_type?: ConnectionType;
   whatsapp_waba_phone_id?: string;
+  whatsapp_waba_access_token?: string;
   adSettings?: CreateDefaultSettingsInput;
   facebookAdSettings?: CreateDefaultSettingsInput;
   tiktokAdSettings?: CreateDefaultSettingsInput;
@@ -104,6 +105,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState<string>('');
   const [whatsappConnectionType, setWhatsappConnectionType] = useState<ConnectionType>('evolution');
   const [whatsappWabaPhoneId, setWhatsappWabaPhoneId] = useState<string>('');
+  const [whatsappWabaAccessToken, setWhatsappWabaAccessToken] = useState<string>('');
 
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
@@ -498,7 +500,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
           ...(whatsappPhoneNumber.trim() && {
             whatsapp_connection_type: whatsappConnectionType,
-            ...(whatsappConnectionType === 'waba' && { whatsapp_waba_phone_id: whatsappWabaPhoneId.trim() }),
+            ...(whatsappConnectionType === 'waba' && {
+              whatsapp_waba_phone_id: whatsappWabaPhoneId.trim(),
+              ...(whatsappWabaAccessToken.trim() && { whatsapp_waba_access_token: whatsappWabaAccessToken.trim() }),
+            }),
           }),
         }),
         ...(needsTikTok && {
@@ -546,6 +551,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setWhatsappPhoneNumber('');
     setWhatsappConnectionType('evolution');
     setWhatsappWabaPhoneId('');
+    setWhatsappWabaAccessToken('');
     setSelectedCities([]);
     setAgeMin(18);
     setAgeMax(65);
@@ -1592,6 +1598,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         onClick={() => {
                           setWhatsappConnectionType('evolution');
                           setWhatsappWabaPhoneId('');
+                          setWhatsappWabaAccessToken('');
                         }}
                         disabled={isSubmitting}
                         className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
@@ -1627,22 +1634,40 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
                   {/* WABA Phone ID - только для WABA */}
                   {whatsappConnectionType === 'waba' && (
-                    <div className="space-y-2">
-                      <Label htmlFor="waba-phone-id">
-                        WABA Phone Number ID <span className="text-red-500">*</span>
-                      </Label>
-                      <Input
-                        id="waba-phone-id"
-                        value={whatsappWabaPhoneId}
-                        onChange={(e) => setWhatsappWabaPhoneId(e.target.value)}
-                        placeholder="123456789012345"
-                        disabled={isSubmitting}
-                        className="font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
-                      </p>
-                    </div>
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="waba-phone-id">
+                          WABA Phone Number ID <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          id="waba-phone-id"
+                          value={whatsappWabaPhoneId}
+                          onChange={(e) => setWhatsappWabaPhoneId(e.target.value)}
+                          placeholder="123456789012345"
+                          disabled={isSubmitting}
+                          className="font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="waba-access-token">WABA Access Token</Label>
+                        <Input
+                          id="waba-access-token"
+                          type="password"
+                          value={whatsappWabaAccessToken}
+                          onChange={(e) => setWhatsappWabaAccessToken(e.target.value)}
+                          placeholder="System User Token"
+                          disabled={isSubmitting}
+                          className="font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
+                        </p>
+                      </div>
+                    </>
                   )}
                 </>
               )}
