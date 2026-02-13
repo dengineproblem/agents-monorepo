@@ -6,6 +6,7 @@ import {
   getDialogForCapi,
   processDialogForCapi,
 } from '../lib/qualificationAgent.js';
+import { resolveCapiSettingsForDirection } from '../lib/capiSettingsResolver.js';
 
 const log = createLogger({ module: 'capiAnalysisCron' });
 
@@ -44,8 +45,7 @@ interface CronStats {
  * - Interest sent (Level 1 confirmed)
  * - No Qualified or Scheduled yet
  * - Had activity in the last hour
- * - Has direction_id with capi_enabled = true
- * - Direction CAPI source = whatsapp
+ * - Has direction with WhatsApp CAPI settings (capi_settings or legacy)
  *
  * CRM source is handled near-real-time from CRM webhooks
  * via POST /capi/crm-event and is intentionally excluded here.
@@ -58,7 +58,7 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
     batchSize: CAPI_CRON_BATCH_SIZE,
   }, 'Querying dialogs for CAPI analysis');
 
-  // Query with JOIN to check capi_enabled on direction level
+  // Step 1: Get candidate dialogs (without CAPI filter — we'll filter via resolver)
   const { data: dialogs, error } = await supabase
     .from('dialog_analysis')
     .select(`
@@ -70,9 +70,7 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
       incoming_count,
       last_message,
       account_directions!inner (
-        name,
-        capi_enabled,
-        capi_source
+        name
       )
     `)
     .eq('capi_interest_sent', true)
@@ -80,10 +78,8 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
     .eq('capi_scheduled_sent', false)
     .not('direction_id', 'is', null)
     .gte('last_message', activityThreshold)
-    .eq('account_directions.capi_enabled', true)
-    .eq('account_directions.capi_source', 'whatsapp')
     .order('last_message', { ascending: false })
-    .limit(CAPI_CRON_BATCH_SIZE);
+    .limit(CAPI_CRON_BATCH_SIZE * 2); // fetch more — some will be filtered out
 
   if (error) {
     log.error({
@@ -94,22 +90,38 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
     return [];
   }
 
-  // Transform to flat structure
-  const result = (dialogs || []).map((d: any) => ({
-    id: d.id,
-    user_account_id: d.user_account_id,
-    instance_name: d.instance_name,
-    contact_phone: d.contact_phone,
-    direction_id: d.direction_id,
-    incoming_count: d.incoming_count,
-    last_message: d.last_message,
-    direction_name: d.account_directions?.name,
-  }));
+  // Step 2: Filter via resolver — only keep dialogs with WhatsApp CAPI source
+  // Cache resolved settings by direction_id to avoid N+1 queries
+  const resolverCache = new Map<string, Awaited<ReturnType<typeof resolveCapiSettingsForDirection>>>();
+  const result: DialogForAnalysis[] = [];
+  for (const d of (dialogs || []) as any[]) {
+    if (result.length >= CAPI_CRON_BATCH_SIZE) break;
+
+    let resolved = resolverCache.get(d.direction_id);
+    if (resolved === undefined) {
+      resolved = await resolveCapiSettingsForDirection(d.direction_id);
+      resolverCache.set(d.direction_id, resolved);
+    }
+
+    if (resolved && resolved.source === 'whatsapp') {
+      result.push({
+        id: d.id,
+        user_account_id: d.user_account_id,
+        instance_name: d.instance_name,
+        contact_phone: d.contact_phone,
+        direction_id: d.direction_id,
+        incoming_count: d.incoming_count,
+        last_message: d.last_message,
+        direction_name: d.account_directions?.name,
+      });
+    }
+  }
 
   log.debug({
     count: result.length,
+    candidatesChecked: (dialogs || []).length,
     activityThreshold,
-  }, 'Dialogs query completed');
+  }, 'Dialogs query completed (with capi_settings filter)');
 
   return result;
 }

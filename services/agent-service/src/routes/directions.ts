@@ -17,18 +17,6 @@ const log = createLogger({ module: 'directionsRoutes' });
 // VALIDATION SCHEMAS
 // ========================================
 
-// CAPI field config schema
-const CapiFieldConfigSchema = z.object({
-  field_id: z.union([z.string(), z.number()]),
-  field_name: z.string(),
-  field_type: z.string(),
-  enum_id: z.union([z.string(), z.number(), z.null()]).optional(),
-  enum_value: z.string().nullable().optional(),
-  entity_type: z.string().optional(), // for Bitrix24
-  pipeline_id: z.union([z.string(), z.number(), z.null()]).optional(),
-  status_id: z.union([z.string(), z.number(), z.null()]).optional(),
-});
-
 const DirectionPlatformSchema = z.enum(['facebook', 'tiktok', 'both']);
 const TikTokObjectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation']);
 const TikTokAdGroupModeSchema = z.enum(['use_existing', 'create_new']);
@@ -128,14 +116,7 @@ const CreateDirectionSchema = z.object({
   default_settings: DefaultSettingsSchema.optional(),
   facebook_default_settings: DefaultSettingsSchema.optional(),
   tiktok_default_settings: DefaultSettingsSchema.optional(),
-  // CAPI settings (direction-level)
-  capi_enabled: z.boolean().optional(),
-  capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
-  capi_crm_type: z.enum(['amocrm', 'bitrix24']).nullable().optional(),
-  capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_access_token: z.string().nullable().optional(),
+  // CAPI event level per-direction (CAPI config now in capi_settings table)
   capi_event_level: z.number().int().min(1).max(3).nullable().optional(),
 }).superRefine((data, ctx) => {
   const platform = data.platform || 'facebook';
@@ -221,14 +202,7 @@ const UpdateDirectionSchema = z.object({
   tiktok_target_cpl: z.number().min(0).optional(),
   tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
   tiktok_instant_page_id: z.string().nullable().optional(),
-  // CAPI settings (direction-level)
-  capi_enabled: z.boolean().optional(),
-  capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
-  capi_crm_type: z.enum(['amocrm', 'bitrix24']).nullable().optional(),
-  capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
-  capi_access_token: z.string().nullable().optional(),
+  // CAPI event level per-direction (CAPI config now in capi_settings table)
   capi_event_level: z.number().int().min(1).max(3).nullable().optional(),
   // Conversions optimization level
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
@@ -248,7 +222,8 @@ async function createFacebookCampaign(
   adAccountId: string,
   accessToken: string,
   directionName: string,
-  objective: DirectionObjective
+  objective: DirectionObjective,
+  conversionChannel?: string | null
 ): Promise<{ campaign_id: string; status: string }> {
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -262,7 +237,8 @@ async function createFacebookCampaign(
       objectiveReadable = 'WhatsApp';
       break;
     case 'conversions':
-      fbObjective = 'OUTCOME_SALES';
+      // lead_form канал требует OUTCOME_LEADS (ON_AD несовместим с OUTCOME_SALES)
+      fbObjective = conversionChannel === 'lead_form' ? 'OUTCOME_LEADS' : 'OUTCOME_SALES';
       objectiveReadable = 'Conversions';
       break;
     case 'instagram_traffic':
@@ -1275,7 +1251,8 @@ export async function directionsRoutes(app: FastifyInstance) {
             fbAdAccountId as string,
             fbAccessToken as string,
             input.name,
-            input.objective as DirectionObjective
+            input.objective as DirectionObjective,
+            input.conversion_channel
           );
 
           createdCampaigns.push({ platform: 'facebook', campaignId: fbCampaign.campaign_id });
@@ -1289,9 +1266,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               conversion_channel: input.conversion_channel,
               optimization_level: input.optimization_level || 'level_1',
               fb_campaign_id: fbCampaign.campaign_id,
-              has_capi_enabled: input.capi_enabled,
-              capi_source: input.capi_source,
-            }, 'Создаём направление конверсии с CAPI оптимизацией');
+            }, 'Создаём направление конверсии');
           }
 
           const insertResult = await supabase
@@ -1311,14 +1286,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               fb_campaign_id: fbCampaign.campaign_id,
               campaign_status: fbCampaign.status,
               is_active: true,
-              // CAPI settings (direction-level)
-              capi_enabled: input.capi_enabled || false,
-              capi_source: input.capi_source || null,
-              capi_crm_type: input.capi_crm_type || null,
-              capi_interest_fields: input.capi_interest_fields || [],
-              capi_qualified_fields: input.capi_qualified_fields || [],
-              capi_scheduled_fields: input.capi_scheduled_fields || [],
-              capi_access_token: input.capi_access_token || null,
+              // CAPI event level per-direction (config now in capi_settings table)
               capi_event_level: input.capi_event_level ?? null,
               // Conversions optimization level
               optimization_level: input.optimization_level || 'level_1',
@@ -1385,14 +1353,6 @@ export async function directionsRoutes(app: FastifyInstance) {
               tiktok_instant_page_id: input.tiktok_instant_page_id ?? null,
               campaign_status: tiktokCampaign.status,
               is_active: true,
-              // CAPI settings are Facebook-only for now
-              capi_enabled: false,
-              capi_source: null,
-              capi_crm_type: null,
-              capi_interest_fields: [],
-              capi_qualified_fields: [],
-              capi_scheduled_fields: [],
-              capi_access_token: null,
               capi_event_level: null,
               optimization_level: 'level_1',
             })

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X } from 'lucide-react';
+import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X, Activity, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../i18n/LanguageContext';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
@@ -23,12 +23,13 @@ const AmoCRMIcon = () => (
 );
 
 export interface ConnectionItem {
-  id: 'facebook' | 'instagram' | 'tiktok' | 'amocrm' | 'tilda';
+  id: 'facebook' | 'instagram' | 'tiktok' | 'amocrm' | 'bitrix24' | 'tilda' | 'meta_capi';
   title: string;
   connected: boolean;
   onClick: () => void;
   disabled?: boolean;
   badge?: string;
+  editMode?: boolean;
 }
 
 // Маппинг id подключения на tooltipKey
@@ -37,7 +38,9 @@ const connectionTooltipKeys: Record<ConnectionItem['id'], TooltipKey | null> = {
   instagram: null, // Instagram подключается через Facebook
   tiktok: TooltipKeys.PROFILE_TIKTOK,
   amocrm: TooltipKeys.PROFILE_AMOCRM,
+  bitrix24: null,
   tilda: TooltipKeys.PROFILE_TILDA,
+  meta_capi: null,
 };
 
 const brandBg: Record<ConnectionItem['id'], string> = {
@@ -45,7 +48,9 @@ const brandBg: Record<ConnectionItem['id'], string> = {
   instagram: 'bg-gradient-to-br from-purple-500/10 to-pink-500/10 text-pink-600',
   tiktok: 'bg-gradient-to-br from-cyan-500/10 to-blue-500/10 text-cyan-600',
   amocrm: 'bg-gradient-to-br from-green-500/10 to-emerald-500/10 text-green-600',
+  bitrix24: 'bg-gradient-to-br from-sky-500/10 to-blue-500/10 text-sky-600',
   tilda: 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 text-yellow-600',
+  meta_capi: 'bg-gradient-to-br from-indigo-500/10 to-violet-500/10 text-indigo-600',
 };
 
 const FacebookIcon = () => (
@@ -61,12 +66,26 @@ const TildaIcon = () => (
   </svg>
 );
 
+// Bitrix24 icon SVG
+const Bitrix24Icon = () => (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z"/>
+  </svg>
+);
+
+// Meta CAPI icon SVG
+const MetaCapiIcon = () => (
+  <Activity className="h-5 w-5" />
+);
+
 const brandIcon: Record<ConnectionItem['id'], React.ReactNode> = {
   facebook: <FacebookIcon />,
   instagram: <Instagram className="h-5 w-5" />,
   tiktok: <TikTokIcon />,
   amocrm: <AmoCRMIcon />,
+  bitrix24: <Bitrix24Icon />,
   tilda: <TildaIcon />,
+  meta_capi: <MetaCapiIcon />,
 };
 
 interface ConnectionsGridProps {
@@ -128,13 +147,24 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[ConnectionsGrid] Button clicked:', it.id, it.connected);
                   it.onClick();
                 }}
                 disabled={it.disabled}
                 className="transition-all hover:shadow-sm px-2 sm:px-4"
               >
-                {it.connected ? (
+                {it.editMode ? (
+                  it.connected ? (
+                    <>
+                      <Settings className="h-4 w-4 sm:mr-2" />
+                      <span className="hidden sm:inline">Редактировать</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 sm:mr-2" />
+                      <span className="hidden sm:inline">Настроить</span>
+                    </>
+                  )
+                ) : it.connected ? (
                   <>
                     <X className="h-4 w-4 sm:mr-2" />
                     <span className="hidden sm:inline">{t('profile.disconnect')}</span>

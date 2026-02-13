@@ -50,6 +50,8 @@ import { FacebookManualConnectModal } from '@/components/profile/FacebookManualC
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
 import { useAppContext } from '@/context/AppContext';
 import { buildPaymentRedirectUrl } from '@/utils/paymentLinks';
+import { capiSettingsApi, type CapiSettingsRecord, CHANNEL_LABELS } from '@/services/capiSettingsApi';
+import CapiSettingsModal from '@/components/profile/CapiSettingsModal';
 
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | 'subscription_1m' | 'subscription_3m' | 'subscription_12m' | null;
@@ -225,6 +227,10 @@ const Profile: React.FC = () => {
   // Tilda Instructions Modal
   const [tildaInstructionsModal, setTildaInstructionsModal] = useState(false);
   const [tildaConnected, setTildaConnected] = useState(false);
+
+  // Meta CAPI Settings
+  const [capiSettings, setCapiSettings] = useState<CapiSettingsRecord[]>([]);
+  const [capiSettingsModalOpen, setCapiSettingsModalOpen] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -453,6 +459,21 @@ const Profile: React.FC = () => {
   }, [user?.id]);
 
   // REMOVED: AmoCRM qualification modal auto-open - now configured at direction level via CAPI settings
+
+  // Load CAPI settings
+  useEffect(() => {
+    const loadCapiSettings = async () => {
+      if (!user?.id) return;
+      try {
+        const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+        const settings = await capiSettingsApi.list(user.id, accountId);
+        setCapiSettings(settings);
+      } catch (error) {
+        console.error('Failed to load CAPI settings:', error);
+      }
+    };
+    loadCapiSettings();
+  }, [user?.id, multiAccountEnabled, currentAdAccountId]);
 
   const tarifBadge = useMemo(() => {
     if (!tarif) return null;
@@ -1606,6 +1627,16 @@ const Profile: React.FC = () => {
                 connected: isTildaConnected,
                 onClick: () => setTildaInstructionsModal(true),
               }] : []),
+              {
+                id: 'meta_capi' as const,
+                title: 'Meta CAPI',
+                connected: capiSettings.length > 0,
+                onClick: () => setCapiSettingsModalOpen(true),
+                editMode: true,
+                badge: capiSettings.length > 0
+                  ? `${capiSettings.length} ${capiSettings.length === 1 ? 'канал' : 'канала'}`
+                  : undefined,
+              },
             ]}
           />
 
@@ -2253,6 +2284,26 @@ const Profile: React.FC = () => {
           onOpenChange={setTildaInstructionsModal}
           userAccountId={user?.id || null}
           onSettingsSaved={() => setTildaConnected(true)}
+        />
+
+        {/* Meta CAPI Settings Modal */}
+        <CapiSettingsModal
+          open={capiSettingsModalOpen}
+          onOpenChange={setCapiSettingsModalOpen}
+          settings={capiSettings}
+          userAccountId={user?.id || ''}
+          accountId={multiAccountEnabled ? currentAdAccountId || null : null}
+          amocrmConnected={amocrmConnected}
+          bitrix24Connected={bitrix24Connected}
+          onSettingsChanged={async () => {
+            try {
+              const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+              const settings = await capiSettingsApi.list(user?.id || '', accountId);
+              setCapiSettings(settings);
+            } catch (error) {
+              console.error('Failed to reload CAPI settings:', error);
+            }
+          }}
         />
 
         {/* REMOVED: AmoCRM Qualification Field Modal - now configured at direction level via CAPI settings */}

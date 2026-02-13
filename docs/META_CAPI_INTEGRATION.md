@@ -107,6 +107,90 @@ export const CRM_LEVEL_EVENTS: Record<number, string> = {
 
 > **Legacy:** Старые события `CompleteRegistration`, `AddToCart`/`Subscribe`, `Purchase` остаются в коде для обратной совместимости WhatsApp конверсий.
 
+## Новая архитектура: CAPI Settings модуль (миграция 208+)
+
+С миграции 208 настройки CAPI вынесены из `account_directions` в отдельную таблицу `capi_settings`. Одна конфигурация на канал (WhatsApp / Lead Forms / Сайт) на аккаунт.
+
+### Таблица `capi_settings`
+
+| Колонка | Тип | Описание |
+|---------|-----|----------|
+| id | UUID PK | |
+| user_account_id | UUID FK | обязательно |
+| account_id | UUID FK | NULL для legacy |
+| channel | TEXT | `whatsapp`, `lead_forms`, `site` |
+| pixel_id | TEXT | Pixel/Dataset ID |
+| capi_access_token | TEXT | pixel-specific токен |
+| capi_source | TEXT | `whatsapp` (AI) или `crm` |
+| capi_crm_type | TEXT | `amocrm` или `bitrix24` |
+| capi_interest_fields | JSONB | L1 CRM конфиг |
+| capi_qualified_fields | JSONB | L2 CRM конфиг |
+| capi_scheduled_fields | JSONB | L3 CRM конфиг |
+| ai_l2_description | TEXT | описание L2 для AI |
+| ai_l3_description | TEXT | описание L3 для AI |
+| ai_generated_prompt | TEXT | сгенерированный промпт |
+| is_active | BOOLEAN | soft delete |
+
+UNIQUE constraint: `(user_account_id, account_id, channel)`
+
+### Resolver pattern
+
+Все потребители теперь используют единый resolver:
+
+```typescript
+// capiSettingsResolver.ts (есть в agent-service и chatbot-service)
+resolveCapiSettingsForDirection(directionId) → ResolvedCapiSettings | null
+```
+
+Логика:
+1. Загрузить direction → определить channel по `objective` + `conversion_channel`
+2. Найти `capi_settings` по `(user_account_id, account_id, channel, is_active=true)`
+3. **Fallback**: если не найдено → проверить legacy `account_directions.capi_enabled`
+
+Channel resolution:
+- `objective='conversions'` + `conversion_channel='whatsapp'` → `'whatsapp'`
+- `objective='whatsapp_conversions'` → `'whatsapp'`
+- `objective='conversions'` + `conversion_channel='lead_form'` → `'lead_forms'`
+- `objective='conversions'` + `conversion_channel='site'` → `'site'`
+- `objective='lead_forms'` → `'lead_forms'`
+
+### API endpoints (agent-service)
+
+```
+GET    /api/capi-settings?userAccountId=...&accountId=...
+GET    /api/capi-settings/:id
+POST   /api/capi-settings          — создание (Zod-валидация)
+PATCH  /api/capi-settings/:id      — обновление
+DELETE /api/capi-settings/:id      — soft delete (is_active=false)
+POST   /api/capi-settings/generate-prompt — генерация AI промпта
+```
+
+### UI: Meta CAPI в Подключениях
+
+Настройка CAPI теперь через карточку "Meta CAPI" в ConnectionsGrid (Profile):
+1. Клик → `CapiSettingsModal` (список каналов с edit/delete)
+2. "Добавить канал" → `CapiWizard` (пошаговый визард)
+   - Шаг 1: Выбор канала
+   - Шаг 2: Источник (AI / CRM, только для WhatsApp)
+   - Шаг 3: Pixel + Access Token
+   - Шаг 4: Конфигурация (AI описания или CRM маппинги)
+
+### Что осталось в направлениях
+
+В `account_directions` осталось только `capi_event_level` (на каком уровне воронки отправлять событие). Все остальные CAPI-поля — legacy (для backward compatibility).
+
+### Потребители resolver'а
+
+| Файл | Функция | Что делает |
+|------|---------|------------|
+| `agent-service/src/lib/crmCapi.ts` | `getDirectionCapiSettings()` | CRM webhook → CAPI levels |
+| `chatbot-service/src/lib/metaCapiClient.ts` | `getDirectionPixelInfo()` | Pixel + token для CAPI event |
+| `chatbot-service/src/lib/qualificationAgent.ts` | `getDirectionCapiSettings()` | AI квалификация + CRM status |
+| `chatbot-service/src/cron/capiAnalysisCron.ts` | `getDialogsForCapiAnalysis()` | Фильтрация WhatsApp CAPI |
+| `chatbot-service/src/server.ts` | `POST /capi/crm-event` | CRM event source check |
+
+---
+
 ## Архитектура
 
 ```
@@ -278,6 +362,24 @@ const CRM_LEVEL_EVENTS = {
 - `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified)
 - `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled)
 
+### Миграция 208_create_capi_settings_table.sql
+
+**capi_settings (новая таблица):**
+- Отдельная таблица для хранения CAPI настроек per-channel per-account
+- `channel` — тип канала: `whatsapp`, `lead_forms`, `site`
+- `pixel_id` — Pixel/Dataset ID
+- `capi_access_token` — pixel-specific токен
+- `capi_source` — источник: `whatsapp` (AI) или `crm`
+- `capi_crm_type` — тип CRM: `amocrm` или `bitrix24`
+- `capi_interest_fields` / `capi_qualified_fields` / `capi_scheduled_fields` — JSONB маппинги L1/L2/L3
+- `ai_l2_description` / `ai_l3_description` / `ai_generated_prompt` — AI конфигурация
+- `is_active` — soft delete
+- UNIQUE: `(user_account_id, account_id, channel)` с NULLS NOT DISTINCT
+
+### Миграция 209_migrate_direction_capi_to_settings.sql
+
+Автоматическая миграция данных из `account_directions` WHERE `capi_enabled=TRUE` в `capi_settings`. Берётся самая свежая запись по `updated_at` для каждой комбинации `(user_account_id, account_id, channel)`.
+
 ### Миграция 203_capi_messaging_upgrade.sql
 
 **account_directions (Messaging dataset поля):**
@@ -316,57 +418,45 @@ const CRM_LEVEL_EVENTS = {
 
 ## Настройка
 
-### 1. Настройки CAPI при создании направления
+### 1. Настройки CAPI через модуль "Meta CAPI" в Подключениях
 
-При создании направления в `CreateDirectionDialog.tsx` доступны настройки CAPI.
+> **Начиная с миграции 208**, настройки CAPI вынесены из направлений в отдельный модуль. Настройка выполняется через карточку "Meta CAPI" в разделе "Подключения" на странице Profile.
 
-**Для цели "Конверсии" (`conversions`):**
-1. Выбрать канал конверсии (WhatsApp / Сайт)
-2. Включить Meta CAPI
-3. Выбрать/ввести Pixel ID
-4. Для WhatsApp — выбор источника: AI анализ переписок или CRM
-5. Для Сайт — только CRM (автоматически)
-6. Выбрать уровень оптимизации (Level 1/2/3)
-7. Настроить CRM тиеры (если CRM источник)
+**Пошаговый визард (CapiWizard):**
 
-**Для цели "Lead Forms" (`lead_forms`):**
-1. Включить Meta CAPI (toggle)
-2. Выбрать/ввести Pixel ID (Dataset ID)
-3. Ввести CAPI Access Token
-4. Источник — только CRM (автоматически)
-5. Настроить CRM тиеры:
-   - Level 1 (Интерес → событие `Contact`)
-   - Level 2 (Квалифицирован → событие `Schedule`)
-   - Level 3 (Закрыт → событие `StartTrial`)
-6. До 5 этапов воронки / полей CRM на каждый уровень
+**Шаг 1: Выбор канала**
+- WhatsApp — конверсии из переписок
+- Lead Forms — конверсии из лид-форм Meta (требует подключённую CRM)
+- Сайт — конверсии с сайта (требует подключённую CRM)
 
-**Общие шаги для CAPI:**
+**Шаг 2: Источник данных** (только для WhatsApp, если CRM подключена)
+- AI анализ переписок — GPT-4o-mini анализирует диалоги
+- CRM — отслеживание полей/этапов воронки
 
-**Шаг 1: Включение CAPI**
-- Переключатель "Включить Meta CAPI"
-- При включении появляются дополнительные опции
+**Шаг 3: Pixel / Dataset ID + Access Token**
+- Ввод ID пикселя или датасета из Meta Events Manager
+- Опциональный pixel-specific access token
 
-**Шаг 2: Выбор пикселя**
-- Если есть другие направления с пикселем — предлагается использовать тот же
-- Предупреждение: "Аудитории разных направлений будут агрегированы"
-- Или выбор нового пикселя из списка
+**Шаг 4: Конфигурация**
 
-**Шаг 3: Выбор источника событий**
-- `WhatsApp (AI анализ)` — LLM анализирует переписку (только для `conversions` + `whatsapp`)
-- `CRM (поля или этапы воронки)` — отслеживание полей/этапов в AMO CRM / Bitrix24 (для всех каналов)
-- Для `lead_forms` — только CRM (автоматически, без выбора)
+Для AI источника (WhatsApp):
+- Описание критериев L2 (квалифицирован)
+- Описание критериев L3 (записался/оплатил)
+- Генерация промпта через API
 
-**Шаг 4 (только для CRM источника):**
-- Выбор типа CRM (AMO CRM или Bitrix24)
-  - Для каждого уровня конверсии выбирается тип триггера:
-    - `Поля CRM`
-    - `Этапы воронки`
-  - До 5 полей/этапов на каждый уровень (OR логика)
-  - Уровни с per-level событиями для CRM dataset:
-    - Level 1 (Интерес → `Contact`)
-    - Level 2 (Квалифицирован → `Schedule`)
-    - Level 3 (Закрыт → `StartTrial`)
-  - Настройка доступна как при создании, так и при редактировании направления.
+Для CRM источника:
+- Выбор режима: по полям CRM или по этапам воронки
+- До 5 полей/этапов на каждый уровень (OR логика):
+  - L1 Contact (интерес)
+  - L2 Schedule (квалификация)
+  - L3 StartTrial (запись/оплата)
+
+### 1.1 Legacy: настройки CAPI в направлениях
+
+> Старый подход (до миграции 208). Настройки хранились per-direction в `account_directions`. Resolver поддерживает fallback на legacy данные в переходный период.
+
+**Что осталось в направлениях:**
+- `capi_event_level` — на каком уровне воронки отправлять событие (1/2/3/NULL=все)
 
 **Логика проверки CRM триггеров:**
 - Если настроено несколько полей/этапов — используется логика OR
@@ -388,11 +478,12 @@ META_CAPI_ENABLE_BUSINESS_MESSAGING=true  # при наличии ctwa_clid
 ### 3. Access Token
 
 Приоритет:
-1. `account_directions.capi_access_token` (pixel-specific, генерируется в Events Manager)
-2. `ad_accounts.access_token` (multi-account mode)
-3. `user_accounts.access_token` (fallback)
+1. `capi_settings.capi_access_token` (pixel-specific, из нового модуля)
+2. `account_directions.capi_access_token` (legacy fallback)
+3. `ad_accounts.access_token` (multi-account mode)
+4. `user_accounts.access_token` (fallback)
 
-> **Рекомендация:** Для Messaging dataset пикселей рекомендуется генерировать отдельный токен в Events Manager и указывать в настройках направления (`capi_access_token`).
+> **Рекомендация:** Для Messaging dataset пикселей рекомендуется генерировать отдельный токен в Events Manager и указывать в настройках CAPI (`capi_access_token`).
 
 ### 4. ctwa_clid (Click-to-WhatsApp Click ID)
 

@@ -18,6 +18,7 @@ import {
   CAPI_EVENTS,
   type CapiEventLevel,
 } from './metaCapiClient.js';
+import { resolveCapiSettingsForDirection } from './capiSettingsResolver.js';
 import { getContactMessages, isEvolutionDbAvailable } from './evolutionDb.js';
 
 const log = createLogger({ module: 'qualificationAgent' });
@@ -155,48 +156,27 @@ function validateCapiFields(fields: unknown): CapiFieldConfig[] {
 
 /**
  * Get direction CAPI settings
- * With JSONB validation for field configs
+ * Uses capi_settings table first, falls back to legacy account_directions
  */
 async function getDirectionCapiSettings(
   directionId: string
 ): Promise<DirectionCapiSettings | null> {
   try {
-    const { data: direction, error } = await supabase
-      .from('account_directions')
-      .select(`
-        capi_enabled,
-        capi_source,
-        capi_crm_type,
-        capi_interest_fields,
-        capi_qualified_fields,
-        capi_scheduled_fields
-      `)
-      .eq('id', directionId)
-      .single();
+    // Use resolver: capi_settings first, then legacy account_directions
+    const resolved = await resolveCapiSettingsForDirection(directionId);
 
-    if (error) {
-      log.warn({
-        error: error.message,
-        directionId,
-      }, 'Error fetching direction CAPI settings');
-      return null;
+    if (resolved) {
+      return {
+        capi_enabled: true,
+        capi_source: resolved.source,
+        capi_crm_type: resolved.crmType,
+        capi_interest_fields: validateCapiFields(resolved.interestFields),
+        capi_qualified_fields: validateCapiFields(resolved.qualifiedFields),
+        capi_scheduled_fields: validateCapiFields(resolved.scheduledFields),
+      };
     }
 
-    if (!direction) return null;
-
-    // Validate JSONB fields to prevent runtime errors
-    const interestFields = validateCapiFields(direction.capi_interest_fields);
-    const qualifiedFields = validateCapiFields(direction.capi_qualified_fields);
-    const scheduledFields = validateCapiFields(direction.capi_scheduled_fields);
-
-    return {
-      capi_enabled: direction.capi_enabled || false,
-      capi_source: direction.capi_source || null,
-      capi_crm_type: direction.capi_crm_type || null,
-      capi_interest_fields: interestFields,
-      capi_qualified_fields: qualifiedFields,
-      capi_scheduled_fields: scheduledFields,
-    };
+    return null;
   } catch (error) {
     log.error({
       error: error instanceof Error ? error.message : String(error),

@@ -12,6 +12,7 @@
 import crypto from 'crypto';
 import { createLogger } from './logger.js';
 import { supabase } from './supabase.js';
+import { resolveCapiSettingsForDirection } from './capiSettingsResolver.js';
 
 const log = createLogger({ module: 'metaCapiClient' });
 
@@ -97,8 +98,19 @@ export const CAPI_EVENTS = {
   SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
 
-export type CapiEventName = 'LeadSubmitted' | 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
+export type CapiEventName = 'LeadSubmitted' | 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS] | string;
 export type CapiEventLevel = 1 | 2 | 3;
+
+// CRM dataset: разные события по уровням для качественной оптимизации Meta
+export const CRM_LEVEL_EVENTS: Record<number, string> = {
+  1: 'Contact',     // L1: первый контакт / интерес
+  2: 'Schedule',    // L2: квалифицирован / назначена встреча
+  3: 'StartTrial',  // L3: закрыт / начало использования
+};
+
+export function getCrmEventByLevel(level: CapiEventLevel): string {
+  return CRM_LEVEL_EVENTS[level] || 'Contact';
+}
 const PURCHASE_CURRENCY = 'KZT';
 const PURCHASE_DEFAULT_VALUE = 1;
 
@@ -885,7 +897,7 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
   capiEventLevel: number | null;
 }> {
   try {
-    // Single query with all necessary JOINs
+    // Load direction data (always needed for capi_event_level, page_id, access_token fallback)
     const { data: direction, error } = await supabase
       .from('account_directions')
       .select(`
@@ -902,18 +914,46 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       .eq('id', directionId)
       .single();
 
-    if (error) {
-      log.warn({ error: error.message, directionId }, 'Error fetching direction pixel info');
+    if (error || !direction) {
+      log.warn({ error: error?.message, directionId }, 'Error fetching direction pixel info');
       return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
-    if (!direction) {
-      log.debug({ directionId }, 'Direction not found');
-      return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
+    // Resolve account data for access_token / page_id fallback
+    const adAccount = direction.ad_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
+    const userAccount = direction.user_accounts as { access_token?: string; page_id?: string; multi_account_enabled?: boolean } | { access_token?: string; page_id?: string; multi_account_enabled?: boolean }[] | null;
+    const userAccountData = Array.isArray(userAccount) ? userAccount[0] : userAccount;
+    const adAccountData = Array.isArray(adAccount) ? adAccount[0] : adAccount;
+    const isMultiAccount = userAccountData?.multi_account_enabled === true;
+
+    // Page ID: resolve by account type
+    const pageId = isMultiAccount
+      ? (adAccountData?.page_id || null)
+      : (userAccountData?.page_id || null);
+
+    // Event level: per-direction (stays in account_directions)
+    const explicitLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
+    const optimizationLevel = (direction as Record<string, unknown>).optimization_level as string | null;
+    const optimizationLevelMap: Record<string, number> = { level_1: 1, level_2: 2, level_3: 3 };
+    const capiEventLevel = explicitLevel ?? (optimizationLevel ? optimizationLevelMap[optimizationLevel] ?? null : null);
+
+    // 1. Try capi_settings table first (new architecture)
+    const resolved = await resolveCapiSettingsForDirection(directionId);
+
+    if (resolved) {
+      // Access token: capi_settings.capi_access_token → account fallback
+      const accessToken = resolved.accessToken
+        || (isMultiAccount ? adAccountData?.access_token : userAccountData?.access_token)
+        || null;
+
+      if (!accessToken) {
+        log.warn({ directionId, pixelId: resolved.pixelId }, 'Found pixel but no access_token');
+      }
+
+      return { pixelId: resolved.pixelId, accessToken, pageId, capiEventLevel };
     }
 
-    // Extract pixel_id from default_ad_settings (could be array or object)
-    // Type assertion needed because Supabase doesn't infer JOIN types correctly
+    // 2. Fallback: legacy pixel from default_ad_settings
     const settings = direction.default_ad_settings as { pixel_id?: string } | { pixel_id?: string }[] | null;
     const pixelId = Array.isArray(settings)
       ? settings[0]?.pixel_id
@@ -924,15 +964,6 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       return { pixelId: null, accessToken: null, pageId: null, capiEventLevel: null };
     }
 
-    // Determine account type and get access_token + page_id from the correct table
-    const adAccount = direction.ad_accounts as { access_token?: string; page_id?: string } | { access_token?: string; page_id?: string }[] | null;
-    const userAccount = direction.user_accounts as { access_token?: string; page_id?: string; multi_account_enabled?: boolean } | { access_token?: string; page_id?: string; multi_account_enabled?: boolean }[] | null;
-
-    const userAccountData = Array.isArray(userAccount) ? userAccount[0] : userAccount;
-    const adAccountData = Array.isArray(adAccount) ? adAccount[0] : adAccount;
-    const isMultiAccount = userAccountData?.multi_account_enabled === true;
-
-    // Access token: prefer capi_access_token (pixel-specific), then resolve by account type
     const accessToken = (direction as Record<string, unknown>).capi_access_token as string
       || (isMultiAccount ? adAccountData?.access_token : userAccountData?.access_token)
       || null;
@@ -940,18 +971,6 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
     if (!accessToken) {
       log.warn({ directionId, pixelId }, 'Found pixel but no access_token');
     }
-
-    // Page ID: resolve by account type (legacy → user_accounts, multi-account → ad_accounts)
-    const pageId = isMultiAccount
-      ? (adAccountData?.page_id || null)
-      : (userAccountData?.page_id || null);
-
-    // Event level: derive from optimization_level (level_1→1, level_2→2, level_3→3)
-    // capi_event_level overrides if explicitly set (legacy/admin use)
-    const explicitLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
-    const optimizationLevel = (direction as Record<string, unknown>).optimization_level as string | null;
-    const optimizationLevelMap: Record<string, number> = { level_1: 1, level_2: 2, level_3: 3 };
-    const capiEventLevel = explicitLevel ?? (optimizationLevel ? optimizationLevelMap[optimizationLevel] ?? null : null);
 
     return { pixelId, accessToken, pageId, capiEventLevel };
   } catch (error) {

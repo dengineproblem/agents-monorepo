@@ -106,17 +106,6 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(facebookSettings && { facebook_default_settings: facebookSettings }),
       ...(tiktokSettings && { tiktok_default_settings: tiktokSettings }),
       ...(sharedSettings && !facebookSettings && !tiktokSettings && { default_settings: sharedSettings }),
-      ...(data.capiSettings && {
-        // CAPI settings (direction-level)
-        capi_enabled: data.capiSettings.capi_enabled,
-        capi_source: data.capiSettings.capi_source,
-        capi_crm_type: data.capiSettings.capi_crm_type,
-        capi_interest_fields: data.capiSettings.capi_interest_fields,
-        capi_qualified_fields: data.capiSettings.capi_qualified_fields,
-        capi_scheduled_fields: data.capiSettings.capi_scheduled_fields,
-        capi_access_token: data.capiSettings.capi_access_token,
-        capi_event_level: data.capiSettings.capi_event_level,
-      }),
     });
 
     if (!result.success || !result.direction) {

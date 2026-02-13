@@ -1,7 +1,10 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance } from 'fastify';
 import { supabase } from './supabase.js';
+import { createLogger } from './logger.js';
+import { resolveCapiSettingsForDirection } from './capiSettingsResolver.js';
 
+const log = createLogger({ module: 'crmCapi' });
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
 export interface CapiFieldConfig {
@@ -401,37 +404,40 @@ function evaluateBitrixLevelWithDiagnostics(entity: any, fields: CapiFieldConfig
 export async function getDirectionCapiSettings(directionId: string | null | undefined): Promise<DirectionCapiSettings | null> {
   if (!directionId) return null;
 
-  const { data: direction, error } = await supabase
-    .from('account_directions')
-    .select(`
-      id,
-      capi_enabled,
-      capi_source,
-      capi_crm_type,
-      capi_interest_fields,
-      capi_qualified_fields,
-      capi_scheduled_fields
-    `)
-    .eq('id', directionId)
-    .maybeSingle();
+  try {
+    // Используем resolver: сначала capi_settings, fallback на legacy account_directions
+    const resolved = await resolveCapiSettingsForDirection(directionId);
 
-  if (error || !direction) {
+    if (resolved) {
+      log.info({
+        directionId,
+        source: resolved.source,
+        crmType: resolved.crmType,
+        isLegacy: resolved.isLegacy,
+        interestFieldsCount: resolved.interestFields.length,
+        qualifiedFieldsCount: resolved.qualifiedFields.length,
+        scheduledFieldsCount: resolved.scheduledFields.length,
+      }, 'CRM CAPI settings resolved');
+      return {
+        directionId,
+        capiEnabled: true,
+        capiSource: resolved.source,
+        capiCrmType: resolved.crmType,
+        interestFields: normalizeFieldConfigs(resolved.interestFields),
+        qualifiedFields: normalizeFieldConfigs(resolved.qualifiedFields),
+        scheduledFields: normalizeFieldConfigs(resolved.scheduledFields),
+      };
+    }
+
+    log.debug({ directionId }, 'No CRM CAPI settings for direction');
+    return null;
+  } catch (error) {
+    log.error({
+      directionId,
+      error: error instanceof Error ? error.message : String(error),
+    }, 'Error resolving CRM CAPI settings');
     return null;
   }
-
-  return {
-    directionId: direction.id,
-    capiEnabled: !!direction.capi_enabled,
-    capiSource: direction.capi_source === 'crm' || direction.capi_source === 'whatsapp'
-      ? direction.capi_source
-      : null,
-    capiCrmType: direction.capi_crm_type === 'amocrm' || direction.capi_crm_type === 'bitrix24'
-      ? direction.capi_crm_type
-      : null,
-    interestFields: normalizeFieldConfigs(direction.capi_interest_fields),
-    qualifiedFields: normalizeFieldConfigs(direction.capi_qualified_fields),
-    scheduledFields: normalizeFieldConfigs(direction.capi_scheduled_fields),
-  };
 }
 
 export function evaluateAmoCapiLevels(

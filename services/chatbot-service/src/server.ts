@@ -374,17 +374,19 @@ app.post('/capi/crm-event', async (request, reply) => {
       });
     }
 
-    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS } = await import('./lib/metaCapiClient.js');
+    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS, getCrmEventByLevel } = await import('./lib/metaCapiClient.js');
     const { supabase } = await import('./lib/supabase.js');
+    const { resolveCapiSettingsForDirection } = await import('./lib/capiSettingsResolver.js');
 
-    const { data: directionSettings, error: directionError } = await supabase
+    // Validate direction exists and belongs to user
+    const { data: directionCheck, error: directionError } = await supabase
       .from('account_directions')
-      .select('id, capi_enabled, capi_source, capi_crm_type, conversion_channel')
+      .select('id, conversion_channel, objective')
       .eq('id', directionId)
       .eq('user_account_id', userAccountId)
       .maybeSingle();
 
-    if (directionError || !directionSettings) {
+    if (directionError || !directionCheck) {
       return reply.status(404).send({
         success: false,
         error: 'Direction not found for user account',
@@ -392,15 +394,18 @@ app.post('/capi/crm-event', async (request, reply) => {
       });
     }
 
-    if (!directionSettings.capi_enabled) {
+    // Resolve CAPI settings via capi_settings table (with legacy fallback)
+    const resolved = await resolveCapiSettingsForDirection(directionId);
+
+    if (!resolved) {
       return reply.status(409).send({
         success: false,
-        error: 'CAPI is disabled for direction',
+        error: 'CAPI is not configured for this direction',
         correlationId
       });
     }
 
-    if (directionSettings.capi_source !== 'crm') {
+    if (resolved.source !== 'crm') {
       return reply.status(409).send({
         success: false,
         error: 'Direction capi_source is not crm',
@@ -408,13 +413,16 @@ app.post('/capi/crm-event', async (request, reply) => {
       });
     }
 
-    if (directionSettings.capi_crm_type && directionSettings.capi_crm_type !== crmType) {
+    if (resolved.crmType && resolved.crmType !== crmType) {
       return reply.status(409).send({
         success: false,
-        error: `Direction CRM type mismatch: expected ${directionSettings.capi_crm_type}`,
+        error: `Direction CRM type mismatch: expected ${resolved.crmType}`,
         correlationId
       });
     }
+
+    // Alias for backward compat with code below
+    const directionSettings = { ...directionCheck, capi_source: resolved.source, capi_crm_type: resolved.crmType };
 
     const pixelInfo = await getDirectionPixelInfo(directionId);
     if (!pixelInfo.pixelId || !pixelInfo.accessToken) {
@@ -428,9 +436,9 @@ app.post('/capi/crm-event', async (request, reply) => {
     const { pageId: directionPageId, capiEventLevel } = pixelInfo;
 
     // Choose event name based on conversion channel:
-    // WhatsApp → LeadSubmitted (Messaging dataset), lead_form/site → Lead (Website dataset)
+    // WhatsApp → LeadSubmitted (Messaging dataset)
+    // CRM (lead_forms / site) → per-level events (Contact/Schedule/StartTrial)
     const isMessagingDataset = directionSettings.conversion_channel === 'whatsapp';
-    const channelEventName = isMessagingDataset ? CAPI_EVENTS.LEAD_SUBMITTED : CAPI_EVENTS.LEAD;
 
     const phoneCandidates = buildPhoneCandidates(contactPhone);
     const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
@@ -520,18 +528,21 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     for (const requestedLevel of requestedLevels) {
       // Filter by capiEventLevel: if set, only send for that specific level
+      // Per-level event name: WhatsApp → LeadSubmitted, CRM → Contact/Schedule/StartTrial
+      const eventName = isMessagingDataset
+        ? CAPI_EVENTS.LEAD_SUBMITTED
+        : getCrmEventByLevel(requestedLevel.level);
+
       if (capiEventLevel !== null && capiEventLevel !== requestedLevel.level) {
         results.push({
           level: requestedLevel.level,
-          eventName: channelEventName,
+          eventName,
           success: false,
           alreadySent: false,
           error: `Level ${requestedLevel.level} filtered by capi_event_level=${capiEventLevel}`
         });
         continue;
       }
-
-      const eventName = channelEventName;
 
       // Deduplication fallback: when no dialogAnalysisId (e.g. lead_form leads without WhatsApp dialog),
       // sendCapiEventAtomic falls back to non-atomic send. Check capi_events_log to prevent duplicates.
