@@ -376,9 +376,11 @@ export function registerMCPRoutes(fastify) {
     }
 
     try {
+      // NOTE: Some deployments don't have `user_accounts.business_name`.
+      // Keep this select minimal and based on widely-present columns.
       const { data, error } = await supabase
         .from('user_accounts')
-        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, business_name, anthropic_api_key')
+        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, anthropic_api_key')
         // Check all supported telegram_id fields
         .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
         .limit(1);
@@ -403,7 +405,7 @@ export function registerMCPRoutes(fastify) {
       const result = {
         success: true,
         userAccountId: user.id,
-        businessName: user.business_name || null,
+        businessName: null,
         multiAccountEnabled: !!user.multi_account_enabled,
         stack,
         adAccounts: [],
