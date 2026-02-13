@@ -11,6 +11,14 @@ import { logger } from './logger.js';
 export interface RouteResult {
   domain: string;
   method: 'keyword' | 'llm' | 'fallback';
+  // Optional token usage (for legacy daily spending limits).
+  // Anthropic Messages API returns input/output tokens; we pass through as-is.
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 interface KeywordRule {
@@ -138,7 +146,19 @@ async function classifyByLLM(message: string, anthropic: Anthropic): Promise<Rou
     const validDomains = ['ads', 'creative', 'crm', 'tiktok', 'onboarding', 'general'];
     const domain = validDomains.includes(text) ? text : 'general';
 
-    return { domain, method: 'llm' };
+    const usage = (response as any)?.usage;
+    return {
+      domain,
+      method: 'llm',
+      usage: usage
+        ? {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+          }
+        : undefined,
+    };
   } catch (error: any) {
     logger.error({ error: error.message }, 'LLM routing failed, fallback');
     return { domain: 'general', method: 'fallback' };

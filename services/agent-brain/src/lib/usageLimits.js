@@ -23,6 +23,11 @@ export const MODEL_PRICING = {
     input: 3.00 / 1_000_000,
     output: 15.00 / 1_000_000
   },
+  // Claude Haiku 4.5 (used by telegram-claude-bot NanoClaw)
+  'claude-haiku-4-5-20251001': {
+    input: 1.00 / 1_000_000,
+    output: 5.00 / 1_000_000
+  },
   'gpt-4o': {
     input: 2.50 / 1_000_000,
     output: 10.00 / 1_000_000

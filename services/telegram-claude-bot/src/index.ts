@@ -74,16 +74,87 @@ let openai: OpenAI | null = null;
  * Creating a new Anthropic() per request is cheap (stateless HTTP wrapper).
  */
 function getAnthropicClient(session: UserSession | null): Anthropic {
-  if (session?.anthropicApiKey) {
-    logger.info({ keyTail: session.anthropicApiKey.slice(-4) }, 'Using per-account Anthropic API key');
+  // Key policy:
+  // - multi-account: use ONLY user-provided Anthropic key (no fallbacks)
+  // - legacy: use ONLY system key (ignore user key)
+  if (session?.multiAccountEnabled) {
+    if (!session.anthropicApiKey) {
+      // Should be validated before calling, but keep a clear error for safety.
+      throw new Error('Anthropic API key is required for multi-account users');
+    }
+    logger.info({ keyTail: session.anthropicApiKey.slice(-4) }, 'Using user Anthropic API key (multi-account)');
     return new Anthropic({ apiKey: session.anthropicApiKey });
   }
-  return anthropic; // global fallback
+  return anthropic; // legacy: system key only
 }
 
 let lastTimestamp = '';
 let sessions: Session = {};
 let lastAgentTimestamp: Record<string, string> = {};
+
+// === LEGACY DAILY SPENDING LIMITS (agent-brain usageLimits) ===
+type LimitCheckResult = {
+  allowed: boolean;
+  remaining: number;
+  limit: number;
+  spent: number;
+  nearLimit?: boolean;
+  unlimited?: boolean;
+  failOpen?: boolean;
+  error?: string;
+};
+
+function formatLegacyLimitExceededMessage(limitCheck: LimitCheckResult): string {
+  const spent = typeof limitCheck.spent === 'number' ? limitCheck.spent : 0;
+  const limit = typeof limitCheck.limit === 'number' ? limitCheck.limit : 0;
+  return `⚠️ Превышен дневной лимит использования AI\n\nИспользовано: $${spent.toFixed(2)} из $${limit.toFixed(2)}\n\nПопробуйте завтра или обратитесь в поддержку для увеличения лимита.`;
+}
+
+async function checkLegacyDailyLimit(telegramId: number): Promise<LimitCheckResult | null> {
+  try {
+    const headers: Record<string, string> = {
+      'X-Telegram-Id': String(telegramId),
+    };
+    if (BRAIN_SERVICE_SECRET) {
+      // Not required by the endpoint today, but safe to include if we lock it down later.
+      headers['X-Service-Auth'] = BRAIN_SERVICE_SECRET;
+    }
+
+    const res = await axios.get(`${BRAIN_SERVICE_URL}/api/limits/check`, {
+      headers,
+      timeout: 10_000,
+    });
+    return res.data as LimitCheckResult;
+  } catch (err: any) {
+    logger.warn({ error: err.message, telegramId }, 'Legacy daily limit check failed (fail-open)');
+    return null; // fail-open
+  }
+}
+
+async function trackLegacyUsage(
+  telegramId: number,
+  model: string,
+  usage: { prompt_tokens: number; completion_tokens: number },
+): Promise<void> {
+  try {
+    const headers: Record<string, string> = {
+      'X-Telegram-Id': String(telegramId),
+      'Content-Type': 'application/json',
+    };
+    if (BRAIN_SERVICE_SECRET) {
+      headers['X-Service-Auth'] = BRAIN_SERVICE_SECRET;
+    }
+
+    await axios.post(
+      `${BRAIN_SERVICE_URL}/api/limits/track`,
+      { model, usage },
+      { headers, timeout: 10_000 },
+    );
+  } catch (err: any) {
+    // We don't block user on tracking errors, but we log to monitor cost leakage.
+    logger.warn({ error: err.message, telegramId, model }, 'Legacy usage tracking failed');
+  }
+}
 
 // === RATE LIMITER ===
 const rateLimitMap = new Map<number, number[]>(); // telegramId → timestamps
@@ -456,6 +527,26 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       }
     }
 
+    // === KEY POLICY (NO FALLBACKS) ===
+    // Multi-account users MUST provide their own Anthropic key. Legacy users always use the system key.
+    if (session.multiAccountEnabled && !session.anthropicApiKey) {
+      await bot.sendMessage(
+        chatId,
+        '❌ У вас включён Multi-Account режим.\n\nЧтобы бот работал, добавьте ваш Anthropic API Key в настройках профиля и повторите запрос.\n\n(В Multi-Account режиме системный ключ не используется.)',
+      );
+      return;
+    }
+
+    // === LEGACY DAILY SPENDING LIMITS ===
+    // Only for legacy users (we pay with the system key).
+    if (telegramId && !session.multiAccountEnabled) {
+      const limitCheck = await checkLegacyDailyLimit(telegramId);
+      if (limitCheck && limitCheck.allowed === false) {
+        await bot.sendMessage(chatId, formatLegacyLimitExceededMessage(limitCheck));
+        return;
+      }
+    }
+
     // Отмечаем активный запрос
     if (telegramId) activeRequests.add(telegramId);
 
@@ -489,7 +580,27 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     let systemPrompt: string;
     let domainTools: (Anthropic.Tool | Anthropic.Messages.WebSearchTool20250305)[];
 
-    const routeResult = await routeMessage(truncatedMessage, anthropic, session.stack);
+    const anthropicClient = getAnthropicClient(session);
+    const routeResult = await routeMessage(truncatedMessage, anthropicClient, session.stack);
+
+    // Track router LLM usage for legacy users (routing may call Claude on ambiguous messages).
+    if (telegramId && !session.multiAccountEnabled && routeResult?.method === 'llm' && routeResult.usage) {
+      const u = routeResult.usage;
+      const promptTokens = [u.input_tokens, u.cache_creation_input_tokens, u.cache_read_input_tokens]
+        .filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+        .reduce((sum, n) => sum + n, 0);
+      const completionTokens = typeof u.output_tokens === 'number' && Number.isFinite(u.output_tokens)
+        ? u.output_tokens
+        : 0;
+
+      // Only track if we got real usage numbers.
+      if (promptTokens > 0 || completionTokens > 0) {
+        await trackLegacyUsage(telegramId, 'claude-haiku-4-5-20251001', {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+        });
+      }
+    }
 
     if (routeResult) {
       const domainConfig = DOMAINS[routeResult.domain];
@@ -608,7 +719,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
 
       let response: Anthropic.Messages.Message;
       try {
-        response = await getAnthropicClient(session).messages.create({
+        response = await anthropicClient.messages.create({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 4096,
           system: systemPrompt,
@@ -616,20 +727,48 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
           messages,
         });
       } catch (apiError: any) {
-        // If per-account key is invalid (401), fallback to global key
-        if (apiError?.status === 401 && session.anthropicApiKey) {
-          logger.warn({ telegramId, chatId }, 'Per-account Anthropic API key is invalid, falling back to global key');
-          session.anthropicApiKey = null;
-          await bot.sendMessage(chatId, '⚠️ Ваш Anthropic API ключ недействителен. Используется системный ключ.');
-          response = await anthropic.messages.create({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 4096,
-            system: systemPrompt,
-            tools: domainTools,
-            messages,
+        // No fallbacks. Multi-account must use user key only. Legacy uses system key only.
+        if (apiError?.status === 401) {
+          if (session.multiAccountEnabled) {
+            logger.warn({ telegramId, chatId }, 'Invalid Anthropic API key (multi-account) - refusing to fallback');
+            await bot.sendMessage(
+              chatId,
+              '❌ Ваш Anthropic API Key недействителен или отозван.\n\nОбновите ключ в профиле и повторите запрос.\n\n(В Multi-Account режиме системный ключ не используется.)',
+            );
+            return;
+          }
+
+          logger.error({ chatId }, 'System Anthropic API key is invalid (legacy)');
+          await bot.sendMessage(chatId, '⚠️ Временная ошибка AI на сервере. Попробуйте позже.');
+          return;
+        }
+
+        throw apiError;
+      }
+
+      // Track legacy usage (we pay with system key). Multi-account users are excluded.
+      if (telegramId && !session.multiAccountEnabled) {
+        const usage = (response as any)?.usage || {};
+        const inputTokens =
+          usage.input_tokens ?? usage.inputTokens ?? 0;
+        const outputTokens =
+          usage.output_tokens ?? usage.outputTokens ?? 0;
+        const cacheCreationInputTokens =
+          usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? 0;
+        const cacheReadInputTokens =
+          usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? 0;
+
+        const promptTokens = [inputTokens, cacheCreationInputTokens, cacheReadInputTokens]
+          .filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+          .reduce((sum, n) => sum + n, 0);
+
+        if (typeof promptTokens === 'number' && Number.isFinite(promptTokens) && typeof outputTokens === 'number' && Number.isFinite(outputTokens)) {
+          await trackLegacyUsage(telegramId, 'claude-haiku-4-5-20251001', {
+            prompt_tokens: promptTokens,
+            completion_tokens: outputTokens,
           });
         } else {
-          throw apiError;
+          logger.warn({ telegramId, usage }, 'Legacy usage tracking skipped: missing/invalid Anthropic usage');
         }
       }
 

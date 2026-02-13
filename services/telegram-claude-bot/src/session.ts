@@ -41,6 +41,12 @@ export function createSession(
   telegramId: number,
   resolved: ResolvedUser,
 ): UserSession {
+  // Key policy:
+  // - multi-account: use ONLY user-provided Anthropic key (no fallbacks)
+  // - legacy: use ONLY system key (ignore user key)
+  const sessionAnthropicKey = resolved.multiAccountEnabled
+    ? (resolved.anthropicApiKey || null)
+    : null;
   const session: UserSession = {
     userAccountId: resolved.userAccountId,
     selectedAccountId: null,
@@ -51,8 +57,8 @@ export function createSession(
     adAccounts: resolved.adAccounts,
     lastActivity: Date.now(),
     isFirstMessage: true,
-    anthropicApiKey: resolved.anthropicApiKey || null,
-    originalAnthropicApiKey: resolved.anthropicApiKey || null,
+    anthropicApiKey: sessionAnthropicKey,
+    originalAnthropicApiKey: sessionAnthropicKey,
   };
   sessions.set(telegramId, session);
   logger.info({
@@ -79,7 +85,11 @@ export function setSelectedAccount(
   if (session) {
     session.selectedAccountId = accountId;
     session.stack = [...accountStack];
-    session.anthropicApiKey = anthropicApiKey || null;
+    // Don't wipe the current key if account doesn't have its own key.
+    // This is important for multi-account users where the key is stored at user level.
+    if (typeof anthropicApiKey === 'string' && anthropicApiKey.trim().length > 0) {
+      session.anthropicApiKey = anthropicApiKey;
+    }
     session.lastActivity = Date.now();
     logger.info({ telegramId, accountId, accountStack }, 'Account selected');
   }
