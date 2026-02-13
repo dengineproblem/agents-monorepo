@@ -369,11 +369,18 @@ export function registerMCPRoutes(fastify) {
       return reply.code(400).send({ success: false, error: 'telegram_id is required' });
     }
 
+    const telegramIdStr = String(telegram_id).trim();
+    // Hardening: this value is used inside supabase `.or(...)` filter string.
+    if (!/^-?\d+$/.test(telegramIdStr)) {
+      return reply.code(400).send({ success: false, error: 'telegram_id must be an integer' });
+    }
+
     try {
       const { data, error } = await supabase
         .from('user_accounts')
         .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, business_name, anthropic_api_key')
-        .eq('telegram_id', telegram_id)
+        // Check all supported telegram_id fields
+        .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
         .limit(1);
 
       if (error) {
@@ -430,7 +437,7 @@ export function registerMCPRoutes(fastify) {
       }
 
       fastify.log.info({
-        telegramId: telegram_id,
+        telegramId: telegramIdStr,
         userId: user.id,
         stack,
         multiAccount: !!user.multi_account_enabled,
