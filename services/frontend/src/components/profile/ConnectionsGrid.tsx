@@ -128,7 +128,7 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                         <span className="text-emerald-600">{t('profile.connected')}</span>
                         {it.badge && (
-                          <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">
+                          <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded text-[10px] font-medium">
                             {it.badge}
                           </span>
                         )}
