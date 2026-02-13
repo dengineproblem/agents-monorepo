@@ -443,10 +443,10 @@ app.post('/capi/crm-event', async (request, reply) => {
     const phoneCandidates = buildPhoneCandidates(contactPhone);
     const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
 
-    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; email?: string | null; ctwa_clid?: string | null; leadgen_id?: string | null } | null = null;
+    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; email?: string | null; name?: string | null; ctwa_clid?: string | null; leadgen_id?: string | null } | null = null;
     const { data: leadByChat } = await supabase
       .from('leads')
-      .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
+      .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
       .eq('user_account_id', userAccountId)
       .eq('direction_id', directionId)
       .in('chat_id', phoneCandidates)
@@ -459,7 +459,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord) {
       const { data: leadByPhone } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
+        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .in('phone', phoneCandidates)
@@ -472,7 +472,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord && digitsCandidate) {
       const { data: leadByLike } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, email, ctwa_clid, leadgen_id')
+        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .ilike('chat_id', `%${digitsCandidate}%`)
@@ -516,6 +516,11 @@ app.post('/capi/crm-event', async (request, reply) => {
     const leadgenId = leadRecord?.leadgen_id || undefined; // Meta's lead form ID (15-17 digits)
     const leadEmail = leadRecord?.email || undefined;
     const dialogAnalysisId = dialogRecord?.id;
+
+    // Split "Имя Фамилия" for better EMQ matching
+    const nameParts = (leadRecord?.name || '').trim().split(/\s+/);
+    const leadFirstName = nameParts[0] || undefined;
+    const leadLastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : undefined;
 
     const results: Array<{
       level: 1 | 2 | 3;
@@ -590,6 +595,8 @@ app.post('/capi/crm-event', async (request, reply) => {
         eventLevel: requestedLevel.level,
         phone: resolvedPhone,
         email: leadEmail,
+        firstName: leadFirstName,
+        lastName: leadLastName,
         // Messaging dataset fields only for WhatsApp channel
         ctwaClid: isMessagingDataset ? ctwaClid : undefined,
         pageId: isMessagingDataset ? (directionPageId || undefined) : undefined,

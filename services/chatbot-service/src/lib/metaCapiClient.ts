@@ -137,6 +137,8 @@ export interface CapiEventParams {
   // User data for matching (at least one required)
   phone?: string;        // Will be hashed
   email?: string;        // Will be hashed
+  firstName?: string;    // Will be hashed (fn)
+  lastName?: string;     // Will be hashed (ln)
   ctwaClid?: string;     // Click-to-WhatsApp Click ID (in user_data for Messaging dataset)
   pageId?: string;       // Facebook Page ID (in user_data for Messaging dataset)
   leadgenId?: string;    // Meta's lead form ID (15-17 digits, highest priority for CRM matching)
@@ -434,6 +436,14 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
 
     if (email) {
       userData.em = [hashForCapi(email)];
+    }
+
+    if (params.firstName) {
+      userData.fn = [hashForCapi(params.firstName)];
+    }
+
+    if (params.lastName) {
+      userData.ln = [hashForCapi(params.lastName)];
     }
 
     if (leadId) {
