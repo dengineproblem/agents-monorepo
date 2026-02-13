@@ -198,9 +198,10 @@ export async function getCredentials(
     telegramId3: user.telegram_id_3,
     telegramId4: user.telegram_id_4,
 
-    openaiApiKey: user.openai_api_key,
-    geminiApiKey: user.gemini_api_key,
-    anthropicApiKey: user.anthropic_api_key,
+    // API ключи — legacy берёт из ENV, НЕ из user_accounts
+    openaiApiKey: process.env.OPENAI_API_KEY || null,
+    geminiApiKey: process.env.GEMINI_API_KEY || null,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
 
     amocrmSubdomain: user.amocrm_subdomain,
     amocrmAccessToken: user.amocrm_access_token,

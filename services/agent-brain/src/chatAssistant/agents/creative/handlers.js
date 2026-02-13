@@ -11,6 +11,29 @@ import { verifyAdStatus } from '../../shared/postCheck.js';
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 
 /**
+ * Helper: загрузить prompt4 из БД (сначала ad_accounts, потом user_accounts)
+ * Тот же prompt4 что использует фронтенд для генерации текстов
+ */
+async function getPrompt4FromDB(userAccountId, adAccountDbId) {
+  // Сначала пробуем ad_accounts (мультиаккаунт)
+  if (adAccountDbId) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('prompt4')
+      .eq('id', adAccountDbId)
+      .maybeSingle();
+    if (adAccount?.prompt4) return adAccount.prompt4;
+  }
+  // Fallback на user_accounts
+  const { data: user } = await supabase
+    .from('user_accounts')
+    .select('prompt4')
+    .eq('id', userAccountId)
+    .maybeSingle();
+  return user?.prompt4 || '';
+}
+
+/**
  * Helper: Convert date_from/date_to or period to days limit for RPC
  * Returns days limit and optional date filter for post-filtering
  */
@@ -996,8 +1019,10 @@ export const creativeHandlers = {
    * generateCreatives - Генерация креатива-картинки (single image)
    * Вызывает /generate-creative endpoint Creative Generation Service
    */
-  async generateCreatives({ offer, bullets, profits, cta, direction_id, style_id, style_prompt, reference_image }, { userAccountId, adAccountDbId, openaiApiKey, geminiApiKey }) {
+  async generateCreatives({ offer, bullets, profits, cta, direction_id, style_id, style_prompt, reference_image, reference_images }, { userAccountId, adAccountDbId, openaiApiKey, geminiApiKey }) {
     const dbAccountId = adAccountDbId || null;
+
+    logger.info({ reference_images, reference_image, hasRefImages: !!reference_images, refImagesLength: reference_images?.length }, 'generateCreatives: reference images debug');
 
     if (openaiApiKey || geminiApiKey) {
       logger.info({ hasOpenaiKey: !!openaiApiKey, hasGeminiKey: !!geminiApiKey, userAccountId }, 'generateCreatives: using per-account AI keys');
@@ -1035,9 +1060,9 @@ export const creativeHandlers = {
           profits: profits || '',
           cta: cta || '',
           direction_id: direction_id || null,
-          style_id: style_id || 'modern_performance',
+          style_id: 'freestyle',
           style_prompt: style_prompt || null,
-          reference_image: reference_image || null,
+          reference_images: reference_images || (reference_image ? [reference_image] : null),
           openai_api_key: openaiApiKey || null,
           gemini_api_key: geminiApiKey || null
         }),
@@ -1067,7 +1092,7 @@ export const creativeHandlers = {
           message: `Image creative generated via Chat Assistant`,
           context: {
             creative_id: result.creative_id,
-            style_id: style_id || 'modern_performance',
+            style_id: 'freestyle',
             source: 'CreativeAgent'
           }
         });
@@ -1135,7 +1160,7 @@ export const creativeHandlers = {
           user_id: userAccountId,
           account_id: dbAccountId,
           carousel_texts,
-          visual_style: visual_style || 'clean_minimal',
+          visual_style: 'freestyle',
           style_prompt: style_prompt || null,
           reference_image: reference_image || null,
           direction_id: direction_id || null,
@@ -1342,7 +1367,7 @@ export const creativeHandlers = {
   /**
    * generateOffer - Генерация заголовка/оффера для креатива
    */
-  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId, openaiApiKey }) {
+  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId, adAccountDbId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1353,12 +1378,16 @@ export const creativeHandlers = {
     }
 
     try {
+      // Загружаем prompt4 из БД — тот же что использует фронтенд
+      const prompt4 = await getPrompt4FromDB(userAccountId, adAccountDbId);
+      logger.info({ hasPrompt4: !!prompt4, promptLength: prompt4?.length }, 'generateOffer: loaded prompt4');
+
       const response = await fetch(`${creativeServiceUrl}/generate-offer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userAccountId,
-          prompt: prompt || '',
+          prompt: prompt4 || prompt || '',
           existing_bullets: existing_bullets || '',
           existing_benefits: existing_profits || '',
           existing_cta: existing_cta || '',
@@ -1387,7 +1416,7 @@ export const creativeHandlers = {
   /**
    * generateBullets - Генерация буллетов/преимуществ
    */
-  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId, openaiApiKey }) {
+  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId, adAccountDbId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1395,12 +1424,15 @@ export const creativeHandlers = {
     }
 
     try {
+      const prompt4 = await getPrompt4FromDB(userAccountId, adAccountDbId);
+      logger.info({ hasPrompt4: !!prompt4 }, 'generateBullets: loaded prompt4');
+
       const response = await fetch(`${creativeServiceUrl}/generate-bullets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userAccountId,
-          prompt: prompt || '',
+          prompt: prompt4 || prompt || '',
           existing_offer: existing_offer || '',
           existing_benefits: existing_profits || '',
           existing_cta: existing_cta || '',
@@ -1429,7 +1461,7 @@ export const creativeHandlers = {
   /**
    * generateProfits - Генерация выгод для клиента
    */
-  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId, openaiApiKey }) {
+  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId, adAccountDbId, openaiApiKey }) {
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
@@ -1437,12 +1469,15 @@ export const creativeHandlers = {
     }
 
     try {
+      const prompt4 = await getPrompt4FromDB(userAccountId, adAccountDbId);
+      logger.info({ hasPrompt4: !!prompt4 }, 'generateProfits: loaded prompt4');
+
       const response = await fetch(`${creativeServiceUrl}/generate-profits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userAccountId,
-          prompt: prompt || '',
+          prompt: prompt4 || prompt || '',
           existing_offer: existing_offer || '',
           existing_bullets: existing_bullets || '',
           existing_cta: existing_cta || '',

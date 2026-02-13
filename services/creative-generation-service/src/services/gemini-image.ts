@@ -42,7 +42,8 @@ export async function generateCreativeImage(
   referenceImagePrompt?: string,
   stylePrompt?: string,
   apiKey?: string | null,
-  openaiApiKey?: string | null
+  openaiApiKey?: string | null,
+  extraReferenceUrls?: string[]
 ): Promise<string> {
   try {
     const hasReferenceImage = !!referenceImage;
@@ -131,13 +132,22 @@ ${textsBlock}
         const buffer = await response.arrayBuffer();
         const base64 = Buffer.from(buffer).toString('base64');
 
+        // Telegram File API часто возвращает application/octet-stream — определяем реальный тип
+        let mimeType = response.headers.get('content-type') || 'image/jpeg';
+        if (!mimeType.startsWith('image/')) {
+          // Определяем по URL расширению или ставим jpeg по умолчанию
+          if (referenceImage.endsWith('.png')) mimeType = 'image/png';
+          else if (referenceImage.endsWith('.webp')) mimeType = 'image/webp';
+          else mimeType = 'image/jpeg';
+        }
+
         contentParts.push({
           inlineData: {
-            mimeType: response.headers.get('content-type') || 'image/jpeg',
+            mimeType,
             data: base64
           }
         });
-        console.log('[Gemini] Reference image fetched and added');
+        console.log(`[Gemini] Reference image fetched and added (${mimeType})`);
       } else {
         // Если уже base64
         contentParts.push({
@@ -147,6 +157,28 @@ ${textsBlock}
           }
         });
         console.log('[Gemini] Reference image (base64) added');
+      }
+    }
+
+    // Добавляем доп. референсные изображения (если есть)
+    if (extraReferenceUrls && extraReferenceUrls.length > 0) {
+      for (const url of extraReferenceUrls) {
+        try {
+          console.log(`[Gemini] Fetching extra reference image from URL...`);
+          const resp = await fetch(url);
+          const buf = await resp.arrayBuffer();
+          const b64 = Buffer.from(buf).toString('base64');
+          let mime = resp.headers.get('content-type') || 'image/jpeg';
+          if (!mime.startsWith('image/')) {
+            if (url.endsWith('.png')) mime = 'image/png';
+            else if (url.endsWith('.webp')) mime = 'image/webp';
+            else mime = 'image/jpeg';
+          }
+          contentParts.push({ inlineData: { mimeType: mime, data: b64 } });
+          console.log(`[Gemini] Extra reference image added (${mime})`);
+        } catch (err) {
+          console.log(`[Gemini] Failed to fetch extra reference: ${err}`);
+        }
       }
     }
 

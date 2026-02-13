@@ -1836,20 +1836,12 @@ export const adsHandlers = {
       since = date_from;
       until = date_to || new Date().toISOString().split('T')[0];
     } else {
-      // Period to days
-      const periodDays = {
-        'today': 1,
-        'yesterday': 1,
-        'last_3d': 3,
-        'last_7d': 7,
-        'last_14d': 14,
-        'last_30d': 30,
-        'last_90d': 90,
-        'last_6m': 180,
-        'last_12m': 365,
-        'all': null
-      }[period] || null;
-
+      const periodMap = {
+        'today': 1, 'yesterday': 1, 'last_3d': 3, 'last_7d': 7,
+        'last_14d': 14, 'last_30d': 30, 'last_90d': 90,
+        'last_6m': 180, 'last_12m': 365, 'all': null
+      };
+      const periodDays = period in periodMap ? periodMap[period] : 7;
       since = (() => {
         if (!periodDays) return null;
         const d = new Date();
@@ -1860,7 +1852,6 @@ export const adsHandlers = {
       until = new Date().toISOString().split('T')[0];
     }
 
-    // USD to KZT rate from DB (cached, updated daily by cron)
     const usdToKztRate = await getUsdToKzt();
 
     // Step 1: Load user_creatives
@@ -1872,15 +1863,9 @@ export const adsHandlers = {
       .order('created_at', { ascending: false })
       .limit(500);
 
-    if (dbAccountId) {
-      creativesQuery = creativesQuery.eq('account_id', dbAccountId);
-    }
-    if (direction_id) {
-      creativesQuery = creativesQuery.eq('direction_id', direction_id);
-    }
-    if (media_type) {
-      creativesQuery = creativesQuery.eq('media_type', media_type);
-    }
+    if (dbAccountId) creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+    if (direction_id) creativesQuery = creativesQuery.eq('direction_id', direction_id);
+    if (media_type) creativesQuery = creativesQuery.eq('media_type', media_type);
 
     const { data: creatives, error: creativesError } = await creativesQuery;
 
@@ -1892,12 +1877,9 @@ export const adsHandlers = {
       logger.info({ userAccountId, dbAccountId, period, direction_id, media_type },
         'getROIReport: no creatives found');
       return {
-        totalSpend: 0,
-        totalRevenue: 0,
-        totalROI: 0,
-        totalLeads: 0,
-        totalConversions: 0,
-        campaigns: [],
+        totalSpend: 0, totalRevenue: 0, totalROI: 0,
+        totalLeads: 0, totalConversions: 0,
+        platforms: {}, campaigns: [],
         message: 'Креативы не найдены за указанный период'
       };
     }
@@ -1907,28 +1889,33 @@ export const adsHandlers = {
 
     const creativeIds = creatives.map(c => c.id);
 
-    // Step 2: Load metrics from creative_metrics_history
+    // Step 2: Load metrics from creative_metrics_history — include platform for separation
     let metricsQuery = supabase
       .from('creative_metrics_history')
-      .select('user_creative_id, impressions, clicks, leads, spend')
+      .select('user_creative_id, impressions, clicks, leads, spend, platform')
       .in('user_creative_id', creativeIds)
       .eq('user_account_id', userAccountId)
       .eq('source', 'production');
 
-    if (since) {
-      metricsQuery = metricsQuery.gte('date', since);
-    }
+    if (since) metricsQuery = metricsQuery.gte('date', since);
+    if (until) metricsQuery = metricsQuery.lte('date', until);
 
     const { data: metricsHistory } = await metricsQuery;
 
-    // Aggregate metrics by creative
-    const metricsMap = new Map();
+    // Aggregate metrics by creative AND platform
+    // Key: `${creativeId}:${platform}`
+    const metricsByPlatform = new Map(); // platform -> Map<creativeId, agg>
     for (const metric of metricsHistory || []) {
-      const creativeId = metric.user_creative_id;
-      if (!metricsMap.has(creativeId)) {
-        metricsMap.set(creativeId, { impressions: 0, clicks: 0, leads: 0, spend: 0 });
+      const platform = metric.platform || 'facebook';
+      if (!metricsByPlatform.has(platform)) {
+        metricsByPlatform.set(platform, new Map());
       }
-      const agg = metricsMap.get(creativeId);
+      const platformMap = metricsByPlatform.get(platform);
+      const creativeId = metric.user_creative_id;
+      if (!platformMap.has(creativeId)) {
+        platformMap.set(creativeId, { impressions: 0, clicks: 0, leads: 0, spend: 0 });
+      }
+      const agg = platformMap.get(creativeId);
       agg.impressions += metric.impressions || 0;
       agg.clicks += metric.clicks || 0;
       agg.leads += metric.leads || 0;
@@ -1942,15 +1929,10 @@ export const adsHandlers = {
       .eq('user_account_id', userAccountId)
       .in('creative_id', creativeIds);
 
-    if (dbAccountId) {
-      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
-    }
-    if (direction_id) {
-      leadsQuery = leadsQuery.eq('direction_id', direction_id);
-    }
-    if (since) {
-      leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
-    }
+    if (dbAccountId) leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    if (direction_id) leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    if (since) leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
+    if (until) leadsQuery = leadsQuery.lte('created_at', until + 'T23:59:59.999Z');
 
     const { data: leadsData } = await leadsQuery;
 
@@ -1962,17 +1944,14 @@ export const adsHandlers = {
       .select('client_phone, amount')
       .eq('user_account_id', userAccountId);
 
-    if (dbAccountId) {
-      purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
-    }
+    if (dbAccountId) purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
     if (leadPhones.length > 0) {
       purchasesQuery = purchasesQuery.in('client_phone', leadPhones);
     } else {
       purchasesQuery = purchasesQuery.in('client_phone', ['__no_match__']);
     }
-    if (since) {
-      purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
-    }
+    if (since) purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
+    if (until) purchasesQuery = purchasesQuery.lte('created_at', until + 'T23:59:59.999Z');
 
     const { data: purchasesData } = await purchasesQuery;
 
@@ -1993,12 +1972,10 @@ export const adsHandlers = {
     for (const lead of leadsData || []) {
       const creativeId = lead.creative_id;
       if (!creativeId) continue;
-
       if (!revenueByCreative.has(creativeId)) {
         revenueByCreative.set(creativeId, { revenue: 0, conversions: 0 });
       }
       const rev = revenueByCreative.get(creativeId);
-
       const purchaseData = purchasesByPhone.get(lead.chat_id);
       if (purchaseData) {
         rev.revenue += purchaseData.amount;
@@ -2006,126 +1983,185 @@ export const adsHandlers = {
       }
     }
 
-    // Step 5: Build result
-    const campaigns = [];
-    let totalRevenue = 0;
-    let totalSpend = 0;
-    let totalLeads = 0;
-    let totalConversions = 0;
+    // Step 5: Build per-platform results
+    // Facebook: spend stored in USD → convert to KZT
+    // TikTok: spend stored in KZT → use as-is
+    const platformConfigs = {
+      facebook: { label: 'Facebook/Instagram', currency: 'USD', spendMultiplier: usdToKztRate },
+      tiktok: { label: 'TikTok', currency: 'KZT', spendMultiplier: 1 },
+    };
 
-    for (const creative of creatives) {
-      const metrics = metricsMap.get(creative.id) || { impressions: 0, clicks: 0, leads: 0, spend: 0 };
-      const revenueData = revenueByCreative.get(creative.id) || { revenue: 0, conversions: 0 };
+    const platforms = {};
+    const allCampaigns = [];
+    let grandTotalSpendKzt = 0;
+    let grandTotalRevenue = 0;
+    let grandTotalLeads = 0;
+    let grandTotalConversions = 0;
 
-      const leads = metrics.leads;
-      const spend = Math.round(metrics.spend * usdToKztRate);
-      const revenue = revenueData.revenue;
-      const conversions = revenueData.conversions;
+    for (const [platform, config] of Object.entries(platformConfigs)) {
+      const platformMetrics = metricsByPlatform.get(platform);
+      if (!platformMetrics || platformMetrics.size === 0) continue;
 
-      // ROI calculation
-      const roi = spend > 0 ? Math.round(((revenue - spend) / spend) * 100) : 0;
+      const campaigns = [];
+      let platSpendKzt = 0;
+      let platSpendOriginal = 0;
+      let platRevenue = 0;
+      let platLeads = 0;
+      let platConversions = 0;
 
-      if (leads > 0 || spend > 0) { // Only include creatives with activity
-        campaigns.push({
-          id: creative.id,
-          name: creative.title || `Креатив ${creative.id.substring(0, 8)}`,
-          media_type: creative.media_type,
-          spend,
-          revenue,
-          roi,
-          leads,
-          conversions
-        });
+      for (const creative of creatives) {
+        const metrics = platformMetrics.get(creative.id);
+        if (!metrics) continue;
 
-        totalRevenue += revenue;
-        totalSpend += spend;
-        totalLeads += leads;
-        totalConversions += conversions;
+        const revenueData = revenueByCreative.get(creative.id) || { revenue: 0, conversions: 0 };
+
+        const leads = metrics.leads;
+        const spendOriginal = Math.round(metrics.spend * 100) / 100; // original currency
+        const spendKzt = Math.round(metrics.spend * config.spendMultiplier);
+        const revenue = revenueData.revenue;
+        const conversions = revenueData.conversions;
+        const roi = spendKzt > 0 ? Math.round(((revenue - spendKzt) / spendKzt) * 100) : 0;
+        const cpl = leads > 0 ? Math.round(spendOriginal / leads * 100) / 100 : null;
+
+        if (leads > 0 || spendOriginal > 0) {
+          campaigns.push({
+            id: creative.id,
+            name: creative.title || `Креатив ${creative.id.substring(0, 8)}`,
+            media_type: creative.media_type,
+            platform,
+            spend: spendOriginal,
+            spend_currency: config.currency,
+            spend_kzt: spendKzt,
+            cpl,
+            cpl_currency: config.currency,
+            revenue,
+            roi,
+            leads,
+            conversions
+          });
+
+          platSpendOriginal += spendOriginal;
+          platSpendKzt += spendKzt;
+          platRevenue += revenue;
+          platLeads += leads;
+          platConversions += conversions;
+        }
       }
+
+      campaigns.sort((a, b) => b.leads - a.leads);
+
+      const platROI = platSpendKzt > 0 ? Math.round(((platRevenue - platSpendKzt) / platSpendKzt) * 100) : 0;
+      const avgCpl = platLeads > 0 ? Math.round(platSpendOriginal / platLeads * 100) / 100 : null;
+
+      const hasRevenue = platRevenue > 0 || platConversions > 0;
+      platforms[platform] = {
+        label: config.label,
+        currency: config.currency,
+        totalSpend: platSpendOriginal,
+        totalSpend_formatted: config.currency === 'USD'
+          ? `$${platSpendOriginal.toFixed(2)}`
+          : `${Math.round(platSpendOriginal).toLocaleString()} ₸`,
+        totalSpend_kzt: platSpendKzt,
+        totalSpend_kzt_formatted: `${(platSpendKzt / 1000).toFixed(0)}K ₸`,
+        avgCPL: avgCpl,
+        avgCPL_formatted: avgCpl != null
+          ? (config.currency === 'USD' ? `$${avgCpl.toFixed(2)}` : `${Math.round(avgCpl)} ₸`)
+          : '—',
+        totalLeads: platLeads,
+        // Revenue/ROI only when data exists
+        ...(hasRevenue ? {
+          totalRevenue: platRevenue,
+          totalROI: platROI,
+          totalROI_formatted: `${platROI}%`,
+          totalConversions: platConversions,
+        } : {}),
+        campaigns: campaigns.slice(0, 10),
+      };
+
+      allCampaigns.push(...campaigns);
+      grandTotalSpendKzt += platSpendKzt;
+      grandTotalRevenue += platRevenue;
+      grandTotalLeads += platLeads;
+      grandTotalConversions += platConversions;
     }
 
-    // Sort by leads descending for main list
-    campaigns.sort((a, b) => b.leads - a.leads);
+    const grandTotalROI = grandTotalSpendKzt > 0
+      ? Math.round(((grandTotalRevenue - grandTotalSpendKzt) / grandTotalSpendKzt) * 100) : 0;
 
-    const totalROI = totalSpend > 0 ? Math.round(((totalRevenue - totalSpend) / totalSpend) * 100) : 0;
+    // Revenue tracking: if no conversions at all, CRM is likely not connected
+    const revenueTrackingAvailable = grandTotalConversions > 0 || grandTotalRevenue > 0;
 
-    // Get top and worst performers by ROI
-    const sortedByROI = [...campaigns].sort((a, b) => b.roi - a.roi);
-    const topPerformers = sortedByROI.filter(c => c.roi > 0).slice(0, 3);
-    const worstPerformers = sortedByROI.filter(c => c.roi < 0 && c.spend > 0).reverse().slice(0, 3);
+    // Top/worst performers across all platforms
+    const sortedByLeads = [...allCampaigns].sort((a, b) => b.leads - a.leads);
+    let topPerformers, worstPerformers;
 
-    // Generate recommendations based on data analysis
+    if (revenueTrackingAvailable) {
+      // With revenue data: rank by ROI
+      const sortedByROI = [...allCampaigns].sort((a, b) => b.roi - a.roi);
+      topPerformers = sortedByROI.filter(c => c.roi > 0).slice(0, 3);
+      worstPerformers = sortedByROI.filter(c => c.roi < 0 && c.spend_kzt > 0).reverse().slice(0, 3);
+    } else {
+      // Without revenue data: rank by CPL (lower is better)
+      const withCpl = allCampaigns.filter(c => c.cpl != null && c.leads > 0);
+      const sortedByCpl = [...withCpl].sort((a, b) => a.cpl - b.cpl);
+      topPerformers = sortedByCpl.slice(0, 3);
+      worstPerformers = sortedByCpl.reverse().slice(0, 3);
+    }
+
+    // Recommendations — only generate ROI-based recs when revenue data exists
     const recommendations = [];
-
-    // Recommendation 1: Cut budget for negative ROI
-    for (const item of worstPerformers) {
-      if (item.roi < -20 && item.spend > 10000) { // More than -20% ROI and >10K spend
-        recommendations.push({
-          type: 'cut_budget',
-          entity_type: 'creative',
-          entity_id: item.id,
-          entity_name: item.name,
-          reason: `ROI ${item.roi}%, потрачено ${(item.spend / 1000).toFixed(0)}K ₸ без окупаемости`,
-          action_label: 'Снизить бюджет или остановить'
-        });
+    if (revenueTrackingAvailable) {
+      for (const item of worstPerformers) {
+        if (item.roi < -20 && item.spend_kzt > 10000) {
+          recommendations.push({
+            type: 'cut_budget', entity_type: 'creative',
+            entity_id: item.id, entity_name: item.name, platform: item.platform,
+            reason: `ROI ${item.roi}%, потрачено ${(item.spend_kzt / 1000).toFixed(0)}K ₸ без окупаемости`,
+            action_label: 'Снизить бюджет или остановить'
+          });
+        }
       }
-    }
-
-    // Recommendation 2: Scale top performers
-    for (const item of topPerformers) {
-      if (item.roi > 100 && item.leads >= 5) { // >100% ROI with decent leads
-        recommendations.push({
-          type: 'increase_budget',
-          entity_type: 'creative',
-          entity_id: item.id,
-          entity_name: item.name,
-          reason: `ROI +${item.roi}%, ${item.leads} лидов — можно масштабировать`,
-          action_label: 'Увеличить бюджет'
-        });
+      for (const item of topPerformers) {
+        if (item.roi > 100 && item.leads >= 5) {
+          recommendations.push({
+            type: 'increase_budget', entity_type: 'creative',
+            entity_id: item.id, entity_name: item.name, platform: item.platform,
+            reason: `ROI +${item.roi}%, ${item.leads} лидов — можно масштабировать`,
+            action_label: 'Увеличить бюджет'
+          });
+        }
       }
-    }
-
-    // Recommendation 3: Overall performance insights
-    if (totalROI < 0 && totalSpend > 50000) {
-      recommendations.push({
-        type: 'review_strategy',
-        entity_type: 'account',
-        reason: `Общий ROI отрицательный (${totalROI}%). Рекомендуем пересмотреть стратегию.`,
-        action_label: 'Провести аудит кампаний'
-      });
-    }
-
-    // Recommendation 4: No conversions
-    const noConversionCampaigns = campaigns.filter(c => c.leads > 5 && c.conversions === 0);
-    if (noConversionCampaigns.length > 2) {
-      recommendations.push({
-        type: 'improve_funnel',
-        entity_type: 'funnel',
-        reason: `${noConversionCampaigns.length} креативов с лидами, но без продаж. Проверьте воронку.`,
-        action_label: 'Проверить обработку лидов'
-      });
     }
 
     return {
       success: true,
       period,
-      totalSpend,
-      totalSpend_formatted: `${(totalSpend / 1000).toFixed(0)}K ₸`,
-      totalRevenue,
-      totalRevenue_formatted: `${(totalRevenue / 1000).toFixed(0)}K ₸`,
-      totalROI,
-      totalROI_formatted: `${totalROI}%`,
-      totalLeads,
-      totalConversions,
-      conversionRate: totalLeads > 0 ? Math.round((totalConversions / totalLeads) * 100) : 0,
-      conversionRate_formatted: totalLeads > 0 ? `${Math.round((totalConversions / totalLeads) * 100)}%` : '0%',
-      campaigns: campaigns.slice(0, 10), // Top 10 creatives by leads
-      topPerformers,   // Top 3 by ROI
-      worstPerformers, // Worst 3 by ROI
-      recommendations, // Auto-generated recommendations
+      revenueTrackingAvailable,
+      // Grand totals (in KZT for comparability)
+      totalSpend_kzt: grandTotalSpendKzt,
+      totalSpend_kzt_formatted: `${(grandTotalSpendKzt / 1000).toFixed(0)}K ₸`,
+      totalLeads: grandTotalLeads,
+      // Revenue/ROI — only meaningful when CRM is connected
+      ...(revenueTrackingAvailable ? {
+        totalRevenue: grandTotalRevenue,
+        totalRevenue_formatted: `${(grandTotalRevenue / 1000).toFixed(0)}K ₸`,
+        totalROI: grandTotalROI,
+        totalROI_formatted: `${grandTotalROI}%`,
+        totalConversions: grandTotalConversions,
+        conversionRate: grandTotalLeads > 0 ? Math.round((grandTotalConversions / grandTotalLeads) * 100) : 0,
+      } : {}),
+      // Per-platform breakdown (Facebook in USD, TikTok in KZT)
+      platforms,
+      campaigns: allCampaigns.sort((a, b) => b.leads - a.leads).slice(0, 10),
+      topPerformers,
+      worstPerformers,
+      recommendations,
       meta: {
         source: 'creative_metrics_history',
-        usdKztRate: usdToKztRate
+        usdKztRate: usdToKztRate,
+        revenueNote: revenueTrackingAvailable
+          ? 'Revenue data from CRM (purchases linked to leads)'
+          : 'CRM не подключена — данные по выручке и ROI недоступны. Показаны только расходы и лиды.'
       }
     };
   },

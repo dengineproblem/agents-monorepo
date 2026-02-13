@@ -85,27 +85,22 @@ async function responsesCreateMini(payload, openaiApiKey) {
   const startTime = Date.now();
   const { model, input, reasoning, temperature, top_p, metadata } = payload || {};
 
-  // Только per-account ключ из user_accounts (НЕ fallback на ENV — multi-account only)
-  const apiKey = openaiApiKey;
-
-  if (!apiKey) {
-    const err = new Error('OpenAI API key not configured in user profile');
+  if (!openaiApiKey) {
+    const err = new Error('OpenAI API key not configured');
     err.status = 500;
     logger.error({
       where: 'responsesCreateMini',
       phase: 'config_error',
-      error: 'No OpenAI API key in user_accounts — set it in Profile settings'
+      error: 'No OpenAI API key provided'
     });
     throw err;
   }
 
-  if (openaiApiKey) {
-    logger.info({
-      where: 'responsesCreateMini',
-      phase: 'using_per_account_key',
-      keyTail: openaiApiKey.slice(-4)
-    });
-  }
+  logger.info({
+    where: 'responsesCreateMini',
+    phase: 'start',
+    keyTail: openaiApiKey.slice(-4)
+  });
 
   const safeBody = {
     ...(model ? { model } : {}),
@@ -134,7 +129,7 @@ async function responsesCreateMini(payload, openaiApiKey) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'authorization': `Bearer ${apiKey}`
+        'authorization': `Bearer ${openaiApiKey}`
       },
       body: JSON.stringify(safeBody),
       signal: controller.signal
@@ -273,7 +268,7 @@ async function responsesCreateMiniWithRetry(payload, maxRetries = 3, openaiApiKe
           total_duration_ms: Date.now() - overallStartTime,
           status,
           error: String(error),
-          should_retry,
+          should_retry: shouldRetry,
           reason: !shouldRetry ? 'non_retryable_error' : 'max_retries_exceeded'
         });
         throw error;

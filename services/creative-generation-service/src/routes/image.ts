@@ -26,6 +26,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       style_id,
       style_prompt,  // Промпт для freestyle стиля
       reference_image,
+      reference_images,
       reference_image_type,
       reference_image_prompt,
       gemini_api_key,
@@ -34,6 +35,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       app.log.info(`[Generate Creative] Request from user: ${user_id}`);
+      app.log.info(`[Generate Creative] reference_images: ${JSON.stringify(reference_images)}, reference_image: ${reference_image}`);
       
       // ====== ШАГ 1: Проверяем лимит генераций и загружаем prompt4 ======
       const { data: user, error: userError } = await supabase
@@ -50,8 +52,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // ====== Месячный лимит генераций: 20 в месяц ======
-      const MONTHLY_LIMIT = 20;
+      // ====== Месячный лимит генераций ======
+      // Admin/unlimited аккаунты — без лимита
+      const UNLIMITED_USERS = new Set([
+        '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b', // anatoliymarketolog
+      ]);
+      const MONTHLY_LIMIT = UNLIMITED_USERS.has(user_id) ? Infinity : 20;
       const isMultiAccountMode = user.multi_account_enabled === true;
 
       // Подсчёт генераций за текущий месяц
@@ -107,15 +113,14 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // ====== ШАГ 2: Генерируем изображение через Gemini 3 Pro Image Preview ======
-      const selectedStyle = style_id || 'modern_performance';
+      const selectedStyle = style_id || 'freestyle';
+      // Поддержка reference_images массива (новый формат) и reference_image (legacy)
+      const resolvedRefImages: string[] = reference_images || (reference_image ? [reference_image] : []);
       app.log.info('[Generate Creative] Generating creative image with Gemini 3 Pro Image Preview...');
       app.log.info(`[Generate Creative] Style: ${selectedStyle}`);
       app.log.info(`[Generate Creative] Texts: offer="${offer}", bullets="${bullets}", profits="${profits}"`);
-      if (reference_image) {
-        app.log.info(`[Generate Creative] Using reference image (type: ${reference_image_type})`);
-        if (reference_image_prompt) {
-          app.log.info(`[Generate Creative] Reference prompt: "${reference_image_prompt}"`);
-        }
+      if (resolvedRefImages.length > 0) {
+        app.log.info(`[Generate Creative] Using ${resolvedRefImages.length} reference image(s)`);
       }
 
       const base64Image = await generateCreativeImage(
@@ -124,12 +129,13 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         profits,
         userPrompt4,
         selectedStyle,
-        reference_image,
-        reference_image_type,
+        resolvedRefImages.length > 0 ? resolvedRefImages[0] : undefined,
+        resolvedRefImages.length > 0 ? 'url' : undefined,
         reference_image_prompt,
-        style_prompt,  // Для freestyle стиля
+        style_prompt,
         gemini_api_key,
-        openai_api_key  // Для imagePromptGenerator (OpenAI генерирует промпт)
+        openai_api_key,
+        resolvedRefImages.length > 1 ? resolvedRefImages.slice(1) : undefined  // extra references
       );
 
       app.log.info(`[Generate Creative] Image generated, base64 length: ${base64Image.length}`);

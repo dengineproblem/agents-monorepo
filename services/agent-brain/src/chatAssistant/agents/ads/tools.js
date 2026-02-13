@@ -263,32 +263,38 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getROIReport',
-    description: `Получить ROI (окупаемость) креативов: расходы vs выручка с продаж.
+    description: `ROI отчёт по креативам с РАЗДЕЛЕНИЕМ по платформам (Facebook и TikTok).
 
-ИСТОЧНИК ДАННЫХ:
-- Расходы: из creative_metrics_history (spend по креативам)
-- Выручка: из purchases (покупки привязанные к креативам через лиды)
-- Курс: USD/KZT для конвертации
+ВАЖНО — ВАЛЮТЫ:
+- Facebook: spend в USD (конвертируется в KZT для общих итогов)
+- TikTok: spend в KZT (тенге)
+- Общие итоги (totalSpend_kzt) — всё приведено к KZT
 
 ВОЗВРАЩАЕТ:
-- totalSpend, totalRevenue, totalROI (%) - общие показатели
-- totalLeads, totalConversions, conversionRate (%) - воронка
-- campaigns[]: id, name, media_type, spend, revenue, roi, leads, conversions
-- topPerformers[]: топ креативы по ROI
-- worstPerformers[]: худшие креативы
-- recommendations[]: автоматические рекомендации (type, entity_id, reason, action_label)
+- platforms.facebook: { totalSpend (USD), campaigns[], avgCPL (USD), totalLeads }
+- platforms.tiktok: { totalSpend (KZT), campaigns[], avgCPL (KZT), totalLeads }
+- campaigns[].spend_currency — валюта расхода ("USD" или "KZT")
+- campaigns[].cpl, cpl_currency — CPL в нативной валюте
+- totalSpend_kzt — общий расход в KZT по всем платформам
+- recommendations[] — автоматические рекомендации
 
-ИСПОЛЬЗУЙ когда нужно:
-- Оценить финансовую эффективность рекламы
-- Найти самые прибыльные и убыточные креативы
-- Получить рекомендации по оптимизации бюджетов`,
+ВАЖНО: ВСЕГДА передавай date_from/date_to или period. По умолчанию 7 дней.
+Для "за неделю" используй date_from (понедельник) и date_to (воскресенье).`,
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
-          enum: ['last_7d', 'last_30d', 'last_90d', 'all'],
-          description: 'Период: all - за всё время (рекомендуется для ROI)'
+          enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'all'],
+          description: 'Период (используй date_from/date_to для точных дат)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         },
         direction_id: {
           type: 'string',
@@ -299,8 +305,7 @@ export const ADS_TOOLS = [
           enum: ['video', 'image', 'carousel'],
           description: 'Тип креатива для фильтрации (опционально)'
         }
-      },
-      required: ['period']
+      }
     }
   },
   {

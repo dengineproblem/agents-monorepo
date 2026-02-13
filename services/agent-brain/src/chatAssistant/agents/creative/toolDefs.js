@@ -235,7 +235,8 @@ export const CreativeToolDefs = {
       direction_id: uuidSchema.optional().describe('UUID направления'),
       style_id: z.string().optional().describe('Стиль изображения: modern_performance (современный), clean_minimal (минималистичный), bold_dark (тёмный контрастный), neon_glow (неоновый), gradient_soft (мягкий градиент)'),
       style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля (если style_id не подходит)'),
-      reference_image: z.string().optional().describe('Base64 референсного изображения для копирования стиля')
+      reference_image: z.string().optional().describe('URL или Base64 одного референсного изображения (legacy)'),
+      reference_images: z.array(z.string()).optional().describe('Массив URL референсных изображений для копирования стиля')
     }),
     meta: { timeout: 120000, retryable: false, dangerous: true }
   },

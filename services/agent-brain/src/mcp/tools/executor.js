@@ -115,7 +115,9 @@ export async function executeToolWithContext(name, args, context) {
     userAccountId: context.userAccountId,
     adAccountId: context.adAccountId,
     adAccountDbId: context.adAccountDbId,  // UUID for database queries
-    accessToken: context.accessToken
+    accessToken: context.accessToken,
+    openaiApiKey: context.openaiApiKey || null,
+    geminiApiKey: context.geminiApiKey || null,
   };
 
   try {

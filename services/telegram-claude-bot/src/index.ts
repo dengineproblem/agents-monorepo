@@ -342,6 +342,44 @@ function saveState(): void {
 }
 
 /**
+ * Обработка альбома (media_group) — несколько фото → один message со всеми URL
+ */
+async function handleMediaGroup(msgs: TelegramBot.Message[]): Promise<void> {
+  if (msgs.length === 0) return;
+
+  // Собираем URL всех фото
+  const photoUrls: string[] = [];
+  for (const m of msgs) {
+    if (m.photo && m.photo.length > 0) {
+      const largest = m.photo[m.photo.length - 1];
+      try {
+        const url = await bot!.getFileLink(largest.file_id);
+        photoUrls.push(url);
+      } catch { /* skip */ }
+    }
+  }
+
+  // Берём caption из первого сообщения с caption
+  const caption = msgs.find(m => m.caption)?.caption || '';
+  const urlList = photoUrls.map((u, i) => `${i + 1}. ${u}`).join('\n');
+
+  // Создаём синтетическое сообщение на основе первого
+  const first = msgs[0];
+  const syntheticText = caption
+    ? `${caption}\n\n[Пользователь приложил ${photoUrls.length} референс-изображений:\n${urlList}]`
+    : `[Пользователь отправил ${photoUrls.length} референс-изображений:\n${urlList}]`;
+
+  // Подменяем текст и убираем photo чтобы handleMessage не обрабатывал фото повторно
+  // Передаём photoUrls через свойство — сессия ещё не создана на этом этапе,
+  // pendingReferenceImages сохраним позже в handleMessage после создания сессии.
+  const syntheticMsg = { ...first, text: syntheticText, photo: undefined, caption: undefined } as any;
+  syntheticMsg._referenceImageUrls = photoUrls;
+  logger.info({ chatId: first.chat.id, photoCount: photoUrls.length }, 'Media group batched into single message');
+
+  await handleMessage(syntheticMsg as TelegramBot.Message);
+}
+
+/**
  * Обработка входящего сообщения от Telegram
  */
 async function handleMessage(msg: TelegramBot.Message): Promise<void> {
@@ -394,6 +432,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       try {
         photoUrl = await bot.getFileLink(largestPhoto.file_id);
         logger.info({ chatId }, 'Photo received as reference');
+        // pendingReferenceImages сохраним позже — после создания/получения сессии
         // Добавить информацию о фото в текст сообщения
         const photoCaption = msg.caption || '';
         messageText = photoCaption
@@ -444,7 +483,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
 
     // Обрезка слишком длинных сообщений (cost + attack surface reduction)
     const truncatedMessage = cleanedMessage.length > MAX_MESSAGE_LENGTH
-      ? cleanedMessage.slice(0, MAX_MESSAGE_LENGTH) + '\n\n[Сообщение обрезано — превышен лимит символов]'
+      ? Array.from(cleanedMessage).slice(0, MAX_MESSAGE_LENGTH).join('') + '\n\n[Сообщение обрезано — превышен лимит символов]'
       : cleanedMessage;
 
     logger.info({ chatId }, 'Processing agent request');
@@ -483,6 +522,19 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       }
     } else {
       updateActivity(telegramId!);
+    }
+
+    // Сохраняем pendingReferenceImages в сессию (теперь сессия точно существует)
+    // Источник 1: media_group — URL'ы переданы через _referenceImageUrls на синтетическом сообщении
+    const refUrlsFromMediaGroup = (msg as any)._referenceImageUrls;
+    if (Array.isArray(refUrlsFromMediaGroup) && refUrlsFromMediaGroup.length > 0) {
+      session.pendingReferenceImages = refUrlsFromMediaGroup;
+      logger.info({ telegramId, count: refUrlsFromMediaGroup.length }, 'Saved pending reference images from media group');
+    }
+    // Источник 2: одиночное фото — photoUrl уже получен выше
+    if (photoUrl && !refUrlsFromMediaGroup) {
+      session.pendingReferenceImages = [photoUrl];
+      logger.info({ telegramId }, 'Saved pending reference image (single photo)');
     }
 
     // === MULTI-ACCOUNT FLOW ===
@@ -580,8 +632,29 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     let systemPrompt: string;
     let domainTools: (Anthropic.Tool | Anthropic.Messages.WebSearchTool20250305)[];
 
+    // Загрузить краткий контекст из последних сообщений для роутера
+    let recentContext = '';
+    try {
+      const contextRows = getRecentMessages(chatId, 3);
+      if (contextRows.length > 0) {
+        recentContext = contextRows
+          .map(r => {
+            // Use Array.from to avoid splitting surrogate pairs (emoji) with .slice()
+            const safe = Array.from(r.text).slice(0, 150).join('');
+            return `${r.is_from_me ? 'Assistant' : 'User'}: ${safe}`;
+          })
+          .join('\n');
+      }
+    } catch { /* ignore */ }
+
     const anthropicClient = getAnthropicClient(session);
-    const routeResult = await routeMessage(truncatedMessage, anthropicClient, session.stack);
+    const routeResult = await routeMessage(
+      truncatedMessage,
+      anthropicClient,
+      session.stack,
+      recentContext || undefined,
+      session.lastDomain,
+    );
 
     // Track router LLM usage for legacy users (routing may call Claude on ambiguous messages).
     if (telegramId && !session.multiAccountEnabled && routeResult?.method === 'llm' && routeResult.usage) {
@@ -600,6 +673,11 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
           completion_tokens: completionTokens,
         });
       }
+    }
+
+    // Save last domain to session for sticky routing
+    if (routeResult && routeResult.domain !== 'general') {
+      session.lastDomain = routeResult.domain;
     }
 
     if (routeResult) {
@@ -822,11 +900,30 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
             }
 
             // Всегда инжектим userAccountId в tool input
-            const toolInput = {
+            const toolInput: Record<string, any> = {
               ...(block.input as Record<string, any>),
               userAccountId,
               ...(session.selectedAccountId ? { accountId: session.selectedAccountId } : {}),
             };
+
+            // Автоинжект reference_images из сессии для generateCreatives
+            if (block.name === 'generateCreatives') {
+              logger.info({
+                hasPending: !!session.pendingReferenceImages,
+                pendingLength: session.pendingReferenceImages?.length,
+                pendingUrls: session.pendingReferenceImages,
+                toolRefImages: toolInput.reference_images,
+              }, 'generateCreatives: auto-inject check');
+
+              if (session.pendingReferenceImages?.length) {
+                if (!toolInput.reference_images || !Array.isArray(toolInput.reference_images) || toolInput.reference_images.length === 0) {
+                  toolInput.reference_images = session.pendingReferenceImages;
+                  logger.info({ count: session.pendingReferenceImages.length }, 'Auto-injected reference_images from session');
+                }
+                session.pendingReferenceImages = null; // Одноразовое использование
+              }
+            }
+
             const result = await executeTool(block.name, toolInput);
 
             toolResults.push({
@@ -973,8 +1070,39 @@ async function initBot(): Promise<void> {
   // Создать бота
   bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-  // Обработка сообщений
-  bot.on('message', handleMessage);
+  // Батчинг media_group (альбомов): Telegram отправляет каждое фото отдельным сообщением
+  // с общим media_group_id. Собираем их в одно сообщение за 1.5 сек.
+  const mediaGroupBuffer = new Map<string, { msgs: TelegramBot.Message[]; timer: ReturnType<typeof setTimeout> }>();
+
+  bot.on('message', (msg) => {
+    const groupId = (msg as any).media_group_id;
+    if (!groupId || !msg.photo) {
+      // Обычное сообщение — обрабатываем сразу
+      handleMessage(msg);
+      return;
+    }
+
+    // Фото из альбома — буферизируем
+    const existing = mediaGroupBuffer.get(groupId);
+    if (existing) {
+      existing.msgs.push(msg);
+      // Сбрасываем таймер — ждём ещё фото
+      clearTimeout(existing.timer);
+      existing.timer = setTimeout(() => {
+        mediaGroupBuffer.delete(groupId);
+        handleMediaGroup(existing.msgs);
+      }, 1500);
+    } else {
+      const entry = {
+        msgs: [msg],
+        timer: setTimeout(() => {
+          mediaGroupBuffer.delete(groupId);
+          handleMediaGroup(entry.msgs);
+        }, 1500),
+      };
+      mediaGroupBuffer.set(groupId, entry);
+    }
+  });
 
   // Обработка ошибок polling
   bot.on('polling_error', (error) => {

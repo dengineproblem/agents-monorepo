@@ -94,9 +94,9 @@ const KEYWORD_RULES: KeywordRule[] = [
 
 /**
  * Phase 1: Keyword-based classification (synchronous, 0ms)
- * Returns null if no match or cross-domain detected
+ * Returns RouteResult for single domain, 'cross-domain' for multi-match, null for no match
  */
-function classifyByKeywords(message: string): RouteResult | null {
+function classifyByKeywords(message: string): RouteResult | 'cross-domain' | null {
   const matched: string[] = [];
 
   for (const rule of KEYWORD_RULES) {
@@ -107,62 +107,97 @@ function classifyByKeywords(message: string): RouteResult | null {
 
   if (matched.length === 0) return null;
 
-  // Cross-domain: multiple domains matched → let caller fallback
+  // Cross-domain: multiple domains matched → caller loads all tools
   if (matched.length > 1) {
     logger.info({ domains: matched }, 'Cross-domain detected, fallback to all tools');
-    return null;
+    return 'cross-domain';
   }
 
   return { domain: matched[0], method: 'keyword' };
 }
 
 const ROUTER_SYSTEM_PROMPT = `Classify the user message into ONE domain. Reply with ONLY the domain name:
-- ads (Facebook campaigns, budgets, metrics, directions, optimization, adsets)
+- ads (Facebook campaigns, budgets, metrics, directions, optimization, adsets, spend reports, ROI)
 - creative (image/text generation, creative analysis, A/B tests, banners, carousels)
 - crm (leads, sales, WhatsApp dialogs, funnel, clients)
 - tiktok (TikTok campaigns and metrics)
 - onboarding (user registration, creating accounts)
 - general (greetings, unclear requests, errors, web search, other)
 
+IMPORTANT: If the user message is a follow-up (like "try again", "show more", "yes", "do it"), classify based on the CONVERSATION CONTEXT, not just the current message.
+
 Reply with ONLY ONE word — the domain name.`;
 
 /**
  * Phase 2: LLM classification via Haiku (~300ms)
+ * Retries once on connection errors (DNS flakes in Docker)
+ * Uses recent conversation context for follow-up messages
  */
-async function classifyByLLM(message: string, anthropic: Anthropic): Promise<RouteResult> {
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 10,
-      system: ROUTER_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: message.slice(0, 200) }],
-    });
+async function classifyByLLM(
+  message: string,
+  anthropic: Anthropic,
+  recentContext?: string,
+): Promise<RouteResult> {
+  const MAX_ATTEMPTS = 2;
 
-    const text = response.content
-      .find(b => b.type === 'text')
-      ?.text?.trim()
-      .toLowerCase() || '';
-
-    const validDomains = ['ads', 'creative', 'crm', 'tiktok', 'onboarding', 'general'];
-    const domain = validDomains.includes(text) ? text : 'general';
-
-    const usage = (response as any)?.usage;
-    return {
-      domain,
-      method: 'llm',
-      usage: usage
-        ? {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            cache_creation_input_tokens: usage.cache_creation_input_tokens,
-            cache_read_input_tokens: usage.cache_read_input_tokens,
-          }
-        : undefined,
-    };
-  } catch (error: any) {
-    logger.error({ error: error.message }, 'LLM routing failed, fallback');
-    return { domain: 'general', method: 'fallback' };
+  // Build messages with optional conversation context
+  const llmMessages: Anthropic.MessageParam[] = [];
+  if (recentContext) {
+    llmMessages.push({ role: 'user', content: `Recent conversation:\n${recentContext}` });
+    llmMessages.push({ role: 'assistant', content: 'Understood. I will use this context to classify the next message.' });
   }
+  llmMessages.push({ role: 'user', content: message.slice(0, 200) });
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await anthropic.messages.create(
+        {
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 10,
+          system: ROUTER_SYSTEM_PROMPT,
+          messages: llmMessages,
+        },
+        { timeout: 10_000 }, // 10s timeout for routing (default is too long)
+      );
+
+      const text = response.content
+        .find(b => b.type === 'text')
+        ?.text?.trim()
+        .toLowerCase() || '';
+
+      const validDomains = ['ads', 'creative', 'crm', 'tiktok', 'onboarding', 'general'];
+      const domain = validDomains.includes(text) ? text : 'general';
+
+      const usage = (response as any)?.usage;
+      return {
+        domain,
+        method: 'llm',
+        usage: usage
+          ? {
+              input_tokens: usage.input_tokens,
+              output_tokens: usage.output_tokens,
+              cache_creation_input_tokens: usage.cache_creation_input_tokens,
+              cache_read_input_tokens: usage.cache_read_input_tokens,
+            }
+          : undefined,
+      };
+    } catch (error: any) {
+      const isConnectionError = error instanceof Anthropic.APIConnectionError
+        || error?.message?.includes('Connection error')
+        || error?.code === 'EAI_AGAIN'
+        || error?.code === 'ECONNRESET';
+
+      if (isConnectionError && attempt < MAX_ATTEMPTS) {
+        logger.warn({ attempt, error: error.message }, 'LLM routing connection error, retrying');
+        continue;
+      }
+
+      logger.error({ error: error.message, attempt }, 'LLM routing failed, fallback');
+      return { domain: 'general', method: 'fallback' };
+    }
+  }
+
+  return { domain: 'general', method: 'fallback' };
 }
 
 // Какие сервисы нужны для каждого домена
@@ -191,14 +226,23 @@ function isDomainAvailable(domain: string, userStack: string[]): boolean {
  * Route a user message to a domain.
  * Returns RouteResult with domain name and classification method.
  * Returns null if cross-domain or error → caller should use all tools.
+ *
+ * @param recentContext — last 3 messages for LLM context (follow-up routing)
+ * @param lastDomain — sticky domain from session (fallback for vague messages)
  */
 export async function routeMessage(
   message: string,
   anthropic: Anthropic,
   userStack?: string[],
+  recentContext?: string,
+  lastDomain?: string | null,
 ): Promise<RouteResult | null> {
   // Phase 1: keyword matching (0ms)
   const keywordResult = classifyByKeywords(message);
+
+  // Cross-domain: immediately return null → caller loads all tools
+  if (keywordResult === 'cross-domain') return null;
+
   if (keywordResult) {
     // Фильтрация по стеку — если домен недоступен, fallback на general
     if (userStack && !isDomainAvailable(keywordResult.domain, userStack)) {
@@ -209,8 +253,14 @@ export async function routeMessage(
     return keywordResult;
   }
 
-  // Phase 2: LLM classify (~300ms)
-  const llmResult = await classifyByLLM(message, anthropic);
+  // Phase 2: LLM classify (~300ms) — only for "no keyword match" case
+  const llmResult = await classifyByLLM(message, anthropic, recentContext);
+
+  // Phase 3: Sticky domain — if LLM returns 'general' but we had a recent domain, use it
+  if (llmResult.domain === 'general' && lastDomain && lastDomain !== 'general') {
+    logger.info({ llmDomain: 'general', stickyDomain: lastDomain }, 'LLM returned general, using sticky domain');
+    return { domain: lastDomain, method: 'fallback' };
+  }
 
   // Фильтрация по стеку
   if (userStack && !isDomainAvailable(llmResult.domain, userStack)) {

@@ -103,12 +103,18 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'getSpendReport',
-    description: 'Отчёт по расходам с детализацией',
+    description: 'Отчёт по расходам с детализацией. ВАЖНО: всегда передавай date_from/date_to или period.',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        period: { type: 'string' },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
+          description: 'Preset период (игнорируется если указаны date_from/date_to)',
+        },
+        date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
+        date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
         breakdown: {
           type: 'string',
           enum: ['day', 'week', 'campaign', 'adset'],
@@ -133,14 +139,18 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'getROIReport',
-    description: 'ROI отчёт по креативам: расходы, выручка, ROI%',
+    description: 'ROI отчёт по креативам с РАЗДЕЛЕНИЕМ по платформам. Facebook spend в USD, TikTok в KZT. Результат содержит platforms.facebook и platforms.tiktok с отдельными campaigns[], totalSpend, avgCPL. ВСЕГДА показывай платформы отдельными секциями с указанием валюты.',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        period: { type: 'string' },
-        date_from: { type: 'string', description: 'Начало периода (YYYY-MM-DD)' },
-        date_to: { type: 'string', description: 'Конец периода (YYYY-MM-DD)' },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
+          description: 'Preset период (игнорируется если указаны date_from/date_to)',
+        },
+        date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
+        date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
         direction_id: { type: 'string' },
         media_type: {
           type: 'string',
@@ -436,7 +446,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'getTopCreatives',
-    description: 'Лучшие креативы по метрикам',
+    description: 'Лучшие креативы по метрикам. ВАЖНО: передавай date_from/date_to или period для нужного периода.',
     input_schema: {
       type: 'object',
       properties: {
@@ -447,7 +457,13 @@ export const tools: Anthropic.Tool[] = [
           description: 'Метрика для сортировки',
         },
         direction_id: { type: 'string' },
-        period: { type: 'string' },
+        period: {
+          type: 'string',
+          enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
+          description: 'Preset период (игнорируется если указаны date_from/date_to)',
+        },
+        date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
+        date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
         limit: { type: 'number' },
       },
       required: ['userAccountId'],
@@ -545,75 +561,61 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'generateOffer',
-    description: 'Сгенерировать заголовок/оффер для креатива (ШАГ 1 из 5)',
+    description: 'Сгенерировать заголовок/оффер для креатива (ШАГ 1). Бэкенд сам берёт описание бизнеса из БД — НЕ передавай prompt.',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        prompt: { type: 'string', description: 'Описание для генерации оффера' },
+        existing_bullets: { type: 'string', description: 'Уже сгенерированные буллеты (если есть)' },
+        existing_profits: { type: 'string', description: 'Уже сгенерированные выгоды (если есть)' },
       },
-      required: ['userAccountId', 'prompt'],
+      required: ['userAccountId'],
     },
   },
   {
     name: 'generateBullets',
-    description: 'Сгенерировать буллеты/преимущества (ШАГ 2 из 5)',
+    description: 'Сгенерировать буллеты/преимущества (ШАГ 2). Бэкенд сам берёт описание бизнеса из БД — НЕ передавай prompt.',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        prompt: { type: 'string' },
         existing_offer: { type: 'string', description: 'Оффер из шага 1' },
+        existing_profits: { type: 'string', description: 'Уже сгенерированные выгоды (если есть)' },
       },
-      required: ['userAccountId', 'prompt'],
+      required: ['userAccountId'],
     },
   },
   {
     name: 'generateProfits',
-    description: 'Сгенерировать выгоды для клиента (ШАГ 3 из 5)',
+    description: 'Сгенерировать выгоды для клиента (ШАГ 3). Бэкенд сам берёт описание бизнеса из БД — НЕ передавай prompt.',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        prompt: { type: 'string' },
-        existing_offer: { type: 'string' },
-        existing_bullets: { type: 'string' },
+        existing_offer: { type: 'string', description: 'Оффер из шага 1' },
+        existing_bullets: { type: 'string', description: 'Буллеты из шага 2' },
       },
-      required: ['userAccountId', 'prompt'],
-    },
-  },
-  {
-    name: 'generateCta',
-    description: 'Сгенерировать призыв к действию (ШАГ 4 из 5)',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userAccountId: { type: 'string' },
-        prompt: { type: 'string' },
-        existing_offer: { type: 'string' },
-        existing_bullets: { type: 'string' },
-        existing_profits: { type: 'string' },
-      },
-      required: ['userAccountId', 'prompt'],
+      required: ['userAccountId'],
     },
   },
   {
     name: 'generateCreatives',
-    description: 'Сгенерировать изображение креатива 1080x1920px с готовыми текстами (ШАГ 5 ФИНАЛ)',
+    description: 'Сгенерировать изображение креатива 1080x1920px с готовыми текстами',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        offer: { type: 'string', description: 'Готовый заголовок' },
-        bullets: { type: 'string', description: 'Готовые буллеты' },
-        profits: { type: 'string', description: 'Готовые выгоды' },
-        cta: { type: 'string', description: 'Готовый CTA' },
+        offer: { type: 'string', description: 'Заголовок (6-12 слов)' },
+        bullets: { type: 'string', description: '3 буллета с маркером •' },
+        profits: { type: 'string', description: 'ОДНА строка выгоды/бонуса (например "Первый месяц бесплатно")' },
+        cta: { type: 'string', description: 'Призыв к действию (2-5 слов)' },
         direction_id: { type: 'string' },
-        style_id: {
-          type: 'string',
-          enum: ['modern_performance', 'clean_minimal', 'bold_dark', 'neon_glow', 'gradient_soft'],
+        style_prompt: { type: 'string', description: 'Описание визуала от пользователя (стиль, цвета, элементы)' },
+        reference_images: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'URL референс-изображений от пользователя (одно или несколько)',
         },
-        reference_image_url: { type: 'string', description: 'URL референс-изображения от пользователя' },
       },
       required: ['userAccountId', 'offer'],
     },
@@ -643,14 +645,13 @@ export const tools: Anthropic.Tool[] = [
           items: { type: 'string' },
           description: 'Тексты для карточек карусели',
         },
-        visual_style: {
-          type: 'string',
-          enum: ['clean_minimal', 'modern_performance', 'bold_dark', 'gradient_soft'],
-          description: 'Визуальный стиль карусели',
-        },
-        style_prompt: { type: 'string', description: 'Дополнительный промпт для стиля' },
+        style_prompt: { type: 'string', description: 'Описание визуала от пользователя' },
         direction_id: { type: 'string' },
-        reference_image_url: { type: 'string', description: 'URL референс-изображения от пользователя' },
+        reference_images: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'URL референс-изображений от пользователя',
+        },
       },
       required: ['userAccountId', 'carousel_texts'],
     },

@@ -176,8 +176,14 @@ export async function workflowCreateAdSetInDirection(
       destination_type = 'WHATSAPP';
       break;
     case 'conversions':
-      fb_objective = 'OUTCOME_SALES';
-      optimization_goal = 'OFFSITE_CONVERSIONS';
+      if (direction.conversion_channel === 'lead_form') {
+        // Lead form + CRM CAPI: адсет как обычная лидформа, оптимизация через CAPI события в датасет
+        fb_objective = 'OUTCOME_LEADS';
+        optimization_goal = 'LEAD_GENERATION';
+      } else {
+        fb_objective = 'OUTCOME_SALES';
+        optimization_goal = 'OFFSITE_CONVERSIONS';
+      }
       // destination_type зависит от conversion_channel — устанавливается ниже
       break;
     case 'instagram_traffic':
@@ -482,10 +488,10 @@ export async function workflowCreateAdSetInDirection(
         ...(whatsapp_phone_number && { whatsapp_phone_number })
       };
     } else if (conversionChannel === 'lead_form') {
+      // Lead form + CRM CAPI: адсет как обычная лидформа, без pixel в promoted_object
+      // Оптимизация по CRM событиям происходит через CAPI события в датасет (по leadgen_id)
       adsetBody.destination_type = 'ON_AD';
       adsetBody.promoted_object = {
-        pixel_id: String(pixelId),
-        custom_event_type: customEventType,
         page_id: String(effective_page_id),
       };
     } else if (conversionChannel === 'site') {

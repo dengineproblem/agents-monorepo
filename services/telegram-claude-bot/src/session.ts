@@ -13,6 +13,8 @@ export interface UserSession {
   isFirstMessage: boolean;
   anthropicApiKey: string | null;
   originalAnthropicApiKey: string | null; // ключ из resolve-user (восстанавливается при сбросе аккаунта)
+  lastDomain: string | null; // sticky domain — последний роутинг для follow-up сообщений
+  pendingReferenceImages: string[] | null; // URL'ы из media_group, автоинжект в generateCreatives
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 минут
@@ -59,6 +61,8 @@ export function createSession(
     isFirstMessage: true,
     anthropicApiKey: sessionAnthropicKey,
     originalAnthropicApiKey: sessionAnthropicKey,
+    lastDomain: null,
+    pendingReferenceImages: null,
   };
   sessions.set(telegramId, session);
   logger.info({

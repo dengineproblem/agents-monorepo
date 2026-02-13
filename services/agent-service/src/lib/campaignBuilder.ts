@@ -111,6 +111,16 @@ export function getCustomEventType(level: string | undefined, conversionChannel?
     return 'OTHER';
   }
 
+  // CRM dataset (lead_form) — все уровни отправляют событие Lead через CAPI
+  if (conversionChannel === 'lead_form') {
+    log.debug({
+      input_level: level,
+      conversionChannel,
+      custom_event_type: 'LEAD',
+    }, 'getCustomEventType: CRM dataset → LEAD');
+    return 'LEAD';
+  }
+
   // Legacy/Website — старый маппинг
   const level2EventRaw = (process.env.WHATSAPP_CONVERSIONS_LEVEL2_EVENT || process.env.META_CAPI_LEVEL2_EVENT || 'ADD_TO_CART')
     .trim()

@@ -100,6 +100,7 @@ async function getCredentials(userAccountId, accountId) {
     }
 
     // LEGACY MODE: get credentials from user_accounts
+    // API keys берутся из ENV — legacy юзеры НЕ хранят свои ключи
     return {
       success: true,
       credentials: {
@@ -109,9 +110,9 @@ async function getCredentials(userAccountId, accountId) {
         instagramId: user.instagram_id,
         instagramUsername: user.instagram_username,
         businessId: user.business_id,
-        openaiApiKey: user.openai_api_key || null,
-        geminiApiKey: user.gemini_api_key || null,
-        anthropicApiKey: user.anthropic_api_key || null,
+        openaiApiKey: process.env.OPENAI_API_KEY || null,
+        geminiApiKey: process.env.GEMINI_API_KEY || null,
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
         // Meta
         isMultiAccountMode: false,
         dbAccountId: null,

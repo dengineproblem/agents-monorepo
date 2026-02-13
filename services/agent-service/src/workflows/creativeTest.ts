@@ -273,10 +273,14 @@ export async function workflowStartCreativeTest(
       break;
 
     case 'conversions': {
-      fb_objective = 'OUTCOME_SALES';
-      optimization_goal = 'OFFSITE_CONVERSIONS';
-
       const conversionChannel = direction.conversion_channel || 'whatsapp';
+      if (conversionChannel === 'lead_form') {
+        fb_objective = 'OUTCOME_LEADS';
+        optimization_goal = 'LEAD_GENERATION';
+      } else {
+        fb_objective = 'OUTCOME_SALES';
+        optimization_goal = 'OFFSITE_CONVERSIONS';
+      }
       if (!direction.conversion_channel) {
         log.warn({
           directionId: direction.id,
@@ -300,8 +304,6 @@ export async function workflowStartCreativeTest(
         } else if (conversionChannel === 'lead_form') {
           destination_type = 'ON_AD';
           promoted_object = {
-            pixel_id: String(defaultSettings.pixel_id),
-            custom_event_type: customEventType,
             page_id: String(page_id),
           };
         } else if (conversionChannel === 'site') {

@@ -124,8 +124,13 @@ export async function workflowCreateCampaignWithCreative(
       optimization_goal = 'CONVERSATIONS';
       break;
     case 'Conversions':
-      fb_objective = 'OUTCOME_SALES';
-      optimization_goal = 'OFFSITE_CONVERSIONS';
+      if (conversion_channel === 'lead_form') {
+        fb_objective = 'OUTCOME_LEADS';
+        optimization_goal = 'LEAD_GENERATION';
+      } else {
+        fb_objective = 'OUTCOME_SALES';
+        optimization_goal = 'OFFSITE_CONVERSIONS';
+      }
       break;
     case 'Instagram':
       fb_objective = 'OUTCOME_TRAFFIC';
