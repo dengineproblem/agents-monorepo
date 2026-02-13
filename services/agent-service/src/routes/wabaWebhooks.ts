@@ -148,24 +148,43 @@ export default async function wabaWebhooks(app: FastifyInstance) {
     }
 
     try {
-      // Signature verification (skip in dev if no secret configured)
-      if (WABA_APP_SECRET) {
-        const signature = request.headers['x-hub-signature-256'] as string | undefined;
-        const rawBody = (request as any).rawBody as Buffer | undefined;
+      const body = request.body as WabaWebhookPayload;
 
-        if (!rawBody) {
-          app.log.warn('WABA webhook: rawBody not available, skipping signature check');
-          // Continue without signature verification if rawBody is not available
-        } else if (!verifyWabaSignature(rawBody, signature, WABA_APP_SECRET)) {
-          app.log.warn({
-            hasSignature: !!signature,
-            rawBodyLength: rawBody?.length
-          }, 'WABA webhook signature verification failed');
-          return reply.status(403).send('Invalid signature');
+      // Signature verification: try per-number secret from DB, fallback to global env
+      const signature = request.headers['x-hub-signature-256'] as string | undefined;
+      const rawBody = (request as any).rawBody as Buffer | undefined;
+
+      if (rawBody && signature) {
+        // Try to extract phone_number_id from payload for per-number secret lookup
+        let appSecret = WABA_APP_SECRET;
+        const firstPhoneNumberId = body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+
+        if (firstPhoneNumberId) {
+          const { data: numberRecord } = await supabase
+            .from('whatsapp_phone_numbers')
+            .select('waba_app_secret')
+            .eq('waba_phone_id', firstPhoneNumberId)
+            .eq('connection_type', 'waba')
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (numberRecord?.waba_app_secret) {
+            appSecret = numberRecord.waba_app_secret;
+          }
+        }
+
+        if (appSecret) {
+          if (!verifyWabaSignature(rawBody, signature, appSecret)) {
+            app.log.warn({
+              hasSignature: true,
+              rawBodyLength: rawBody.length,
+              phoneNumberId: firstPhoneNumberId || 'unknown',
+              secretSource: appSecret !== WABA_APP_SECRET ? 'db' : 'env'
+            }, 'WABA webhook signature verification failed');
+            return reply.status(403).send('Invalid signature');
+          }
         }
       }
-
-      const body = request.body as WabaWebhookPayload;
 
       // Forward to ad-analytics (fire and forget)
       if (AD_ANALYTICS_WEBHOOK_URL) {
@@ -634,6 +653,7 @@ interface WhatsAppNumberRecord {
   waba_phone_id: string | null;
   connection_type: string | null;
   connection_status: string | null;
+  waba_app_secret: string | null;
 }
 
 function resolveInstanceName(record: WhatsAppNumberRecord, phoneNumberId: string): string {
@@ -651,7 +671,7 @@ async function findWhatsAppNumber(
   // Strict mode: resolve WABA channel only by phone_number_id (waba_phone_id).
   const { data: byWabaId } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status')
+    .select('id, user_account_id, account_id, phone_number, instance_name, waba_phone_id, connection_type, connection_status, waba_app_secret')
     .eq('waba_phone_id', phoneNumberId)
     .eq('connection_type', 'waba')
     .eq('is_active', true)

@@ -66,6 +66,7 @@ export interface CreateDirectionFormData {
   whatsapp_connection_type?: ConnectionType;
   whatsapp_waba_phone_id?: string;
   whatsapp_waba_access_token?: string;
+  whatsapp_waba_app_secret?: string;
   adSettings?: CreateDefaultSettingsInput;
   facebookAdSettings?: CreateDefaultSettingsInput;
   tiktokAdSettings?: CreateDefaultSettingsInput;
@@ -106,6 +107,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [whatsappConnectionType, setWhatsappConnectionType] = useState<ConnectionType>('evolution');
   const [whatsappWabaPhoneId, setWhatsappWabaPhoneId] = useState<string>('');
   const [whatsappWabaAccessToken, setWhatsappWabaAccessToken] = useState<string>('');
+  const [whatsappWabaAppSecret, setWhatsappWabaAppSecret] = useState<string>('');
 
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
@@ -503,6 +505,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             ...(whatsappConnectionType === 'waba' && {
               whatsapp_waba_phone_id: whatsappWabaPhoneId.trim(),
               ...(whatsappWabaAccessToken.trim() && { whatsapp_waba_access_token: whatsappWabaAccessToken.trim() }),
+              ...(whatsappWabaAppSecret.trim() && { whatsapp_waba_app_secret: whatsappWabaAppSecret.trim() }),
             }),
           }),
         }),
@@ -1665,6 +1668,22 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         />
                         <p className="text-xs text-muted-foreground">
                           System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="waba-app-secret">WABA App Secret</Label>
+                        <Input
+                          id="waba-app-secret"
+                          type="password"
+                          value={whatsappWabaAppSecret}
+                          onChange={(e) => setWhatsappWabaAppSecret(e.target.value)}
+                          placeholder="App Secret из Meta Developer Console"
+                          disabled={isSubmitting}
+                          className="font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Settings → Basic → App Secret. Используется для верификации входящих webhook.
                         </p>
                       </div>
                     </>

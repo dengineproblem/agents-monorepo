@@ -107,6 +107,7 @@ const CreateDirectionSchema = z.object({
   whatsapp_connection_type: z.enum(['evolution', 'waba']).optional(),
   whatsapp_waba_phone_id: z.string().optional(),
   whatsapp_waba_access_token: z.string().optional(),
+  whatsapp_waba_app_secret: z.string().optional(),
   tiktok_objective: TikTokObjectiveSchema.optional(),
   tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
@@ -198,6 +199,7 @@ const UpdateDirectionSchema = z.object({
   whatsapp_connection_type: z.enum(['evolution', 'waba']).optional(),
   whatsapp_waba_phone_id: z.string().nullable().optional(),
   whatsapp_waba_access_token: z.string().nullable().optional(),
+  whatsapp_waba_app_secret: z.string().nullable().optional(),
   tiktok_objective: TikTokObjectiveSchema.optional(),
   tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
   tiktok_target_cpl_kzt: z.number().min(0).optional(),
@@ -1013,6 +1015,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             const connectionType = input.whatsapp_connection_type;
             const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
             const wabaAccessToken = connectionType === 'waba' ? (input.whatsapp_waba_access_token || null) : null;
+            const wabaAppSecret = connectionType === 'waba' ? (input.whatsapp_waba_app_secret || null) : null;
 
             const { error: updateNumberError } = await supabase
               .from('whatsapp_phone_numbers')
@@ -1020,6 +1023,7 @@ export async function directionsRoutes(app: FastifyInstance) {
                 connection_type: connectionType,
                 waba_phone_id: wabaPhoneId,
                 waba_access_token: wabaAccessToken,
+                waba_app_secret: wabaAppSecret,
               })
               .eq('id', existingNumber.id);
 
@@ -1036,6 +1040,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           const connectionType = input.whatsapp_connection_type || 'evolution';
           const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
           const wabaAccessToken = connectionType === 'waba' ? (input.whatsapp_waba_access_token || null) : null;
+          const wabaAppSecret = connectionType === 'waba' ? (input.whatsapp_waba_app_secret || null) : null;
 
           const { data: newNumber, error: insertNumberError } = await supabase
             .from('whatsapp_phone_numbers')
@@ -1049,6 +1054,7 @@ export async function directionsRoutes(app: FastifyInstance) {
                 connection_type: connectionType,
                 waba_phone_id: wabaPhoneId,
                 waba_access_token: wabaAccessToken,
+                waba_app_secret: wabaAppSecret,
               },
             ])
             .select('id')
@@ -1537,6 +1543,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       delete updateData.whatsapp_connection_type; // Это поле для whatsapp_phone_numbers, не для directions
       delete updateData.whatsapp_waba_phone_id; // Это поле для whatsapp_phone_numbers, не для directions
       delete updateData.whatsapp_waba_access_token; // Это поле для whatsapp_phone_numbers, не для directions
+      delete updateData.whatsapp_waba_app_secret; // Это поле для whatsapp_phone_numbers, не для directions
 
       if (typeof updateData.custom_audience_id === 'string') {
         updateData.custom_audience_id = updateData.custom_audience_id.trim() || null;
@@ -1579,6 +1586,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               const connectionType = input.whatsapp_connection_type;
               const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
               const wabaAccessToken = connectionType === 'waba' ? (input.whatsapp_waba_access_token || null) : null;
+              const wabaAppSecret = connectionType === 'waba' ? (input.whatsapp_waba_app_secret || null) : null;
 
               const { error: updateNumberError } = await supabase
                 .from('whatsapp_phone_numbers')
@@ -1586,6 +1594,7 @@ export async function directionsRoutes(app: FastifyInstance) {
                   connection_type: connectionType,
                   waba_phone_id: wabaPhoneId,
                   waba_access_token: wabaAccessToken,
+                  waba_app_secret: wabaAppSecret,
                 })
                 .eq('id', existingNumber.id);
 
@@ -1600,6 +1609,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             const connectionType = input.whatsapp_connection_type || 'evolution';
             const wabaPhoneId = connectionType === 'waba' ? input.whatsapp_waba_phone_id : null;
             const wabaAccessToken = connectionType === 'waba' ? (input.whatsapp_waba_access_token || null) : null;
+            const wabaAppSecret = connectionType === 'waba' ? (input.whatsapp_waba_app_secret || null) : null;
 
             const { data: newNumber, error: insertNumberError } = await supabase
               .from('whatsapp_phone_numbers')
@@ -1613,6 +1623,7 @@ export async function directionsRoutes(app: FastifyInstance) {
                   connection_type: connectionType,
                   waba_phone_id: wabaPhoneId,
                   waba_access_token: wabaAccessToken,
+                  waba_app_secret: wabaAppSecret,
                 },
               ])
               .select('id')

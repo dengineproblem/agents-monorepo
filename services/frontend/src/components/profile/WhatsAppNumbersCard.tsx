@@ -39,6 +39,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
     connection_type: 'evolution' as ConnectionType,
     waba_phone_id: '',
     waba_access_token: '',
+    waba_app_secret: '',
   });
 
   // Загрузка номеров
@@ -89,6 +90,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
           connection_type: formData.connection_type,
           waba_phone_id: formData.connection_type === 'waba' ? formData.waba_phone_id : undefined,
           waba_access_token: formData.connection_type === 'waba' && formData.waba_access_token.trim() ? formData.waba_access_token.trim() : undefined,
+          waba_app_secret: formData.connection_type === 'waba' && formData.waba_app_secret.trim() ? formData.waba_app_secret.trim() : undefined,
         }),
       });
 
@@ -99,7 +101,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
 
       toast.success('Номер добавлен');
       setAddDialogOpen(false);
-      setFormData({ phone_number: '', label: '', is_default: false, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '' });
+      setFormData({ phone_number: '', label: '', is_default: false, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '', waba_app_secret: '' });
       loadNumbers();
     } catch (error: any) {
       toast.error(error.message || 'Не удалось добавить номер');
@@ -317,7 +319,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '' })}
+                  onClick={() => setFormData({ ...formData, connection_type: 'evolution', waba_phone_id: '', waba_access_token: '', waba_app_secret: '' })}
                   className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
                     formData.connection_type === 'evolution'
                       ? 'border-primary bg-primary/5'
@@ -391,6 +393,21 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
                   />
                   <p className="text-xs text-muted-foreground">
                     System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="waba_app_secret">WABA App Secret</Label>
+                  <Input
+                    id="waba_app_secret"
+                    type="password"
+                    value={formData.waba_app_secret}
+                    onChange={(e) => setFormData({ ...formData, waba_app_secret: e.target.value })}
+                    placeholder="App Secret из Meta Developer Console"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Settings → Basic → App Secret. Используется для верификации входящих webhook.
                   </p>
                 </div>
               </>
