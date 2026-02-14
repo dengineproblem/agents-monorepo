@@ -181,6 +181,8 @@ export const adsTools = [
   // WRITE tools - Create AdSets & Ads
   createMCPTool('createAdSet', AdsToolDefs.createAdSet, adsHandlers.createAdSet, 'ads'),
   createMCPTool('createAd', AdsToolDefs.createAd, adsHandlers.createAd, 'ads'),
+  // Launch tools
+  createMCPTool('aiLaunch', AdsToolDefs.aiLaunch, adsHandlers.aiLaunch, 'ads'),
   // Advanced tools
   createMCPTool('triggerBrainOptimizationRun', AdsToolDefs.triggerBrainOptimizationRun, adsHandlers.triggerBrainOptimizationRun, 'ads'),
   createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads'),

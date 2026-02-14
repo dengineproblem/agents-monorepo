@@ -4,11 +4,14 @@
  */
 
 import crypto from 'crypto';
+import axios from 'axios';
 import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import { adsDryRunHandlers } from '../../shared/dryRunHandlers.js';
 import { generateAdsetName } from '../../../utils/adsetNaming.js';
+
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
 
 /**
  * Get date range with date_from/date_to support
@@ -845,253 +848,60 @@ export const adsHandlers = {
 
   /**
    * Create AdSet in campaign with creatives
-   * Uses direction settings for targeting
+   * PROXY: delegates to agent-service /api/campaign-builder/manual-launch-multi
+   * for full production workflow (targeting, batch API, direction_adsets, etc.)
    */
-  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, dry_run }, { accessToken, adAccountId, userAccountId, pageId, adAccountDbId }) {
-    const dbAccountId = adAccountDbId || null;
+  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, start_mode, dry_run }, { accessToken, adAccountId, userAccountId, pageId, adAccountDbId }) {
+    // Dry-run: lightweight preview without calling agent-service
+    if (dry_run) {
+      return adsDryRunHandlers.createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name }, { userAccountId, adAccountId, adAccountDbId });
+    }
 
     logger.info({
       handler: 'createAdSet',
       direction_id,
       creative_ids,
-      daily_budget_cents,
-      adset_name,
-      dry_run,
-      dbAccountId,
-      filterMode: dbAccountId ? 'multi_account' : 'legacy'
-    }, 'createAdSet: начало операции');
+      start_mode,
+      proxy: 'agent-service/manual-launch-multi',
+    }, 'createAdSet: proxying to agent-service');
 
-    // 1. Get direction with campaign_id and settings
-    // Мультиаккаунтность: проверяем владение направлением через account_id
-    let dirQuery = supabase
-      .from('account_directions')
-      .select('id, name, fb_campaign_id, objective, daily_budget_cents')
-      .eq('id', direction_id);
-
-    if (dbAccountId) {
-      dirQuery = dirQuery.eq('account_id', dbAccountId);
-    } else {
-      dirQuery = dirQuery.is('account_id', null);
-    }
-
-    const { data: direction, error: dirError } = await dirQuery.single();
-
-    if (dirError || !direction) {
-      logger.warn({
-        handler: 'createAdSet',
-        direction_id,
-        dbAccountId,
-        error: dirError?.message,
-        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
-      }, 'createAdSet: направление не найдено');
-      return { success: false, error: `Направление не найдено или недоступно: ${dirError?.message || 'not found'}` };
-    }
-
-    if (!direction.fb_campaign_id) {
-      return { success: false, error: 'У направления нет привязанной FB кампании' };
-    }
-
-    // 2. Get direction settings for targeting
-    const { data: settings, error: settingsError } = await supabase
-      .from('default_ad_settings')
-      .select('*')
-      .eq('direction_id', direction_id)
-      .maybeSingle();
-
-    if (settingsError || !settings) {
-      return { success: false, error: `Настройки таргетинга не настроены для направления: ${settingsError?.message || 'not configured'}` };
-    }
-
-    // 3. Get creatives
-    const { data: creatives, error: creativesError } = await supabase
-      .from('user_creatives')
-      .select('id, title, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms')
-      .in('id', creative_ids)
-      .eq('user_id', userAccountId)
-      .eq('status', 'ready');
-
-    if (creativesError || !creatives || creatives.length === 0) {
-      return { success: false, error: `Креативы не найдены или не готовы: ${creativesError?.message || 'no valid creatives'}` };
-    }
-
-    // 4. Build targeting
-    const targeting = {
-      age_min: 18,
-      age_max: 65,
-      targeting_automation: { advantage_audience: 1 }
-    };
-
-    if (settings.gender && settings.gender !== 'all') {
-      targeting.genders = settings.gender === 'male' ? [1] : [2];
-    }
-
-    if (settings.cities && Array.isArray(settings.cities) && settings.cities.length > 0) {
-      const countries = [];
-      const cities = [];
-      for (const item of settings.cities) {
-        if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
-          countries.push(item);
-        } else {
-          cities.push(String(item));
-        }
-      }
-      targeting.geo_locations = {};
-      if (countries.length > 0) targeting.geo_locations.countries = countries;
-      if (cities.length > 0) targeting.geo_locations.cities = cities.map(id => ({ key: id }));
-    }
-
-    // 5. Get optimization_goal and billing_event based on objective
-    const objectiveMap = {
-      whatsapp: { optimization_goal: 'CONVERSATIONS', billing_event: 'IMPRESSIONS', destination_type: 'WHATSAPP' },
-      instagram_traffic: { optimization_goal: 'LINK_CLICKS', billing_event: 'IMPRESSIONS', destination_type: 'INSTAGRAM_PROFILE' },
-      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' },
-      lead_forms: { optimization_goal: 'LEAD_GENERATION', billing_event: 'IMPRESSIONS', destination_type: 'ON_AD' }
-    };
-    const objectiveSettings = objectiveMap[direction.objective] || objectiveMap.whatsapp;
-
-    // 6. Build promoted_object
-    let promoted_object = {};
-    if (direction.objective === 'whatsapp') {
-      promoted_object = { page_id: pageId };
-    } else if (direction.objective === 'instagram_traffic') {
-      promoted_object = { page_id: pageId };
-    } else if (direction.objective === 'site_leads') {
-      promoted_object = { custom_event_type: 'LEAD' };
-      if (direction.pixel_id || settings.pixel_id) {
-        promoted_object.pixel_id = String(direction.pixel_id || settings.pixel_id);
-      }
-    } else if (direction.objective === 'lead_forms') {
-      // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
-      promoted_object = { page_id: pageId };
-    }
-
-    const finalBudget = daily_budget_cents || direction.daily_budget_cents || 300;
-    const finalName = generateAdsetName({ directionName: direction.name, source: 'Brain', objective: direction.objective });
-
-    // Dry-run mode
-    if (dry_run) {
-      return {
-        success: true,
-        dry_run: true,
-        preview: {
-          campaign_id: direction.fb_campaign_id,
-          direction_id,
-          direction_name: direction.name,
-          adset_name: finalName,
-          daily_budget: finalBudget / 100,
-          targeting,
-          objective: direction.objective,
-          optimization_goal: objectiveSettings.optimization_goal,
-          creatives_count: creatives.length,
-          creatives: creatives.map(c => ({ id: c.id, title: c.title }))
-        },
-        message: `Будет создан адсет "${finalName}" с бюджетом $${(finalBudget / 100).toFixed(2)}/день и ${creatives.length} объявлениями`
-      };
-    }
-
-    // 7. Create AdSet via FB Graph API
-    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-
-    const adsetBody = {
-      name: finalName,
-      campaign_id: direction.fb_campaign_id,
-      daily_budget: finalBudget,
-      billing_event: objectiveSettings.billing_event,
-      optimization_goal: objectiveSettings.optimization_goal,
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-      targeting,
-      status: 'ACTIVE',
-      destination_type: objectiveSettings.destination_type,
-      promoted_object
-    };
-
-    let adsetResult;
     try {
-      adsetResult = await fbGraph('POST', `${actId}/adsets`, accessToken, adsetBody);
-    } catch (fbError) {
-      logger.error({ err: fbError, direction_id, adsetBody }, 'createAdSet: FB API error');
-      return { success: false, error: `Ошибка создания адсета: ${fbError.message}` };
-    }
-
-    const adsetId = adsetResult.id;
-    logger.info({ adsetId, direction_id, creativesCount: creatives.length }, 'createAdSet: adset created');
-
-    // 8. Create Ads for each creative
-    const createdAds = [];
-    for (const creative of creatives) {
-      const creativeIdField = direction.objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
-        : direction.objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
-        : direction.objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
-        : 'fb_creative_id_site_leads';
-
-      const fbCreativeId = creative[creativeIdField];
-      if (!fbCreativeId) {
-        logger.warn({ creativeId: creative.id, objective: direction.objective }, 'createAdSet: no FB creative ID for objective');
-        continue;
-      }
-
-      try {
-        const adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
-          name: `Ad - ${creative.title}`,
-          adset_id: adsetId,
-          creative: { creative_id: fbCreativeId },
-          status: 'ACTIVE'
-        });
-
-        createdAds.push({
-          ad_id: adResult.id,
-          name: `Ad - ${creative.title}`,
-          creative_id: creative.id,
-          creative_title: creative.title
-        });
-
-        // Save mapping for lead tracking (ignore errors - non-critical)
-        try {
-          await supabase.from('ad_creative_mapping').insert({
-            ad_id: adResult.id,
-            user_creative_id: creative.id,
-            direction_id,
-            user_id: userAccountId,
-            adset_id: adsetId,
-            campaign_id: direction.fb_campaign_id
-          });
-        } catch {
-          // Ignore mapping errors - non-critical
-        }
-
-      } catch (adError) {
-        logger.error({ err: adError, creativeId: creative.id }, 'createAdSet: failed to create ad');
-      }
-    }
-
-    // Log action
-    await supabase.from('agent_logs').insert({
-      ad_account_id: adAccountId,
-      level: 'info',
-      message: `AdSet created: ${finalName} with ${createdAds.length} ads`,
-      context: {
-        adset_id: adsetId,
+      const payload = {
+        user_account_id: userAccountId,
+        account_id: adAccountDbId || null,
         direction_id,
-        direction_name: direction.name,
-        daily_budget_cents: finalBudget,
-        ads_count: createdAds.length,
-        source: 'chat_assistant',
-        agent: 'AdsAgent'
-      }
-    });
+        start_mode: start_mode || 'now',
+        adsets: [{
+          creative_ids,
+          daily_budget_cents: daily_budget_cents || undefined,
+        }],
+      };
 
-    return {
-      success: true,
-      message: `Создан адсет "${finalName}" с ${createdAds.length} объявлениями`,
-      adset_id: adsetId,
-      adset_name: finalName,
-      daily_budget: finalBudget / 100,
-      ads_created: createdAds.length,
-      ads: createdAds,
-      direction_id,
-      direction_name: direction.name,
-      campaign_id: direction.fb_campaign_id
-    };
+      const res = await axios.post(
+        `${AGENT_SERVICE_URL}/api/campaign-builder/manual-launch-multi`,
+        payload,
+        { timeout: 90_000 }
+      );
+
+      const data = res.data;
+      const firstAdset = data.adsets?.[0];
+
+      return {
+        success: data.success,
+        message: data.message,
+        adset_id: firstAdset?.adset_id,
+        adset_name: firstAdset?.adset_name,
+        ads_created: firstAdset?.ads_created,
+        ads: firstAdset?.ads,
+        direction_id: data.direction_id,
+        direction_name: data.direction_name,
+        campaign_id: data.campaign_id,
+      };
+    } catch (error) {
+      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+      logger.error({ handler: 'createAdSet', error: errMsg, direction_id }, 'createAdSet: proxy call failed');
+      return { success: false, error: `Ошибка запуска: ${errMsg}` };
+    }
   },
 
   /**
@@ -3978,6 +3788,62 @@ ${errorMessage}
       message: `Кампания "${campaignInfo.name}" включена в Facebook Ads Manager`,
       campaign: { id: campaign_id, name: campaignInfo.name, before: campaignInfo.status, after: afterStatus || 'ACTIVE' }
     };
+  },
+
+  // ============================================================
+  // AI LAUNCH — proxy to agent-service auto-launch-v2
+  // ============================================================
+
+  /**
+   * AI Launch: GPT-4o выбирает лучшие креативы, паузит старые адсеты,
+   * создаёт новые для ВСЕХ активных направлений пользователя.
+   * Proxy to agent-service /api/campaign-builder/auto-launch-v2
+   */
+  async aiLaunch({ start_mode }, { userAccountId, adAccountDbId }) {
+    logger.info({
+      handler: 'aiLaunch',
+      start_mode,
+      proxy: 'agent-service/auto-launch-v2',
+    }, 'aiLaunch: proxying to agent-service');
+
+    try {
+      const payload = {
+        user_account_id: userAccountId,
+        account_id: adAccountDbId || null,
+        start_mode: start_mode || 'now',
+      };
+
+      logger.info({ handler: 'aiLaunch', payload_start_mode: payload.start_mode }, 'aiLaunch: sending payload');
+
+      const res = await axios.post(
+        `${AGENT_SERVICE_URL}/api/campaign-builder/auto-launch-v2`,
+        payload,
+        { timeout: 180_000 }
+      );
+
+      const data = res.data;
+
+      return {
+        success: data.success,
+        message: data.message,
+        total_directions: data.results?.length || 0,
+        results: data.results?.map(r => ({
+          direction: r.direction_name,
+          direction_id: r.direction_id,
+          status: r.status,
+          mode: r.mode,
+          reasoning: r.reasoning,
+          ads_created: r.ads_created,
+          adset_name: r.adset_name,
+          daily_budget_cents: r.daily_budget_cents,
+          error: r.error,
+        })),
+      };
+    } catch (error) {
+      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+      logger.error({ handler: 'aiLaunch', error: errMsg }, 'aiLaunch: proxy call failed');
+      return { success: false, error: `Ошибка AI запуска: ${errMsg}` };
+    }
   },
 
   // ============================================================

@@ -3,12 +3,15 @@
  * Tool execution handlers for creative operations
  */
 
+import axios from 'axios';
 import { supabase } from '../../../lib/supabaseClient.js';
 import { fbGraph } from '../../shared/fbGraph.js';
 import { logger } from '../../../lib/logger.js';
 import { creativeDryRunHandlers } from '../../shared/dryRunHandlers.js';
 import { verifyAdStatus } from '../../shared/postCheck.js';
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
+
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
 
 /**
  * Helper: загрузить prompt4 из БД (сначала ad_accounts, потом user_accounts)
@@ -755,107 +758,56 @@ export const creativeHandlers = {
     }
   },
 
+  /**
+   * Launch single creative into a direction
+   * PROXY: delegates to agent-service /api/campaign-builder/manual-launch-multi
+   * for full production workflow (targeting, batch API, direction_adsets, etc.)
+   */
   async launchCreative({ creative_id, direction_id, dry_run }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     // Dry-run mode: return preview without executing
     if (dry_run) {
       return creativeDryRunHandlers.launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId, adAccountDbId });
     }
 
-    // Get creative details
-    const { data: creative, error: creativeError } = await supabase
-      .from('user_creatives')
-      .select('*')
-      .eq('id', creative_id)
-      .eq('user_id', userAccountId)
-      .single();
+    logger.info({
+      handler: 'launchCreative',
+      creative_id,
+      direction_id,
+      proxy: 'agent-service/manual-launch-multi',
+    }, 'launchCreative: proxying to agent-service');
 
-    if (creativeError || !creative) {
-      return { success: false, error: 'Креатив не найден' };
-    }
-
-    if (!creative.fb_video_id && !creative.image_url) {
-      return { success: false, error: 'Креатив не загружен в Facebook' };
-    }
-
-    // Get direction details
-    const { data: direction, error: dirError } = await supabase
-      .from('account_directions')
-      .select('*')
-      .eq('id', direction_id)
-      .eq('user_account_id', userAccountId)
-      .single();
-
-    if (dirError || !direction) {
-      return { success: false, error: 'Направление не найдено' };
-    }
-
-    if (!direction.fb_campaign_id) {
-      return { success: false, error: 'Направление не привязано к Facebook кампании' };
-    }
-
-    // Get fb_creative_id for the direction's objective
-    const fbCreativeField = `fb_creative_id_${direction.objective}`;
-    const fbCreativeId = creative[fbCreativeField];
-
-    if (!fbCreativeId) {
-      return { success: false, error: `Креатив не создан для objective: ${direction.objective}` };
-    }
-
-    // Create ad in the campaign's first adset
     try {
-      // Get adset from campaign
-      const adsetsResult = await fbGraph('GET', `${direction.fb_campaign_id}/adsets`, accessToken, {
-        fields: 'id,name,status',
-        limit: 1
-      });
-
-      if (!adsetsResult.data?.length) {
-        return { success: false, error: 'Нет активных адсетов в кампании' };
-      }
-
-      const adsetId = adsetsResult.data[0].id;
-
-      // Create ad
-      // Normalize: don't add act_ prefix if already present
-      const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-      const adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
-        name: `${creative.title} - Chat Assistant`,
-        adset_id: adsetId,
-        creative: JSON.stringify({ creative_id: fbCreativeId }),
-        status: 'ACTIVE'
-      });
-
-      // Save mapping
-      // Используем adAccountDbId (UUID) для account_id в БД
-      const dbAccountId = adAccountDbId || null;
-      await supabase.from('ad_creative_mapping').insert({
-        ad_id: adResult.id,
-        user_creative_id: creative_id,
+      const payload = {
+        user_account_id: userAccountId,
+        account_id: adAccountDbId || null,
         direction_id,
-        user_id: userAccountId,
-        account_id: dbAccountId,  // UUID для мультиаккаунтности
-        adset_id: adsetId,
-        campaign_id: direction.fb_campaign_id,
-        fb_creative_id: fbCreativeId,
-        source: 'chat_assistant'
-      });
+        start_mode: 'now',
+        adsets: [{ creative_ids: [creative_id] }],
+      };
 
-      // Log action
-      await supabase.from('agent_logs').insert({
-        ad_account_id: adAccountId,
-        level: 'info',
-        message: `Creative ${creative_id} launched to direction ${direction.name} via Chat Assistant`,
-        context: { creative_id, direction_id, ad_id: adResult.id, source: 'CreativeAgent' }
-      });
+      const res = await axios.post(
+        `${AGENT_SERVICE_URL}/api/campaign-builder/manual-launch-multi`,
+        payload,
+        { timeout: 90_000 }
+      );
+
+      const data = res.data;
+      const firstAdset = data.adsets?.[0];
+      const firstAd = firstAdset?.ads?.[0];
 
       return {
-        success: true,
-        message: `Креатив "${creative.title}" запущен в направление "${direction.name}"`,
-        ad_id: adResult.id
+        success: data.success,
+        message: data.message || `Креатив запущен в направление "${data.direction_name}"`,
+        ad_id: firstAd?.ad_id,
+        adset_id: firstAdset?.adset_id,
+        adset_name: firstAdset?.adset_name,
+        direction_name: data.direction_name,
+        campaign_id: data.campaign_id,
       };
     } catch (error) {
-      logger.error({ error: error.message }, 'Failed to launch creative');
-      return { success: false, error: error.message };
+      const errMsg = error.response?.data?.error || error.response?.data?.message || error.message;
+      logger.error({ handler: 'launchCreative', error: errMsg, creative_id, direction_id }, 'launchCreative: proxy call failed');
+      return { success: false, error: `Ошибка запуска креатива: ${errMsg}` };
     }
   },
 

@@ -23,6 +23,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
   triggerCreativeAnalysis: 120_000,
   analyzeDialog: 120_000,
   triggerBrainOptimizationRun: 120_000,
+  // Launch tools — proxy через agent-service
+  aiLaunch: 180_000,
+  createAdSet: 90_000,
 };
 const DEFAULT_TIMEOUT = 30_000;
 
@@ -468,8 +471,24 @@ export const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'aiLaunch',
+    description: 'Запуск с AI — GPT-4o выбирает лучшие креативы по risk score/CPL/CTR, паузит старые адсеты и создаёт новые для ВСЕХ активных направлений. Это основной способ запуска рекламы. Полный production workflow с правильным таргетингом и маппингом.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        start_mode: {
+          type: 'string',
+          enum: ['now', 'midnight_almaty'],
+          description: 'Время запуска: сейчас или с полуночи по Алмате (UTC+5). По умолчанию now',
+        },
+      },
+      required: ['userAccountId'],
+    },
+  },
+  {
     name: 'createAdSet',
-    description: 'Создать адсет с креативами в направлении (= Запуск с AI). Бот подберёт таргетинг из настроек direction. Сначала вызови getDirections для direction_id и getDirectionCreatives для creative_ids.',
+    description: 'Ручной запуск: создать адсет с конкретными креативами в направлении. Полный production workflow с таргетингом из БД и маппингом. Сначала вызови getDirections для direction_id и getDirectionCreatives для creative_ids.',
     input_schema: {
       type: 'object',
       properties: {
@@ -481,25 +500,14 @@ export const tools: Anthropic.Tool[] = [
           description: 'Массив ID креативов для запуска',
         },
         daily_budget_cents: { type: 'number', description: 'Суточный бюджет в центах (опционально, берётся из direction)' },
-        adset_name: { type: 'string', description: 'Название адсета (опционально)' },
+        start_mode: {
+          type: 'string',
+          enum: ['now', 'midnight_almaty'],
+          description: 'Время запуска: сейчас или с полуночи по Алмате (UTC+5). По умолчанию now',
+        },
         dry_run: { type: 'boolean', description: 'Preview режим без выполнения' },
       },
       required: ['userAccountId', 'direction_id', 'creative_ids'],
-    },
-  },
-  {
-    name: 'createAd',
-    description: 'Добавить одно объявление в существующий адсет. Сначала вызови getAdSets для adset_id и getDirectionCreatives для creative_id.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userAccountId: { type: 'string' },
-        adset_id: { type: 'string', description: 'ID существующего адсета Facebook' },
-        creative_id: { type: 'string', description: 'ID креатива из user_creatives' },
-        ad_name: { type: 'string', description: 'Название объявления (опционально)' },
-        dry_run: { type: 'boolean', description: 'Preview режим без выполнения' },
-      },
-      required: ['userAccountId', 'adset_id', 'creative_id'],
     },
   },
   {
@@ -1115,6 +1123,15 @@ export const tools: Anthropic.Tool[] = [
   },
 ];
 
+// Tools that require detailed logging (launch/write operations)
+const DETAILED_LOG_TOOLS = new Set([
+  'aiLaunch', 'createAdSet', 'launchCreative',
+  'pauseDirection', 'resumeDirection', 'updateDirectionBudget',
+  'pauseCampaign', 'resumeCampaign',
+  'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
+  'approveBrainActions',
+]);
+
 /**
  * Выполнить tool через HTTP запрос к agent-brain
  */
@@ -1122,8 +1139,16 @@ export async function executeTool(
   toolName: string,
   toolInput: Record<string, any>
 ): Promise<any> {
+  const startTime = Date.now();
   try {
-    logger.info({ toolName }, 'Executing tool');
+    // Подробный лог для launch/write tools, краткий для read tools
+    if (DETAILED_LOG_TOOLS.has(toolName)) {
+      // Не логируем userAccountId/accountId — они всегда есть
+      const { userAccountId, accountId, ...relevantArgs } = toolInput;
+      logger.info({ toolName, args: relevantArgs }, 'Executing dangerous tool');
+    } else {
+      logger.info({ toolName }, 'Executing tool');
+    }
 
     const url = `${BRAIN_SERVICE_URL}/brain/tools/${toolName}`;
     const timeout = getToolTimeout(toolName);
@@ -1137,13 +1162,27 @@ export async function executeTool(
 
     const response = await axios.post(url, toolInput, { headers, timeout });
 
-    logger.info({ toolName, success: true }, 'Tool executed successfully');
+    const duration = Date.now() - startTime;
+    const resultSuccess = response.data?.success;
+    logger.info({ toolName, success: resultSuccess ?? true, duration_ms: duration }, 'Tool executed');
     return response.data;
   } catch (error: any) {
-    logger.error({ toolName, status: error.response?.status }, 'Tool execution failed');
+    const duration = Date.now() - startTime;
+    const status = error.response?.status;
+    const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+
+    logger.error({
+      toolName,
+      status,
+      duration_ms: duration,
+      isTimeout,
+      error: error.response?.data?.error || error.message,
+    }, 'Tool execution failed');
 
     // Не раскрывать internal details в ответах Claude
-    const safeError = error.response?.data?.error || 'Ошибка выполнения операции';
+    const safeError = isTimeout
+      ? `Операция ${toolName} превысила таймаут (${Math.round(getToolTimeout(toolName) / 1000)}с). Попробуйте позже.`
+      : (error.response?.data?.error || 'Ошибка выполнения операции');
     return {
       success: false,
       error: safeError,

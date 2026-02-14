@@ -400,19 +400,32 @@ export const AdsToolDefs = {
   },
 
   // ============================================================
-  // MANUAL MODE TOOLS (for users without directions)
+  // AI LAUNCH — proxy to agent-service auto-launch-v2
+  // ============================================================
+
+  aiLaunch: {
+    description: 'Запуск с AI — GPT-4o выбирает лучшие креативы, паузит старые адсеты и создаёт новые для ВСЕХ активных направлений. Основной способ запуска рекламы.',
+    schema: z.object({
+      start_mode: z.enum(['now', 'midnight_almaty']).default('now').optional().describe('Время запуска: сейчас или с полуночи по Алмате (UTC+5)')
+    }),
+    meta: { timeout: 180000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // LAUNCH TOOLS (proxy to agent-service)
   // ============================================================
 
   createAdSet: {
-    description: 'Создать адсет с креативами в направлении. Таргетинг берётся из настроек direction. Используй dry_run: true для preview.',
+    description: 'Ручной запуск: создать адсет с конкретными креативами в направлении. Полный production workflow: таргетинг из БД, batch API, маппинг direction_adsets.',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
       creative_ids: z.array(z.string().min(1)).min(1).describe('Массив ID креативов для запуска'),
       daily_budget_cents: z.number().min(300).optional().describe('Суточный бюджет в центах (опционально, берётся из direction)'),
       adset_name: z.string().optional().describe('Название адсета (опционально)'),
+      start_mode: z.enum(['now', 'midnight_almaty']).default('now').optional().describe('Время запуска: сейчас или с полуночи по Алмате (UTC+5)'),
       dry_run: dryRunOption
     }),
-    meta: { timeout: 30000, retryable: false, dangerous: true }
+    meta: { timeout: 90000, retryable: false, dangerous: true }
   },
 
   createAd: {

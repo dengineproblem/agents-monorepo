@@ -214,7 +214,7 @@ const DANGEROUS_TOOLS = new Set([
   'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
   'pauseDirection', 'resumeDirection', 'approveBrainActions',
   'pauseCampaign', 'resumeCampaign',
-  'createAdSet', 'createAd', 'saveCampaignMapping',
+  'aiLaunch', 'createAdSet', 'saveCampaignMapping',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   'pauseTikTokCampaign', 'addSale', 'updateLeadStage',
 ]);
@@ -227,7 +227,7 @@ const CONFIRMATION_REQUIRED_TOOLS = new Set([
   'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
   'pauseDirection', 'resumeDirection',
   'pauseCampaign', 'resumeCampaign',
-  'createAdSet', 'createAd',
+  'createAdSet', 'aiLaunch',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   // approveBrainActions НЕ требует подтверждения — юзер уже подтвердил выбором proposals
   'pauseTikTokCampaign',
@@ -247,7 +247,7 @@ const CONFIRMATION_REASONS: Record<string, string> = {
   pauseCampaign: 'Остановит FB кампанию в Ads Manager',
   resumeCampaign: 'Включит FB кампанию в Ads Manager',
   createAdSet: 'Создаст новый адсет с креативами (начнёт расходовать бюджет)',
-  createAd: 'Добавит объявление в адсет',
+  aiLaunch: 'Запустит AI-оптимизацию рекламы по ВСЕМ направлениям (паузит старые адсеты, создаёт новые)',
   pauseCreative: 'Остановит рекламу креатива',
   launchCreative: 'Запустит рекламу (начнёт расходовать бюджет)',
   startCreativeTest: 'Запустит A/B тест (~$20 бюджет)',
@@ -954,19 +954,27 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
             // Confirmation flow: если tool требует подтверждения — блокируем первый вызов
             if (needsConfirmation) {
               const pending = session.pendingApproval;
+              const currentArgs = block.input as Record<string, any>;
+
+              // Сверяем tool name + ключевые аргументы (защита от stale approval с другими параметрами)
+              const argsMatch = pending && pending.tool === block.name && (() => {
+                const keysToCheck = ['direction_id', 'creative_id', 'adSetId', 'adId', 'campaign_id'];
+                return keysToCheck.every(k => !(k in currentArgs) || currentArgs[k] === pending.args?.[k]);
+              })();
+
               const isApproved = pending
-                && pending.tool === block.name
+                && argsMatch
                 && (Date.now() - pending.timestamp) < PENDING_APPROVAL_TTL_MS;
 
               if (!isApproved) {
                 // Первый вызов — блокируем, сохраняем pending
                 session.pendingApproval = {
                   tool: block.name,
-                  args: block.input as Record<string, any>,
+                  args: currentArgs,
                   timestamp: Date.now(),
                 };
                 const reason = CONFIRMATION_REASONS[block.name] || 'Действие может изменить рекламные кампании';
-                logger.info({ toolName: block.name, reason }, 'Tool blocked, waiting for user confirmation');
+                logger.info({ toolName: block.name, reason, args: currentArgs }, 'Tool blocked, waiting for user confirmation');
 
                 toolResults.push({
                   type: 'tool_result',
@@ -982,7 +990,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
 
               // Пользователь подтвердил — очищаем pending и выполняем
               session.pendingApproval = null;
-              logger.info({ toolName: block.name }, 'Tool approved by user, executing');
+              logger.info({ toolName: block.name, args: currentArgs }, 'Tool approved by user, executing');
             }
 
             // Всегда инжектим userAccountId в tool input
@@ -1029,6 +1037,13 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
               } else if (block.name === 'getAdSets' && result?.adSets) {
                 const sets = result.adSets.slice(0, 10).map((s: any) => `${s.name} (id: ${s.id})`).join(', ');
                 toolContextEntries.push(`Адсеты: ${sets}`);
+              } else if (block.name === 'aiLaunch' && result?.success && result?.results) {
+                const dirs = result.results.map((r: any) => `${r.direction}: ${r.status}${r.adset_name ? ` (${r.adset_name})` : ''}`).join(', ');
+                toolContextEntries.push(`AI Launch: ${dirs}`);
+              } else if (block.name === 'createAdSet' && result?.success) {
+                toolContextEntries.push(`Создан адсет: ${result.adset_name || result.adset_id} в направлении ${result.direction_name || result.direction_id}`);
+              } else if (block.name === 'launchCreative' && result?.success) {
+                toolContextEntries.push(`Запущен креатив: adset=${result.adset_name || result.adset_id}, направление=${result.direction_name}`);
               }
             } catch { /* non-critical */ }
           }

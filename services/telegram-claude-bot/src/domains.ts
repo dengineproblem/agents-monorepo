@@ -31,8 +31,8 @@ export const DOMAINS: Record<string, DomainConfig> = {
       // WRITE — Directions
       'pauseDirection', 'resumeDirection', 'updateDirectionBudget', 'updateDirectionTargetCPL',
       'createDirection', 'approveBrainActions',
-      // WRITE — Create AdSets & Ads
-      'createAdSet', 'createAd',
+      // WRITE — Launch (proxy to agent-service)
+      'aiLaunch', 'createAdSet',
       // WRITE — Direct FB API
       'pauseCampaign', 'resumeCampaign',
       'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
