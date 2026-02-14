@@ -3505,189 +3505,282 @@ export const adsHandlers = {
   },
 
   // ============================================================
-  // CUSTOM FB API QUERY (LLM-powered)
+  // INSIGHTS BREAKDOWN (stats with breakdowns)
   // ============================================================
 
-  /**
-   * Execute custom Facebook API query using LLM
-   * For non-standard metrics that don't have a dedicated tool
-   *
-   * Flow:
-   * 1. LLM analyzes user_request
-   * 2. LLM builds FB Graph API query (endpoint, fields, params)
-   * 3. Execute query to FB
-   * 4. On error: LLM fixes query, retry (max 3 times)
-   * 5. Return result or final error
-   */
-  async customFbQuery({ user_request, entity_type, entity_id, period }, { accessToken, adAccountId }) {
-    const openai = await import('openai');
-    const OpenAI = openai.default;
-    const client = new OpenAI();
+  async getInsightsBreakdown({ breakdown, entity_type, entity_id, period, date_from, date_to }, { accessToken, adAccountId }) {
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    if (entity_type !== 'account' && !entity_id) {
+      return { success: false, error: 'entity_id обязателен для entity_type campaign/adset' };
+    }
+
+    const { since, until } = getDateRangeWithDates({ date_from, date_to, period });
+    const basePath = entity_type === 'account' ? actId : entity_id;
+
+    logger.info({ breakdown, entity_type, entity_id: entity_id || actId, since, until }, 'getInsightsBreakdown: requesting');
+
+    try {
+      const result = await fbGraph('GET', `${basePath}/insights`, accessToken, {
+        fields: 'spend,impressions,clicks,cpm,cpc,ctr,reach,frequency,actions,cost_per_action_type',
+        breakdowns: breakdown,
+        action_breakdowns: 'action_type',
+        time_range: JSON.stringify({ since, until }),
+        limit: 200,
+      });
+
+      const LEAD_ACTION_TYPES = [
+        'onsite_conversion.total_messaging_connection',
+        'offsite_conversion.fb_pixel_lead',
+        'onsite_conversion.lead_grouped',
+      ];
+
+      const rows = (result.data || []).map(row => {
+        const spend = parseFloat(row.spend || 0);
+        let leads = 0;
+        if (row.actions) {
+          for (const action of row.actions) {
+            if (LEAD_ACTION_TYPES.includes(action.action_type)) {
+              leads += parseInt(action.value || 0);
+            }
+          }
+        }
+        return {
+          ...Object.fromEntries(breakdown.split(',').map(b => [b, row[b]])),
+          spend: spend.toFixed(2),
+          impressions: parseInt(row.impressions || 0),
+          clicks: parseInt(row.clicks || 0),
+          cpm: parseFloat(row.cpm || 0).toFixed(2),
+          cpc: parseFloat(row.cpc || 0).toFixed(2),
+          ctr: parseFloat(row.ctr || 0).toFixed(2),
+          reach: parseInt(row.reach || 0),
+          leads,
+          cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
+        };
+      });
+
+      logger.info({ breakdown, entity_type, total_rows: rows.length, since, until }, 'getInsightsBreakdown: success');
+      return {
+        success: true,
+        breakdown,
+        entity_type,
+        period: { since, until },
+        data: rows,
+        total_rows: rows.length,
+      };
+    } catch (error) {
+      logger.error({ error: error.message, breakdown, entity_type, entity_id: entity_id || actId }, 'getInsightsBreakdown failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  // ============================================================
+  // DIRECT FB ENTITY MODIFICATIONS
+  // ============================================================
+
+  async updateTargeting({ adset_id, age_min, age_max, genders, countries, cities, dry_run }, { accessToken }) {
+    // Validate at least one change is requested
+    if (age_min === undefined && age_max === undefined && genders === undefined && countries === undefined && cities === undefined) {
+      return { success: false, error: 'Укажите хотя бы один параметр для изменения (age_min, age_max, genders, countries, cities)' };
+    }
+
+    logger.info({ adset_id, age_min, age_max, genders, countries: countries?.length, cities: cities?.length, dry_run }, 'updateTargeting: starting');
+
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'targeting,name,status' });
+      const targeting = { ...(current.targeting || {}) };
+
+      if (age_min !== undefined) targeting.age_min = age_min;
+      if (age_max !== undefined) targeting.age_max = age_max;
+      if (genders !== undefined) targeting.genders = genders;
+      if (countries !== undefined) {
+        targeting.geo_locations = { ...(targeting.geo_locations || {}), countries };
+      }
+      if (cities !== undefined) {
+        targeting.geo_locations = { ...(targeting.geo_locations || {}), cities };
+      }
+
+      if (dry_run) {
+        logger.info({ adset_id, adset_name: current.name }, 'updateTargeting: dry_run preview');
+        return { success: true, dry_run: true, adset_name: current.name, status: current.status, current_targeting: current.targeting, proposed_targeting: targeting };
+      }
+
+      await fbGraph('POST', adset_id, accessToken, { targeting: JSON.stringify(targeting) });
+      const after = await fbGraph('GET', adset_id, accessToken, { fields: 'targeting' });
+
+      logger.info({ adset_id, adset_name: current.name }, 'updateTargeting: applied successfully');
+      return { success: true, adset_name: current.name, before: current.targeting, after: after.targeting };
+    } catch (error) {
+      logger.error({ error: error.message, adset_id }, 'updateTargeting failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  async updateSchedule({ adset_id, start_time, end_time, dry_run }, { accessToken }) {
+    if (start_time === undefined && end_time === undefined) {
+      return { success: false, error: 'Укажите хотя бы start_time или end_time' };
+    }
+
+    logger.info({ adset_id, start_time, end_time, dry_run }, 'updateSchedule: starting');
+
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'start_time,end_time,name,status' });
+
+      if (dry_run) {
+        logger.info({ adset_id, adset_name: current.name }, 'updateSchedule: dry_run preview');
+        return { success: true, dry_run: true, adset_name: current.name, status: current.status, current: { start_time: current.start_time, end_time: current.end_time }, proposed: { start_time, end_time } };
+      }
+
+      const updates = {};
+      if (start_time !== undefined) updates.start_time = start_time;
+      if (end_time !== undefined) updates.end_time = end_time;
+
+      await fbGraph('POST', adset_id, accessToken, updates);
+      const after = await fbGraph('GET', adset_id, accessToken, { fields: 'start_time,end_time' });
+
+      logger.info({ adset_id, adset_name: current.name, before_start: current.start_time, after_start: after.start_time }, 'updateSchedule: applied successfully');
+      return { success: true, adset_name: current.name, before: { start_time: current.start_time, end_time: current.end_time }, after: { start_time: after.start_time, end_time: after.end_time } };
+    } catch (error) {
+      logger.error({ error: error.message, adset_id }, 'updateSchedule failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  async updateBidStrategy({ adset_id, bid_strategy, bid_amount, dry_run }, { accessToken }) {
+    if (bid_strategy === undefined && bid_amount === undefined) {
+      return { success: false, error: 'Укажите хотя бы bid_strategy или bid_amount' };
+    }
+
+    // Validate: bid_amount requires BID_CAP or COST_CAP
+    if (bid_amount !== undefined && bid_strategy === 'LOWEST_COST_WITHOUT_CAP') {
+      return { success: false, error: 'bid_amount не используется с LOWEST_COST_WITHOUT_CAP' };
+    }
+
+    logger.info({ adset_id, bid_strategy, bid_amount, dry_run }, 'updateBidStrategy: starting');
+
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'bid_strategy,bid_amount,name,status' });
+
+      if (dry_run) {
+        logger.info({ adset_id, adset_name: current.name }, 'updateBidStrategy: dry_run preview');
+        return { success: true, dry_run: true, adset_name: current.name, status: current.status, current: { bid_strategy: current.bid_strategy, bid_amount: current.bid_amount }, proposed: { bid_strategy, bid_amount } };
+      }
+
+      const updates = {};
+      if (bid_strategy !== undefined) updates.bid_strategy = bid_strategy;
+      if (bid_amount !== undefined) updates.bid_amount = bid_amount;
+
+      await fbGraph('POST', adset_id, accessToken, updates);
+      const after = await fbGraph('GET', adset_id, accessToken, { fields: 'bid_strategy,bid_amount' });
+
+      logger.info({ adset_id, adset_name: current.name, new_strategy: after.bid_strategy, new_amount: after.bid_amount }, 'updateBidStrategy: applied successfully');
+      return { success: true, adset_name: current.name, before: { bid_strategy: current.bid_strategy, bid_amount: current.bid_amount }, after: { bid_strategy: after.bid_strategy, bid_amount: after.bid_amount } };
+    } catch (error) {
+      logger.error({ error: error.message, adset_id }, 'updateBidStrategy failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  async renameEntity({ entity_id, entity_type, new_name }, { accessToken }) {
+    logger.info({ entity_id, entity_type, new_name }, 'renameEntity: starting');
+
+    try {
+      const current = await fbGraph('GET', entity_id, accessToken, { fields: 'name' });
+
+      if (current.name === new_name) {
+        logger.info({ entity_id, entity_type }, 'renameEntity: name already matches, skipping');
+        return { success: true, entity_type, old_name: current.name, new_name, note: 'Имя уже совпадает, изменение не требуется' };
+      }
+
+      await fbGraph('POST', entity_id, accessToken, { name: new_name });
+      const after = await fbGraph('GET', entity_id, accessToken, { fields: 'name' });
+
+      logger.info({ entity_id, entity_type, old_name: current.name, new_name: after.name }, 'renameEntity: applied successfully');
+      return { success: true, entity_type, old_name: current.name, new_name: after.name };
+    } catch (error) {
+      logger.error({ error: error.message, entity_id, entity_type }, 'renameEntity failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  async updateCampaignBudget({ campaign_id, daily_budget, lifetime_budget, dry_run }, { accessToken }) {
+    if (daily_budget === undefined && lifetime_budget === undefined) {
+      return { success: false, error: 'Укажите хотя бы daily_budget или lifetime_budget' };
+    }
+
+    logger.info({ campaign_id, daily_budget, lifetime_budget, dry_run }, 'updateCampaignBudget: starting');
+
+    try {
+      const current = await fbGraph('GET', campaign_id, accessToken, { fields: 'name,daily_budget,lifetime_budget,status' });
+
+      if (dry_run) {
+        logger.info({ campaign_id, campaign_name: current.name }, 'updateCampaignBudget: dry_run preview');
+        return { success: true, dry_run: true, campaign_name: current.name, status: current.status, current: { daily_budget: current.daily_budget, lifetime_budget: current.lifetime_budget }, proposed: { daily_budget, lifetime_budget } };
+      }
+
+      const updates = {};
+      if (daily_budget !== undefined) updates.daily_budget = daily_budget;
+      if (lifetime_budget !== undefined) updates.lifetime_budget = lifetime_budget;
+
+      await fbGraph('POST', campaign_id, accessToken, updates);
+      const after = await fbGraph('GET', campaign_id, accessToken, { fields: 'daily_budget,lifetime_budget' });
+
+      logger.info({ campaign_id, campaign_name: current.name, before_daily: current.daily_budget, after_daily: after.daily_budget }, 'updateCampaignBudget: applied successfully');
+      return { success: true, campaign_name: current.name, before: { daily_budget: current.daily_budget, lifetime_budget: current.lifetime_budget }, after: { daily_budget: after.daily_budget, lifetime_budget: after.lifetime_budget } };
+    } catch (error) {
+      logger.error({ error: error.message, campaign_id }, 'updateCampaignBudget failed');
+      return { success: false, error: error.message };
+    }
+  },
+
+  // ============================================================
+  // CUSTOM FB API QUERY (direct executor — no LLM, Claude builds params)
+  // ============================================================
+
+  async customFbQuery({ endpoint, method, fields, params }, { accessToken, adAccountId }) {
+    if (!endpoint || typeof endpoint !== 'string') {
+      return { success: false, error: 'endpoint обязателен' };
+    }
 
     const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-    const dateRange = period ? getDateRange(period) : null;
+    const resolvedMethod = method || 'GET';
 
-    // Build entity path based on type
-    let basePath;
-    switch (entity_type) {
-      case 'campaign':
-        basePath = entity_id;
-        break;
-      case 'adset':
-        basePath = entity_id;
-        break;
-      case 'ad':
-        basePath = entity_id;
-        break;
-      case 'account':
-      default:
-        basePath = actId;
+    // Replace 'account' prefix with actual act_id
+    const resolvedEndpoint = endpoint.replace(/^account\b\/?/, `${actId}/`);
+
+    // Validate endpoint: must be alphanumeric with slashes, underscores, dots (FB API IDs and paths)
+    if (!/^[\w./,-]+$/.test(resolvedEndpoint)) {
+      logger.warn({ endpoint: resolvedEndpoint }, 'customFbQuery: invalid endpoint characters');
+      return { success: false, error: 'Недопустимые символы в endpoint' };
     }
 
-    const systemPrompt = `Ты эксперт по Facebook Marketing API.
+    const apiParams = { ...(params || {}) };
+    if (fields) apiParams.fields = fields;
 
-Твоя задача: построить корректный запрос к FB Graph API на основе вопроса пользователя.
-
-## Доступные endpoints и fields:
-
-### Account level (act_<id>):
-- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions, cost_per_action_type
-- /campaigns: id, name, status, objective, daily_budget
-- /adsets: id, name, status, daily_budget, targeting
-- /ads: id, name, status, creative
-
-### Campaign/AdSet/Ad level:
-- /insights: те же метрики + date breakdown
-- fields: id, name, status, effective_status, daily_budget, bid_amount
-
-### Breakdowns:
-- age, gender, country, region, device_platform, publisher_platform, placement
-
-### Time ranges:
-- time_range: {"since": "YYYY-MM-DD", "until": "YYYY-MM-DD"}
-- date_preset: today, yesterday, last_7d, last_14d, last_30d, lifetime
-
-## Формат ответа (JSON):
-{
-  "endpoint": "<entity_id>/insights или <entity_id>/campaigns и т.д.",
-  "fields": "spend,impressions,clicks,ctr",
-  "params": {
-    "time_range": {"since": "2024-01-01", "until": "2024-01-07"},
-    "breakdowns": "age,gender",
-    "level": "ad"
-  },
-  "explanation": "Краткое объяснение что запрашиваем"
-}
-
-Отвечай ТОЛЬКО JSON без markdown.`;
-
-    const userPrompt = `Запрос пользователя: "${user_request}"
-
-Базовый путь: ${basePath}
-Тип сущности: ${entity_type}
-${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Период: не указан, используй last_7d'}
-
-Построй FB API запрос для этого вопроса.`;
-
-    const MAX_ATTEMPTS = 3;
-    let lastError = null;
-    let attemptPrompt = userPrompt;
-
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        // Step 1: Get query from LLM
-        const completion = await client.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: attemptPrompt }
-          ],
-          temperature: 0.2,
-          max_tokens: 500
-        });
-
-        const llmResponse = completion.choices[0]?.message?.content || '';
-
-        // Parse LLM response
-        let queryPlan;
-        try {
-          // Try to extract JSON from response
-          const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            throw new Error('No JSON found in LLM response');
-          }
-          queryPlan = JSON.parse(jsonMatch[0]);
-        } catch (parseError) {
-          logger.warn({ attempt, llmResponse }, 'customFbQuery: failed to parse LLM response');
-          lastError = `Не удалось распознать план запроса: ${parseError.message}`;
-          attemptPrompt = `${userPrompt}\n\nПредыдущая попытка не удалась: ${lastError}\nПопробуй снова, верни только валидный JSON.`;
-          continue;
-        }
-
-        // Step 2: Execute FB API query
-        const params = {
-          fields: queryPlan.fields,
-          ...queryPlan.params
-        };
-
-        // Handle time_range
-        if (params.time_range && typeof params.time_range === 'object') {
-          params.time_range = JSON.stringify(params.time_range);
-        } else if (dateRange && !params.date_preset) {
-          params.time_range = JSON.stringify({ since: dateRange.since, until: dateRange.until });
-        }
-
-        logger.info({
-          attempt,
-          endpoint: queryPlan.endpoint,
-          params,
-          explanation: queryPlan.explanation
-        }, 'customFbQuery: executing FB API request');
-
-        const result = await fbGraph('GET', queryPlan.endpoint, accessToken, params);
-
-        // Success!
-        return {
-          success: true,
-          query: {
-            endpoint: queryPlan.endpoint,
-            fields: queryPlan.fields,
-            params: queryPlan.params,
-            explanation: queryPlan.explanation
-          },
-          data: result.data || result,
-          attempts: attempt,
-          source: 'custom_fb_query'
-        };
-
-      } catch (fbError) {
-        const errorMessage = fbError.message || String(fbError);
-        logger.warn({ attempt, error: errorMessage }, 'customFbQuery: FB API error');
-
-        lastError = errorMessage;
-
-        // Build retry prompt with error context
-        attemptPrompt = `${userPrompt}
-
-ПРЕДЫДУЩАЯ ПОПЫТКА #${attempt} ОШИБКА:
-${errorMessage}
-
-Исправь запрос учитывая эту ошибку. Частые проблемы:
-- Неверный формат time_range (должен быть JSON строка)
-- Недопустимые breakdowns для данного уровня
-- Несуществующие fields
-- Нужен access к ads_read permission`;
-      }
+    // Serialize time_range if it's an object
+    if (apiParams.time_range && typeof apiParams.time_range === 'object') {
+      apiParams.time_range = JSON.stringify(apiParams.time_range);
+    }
+    // Serialize filtering if it's an object/array
+    if (apiParams.filtering && typeof apiParams.filtering === 'object') {
+      apiParams.filtering = JSON.stringify(apiParams.filtering);
     }
 
-    // All attempts failed
-    return {
-      success: false,
-      error: `Не удалось выполнить запрос после ${MAX_ATTEMPTS} попыток`,
-      last_error: lastError,
-      user_request,
-      suggestion: 'Попробуйте переформулировать запрос или использовать стандартные tools (getCampaigns, getSpendReport и т.д.)'
-    };
+    logger.info({ endpoint: resolvedEndpoint, method: resolvedMethod, fields, hasParams: !!params }, 'customFbQuery: executing');
+
+    try {
+      const result = await fbGraph(resolvedMethod, resolvedEndpoint, accessToken, apiParams);
+      const data = result.data || result;
+      logger.info({ endpoint: resolvedEndpoint, method: resolvedMethod, resultCount: Array.isArray(data) ? data.length : 1 }, 'customFbQuery: success');
+      return {
+        success: true,
+        data,
+        source: 'custom_fb_query',
+      };
+    } catch (error) {
+      logger.error({ error: error.message, endpoint: resolvedEndpoint, method: resolvedMethod }, 'customFbQuery failed');
+      return { success: false, error: error.message, endpoint: resolvedEndpoint };
+    }
   },
 
   // ============================================================

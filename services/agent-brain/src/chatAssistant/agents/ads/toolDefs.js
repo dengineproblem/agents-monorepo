@@ -6,7 +6,7 @@
  * - Tool descriptions
  * - Metadata (timeout, retryable, dangerous)
  *
- * 19 tools: 11 READ + 8 WRITE
+ * 25 tools: 12 READ + 13 WRITE
  */
 
 import { z } from 'zod';
@@ -375,28 +375,102 @@ export const AdsToolDefs = {
   },
 
   // ============================================================
-  // CUSTOM FB API QUERY (LLM-powered)
+  // INSIGHTS BREAKDOWN (stats with breakdowns)
+  // ============================================================
+
+  getInsightsBreakdown: {
+    description: 'Получить метрики с разбивкой (breakdown): по возрасту, полу, устройству, площадке, стране. Работает на уровне аккаунта, кампании или адсета.',
+    schema: z.object({
+      breakdown: z.enum(['age', 'gender', 'age,gender', 'country', 'region', 'device_platform', 'publisher_platform', 'platform_position']).describe('Тип разбивки'),
+      entity_type: z.enum(['account', 'campaign', 'adset']).default('account').describe('Уровень: account, campaign или adset'),
+      entity_id: z.string().optional().describe('ID кампании или адсета (для account не нужен)'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
+    }),
+    meta: { timeout: 30000, retryable: true }
+  },
+
+  // ============================================================
+  // DIRECT FB ENTITY MODIFICATIONS
+  // ============================================================
+
+  updateTargeting: {
+    description: 'Изменить таргетинг адсета: возраст, пол, страны, города. Для интересов и аудиторий используй customFbQuery.',
+    schema: z.object({
+      adset_id: nonEmptyString('adset_id').describe('Facebook AdSet ID'),
+      age_min: z.number().min(13).max(65).optional().describe('Минимальный возраст (13-65)'),
+      age_max: z.number().min(13).max(65).optional().describe('Максимальный возраст (13-65)'),
+      genders: z.array(z.number().min(0).max(2)).optional().describe('Пол: 0=все, 1=мужчины, 2=женщины'),
+      countries: z.array(z.string()).optional().describe('Коды стран (KZ, RU, US...)'),
+      cities: z.array(z.object({
+        key: z.string().describe('FB city key'),
+        radius: z.number().optional().describe('Радиус в км'),
+        distance_unit: z.string().optional().describe('Единица: kilometer или mile'),
+      })).optional().describe('Города с радиусом'),
+      dry_run: dryRunOption,
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  updateSchedule: {
+    description: 'Изменить расписание адсета: время начала и/или окончания.',
+    schema: z.object({
+      adset_id: nonEmptyString('adset_id').describe('Facebook AdSet ID'),
+      start_time: z.string().optional().describe('Время начала в ISO 8601 (2024-01-15T00:00:00+0500)'),
+      end_time: z.string().optional().describe('Время окончания в ISO 8601 (null = без ограничения)'),
+      dry_run: dryRunOption,
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  updateBidStrategy: {
+    description: 'Изменить стратегию ставок адсета: bid_strategy и bid_amount.',
+    schema: z.object({
+      adset_id: nonEmptyString('adset_id').describe('Facebook AdSet ID'),
+      bid_strategy: z.enum(['LOWEST_COST_WITHOUT_CAP', 'LOWEST_COST_WITH_BID_CAP', 'COST_CAP']).optional().describe('Стратегия ставок'),
+      bid_amount: z.number().min(1).optional().describe('Сумма ставки в центах (для BID_CAP и COST_CAP)'),
+      dry_run: dryRunOption,
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  renameEntity: {
+    description: 'Переименовать кампанию, адсет или объявление в Facebook.',
+    schema: z.object({
+      entity_id: nonEmptyString('entity_id').describe('Facebook ID (campaign_id, adset_id или ad_id)'),
+      entity_type: z.enum(['campaign', 'adset', 'ad']).describe('Тип сущности'),
+      new_name: z.string().min(1).max(400).describe('Новое название'),
+    }),
+    meta: { timeout: 15000, retryable: false, dangerous: true }
+  },
+
+  updateCampaignBudget: {
+    description: 'Изменить бюджет кампании (для CBO кампаний с бюджетом на уровне кампании). Для адсетов используй updateBudget.',
+    schema: z.object({
+      campaign_id: nonEmptyString('campaign_id').describe('Facebook Campaign ID'),
+      daily_budget: z.number().min(100).optional().describe('Суточный бюджет в центах ($1 = 100)'),
+      lifetime_budget: z.number().min(100).optional().describe('Бюджет за всё время в центах'),
+      dry_run: dryRunOption,
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // CUSTOM FB API QUERY (direct executor)
   // ============================================================
 
   customFbQuery: {
-    description: `УНИВЕРСАЛЬНЫЙ запрос к Facebook Marketing API. Может получить ЛЮБЫЕ данные из FB API.
+    description: `Выполнить произвольный запрос к Facebook Graph API. Передай готовые endpoint, fields и params — handler выполнит запрос напрямую.
 
-⚠️ ВАЖНО: Если ни один стандартный tool не подходит для запроса пользователя — ВСЕГДА используй customFbQuery.
-Не отказывай пользователю, если данные теоретически есть в Facebook API.
-
-Этот tool умеет:
-- Запрашивать любые поля и метрики FB API (включая breakdowns, action_breakdowns)
-- Применять любые фильтры и группировки
-- Работать с любым уровнем (account, campaign, adset, ad)
-
-Просто передай user_request на естественном языке — внутренний LLM построит правильный API запрос.`,
+Используй когда ни один стандартный tool не подходит. Для account-level запросов используй 'account/insights' — 'account' будет заменён на act_xxx.`,
     schema: z.object({
-      user_request: z.string().describe('Описание того, что хочет узнать пользователь (на естественном языке)'),
-      entity_type: z.enum(['account', 'campaign', 'adset', 'ad']).default('account').describe('Уровень сущности для запроса'),
-      entity_id: z.string().optional().describe('ID сущности (campaign_id, adset_id, ad_id). Если не указан — используется ad_account'),
-      period: periodSchema.optional().describe('Период для метрик (если применимо)')
+      endpoint: z.string().describe('FB API endpoint (account/insights, campaign_id/adsets, act_xxx/insights)'),
+      method: z.enum(['GET', 'POST']).default('GET').describe('HTTP метод'),
+      fields: z.string().optional().describe('Запрашиваемые поля через запятую (spend,impressions,clicks,ctr)'),
+      params: z.record(z.any()).optional().describe('Дополнительные параметры (breakdowns, time_range, filtering и т.д.)'),
     }),
-    meta: { timeout: 60000, retryable: true }
+    meta: { timeout: 30000, retryable: true }
   },
 
   // ============================================================

@@ -215,6 +215,9 @@ const DANGEROUS_TOOLS = new Set([
   'pauseDirection', 'resumeDirection', 'approveBrainActions',
   'pauseCampaign', 'resumeCampaign',
   'aiLaunch', 'createAdSet', 'saveCampaignMapping',
+  'updateTargeting', 'updateSchedule', 'updateBidStrategy',
+  'renameEntity', 'updateCampaignBudget',
+  'customFbQuery',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   'pauseTikTokCampaign', 'addSale', 'updateLeadStage',
 ]);
@@ -228,6 +231,9 @@ const CONFIRMATION_REQUIRED_TOOLS = new Set([
   'pauseDirection', 'resumeDirection',
   'pauseCampaign', 'resumeCampaign',
   'createAdSet', 'aiLaunch',
+  'updateTargeting', 'updateSchedule', 'updateBidStrategy',
+  'renameEntity', 'updateCampaignBudget',
+  'customFbQuery',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   // approveBrainActions НЕ требует подтверждения — юзер уже подтвердил выбором proposals
   'pauseTikTokCampaign',
@@ -253,6 +259,12 @@ const CONFIRMATION_REASONS: Record<string, string> = {
   startCreativeTest: 'Запустит A/B тест (~$20 бюджет)',
   stopCreativeTest: 'Остановит A/B тест',
   approveBrainActions: 'Выполнит рекомендации Brain оптимизатора',
+  updateTargeting: 'Изменит таргетинг адсета (возраст, пол, гео)',
+  updateSchedule: 'Изменит расписание адсета',
+  updateBidStrategy: 'Изменит стратегию ставок адсета',
+  renameEntity: 'Переименует сущность в Facebook',
+  updateCampaignBudget: 'Изменит бюджет кампании',
+  customFbQuery: 'Выполнит произвольный запрос к Facebook API',
   pauseTikTokCampaign: 'Остановит TikTok кампанию',
 };
 const PENDING_APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 минут

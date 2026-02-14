@@ -37,6 +37,11 @@ export const DOMAINS: Record<string, DomainConfig> = {
       'pauseCampaign', 'resumeCampaign',
       'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
       'pauseAd', 'resumeAd',
+      // WRITE — Direct FB Entity Modifications
+      'updateTargeting', 'updateSchedule', 'updateBidStrategy',
+      'renameEntity', 'updateCampaignBudget',
+      // READ — Insights Breakdown
+      'getInsightsBreakdown',
       // WRITE — External campaigns
       'saveCampaignMapping',
       // Flexible FB API

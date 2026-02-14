@@ -1,6 +1,6 @@
 /**
  * AdsAgent Tools - Facebook/Instagram Advertising
- * 23 tools: 13 READ + 10 WRITE
+ * 29 tools: 14 READ + 15 WRITE
  */
 
 export const ADS_TOOLS = [
@@ -927,54 +927,198 @@ dry_run=true ВОЗВРАЩАЕТ:
   },
 
   // ============================================================
-  // CUSTOM FB API QUERY (LLM-powered)
+  // INSIGHTS BREAKDOWN
   // ============================================================
   {
-    name: 'customFbQuery',
-    description: `Кастомный запрос к FB API через LLM (для нестандартных метрик).
-
-КАК РАБОТАЕТ:
-1. LLM (gpt-4o-mini) анализирует user_request
-2. LLM строит FB Graph API запрос (endpoint, fields, params)
-3. Выполняем запрос к FB
-4. При ошибке: LLM исправляет запрос, retry (до 3 раз)
+    name: 'getInsightsBreakdown',
+    description: `Метрики с разбивкой (breakdown) по возрасту, полу, устройству, площадке, стране.
 
 ВОЗВРАЩАЕТ:
-- query: { endpoint, fields, params, explanation }
-- data: результат FB API
-- attempts: сколько попыток потребовалось
+- data[]: breakdown values + spend, impressions, clicks, cpm, cpc, ctr, reach, leads, cpl
+- total_rows: количество строк
 
-ДОСТУПНЫЕ endpoints:
-- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions
-- /campaigns, /adsets, /ads: структура аккаунта
-- breakdowns: age, gender, country, device_platform, placement
+РАЗБИВКИ:
+- age: 18-24, 25-34, 35-44, 45-54, 55-64, 65+
+- gender: male, female, unknown
+- age,gender: комбинация возраста и пола
+- country: по странам (KZ, RU, US...)
+- region: по регионам
+- device_platform: mobile_app, desktop, mobile_web
+- publisher_platform: facebook, instagram, audience_network
+- platform_position: feed, story, reels, right_column
 
 ИСПОЛЬЗУЙ когда:
-- Нужны метрики которых нет в других tools
-- Нестандартные разбивки (по возрасту, полу, устройствам)
-- Специфичные FB API запросы`,
+- "покажи статистику по возрасту/полу/устройствам/площадкам"
+- "какой CTR по площадкам?"
+- "разбивка по странам за месяц"`,
     parameters: {
       type: 'object',
       properties: {
-        user_request: {
+        breakdown: {
           type: 'string',
-          description: 'Что нужно узнать на естественном языке (например: "разбивка по возрасту за неделю")'
+          enum: ['age', 'gender', 'age,gender', 'country', 'region', 'device_platform', 'publisher_platform', 'platform_position'],
+          description: 'Тип разбивки'
         },
         entity_type: {
           type: 'string',
-          enum: ['account', 'campaign', 'adset', 'ad'],
-          description: 'Уровень: account (весь аккаунт), campaign, adset или ad'
+          enum: ['account', 'campaign', 'adset'],
+          description: 'Уровень (по умолчанию account)'
         },
         entity_id: {
           type: 'string',
-          description: 'ID сущности (если не account). Получи через getCampaigns/getAdSets'
+          description: 'ID кампании или адсета (для account не нужен)'
         },
         period: {
           type: 'string',
-          description: 'Период: today, yesterday, last_7d, last_30d или дата YYYY-MM-DD'
+          enum: ['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d'],
+          description: 'Период'
+        },
+        date_from: { type: 'string', description: 'Начало YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'Конец YYYY-MM-DD' }
+      },
+      required: ['breakdown']
+    }
+  },
+
+  // ============================================================
+  // DIRECT FB ENTITY MODIFICATIONS
+  // ============================================================
+  {
+    name: 'updateTargeting',
+    description: `⚠️ DANGEROUS: Изменить таргетинг адсета.
+
+ИЗМЕНЯЕТ: возраст, пол, гео (страны, города).
+Для интересов и кастомных аудиторий используй customFbQuery.
+
+ВОЗВРАЩАЕТ:
+- before/after: таргетинг до и после изменения
+- dry_run=true: показывает proposed_targeting без применения`,
+    parameters: {
+      type: 'object',
+      properties: {
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        age_min: { type: 'number', description: 'Мин. возраст (13-65)' },
+        age_max: { type: 'number', description: 'Макс. возраст (13-65)' },
+        genders: { type: 'array', items: { type: 'number' }, description: '0=все, 1=мужчины, 2=женщины' },
+        countries: { type: 'array', items: { type: 'string' }, description: 'Коды стран (KZ, RU, US)' },
+        cities: { type: 'array', items: { type: 'object' }, description: 'Города [{key, radius, distance_unit}]' },
+        dry_run: { type: 'boolean', description: 'true = только preview' }
+      },
+      required: ['adset_id']
+    }
+  },
+  {
+    name: 'updateSchedule',
+    description: `⚠️ DANGEROUS: Изменить расписание адсета (start_time, end_time).
+
+ВОЗВРАЩАЕТ:
+- before/after: расписание до и после
+- dry_run=true: показывает proposed без применения`,
+    parameters: {
+      type: 'object',
+      properties: {
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        start_time: { type: 'string', description: 'Время начала ISO 8601 (2024-01-15T00:00:00+0500)' },
+        end_time: { type: 'string', description: 'Время окончания ISO 8601 (null = без ограничения)' },
+        dry_run: { type: 'boolean', description: 'true = только preview' }
+      },
+      required: ['adset_id']
+    }
+  },
+  {
+    name: 'updateBidStrategy',
+    description: `⚠️ DANGEROUS: Изменить стратегию ставок адсета.
+
+СТРАТЕГИИ:
+- LOWEST_COST_WITHOUT_CAP: минимальная стоимость без ограничения
+- LOWEST_COST_WITH_BID_CAP: минимальная стоимость с лимитом ставки
+- COST_CAP: целевая стоимость результата
+
+ВОЗВРАЩАЕТ:
+- before/after: стратегия и сумма до и после`,
+    parameters: {
+      type: 'object',
+      properties: {
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        bid_strategy: { type: 'string', enum: ['LOWEST_COST_WITHOUT_CAP', 'LOWEST_COST_WITH_BID_CAP', 'COST_CAP'], description: 'Стратегия' },
+        bid_amount: { type: 'number', description: 'Ставка в центах (для BID_CAP и COST_CAP)' },
+        dry_run: { type: 'boolean', description: 'true = только preview' }
+      },
+      required: ['adset_id']
+    }
+  },
+  {
+    name: 'renameEntity',
+    description: `⚠️ DANGEROUS: Переименовать кампанию, адсет или объявление.
+
+ВОЗВРАЩАЕТ:
+- old_name, new_name: имя до и после`,
+    parameters: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string', description: 'Facebook ID (campaign, adset или ad)' },
+        entity_type: { type: 'string', enum: ['campaign', 'adset', 'ad'], description: 'Тип сущности' },
+        new_name: { type: 'string', description: 'Новое название' }
+      },
+      required: ['entity_id', 'entity_type', 'new_name']
+    }
+  },
+  {
+    name: 'updateCampaignBudget',
+    description: `⚠️ DANGEROUS: Изменить бюджет кампании (для CBO кампаний).
+
+ОТЛИЧИЕ от updateBudget: updateBudget меняет бюджет АДСЕТА, а этот tool — бюджет КАМПАНИИ.
+
+ВОЗВРАЩАЕТ:
+- before/after: daily_budget и lifetime_budget до и после`,
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Facebook Campaign ID' },
+        daily_budget: { type: 'number', description: 'Суточный бюджет в центах ($1 = 100)' },
+        lifetime_budget: { type: 'number', description: 'Бюджет за всё время в центах' },
+        dry_run: { type: 'boolean', description: 'true = только preview' }
+      },
+      required: ['campaign_id']
+    }
+  },
+
+  // ============================================================
+  // CUSTOM FB API QUERY (direct executor)
+  // ============================================================
+  {
+    name: 'customFbQuery',
+    description: `Выполнить произвольный запрос к Facebook Graph API.
+
+Передай готовые endpoint, fields и params. Handler выполнит запрос напрямую через fbGraph().
+Для account-level: используй 'account/insights' — 'account' заменится на act_xxx.
+
+ВОЗВРАЩАЕТ:
+- data: результат FB API
+
+ИСПОЛЬЗУЙ когда ни один стандартный tool не подходит. Используй web search чтобы найти правильные FB API endpoint и fields.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        endpoint: {
+          type: 'string',
+          description: 'FB API endpoint (account/insights, {campaign_id}/adsets, act_xxx/insights)'
+        },
+        method: {
+          type: 'string',
+          enum: ['GET', 'POST'],
+          description: 'HTTP метод (по умолчанию GET)'
+        },
+        fields: {
+          type: 'string',
+          description: 'Поля через запятую (spend,impressions,clicks,ctr)'
+        },
+        params: {
+          type: 'object',
+          description: 'Дополнительные параметры (breakdowns, time_range, filtering и т.д.)'
         }
       },
-      required: ['user_request']
+      required: ['endpoint']
     }
   },
 
@@ -1034,7 +1178,13 @@ export const ADS_WRITE_TOOLS = [
   'resumeDirection',
   'pauseCampaign',
   'resumeCampaign',
-  'triggerBrainOptimizationRun'
+  'triggerBrainOptimizationRun',
+  'updateTargeting',
+  'updateSchedule',
+  'updateBidStrategy',
+  'renameEntity',
+  'updateCampaignBudget',
+  'customFbQuery',
 ];
 
 // Dangerous tools that ALWAYS require confirmation
@@ -1046,5 +1196,11 @@ export const ADS_DANGEROUS_TOOLS = [
   'pauseDirection',
   'pauseAdSet',
   'pauseAd',
-  'triggerBrainOptimizationRun'
+  'triggerBrainOptimizationRun',
+  'updateTargeting',
+  'updateSchedule',
+  'updateBidStrategy',
+  'renameEntity',
+  'updateCampaignBudget',
+  'customFbQuery',
 ];

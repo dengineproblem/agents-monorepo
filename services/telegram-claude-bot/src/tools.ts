@@ -510,23 +510,134 @@ export const tools: Anthropic.Tool[] = [
       required: ['userAccountId', 'direction_id', 'creative_ids'],
     },
   },
+  // ============================================================
+  // INSIGHTS BREAKDOWN
+  // ============================================================
   {
-    name: 'customFbQuery',
-    description: 'Кастомный запрос к FB API для нестандартных метрик и статистики. LLM строит запрос, выполняет, при ошибке retry до 3 раз. Для: разбивки по возрасту/полу/устройствам, любых нестандартных метрик.',
+    name: 'getInsightsBreakdown',
+    description: 'Метрики с разбивкой по возрасту, полу, устройству, площадке, стране. Используй для: "статистика по возрасту", "CTR по площадкам", "разбивка по странам".',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        user_request: { type: 'string', description: 'Что нужно узнать (например: "разбивка по возрасту за неделю")' },
+        breakdown: {
+          type: 'string',
+          enum: ['age', 'gender', 'age,gender', 'country', 'region', 'device_platform', 'publisher_platform', 'platform_position'],
+          description: 'Тип разбивки',
+        },
         entity_type: {
           type: 'string',
-          enum: ['account', 'campaign', 'adset', 'ad'],
-          description: 'Уровень: account, campaign, adset или ad',
+          enum: ['account', 'campaign', 'adset'],
+          description: 'Уровень (по умолчанию account)',
         },
-        entity_id: { type: 'string', description: 'ID сущности (если не account)' },
-        period: { type: 'string', description: 'Период: today, yesterday, last_7d, last_30d' },
+        entity_id: { type: 'string', description: 'ID кампании или адсета (для account не нужен)' },
+        period: { type: 'string', description: 'Период: today, yesterday, last_7d, last_14d, last_30d' },
+        date_from: { type: 'string', description: 'Начало YYYY-MM-DD' },
+        date_to: { type: 'string', description: 'Конец YYYY-MM-DD' },
       },
-      required: ['userAccountId', 'user_request'],
+      required: ['userAccountId', 'breakdown'],
+    },
+  },
+  // ============================================================
+  // DIRECT FB ENTITY MODIFICATIONS
+  // ============================================================
+  {
+    name: 'updateTargeting',
+    description: 'Изменить таргетинг адсета: возраст, пол, страны, города. Для интересов и аудиторий используй customFbQuery.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        age_min: { type: 'number', description: 'Мин. возраст (13-65)' },
+        age_max: { type: 'number', description: 'Макс. возраст (13-65)' },
+        genders: { type: 'array', items: { type: 'number' }, description: '0=все, 1=мужчины, 2=женщины' },
+        countries: { type: 'array', items: { type: 'string' }, description: 'Коды стран (KZ, RU, US)' },
+        cities: { type: 'array', items: { type: 'object' }, description: 'Города [{key, radius, distance_unit}]' },
+        dry_run: { type: 'boolean', description: 'Preview без применения' },
+      },
+      required: ['userAccountId', 'adset_id'],
+    },
+  },
+  {
+    name: 'updateSchedule',
+    description: 'Изменить расписание адсета: время начала и/или окончания.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        start_time: { type: 'string', description: 'Время начала ISO 8601 (2024-01-15T00:00:00+0500)' },
+        end_time: { type: 'string', description: 'Время окончания ISO 8601' },
+        dry_run: { type: 'boolean', description: 'Preview без применения' },
+      },
+      required: ['userAccountId', 'adset_id'],
+    },
+  },
+  {
+    name: 'updateBidStrategy',
+    description: 'Изменить стратегию ставок адсета: bid_strategy и bid_amount.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        adset_id: { type: 'string', description: 'Facebook AdSet ID' },
+        bid_strategy: {
+          type: 'string',
+          enum: ['LOWEST_COST_WITHOUT_CAP', 'LOWEST_COST_WITH_BID_CAP', 'COST_CAP'],
+          description: 'Стратегия ставок',
+        },
+        bid_amount: { type: 'number', description: 'Ставка в центах (для BID_CAP и COST_CAP)' },
+        dry_run: { type: 'boolean', description: 'Preview без применения' },
+      },
+      required: ['userAccountId', 'adset_id'],
+    },
+  },
+  {
+    name: 'renameEntity',
+    description: 'Переименовать кампанию, адсет или объявление в Facebook.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        entity_id: { type: 'string', description: 'Facebook ID (campaign, adset или ad)' },
+        entity_type: { type: 'string', enum: ['campaign', 'adset', 'ad'], description: 'Тип сущности' },
+        new_name: { type: 'string', description: 'Новое название' },
+      },
+      required: ['userAccountId', 'entity_id', 'entity_type', 'new_name'],
+    },
+  },
+  {
+    name: 'updateCampaignBudget',
+    description: 'Изменить бюджет кампании (для CBO кампаний). Для бюджета адсетов используй updateBudget.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'Facebook Campaign ID' },
+        daily_budget: { type: 'number', description: 'Суточный бюджет в центах ($1 = 100)' },
+        lifetime_budget: { type: 'number', description: 'Бюджет за всё время в центах' },
+        dry_run: { type: 'boolean', description: 'Preview без применения' },
+      },
+      required: ['userAccountId', 'campaign_id'],
+    },
+  },
+  // ============================================================
+  // CUSTOM FB API QUERY (direct executor)
+  // ============================================================
+  {
+    name: 'customFbQuery',
+    description: 'Выполнить произвольный запрос к Facebook Graph API. Передай готовые endpoint, fields и params — handler выполнит напрямую. Для account-level используй "account/insights" — "account" заменится на act_xxx. Для редких запросов используй web search чтобы найти правильные FB API endpoints и fields.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        endpoint: { type: 'string', description: 'FB API endpoint (account/insights, {campaign_id}/adsets)' },
+        method: { type: 'string', enum: ['GET', 'POST'], description: 'HTTP метод (по умолчанию GET)' },
+        fields: { type: 'string', description: 'Поля через запятую (spend,impressions,clicks,ctr)' },
+        params: { type: 'object', description: 'Доп. параметры (breakdowns, time_range, filtering)' },
+      },
+      required: ['userAccountId', 'endpoint'],
     },
   },
   {

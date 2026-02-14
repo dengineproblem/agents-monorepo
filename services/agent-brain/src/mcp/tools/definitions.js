@@ -138,7 +138,7 @@ export const creativeTools = [
 ];
 
 /**
- * Ads Agent Tools (24 tools)
+ * Ads Agent Tools (30 tools)
  * All tools from toolDefs with handlers
  */
 export const adsTools = [
@@ -178,6 +178,14 @@ export const adsTools = [
   // WRITE tools - Direct FB Campaign Management
   createMCPTool('pauseCampaign', AdsToolDefs.pauseCampaign, adsHandlers.pauseCampaign, 'ads'),
   createMCPTool('resumeCampaign', AdsToolDefs.resumeCampaign, adsHandlers.resumeCampaign, 'ads'),
+  // WRITE tools - Direct FB Entity Modifications
+  createMCPTool('updateTargeting', AdsToolDefs.updateTargeting, adsHandlers.updateTargeting, 'ads'),
+  createMCPTool('updateSchedule', AdsToolDefs.updateSchedule, adsHandlers.updateSchedule, 'ads'),
+  createMCPTool('updateBidStrategy', AdsToolDefs.updateBidStrategy, adsHandlers.updateBidStrategy, 'ads'),
+  createMCPTool('renameEntity', AdsToolDefs.renameEntity, adsHandlers.renameEntity, 'ads'),
+  createMCPTool('updateCampaignBudget', AdsToolDefs.updateCampaignBudget, adsHandlers.updateCampaignBudget, 'ads'),
+  // READ tools - Insights Breakdown
+  createMCPTool('getInsightsBreakdown', AdsToolDefs.getInsightsBreakdown, adsHandlers.getInsightsBreakdown, 'ads'),
   // WRITE tools - Create AdSets & Ads
   createMCPTool('createAdSet', AdsToolDefs.createAdSet, adsHandlers.createAdSet, 'ads'),
   createMCPTool('createAd', AdsToolDefs.createAd, adsHandlers.createAd, 'ads'),
