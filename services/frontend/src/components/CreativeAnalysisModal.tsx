@@ -344,7 +344,7 @@ export const CreativeAnalysisModal: React.FC<CreativeAnalysisModalProps> = ({
               Анализ креативов
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Креативы с минимум 5 лидами за 90 дней
+              Креативы с минимум 5 лидами за 180 дней
             </p>
           </div>
           <button

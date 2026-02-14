@@ -21,7 +21,16 @@ import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appIn
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const MIN_LEADS = 5;
 const MAX_IMPORT_LIMIT = 500; // Практически без лимита
-const DATE_PRESET = 'last_90d';
+const LOOKBACK_DAYS = 180;
+function getTimeRange(): { since: string; until: string } {
+  const until = new Date();
+  const since = new Date();
+  since.setDate(since.getDate() - LOOKBACK_DAYS);
+  return {
+    since: since.toISOString().slice(0, 10),
+    until: until.toISOString().slice(0, 10),
+  };
+}
 const FB_API_TIMEOUT = 60000; // 60 секунд таймаут для FB API
 const VIDEO_DOWNLOAD_TIMEOUT = 300000; // 5 минут для скачивания видео
 const YTDLP_RETRY_ATTEMPTS = 3; // Количество попыток скачивания через yt-dlp
@@ -262,40 +271,48 @@ async function fetchTopCreatives(
   const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
   const startTime = Date.now();
 
-  // Шаг 1: Получить все ads за период с creative info
-  log.info({ adAccountId: normalizedAccountId, datePreset: DATE_PRESET }, 'Step 1: Fetching ads with creatives');
+  // Шаг 1: Получить все ads за период с creative info (с пагинацией)
+  const timeRange = getTimeRange();
+  log.info({ adAccountId: normalizedAccountId, timeRange }, 'Step 1: Fetching ads with creatives');
 
-  const adsUrl = `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAccountId}/ads?` +
+  const ads: any[] = [];
+  let nextUrl: string | null = `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAccountId}/ads?` +
     `fields=id,name,creative{id,video_id,thumbnail_url,effective_object_story_id,object_story_id}` +
-    `&date_preset=${DATE_PRESET}` +
-    `&limit=500` +
+    `&time_range=${encodeURIComponent(JSON.stringify(timeRange))}` +
+    `&limit=200` +
     `&access_token=${accessToken}`;
 
-  let adsResponse: Response;
-  try {
-    adsResponse = await fetchWithTimeout(adsUrl, {}, FB_API_TIMEOUT);
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      log.error({ adAccountId: normalizedAccountId, timeout: FB_API_TIMEOUT }, 'FB API timeout on ads fetch');
-      throw new Error('Facebook API timeout while fetching ads');
+  while (nextUrl) {
+    let adsResponse: Response;
+    try {
+      adsResponse = await fetchWithTimeout(nextUrl, {}, FB_API_TIMEOUT);
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        log.error({ adAccountId: normalizedAccountId, timeout: FB_API_TIMEOUT }, 'FB API timeout on ads fetch');
+        throw new Error('Facebook API timeout while fetching ads');
+      }
+      throw error;
     }
-    throw error;
+
+    const adsData = await adsResponse.json() as { data?: any[]; paging?: { next?: string }; error?: any };
+
+    if (!adsResponse.ok || adsData.error) {
+      log.error({
+        adAccountId: normalizedAccountId,
+        status: adsResponse.status,
+        errorCode: adsData.error?.code,
+        errorType: adsData.error?.type,
+        errorMessage: adsData.error?.message
+      }, 'Facebook API error on ads fetch');
+      throw new Error(`Facebook API error: ${adsData.error?.message || `HTTP ${adsResponse.status}`}`);
+    }
+
+    const page = adsData.data || [];
+    ads.push(...page);
+    nextUrl = adsData.paging?.next || null;
+    log.debug?.({ fetched: page.length, total: ads.length, hasNext: !!nextUrl }, 'Ads page fetched');
   }
 
-  const adsData = await adsResponse.json() as { data?: any[]; error?: any };
-
-  if (!adsResponse.ok || adsData.error) {
-    log.error({
-      adAccountId: normalizedAccountId,
-      status: adsResponse.status,
-      errorCode: adsData.error?.code,
-      errorType: adsData.error?.type,
-      errorMessage: adsData.error?.message
-    }, 'Facebook API error on ads fetch');
-    throw new Error(`Facebook API error: ${adsData.error?.message || `HTTP ${adsResponse.status}`}`);
-  }
-
-  const ads = adsData.data || [];
   log.info({ count: ads.length, durationMs: Date.now() - startTime }, 'Step 1 completed: Ads fetched');
 
   // Диагностика: показываем структуру первых 5 ads
@@ -336,7 +353,7 @@ async function fetchTopCreatives(
 
     const batchRequests = batch.map((adId: string) => ({
       method: 'GET',
-      relative_url: `${adId}/insights?fields=spend,actions&date_preset=${DATE_PRESET}&action_breakdowns=action_type`
+      relative_url: `${adId}/insights?fields=spend,actions&time_range=${encodeURIComponent(JSON.stringify(timeRange))}&action_breakdowns=action_type`
     }));
 
     const batchUrl = `https://graph.facebook.com/${FB_API_VERSION}/?` +
