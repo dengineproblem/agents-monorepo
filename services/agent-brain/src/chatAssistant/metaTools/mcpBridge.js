@@ -89,7 +89,7 @@ export async function executeMCPTool(toolName, args, context) {
         tool: result.tool,
         args: result.args,
         reason: result.reason,
-        message: `⚠️ Действие "${toolName}" требует подтверждения: ${result.reason}`,
+        message: `⚠️ ${result.reason}. Требуется подтверждение.`,
         _meta: {
           tool: toolName,
           domain,

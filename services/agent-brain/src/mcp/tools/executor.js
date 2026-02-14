@@ -151,12 +151,32 @@ function getToolDangerReason(toolName) {
     launchCreative: 'Запустит рекламу и начнёт расходовать бюджет',
     pauseCreative: 'Остановит рекламу креатива',
     startCreativeTest: 'Запустит A/B тест (~$20 бюджет)',
+    stopCreativeTest: 'Остановит A/B тест',
     // Ads tools
-    pauseCampaign: 'Остановит всю кампанию',
+    pauseCampaign: 'Остановит FB кампанию',
+    resumeCampaign: 'Включит FB кампанию',
     pauseAdSet: 'Остановит адсет',
+    resumeAdSet: 'Возобновит адсет',
+    pauseAd: 'Остановит объявление',
     updateBudget: 'Изменит дневной бюджет адсета',
+    updateCampaignBudget: 'Изменит бюджет кампании',
     updateDirectionBudget: 'Изменит суточный бюджет направления',
-    pauseDirection: 'Остановит все адсеты направления'
+    updateDirectionTargetCPL: 'Изменит целевой CPL направления',
+    pauseDirection: 'Остановит все адсеты направления',
+    resumeDirection: 'Возобновит направление',
+    // Targeting & settings
+    updateTargeting: 'Изменит таргетинг адсета',
+    updateSchedule: 'Изменит расписание адсета',
+    updateBidStrategy: 'Изменит стратегию ставок адсета',
+    renameEntity: 'Переименует сущность в Facebook',
+    customFbQuery: 'Выполнит произвольный запрос к Facebook API',
+    // Launch
+    aiLaunch: 'AI-запуск: паузит старые адсеты, создаёт новые',
+    createAdSet: 'Создаст адсет (начнёт расходовать бюджет)',
+    // Brain
+    triggerBrainOptimizationRun: 'Запустит Brain оптимизацию',
+    // TikTok
+    pauseTikTokCampaign: 'Остановит TikTok кампанию',
   };
 
   return reasons[toolName] || 'Действие может изменить рекламные кампании или бюджеты';

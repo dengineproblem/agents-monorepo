@@ -269,6 +269,39 @@ const CONFIRMATION_REASONS: Record<string, string> = {
 };
 const PENDING_APPROVAL_TTL_MS = 15 * 60 * 1000; // 15 минут
 
+/** Формирует детальное описание действия с конкретными цифрами из аргументов */
+function buildConfirmationDetail(toolName: string, args: Record<string, any>): string {
+  const reason = CONFIRMATION_REASONS[toolName] || 'Действие может изменить рекламные кампании';
+  const details: string[] = [];
+
+  // Бюджет
+  if (args.daily_budget_cents != null) {
+    details.push(`бюджет: $${(args.daily_budget_cents / 100).toFixed(2)}/день`);
+  }
+  if (args.new_budget != null) {
+    details.push(`новый бюджет: $${args.new_budget}/день`);
+  }
+  if (args.new_budget_cents != null) {
+    details.push(`новый бюджет: $${(args.new_budget_cents / 100).toFixed(2)}/день`);
+  }
+  if (args.daily_budget != null && toolName === 'updateCampaignBudget') {
+    details.push(`бюджет: $${(args.daily_budget / 100).toFixed(2)}/день`);
+  }
+  if (args.target_cpl != null) {
+    details.push(`целевой CPL: $${args.target_cpl}`);
+  }
+
+  // Креативы
+  if (Array.isArray(args.creative_ids) && args.creative_ids.length > 0) {
+    details.push(`креативов: ${args.creative_ids.length}`);
+  }
+
+  if (details.length > 0) {
+    return `${reason} (${details.join(', ')})`;
+  }
+  return reason;
+}
+
 // === FAST CONFIRMATION (перехват "Да"/"Нет" до вызова Claude) ===
 const CONFIRMATION_PATTERN = /^(да|ок|ok|yes|go|выполни|выполнить|выполняй|подтверждаю|подтверждай|давай|ладно|конечно|делай|запускай|поехали|погнали|вперёд|вперед|ага|угу|yep|sure|do it|y)\s*[.!]?\s*$/i;
 const REJECTION_PATTERN = /^(нет|не надо|не нужно|отмена|отменить|cancel|no|nope|стоп|stop)\s*[.!]?\s*$/i;
@@ -295,18 +328,102 @@ function buildAccountKeyboard(accounts: import('./types.js').AdAccountInfo[]) {
   };
 }
 
-function formatFastConfirmationResponse(_toolName: string, result: any, reason: string): string {
+/**
+ * Форматирует ответ после fast confirmation — информативное уведомление с деталями.
+ * Brain handlers возвращают { success, message, verification? } — используем всё.
+ */
+function formatFastConfirmationResponse(
+  toolName: string,
+  result: any,
+  reason: string,
+  args: Record<string, any>,
+): string {
   if (!result || typeof result !== 'object') return `✅ ${reason}`;
 
   const data = result.data || result;
+  const brainMsg = data.message && typeof data.message === 'string' ? data.message : null;
+  const verification = data.verification;
+  const icon = data.warning || verification?.warning ? '⚠️' : '✅';
 
-  // Все handlers возвращают { success, message } — используем message напрямую
-  if (data.message && typeof data.message === 'string') {
-    const icon = data.warning ? '⚠️' : '✅';
-    return `${icon} ${data.message}`;
+  // Основное сообщение (brain message или fallback из аргументов)
+  let mainLine = brainMsg || buildFallbackMessage(toolName, args);
+
+  // Добавляем верификацию (before → after)
+  const details: string[] = [];
+  if (verification) {
+    if (verification.before && verification.after) {
+      details.push(`${verification.before} → ${verification.after}`);
+    }
+    if (verification.warning) {
+      details.push(`⚠️ ${verification.warning}`);
+    }
   }
 
-  return `✅ ${reason}`;
+  if (details.length > 0) {
+    return `${icon} ${mainLine}\n${details.join('\n')}`;
+  }
+
+  return `${icon} ${mainLine}`;
+}
+
+/** Резервное сообщение из аргументов — когда brain не вернул message */
+function buildFallbackMessage(toolName: string, args: Record<string, any>): string {
+  switch (toolName) {
+    case 'updateDirectionBudget':
+      return `Бюджет направления изменён на $${args.new_budget}/день`;
+    case 'updateDirectionTargetCPL':
+      return `Целевой CPL направления изменён на $${args.target_cpl}`;
+    case 'updateBudget':
+      return `Бюджет адсета изменён на $${((args.new_budget_cents || 0) / 100).toFixed(2)}/день`;
+    case 'scaleBudget':
+      return `Бюджет адсета масштабирован`;
+    case 'updateCampaignBudget':
+      return args.daily_budget
+        ? `Бюджет кампании изменён на $${(args.daily_budget / 100).toFixed(2)}/день`
+        : `Бюджет кампании изменён`;
+    case 'pauseAdSet':
+      return `Адсет ${args.adset_id} поставлен на паузу`;
+    case 'resumeAdSet':
+      return `Адсет ${args.adset_id} возобновлён`;
+    case 'pauseAd':
+      return `Объявление ${args.ad_id} поставлено на паузу`;
+    case 'resumeAd':
+      return `Объявление ${args.ad_id} возобновлено`;
+    case 'pauseDirection':
+      return `Направление поставлено на паузу`;
+    case 'resumeDirection':
+      return `Направление возобновлено`;
+    case 'pauseCampaign':
+      return `Кампания ${args.campaign_id} поставлена на паузу`;
+    case 'resumeCampaign':
+      return `Кампания ${args.campaign_id} возобновлена`;
+    case 'pauseCreative':
+      return `Креатив поставлен на паузу`;
+    case 'launchCreative':
+      return `Креатив запущен`;
+    case 'startCreativeTest':
+      return `A/B тест запущен`;
+    case 'stopCreativeTest':
+      return `A/B тест остановлен`;
+    case 'updateTargeting':
+      return `Таргетинг адсета ${args.adset_id} обновлён`;
+    case 'updateSchedule':
+      return `Расписание адсета ${args.adset_id} обновлено`;
+    case 'updateBidStrategy':
+      return `Стратегия ставок адсета ${args.adset_id} обновлена`;
+    case 'renameEntity':
+      return `${args.entity_type || 'Сущность'} переименован(а) в "${args.new_name}"`;
+    case 'aiLaunch':
+      return `AI-запуск выполнен`;
+    case 'createAdSet':
+      return `Адсет создан`;
+    case 'customFbQuery':
+      return `Запрос к Facebook API выполнен`;
+    case 'pauseTikTokCampaign':
+      return `TikTok кампания поставлена на паузу`;
+    default:
+      return 'Действие выполнено';
+  }
 }
 
 async function handleFastConfirmation(
@@ -346,11 +463,17 @@ async function handleFastConfirmation(
     const reason = CONFIRMATION_REASONS[pending.tool] || 'Действие выполнено';
     let responseText: string;
 
-    if (result?.success === false) {
-      responseText = `❌ Ошибка: ${result.error || 'не удалось выполнить операцию'}`;
-      logger.warn({ toolName: pending.tool, error: result.error }, 'Fast confirmation: tool failed');
+    // Brain возвращает { success: true, result: { success, message, ... } }
+    // Проверяем и внешний wrapper, и вложенный результат tool handler'а
+    const toolResult = result?.result ?? result;
+    const isFailed = result?.success === false || toolResult?.success === false;
+
+    if (isFailed) {
+      const errorMsg = toolResult?.error || toolResult?.message || result?.error || 'не удалось выполнить операцию';
+      responseText = `❌ Ошибка: ${errorMsg}`;
+      logger.warn({ toolName: pending.tool, error: errorMsg }, 'Fast confirmation: tool failed');
     } else {
-      responseText = formatFastConfirmationResponse(pending.tool, result, reason);
+      responseText = formatFastConfirmationResponse(pending.tool, toolResult, reason, pending.args);
     }
 
     // Отправка в Telegram (Markdown с fallback)
@@ -834,6 +957,14 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     let systemPrompt: string;
     let domainTools: (Anthropic.Tool | Anthropic.Messages.WebSearchTool20250305)[];
 
+    // Инжект текущего аккаунта в prompt (multi-account)
+    const activeAccountName = session.selectedAccountId
+      ? getUserMemoryValue(userAccountId, 'selected_account_name')
+      : null;
+    const accountHeader = activeAccountName
+      ? `\nТекущий рекламный аккаунт: ${activeAccountName}. Все данные и действия относятся ТОЛЬКО к этому аккаунту.\n`
+      : '';
+
     // Загрузить краткий контекст из последних сообщений для роутера
     let recentContext = '';
     try {
@@ -899,7 +1030,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         const fullPrompt = basePrompt + '\n\n' + specificPrompt;
         const userMemory = readUserMemory(userAccountId);
         const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
-        systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
+        systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
 
         const filtered = getToolsForDomainWithStack(routeResult.domain, session.stack);
         domainTools = domainConfig.includeWebSearch
@@ -917,7 +1048,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         const fallbackPrompt = fs.readFileSync(path.join(groupsDir, 'main', 'CLAUDE.md'), 'utf-8');
         const userMemory = readUserMemory(userAccountId);
         const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
-        systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fallbackPrompt}`;
+        systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fallbackPrompt}`;
         domainTools = [...tools, webSearchTool];
         logger.info({ chatId }, 'Fallback to monolithic (unknown domain)');
       }
@@ -926,7 +1057,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       const fallbackPrompt = fs.readFileSync(path.join(groupsDir, 'main', 'CLAUDE.md'), 'utf-8');
       const userMemory = readUserMemory(userAccountId);
       const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
-      systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fallbackPrompt}`;
+      systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fallbackPrompt}`;
       domainTools = [...tools, webSearchTool];
       logger.info({ chatId }, 'Fallback to monolithic (cross-domain)');
     }
@@ -934,9 +1065,19 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     // Загрузка истории сообщений из SQLite для контекста
     const historyMessages: Anthropic.MessageParam[] = [];
     try {
-      const recentRows = getRecentMessages(chatId, 10);
+      let recentRows = getRecentMessages(chatId, 10);
       let totalChars = 0;
       const MAX_HISTORY_CHARS = 8000;
+
+      // При смене аккаунта — отбрасываем историю до момента переключения
+      if (session.accountSwitchedAt) {
+        const switchedAt = session.accountSwitchedAt;
+        const beforeCount = recentRows.length;
+        recentRows = recentRows.filter(r => r.timestamp >= switchedAt);
+        if (recentRows.length < beforeCount) {
+          logger.info({ chatId, dropped: beforeCount - recentRows.length }, 'Dropped pre-switch conversation history');
+        }
+      }
 
       // Формируем пары user/assistant из сохранённых сообщений
       const pairs: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -1129,7 +1270,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
                   args: currentArgs,
                   timestamp: Date.now(),
                 };
-                const reason = CONFIRMATION_REASONS[block.name] || 'Действие может изменить рекламные кампании';
+                const reason = buildConfirmationDetail(block.name, currentArgs);
                 logger.info({ toolName: block.name, reason, args: currentArgs }, 'Tool blocked, waiting for user confirmation');
 
                 toolResults.push({
@@ -1138,7 +1279,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
                   content: JSON.stringify({
                     approval_required: true,
                     reason,
-                    message: `Требуется подтверждение пользователя. Опиши что собираешься сделать (${reason}) и спроси "Выполнить?". НЕ вызывай tool повторно пока пользователь не подтвердит.`,
+                    message: `Требуется подтверждение пользователя. Покажи пользователю ТОЧНЫЕ параметры: ${reason}. Спроси "Выполнить?". НЕ вызывай tool повторно пока пользователь не подтвердит.`,
                   }),
                 });
                 continue;

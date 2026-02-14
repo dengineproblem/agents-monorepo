@@ -16,6 +16,7 @@ export interface UserSession {
   lastDomain: string | null; // sticky domain — последний роутинг для follow-up сообщений
   pendingReferenceImages: string[] | null; // URL'ы из media_group, автоинжект в generateCreatives
   pendingApproval: { tool: string; args: Record<string, any>; timestamp: number } | null; // Ожидает подтверждения пользователя
+  accountSwitchedAt: string | null; // ISO timestamp — conversation history до этого момента пропускается
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 минут
@@ -65,6 +66,7 @@ export function createSession(
     lastDomain: null,
     pendingReferenceImages: null,
     pendingApproval: null,
+    accountSwitchedAt: null,
   };
   sessions.set(telegramId, session);
   logger.info({
@@ -89,6 +91,7 @@ export function setSelectedAccount(
 ): void {
   const session = sessions.get(telegramId);
   if (session) {
+    const previousAccountId = session.selectedAccountId;
     session.selectedAccountId = accountId;
     session.stack = [...accountStack];
     // Don't wipe the current key if account doesn't have its own key.
@@ -96,8 +99,13 @@ export function setSelectedAccount(
     if (typeof anthropicApiKey === 'string' && anthropicApiKey.trim().length > 0) {
       session.anthropicApiKey = anthropicApiKey;
     }
+    // Сброс conversation context при смене аккаунта (чтобы Claude не путал данные)
+    if (previousAccountId !== accountId) {
+      session.accountSwitchedAt = new Date().toISOString();
+      session.lastDomain = null;
+    }
     session.lastActivity = Date.now();
-    logger.info({ telegramId, accountId, accountStack }, 'Account selected');
+    logger.info({ telegramId, accountId, accountStack, switched: previousAccountId !== accountId }, 'Account selected');
   }
 }
 

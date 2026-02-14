@@ -878,7 +878,7 @@ export const adsHandlers = {
       };
 
       const res = await axios.post(
-        `${AGENT_SERVICE_URL}/api/campaign-builder/manual-launch-multi`,
+        `${AGENT_SERVICE_URL}/campaign-builder/manual-launch-multi`,
         payload,
         { timeout: 90_000 }
       );
@@ -2791,7 +2791,7 @@ export const adsHandlers = {
               success: r.success,
               message: r.message || r.error
             })),
-            report_text: `Brain Mini (fast path): ${successCount}/${executionResults.length} действий выполнено`,
+            report_text: this.generateDetailedFastPathReport(executionResults, preApprovedProposals, successCount),
             status: failCount === 0 ? 'success' : 'partial',
             actions_taken: successCount,
             actions_failed: failCount
@@ -3909,7 +3909,7 @@ export const adsHandlers = {
       logger.info({ handler: 'aiLaunch', payload_start_mode: payload.start_mode }, 'aiLaunch: sending payload');
 
       const res = await axios.post(
-        `${AGENT_SERVICE_URL}/api/campaign-builder/auto-launch-v2`,
+        `${AGENT_SERVICE_URL}/campaign-builder/auto-launch-v2`,
         payload,
         { timeout: 180_000 }
       );
@@ -3957,5 +3957,89 @@ export const adsHandlers = {
       { campaign_id, campaign_name, direction_name, goal, target_cpl_cents },
       context
     );
+  },
+
+  /**
+   * Генерирует детальный отчёт для fast path execution
+   */
+  generateDetailedFastPathReport(executionResults, proposals, successCount) {
+    const ACTION_LABELS = {
+      updateBudget: '💰 Изменение бюджета',
+      pauseAdSet: '⏸️ Пауза группы',
+      pauseAd: '⏸️ Пауза объявления',
+      enableAdSet: '▶️ Включение группы',
+      enableAd: '▶️ Включение объявления',
+      createAdSet: '➕ Создание группы',
+      launchNewCreatives: '🚀 Запуск креативов',
+      review: '👀 Требует внимания'
+    };
+
+    const lines = [];
+    const total = executionResults.length;
+    const failCount = total - successCount;
+
+    // Заголовок
+    if (failCount === 0) {
+      lines.push(`✅ Brain Mini: все ${total} действий выполнены успешно`);
+    } else {
+      lines.push(`⚠️ Brain Mini: ${successCount}/${total} действий выполнено`);
+    }
+    lines.push('');
+
+    // Группируем по direction_name
+    const grouped = new Map();
+    for (let i = 0; i < executionResults.length; i++) {
+      const r = executionResults[i];
+      const p = proposals[i];
+      const dirName = p?.direction_name || r?.proposal?.direction_name || 'Общие';
+      if (!grouped.has(dirName)) grouped.set(dirName, []);
+      grouped.get(dirName).push({ result: r, proposal: p });
+    }
+
+    for (const [dirName, items] of grouped) {
+      if (grouped.size > 1 || dirName !== 'Общие') {
+        lines.push(`📁 ${dirName}`);
+      }
+
+      for (const { result: r, proposal: p } of items) {
+        const action = p?.action || r?.proposal?.action || 'unknown';
+        const label = ACTION_LABELS[action] || action;
+        const icon = r.success ? '✓' : '✗';
+        const entityName = p?.entity_name || r?.proposal?.entity_name || '';
+
+        // Основная строка: действие + название сущности
+        lines.push(`  ${icon} ${label}`);
+        if (entityName) {
+          lines.push(`    ${entityName}`);
+        }
+
+        // Детали бюджета
+        const params = p?.suggested_action_params || {};
+        if (action === 'updateBudget' && params.current_budget_cents && params.new_budget_cents) {
+          const current = `$${(params.current_budget_cents / 100).toFixed(2)}`;
+          const next = `$${(params.new_budget_cents / 100).toFixed(2)}`;
+          const pct = params.increase_percent
+            ? `+${params.increase_percent}%`
+            : params.decrease_percent
+              ? `-${params.decrease_percent}%`
+              : '';
+          lines.push(`    ${current} → ${next}${pct ? ` (${pct})` : ''}`);
+        }
+
+        // Причина
+        if (p?.reason) {
+          lines.push(`    Причина: ${p.reason}`);
+        }
+
+        // Ошибка
+        if (r.error) {
+          lines.push(`    ❌ ${r.error}`);
+        }
+
+        lines.push('');
+      }
+    }
+
+    return lines.join('\n').trim();
   }
 };
