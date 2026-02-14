@@ -54,12 +54,14 @@ export const tools: Anthropic.Tool[] = [
           description: 'Период для метрик',
         },
         status: {
-          type: 'array',
-          items: {
-            type: 'string',
-            enum: ['ACTIVE', 'PAUSED'],
-          },
+          type: 'string',
+          enum: ['ACTIVE', 'PAUSED', 'all'],
           description: 'Фильтр по статусу кампаний',
+        },
+        campaign_type: {
+          type: 'string',
+          enum: ['internal', 'external', 'all'],
+          description: 'internal = привязаны к directions, external = без directions, all = все',
         },
       },
       required: ['userAccountId'],
@@ -72,10 +74,10 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        campaignId: { type: 'string', description: 'ID Facebook кампании' },
+        campaign_id: { type: 'string', description: 'ID Facebook кампании' },
         period: { type: 'string' },
       },
-      required: ['userAccountId', 'campaignId'],
+      required: ['userAccountId'],
     },
   },
   {
@@ -85,23 +87,23 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        campaignId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'ID кампании в Facebook' },
         period: { type: 'string' },
       },
-      required: ['userAccountId', 'campaignId'],
+      required: ['userAccountId', 'campaign_id'],
     },
   },
   {
     name: 'getAds',
-    description: 'Получить объявления адсета',
+    description: 'Получить статистику на уровне объявлений (ads level) с метриками',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adSetId: { type: 'string', description: 'ID адсета Facebook' },
+        campaign_id: { type: 'string', description: 'ID кампании (опционально)' },
         period: { type: 'string' },
       },
-      required: ['userAccountId', 'adSetId'],
+      required: ['userAccountId'],
     },
   },
   {
@@ -118,10 +120,10 @@ export const tools: Anthropic.Tool[] = [
         },
         date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
         date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
-        breakdown: {
+        group_by: {
           type: 'string',
-          enum: ['day', 'week', 'campaign', 'adset'],
-          description: 'Тип разбивки отчёта',
+          enum: ['campaign', 'day', 'total'],
+          description: 'Группировка данных',
         },
       },
       required: ['userAccountId'],
@@ -134,10 +136,10 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        directionId: { type: 'string', description: 'UUID направления' },
+        direction_id: { type: 'string', description: 'UUID направления' },
         period: { type: 'string' },
       },
-      required: ['userAccountId', 'directionId'],
+      required: ['userAccountId', 'direction_id'],
     },
   },
   {
@@ -249,9 +251,9 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adSetId: { type: 'string' },
+        adset_id: { type: 'string', description: 'ID адсета Facebook' },
       },
-      required: ['userAccountId', 'adSetId'],
+      required: ['userAccountId', 'adset_id'],
     },
   },
   {
@@ -261,9 +263,9 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adSetId: { type: 'string' },
+        adset_id: { type: 'string', description: 'ID адсета Facebook' },
       },
-      required: ['userAccountId', 'adSetId'],
+      required: ['userAccountId', 'adset_id'],
     },
   },
   {
@@ -273,10 +275,10 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adSetId: { type: 'string' },
-        dailyBudget: { type: 'number', description: 'Новый суточный бюджет в долларах' },
+        adset_id: { type: 'string', description: 'ID адсета Facebook' },
+        new_budget_cents: { type: 'number', description: 'Новый суточный бюджет в центах (минимум 300, т.е. $3). Пример: $10 = 1000' },
       },
-      required: ['userAccountId', 'adSetId', 'dailyBudget'],
+      required: ['userAccountId', 'adset_id', 'new_budget_cents'],
     },
   },
   {
@@ -294,29 +296,16 @@ export const tools: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'scaleBudget',
-    description: 'Масштабировать бюджет с процентным изменением',
-    input_schema: {
-      type: 'object',
-      properties: {
-        userAccountId: { type: 'string' },
-        adSetId: { type: 'string', description: 'ID адсета Facebook' },
-        scalePercent: { type: 'number', description: 'Процент изменения (например 20 = +20%)' },
-      },
-      required: ['userAccountId', 'adSetId', 'scalePercent'],
-    },
-  },
-  {
     name: 'pauseAd',
     description: 'Поставить объявление на паузу',
     input_schema: {
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adId: { type: 'string', description: 'ID объявления Facebook' },
+        ad_id: { type: 'string', description: 'ID объявления Facebook' },
         reason: { type: 'string', description: 'Причина паузы' },
       },
-      required: ['userAccountId', 'adId'],
+      required: ['userAccountId', 'ad_id'],
     },
   },
   {
@@ -326,9 +315,9 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        adId: { type: 'string', description: 'ID объявления Facebook' },
+        ad_id: { type: 'string', description: 'ID объявления Facebook' },
       },
-      required: ['userAccountId', 'adId'],
+      required: ['userAccountId', 'ad_id'],
     },
   },
   {
@@ -1093,9 +1082,9 @@ export const tools: Anthropic.Tool[] = [
       type: 'object',
       properties: {
         userAccountId: { type: 'string' },
-        dialogId: { type: 'string', description: 'ID диалога' },
+        contact_phone: { type: 'string', description: 'Номер телефона контакта (например: 79001234567)' },
       },
-      required: ['userAccountId', 'dialogId'],
+      required: ['userAccountId', 'contact_phone'],
     },
   },
   {
@@ -1239,7 +1228,7 @@ const DETAILED_LOG_TOOLS = new Set([
   'aiLaunch', 'createAdSet', 'launchCreative',
   'pauseDirection', 'resumeDirection', 'updateDirectionBudget',
   'pauseCampaign', 'resumeCampaign',
-  'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
+  'pauseAdSet', 'resumeAdSet', 'updateBudget',
   'approveBrainActions',
 ]);
 

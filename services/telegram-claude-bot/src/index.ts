@@ -285,6 +285,16 @@ function isRejectionMessage(text: string): boolean {
   return REJECTION_PATTERN.test(cleaned);
 }
 
+// === INLINE KEYBOARD для выбора аккаунта ===
+function buildAccountKeyboard(accounts: import('./types.js').AdAccountInfo[]) {
+  return {
+    inline_keyboard: accounts.map((acc, i) => ([{
+      text: acc.name,
+      callback_data: `select_account:${i}`,
+    }])),
+  };
+}
+
 function formatFastConfirmationResponse(_toolName: string, result: any, reason: string): string {
   if (!result || typeof result !== 'object') return `✅ ${reason}`;
 
@@ -733,37 +743,40 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         logger.info({ telegramId, chatId }, 'Account switch requested');
         clearSelectedAccount(telegramId!);
         session = getSession(telegramId!)!;
-        const accountList = session.adAccounts
-          .map((acc, i) => `${i + 1}. ${acc.name}`)
-          .join('\n');
-        await bot.sendMessage(chatId, `Выберите аккаунт:\n\n${accountList}\n\nОтправьте номер.`);
+        const currentName = getUserMemoryValue(userAccountId, 'selected_account_name');
+        const header = currentName
+          ? `Текущий аккаунт: *${currentName}*\n\nВыберите аккаунт:`
+          : 'Выберите аккаунт:';
+        await bot.sendMessage(chatId, header, {
+          parse_mode: 'Markdown',
+          reply_markup: buildAccountKeyboard(session.adAccounts),
+        });
         return;
       }
 
       // Если аккаунт не выбран — проверяем, выбирает ли пользователь сейчас
       if (!session.selectedAccountId) {
+        // Fallback: текстовый ввод номера (обратная совместимость)
         const num = parseInt(truncatedMessage, 10);
         if (num > 0 && num <= session.adAccounts.length) {
-          // Пользователь выбрал аккаунт
           const acc = session.adAccounts[num - 1];
           setSelectedAccount(telegramId!, acc.id, acc.stack, acc.anthropicApiKey);
           session = getSession(telegramId!)!;
           updateUserMemory(userAccountId, 'selected_account', acc.id);
           updateUserMemory(userAccountId, 'selected_account_name', acc.name);
           updateUserMemory(userAccountId, 'stack', acc.stack.join(','));
-          logger.info({ telegramId, chatId, accountId: acc.id, accountName: acc.name }, 'Account selected by user');
+          logger.info({ telegramId, chatId, accountId: acc.id, accountName: acc.name }, 'Account selected by user (text)');
           await bot.sendMessage(chatId, `Работаем с аккаунтом: *${acc.name}*. Чем могу помочь?`, {
             parse_mode: 'Markdown',
           });
           return;
         }
 
-        // Аккаунт не выбран — показать список
+        // Аккаунт не выбран — показать inline кнопки
         logger.info({ telegramId, chatId }, 'Multi-account: prompting user for selection');
-        const accountList = session.adAccounts
-          .map((acc, i) => `${i + 1}. ${acc.name}`)
-          .join('\n');
-        await bot.sendMessage(chatId, `У вас несколько аккаунтов. Выберите:\n\n${accountList}\n\nОтправьте номер.`);
+        await bot.sendMessage(chatId, 'У вас несколько аккаунтов. Выберите:', {
+          reply_markup: buildAccountKeyboard(session.adAccounts),
+        });
         return;
       }
     }
@@ -1362,6 +1375,57 @@ async function initBot(): Promise<void> {
         }, 1500),
       };
       mediaGroupBuffer.set(groupId, entry);
+    }
+  });
+
+  // Обработка inline кнопок (выбор аккаунта)
+  bot.on('callback_query', async (query) => {
+    try {
+      const data = query.data;
+      if (!data || !data.startsWith('select_account:')) {
+        await bot.answerCallbackQuery(query.id);
+        return;
+      }
+
+      const index = parseInt(data.split(':')[1], 10);
+      const telegramId = query.from.id;
+      const session = getSession(telegramId);
+
+      if (!session) {
+        await bot.answerCallbackQuery(query.id, { text: 'Сессия истекла. Отправьте новое сообщение.' });
+        return;
+      }
+
+      if (index < 0 || index >= session.adAccounts.length) {
+        await bot.answerCallbackQuery(query.id, { text: 'Аккаунт не найден.' });
+        return;
+      }
+
+      const acc = session.adAccounts[index];
+      setSelectedAccount(telegramId, acc.id, acc.stack, acc.anthropicApiKey);
+      updateUserMemory(session.userAccountId, 'selected_account', acc.id);
+      updateUserMemory(session.userAccountId, 'selected_account_name', acc.name);
+      updateUserMemory(session.userAccountId, 'stack', acc.stack.join(','));
+
+      logger.info({ telegramId, accountId: acc.id, accountName: acc.name }, 'Account selected via inline button');
+
+      await bot.answerCallbackQuery(query.id);
+
+      // Заменить кнопки на подтверждение
+      if (query.message) {
+        const chatId = query.message.chat.id;
+        const messageId = query.message.message_id;
+        await bot.editMessageText(`✅ Аккаунт: *${acc.name}*. Чем могу помочь?`, {
+          chat_id: chatId,
+          message_id: messageId,
+          parse_mode: 'Markdown',
+        });
+      }
+    } catch (error: any) {
+      logger.error({ error: error.message }, 'Callback query error');
+      try {
+        await bot.answerCallbackQuery(query.id, { text: 'Ошибка. Попробуйте ещё раз.' });
+      } catch { /* ignore */ }
     }
   });
 
