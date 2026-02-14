@@ -857,10 +857,31 @@ export const adsHandlers = {
       return adsDryRunHandlers.createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name }, { userAccountId, adAccountId, adAccountDbId });
     }
 
+    // Resolve creative_ids: if not UUIDs, look up by name in DB
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let resolvedCreativeIds = creative_ids;
+    const nonUuids = creative_ids.filter(id => !UUID_RE.test(id));
+    if (nonUuids.length > 0) {
+      logger.info({ handler: 'createAdSet', nonUuids }, 'createAdSet: resolving non-UUID creative_ids by name');
+      const { data: found } = await supabase
+        .from('user_creatives')
+        .select('id, name')
+        .eq('user_id', userAccountId)
+        .eq('direction_id', direction_id)
+        .in('name', nonUuids);
+      if (found && found.length > 0) {
+        const nameToId = Object.fromEntries(found.map(c => [c.name, c.id]));
+        resolvedCreativeIds = creative_ids.map(id => nameToId[id] || id);
+        logger.info({ handler: 'createAdSet', resolved: resolvedCreativeIds }, 'createAdSet: creative_ids resolved');
+      } else {
+        logger.warn({ handler: 'createAdSet', nonUuids }, 'createAdSet: could not resolve creative names to UUIDs');
+      }
+    }
+
     logger.info({
       handler: 'createAdSet',
       direction_id,
-      creative_ids,
+      creative_ids: resolvedCreativeIds,
       start_mode,
       proxy: 'agent-service/manual-launch-multi',
     }, 'createAdSet: proxying to agent-service');
@@ -872,7 +893,7 @@ export const adsHandlers = {
         direction_id,
         start_mode: start_mode || 'now',
         adsets: [{
-          creative_ids,
+          creative_ids: resolvedCreativeIds,
           daily_budget_cents: daily_budget_cents || undefined,
         }],
       };

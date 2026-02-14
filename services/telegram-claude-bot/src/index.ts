@@ -42,7 +42,7 @@ import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
 import { tools, executeTool } from './tools.js';
 import { routeMessage, ACCOUNT_SWITCH_PATTERN } from './router.js';
-import { DOMAINS, getToolsForDomain, getToolsForDomainWithStack } from './domains.js';
+import { DOMAINS, getToolsForDomain, getToolsForDomainWithStack, getMergedToolsForDomains } from './domains.js';
 import { ensureMemoryDir, readUserMemory, getUserMemoryValue, updateUserMemory } from './memory.js';
 import {
   UserSession,
@@ -1016,33 +1016,59 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     if (routeResult) {
       const domainConfig = DOMAINS[routeResult.domain];
       if (domainConfig) {
-        // Load shared base + domain-specific prompt
+        // Load shared base prompt
         const basePath = path.join(groupsDir, 'shared', 'BASE.md');
-        const domainPath = path.join(groupsDir, domainConfig.promptFile);
-
         const basePrompt = fs.existsSync(basePath)
           ? fs.readFileSync(basePath, 'utf-8')
           : '';
-        const specificPrompt = fs.existsSync(domainPath)
-          ? fs.readFileSync(domainPath, 'utf-8')
-          : '';
-
-        const fullPrompt = basePrompt + '\n\n' + specificPrompt;
         const userMemory = readUserMemory(userAccountId);
         const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
-        systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
 
-        const filtered = getToolsForDomainWithStack(routeResult.domain, session.stack);
-        domainTools = domainConfig.includeWebSearch
-          ? [...filtered, webSearchTool]
-          : filtered;
+        if (routeResult.domains && routeResult.domains.length > 1) {
+          // Cross-domain: merge prompts and tools from matched domains
+          const promptParts = routeResult.domains
+            .map(d => DOMAINS[d]?.promptFile)
+            .filter(Boolean)
+            .map(f => {
+              const p = path.join(groupsDir, f!);
+              return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
+            })
+            .filter(p => p.length > 0);
 
-        logger.info({
-          chatId,
-          domain: routeResult.domain,
-          method: routeResult.method,
-          toolCount: filtered.length,
-        }, 'Domain routing applied');
+          const fullPrompt = basePrompt + '\n\n' + promptParts.join('\n\n---\n\n');
+          systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
+
+          const merged = getMergedToolsForDomains(routeResult.domains, session.stack);
+          domainTools = [...merged, webSearchTool];
+
+          logger.info({
+            chatId,
+            domains: routeResult.domains,
+            method: routeResult.method,
+            toolCount: merged.length,
+          }, 'Cross-domain routing applied (merged)');
+        } else {
+          // Single domain
+          const domainPath = path.join(groupsDir, domainConfig.promptFile);
+          const specificPrompt = fs.existsSync(domainPath)
+            ? fs.readFileSync(domainPath, 'utf-8')
+            : '';
+
+          const fullPrompt = basePrompt + '\n\n' + specificPrompt;
+          systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fullPrompt}`;
+
+          const filtered = getToolsForDomainWithStack(routeResult.domain, session.stack);
+          domainTools = domainConfig.includeWebSearch
+            ? [...filtered, webSearchTool]
+            : filtered;
+
+          logger.info({
+            chatId,
+            domain: routeResult.domain,
+            method: routeResult.method,
+            toolCount: filtered.length,
+          }, 'Domain routing applied');
+        }
       } else {
         // Unknown domain — fallback
         const fallbackPrompt = fs.readFileSync(path.join(groupsDir, 'main', 'CLAUDE.md'), 'utf-8');
@@ -1053,13 +1079,13 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
         logger.info({ chatId }, 'Fallback to monolithic (unknown domain)');
       }
     } else {
-      // Cross-domain or error — fallback to all tools
+      // LLM routing error — fallback to all tools
       const fallbackPrompt = fs.readFileSync(path.join(groupsDir, 'main', 'CLAUDE.md'), 'utf-8');
       const userMemory = readUserMemory(userAccountId);
       const memoryBlock = userMemory ? `\n\n## Память о пользователе\n${userMemory}` : '';
       systemPrompt = `userAccountId пользователя: ${userAccountId}\n\nВсегда используй этот userAccountId при вызове tools.${accountHeader}${securityReminder}${memoryBlock}${greetingInstruction}\n\n${fallbackPrompt}`;
       domainTools = [...tools, webSearchTool];
-      logger.info({ chatId }, 'Fallback to monolithic (cross-domain)');
+      logger.info({ chatId }, 'Fallback to monolithic (routing error)');
     }
 
     // Загрузка истории сообщений из SQLite для контекста

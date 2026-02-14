@@ -486,7 +486,7 @@ export const tools: Anthropic.Tool[] = [
         creative_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Массив ID креативов для запуска',
+          description: 'Массив UUID креативов из поля "id" ответа getDirectionCreatives. НЕ name/filename! Пример: ["a1b2c3d4-..."]',
         },
         daily_budget_cents: { type: 'number', description: 'Суточный бюджет в ЦЕНТАХ. $1 = 100 центов. Примеры: $5 = 500, $10 = 1000, $50 = 5000. Опционально — берётся из direction.' },
         start_mode: {

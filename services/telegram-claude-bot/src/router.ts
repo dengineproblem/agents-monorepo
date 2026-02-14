@@ -10,6 +10,7 @@ import { logger } from './logger.js';
 
 export interface RouteResult {
   domain: string;
+  domains?: string[];     // set when multiple domains matched (cross-domain merge)
   method: 'keyword' | 'llm' | 'fallback';
   // Optional token usage (for legacy daily spending limits).
   // Anthropic Messages API returns input/output tokens; we pass through as-is.
@@ -94,9 +95,9 @@ const KEYWORD_RULES: KeywordRule[] = [
 
 /**
  * Phase 1: Keyword-based classification (synchronous, 0ms)
- * Returns RouteResult for single domain, 'cross-domain' for multi-match, null for no match
+ * Returns RouteResult for single or multi-domain match, null for no match
  */
-function classifyByKeywords(message: string): RouteResult | 'cross-domain' | null {
+function classifyByKeywords(message: string): RouteResult | null {
   const matched: string[] = [];
 
   for (const rule of KEYWORD_RULES) {
@@ -107,10 +108,10 @@ function classifyByKeywords(message: string): RouteResult | 'cross-domain' | nul
 
   if (matched.length === 0) return null;
 
-  // Cross-domain: multiple domains matched → caller loads all tools
+  // Cross-domain: merge tools from matched domains instead of fallback to all
   if (matched.length > 1) {
-    logger.info({ domains: matched }, 'Cross-domain detected, fallback to all tools');
-    return 'cross-domain';
+    logger.info({ domains: matched }, 'Cross-domain detected, merging tools');
+    return { domain: matched[0], domains: matched, method: 'keyword' };
   }
 
   return { domain: matched[0], method: 'keyword' };
@@ -253,9 +254,6 @@ export async function routeMessage(
 ): Promise<RouteResult | null> {
   // Phase 1: keyword matching (0ms)
   const keywordResult = classifyByKeywords(message);
-
-  // Cross-domain: immediately return null → caller loads all tools
-  if (keywordResult === 'cross-domain') return null;
 
   if (keywordResult) {
     // Фильтрация по стеку — если домен недоступен, fallback на general

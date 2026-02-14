@@ -143,3 +143,31 @@ export function getToolsForDomainWithStack(
   }
   return filtered;
 }
+
+/**
+ * Merge tools from multiple domains (cross-domain).
+ * Deduplicates by tool name. Filters by user stack.
+ */
+export function getMergedToolsForDomains(
+  domains: string[],
+  userStack: string[],
+): Anthropic.Tool[] {
+  const seen = new Set<string>();
+  const merged: Anthropic.Tool[] = [];
+
+  for (const domain of domains) {
+    const config = DOMAINS[domain];
+    if (!config) continue;
+    for (const name of config.toolNames) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const tool = tools.find(t => t.name === name);
+      if (tool) merged.push(tool);
+    }
+  }
+
+  if (!userStack.includes('tiktok')) {
+    return merged.filter(t => !TIKTOK_TOOL_NAMES.has(t.name));
+  }
+  return merged;
+}
