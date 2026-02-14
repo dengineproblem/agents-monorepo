@@ -267,7 +267,111 @@ const CONFIRMATION_REASONS: Record<string, string> = {
   customFbQuery: 'Выполнит произвольный запрос к Facebook API',
   pauseTikTokCampaign: 'Остановит TikTok кампанию',
 };
-const PENDING_APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 минут
+const PENDING_APPROVAL_TTL_MS = 15 * 60 * 1000; // 15 минут
+
+// === FAST CONFIRMATION (перехват "Да"/"Нет" до вызова Claude) ===
+const CONFIRMATION_PATTERN = /^(да|ок|ok|yes|go|выполни|выполнить|выполняй|подтверждаю|подтверждай|давай|ладно|конечно|делай|запускай|поехали|погнали|вперёд|вперед|ага|угу|yep|sure|do it|y)\s*[.!]?\s*$/i;
+const REJECTION_PATTERN = /^(нет|не надо|не нужно|отмена|отменить|cancel|no|nope|стоп|stop)\s*[.!]?\s*$/i;
+
+function isConfirmationMessage(text: string): boolean {
+  const cleaned = text.trim();
+  if (cleaned.length > 30) return false;
+  return CONFIRMATION_PATTERN.test(cleaned);
+}
+
+function isRejectionMessage(text: string): boolean {
+  const cleaned = text.trim();
+  if (cleaned.length > 30) return false;
+  return REJECTION_PATTERN.test(cleaned);
+}
+
+function formatFastConfirmationResponse(_toolName: string, result: any, reason: string): string {
+  if (!result || typeof result !== 'object') return `✅ ${reason}`;
+
+  const data = result.data || result;
+
+  // Все handlers возвращают { success, message } — используем message напрямую
+  if (data.message && typeof data.message === 'string') {
+    const icon = data.warning ? '⚠️' : '✅';
+    return `${icon} ${data.message}`;
+  }
+
+  return `✅ ${reason}`;
+}
+
+async function handleFastConfirmation(
+  session: UserSession,
+  telegramId: number,
+  chatId: string,
+  messageId: string,
+): Promise<boolean> {
+  const pending = session.pendingApproval!;
+
+  // TTL check
+  if (Date.now() - pending.timestamp > PENDING_APPROVAL_TTL_MS) {
+    session.pendingApproval = null;
+    logger.info({ telegramId, tool: pending.tool }, 'Pending approval expired (fast confirm)');
+    return false;
+  }
+
+  // Подготовка аргументов (инжект userAccountId + accountId)
+  const toolInput: Record<string, any> = {
+    ...pending.args,
+    userAccountId: session.userAccountId,
+    ...(session.selectedAccountId ? { accountId: session.selectedAccountId } : {}),
+  };
+
+  logger.info({
+    toolName: pending.tool,
+    telegramId,
+    chatId,
+  }, 'AUDIT: Fast confirmation — executing tool directly');
+
+  activeRequests.add(telegramId);
+  await bot.sendChatAction(chatId, 'typing');
+
+  try {
+    const result = await executeTool(pending.tool, toolInput);
+
+    const reason = CONFIRMATION_REASONS[pending.tool] || 'Действие выполнено';
+    let responseText: string;
+
+    if (result?.success === false) {
+      responseText = `❌ Ошибка: ${result.error || 'не удалось выполнить операцию'}`;
+      logger.warn({ toolName: pending.tool, error: result.error }, 'Fast confirmation: tool failed');
+    } else {
+      responseText = formatFastConfirmationResponse(pending.tool, result, reason);
+    }
+
+    // Отправка в Telegram (Markdown с fallback)
+    try {
+      await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown' });
+    } catch {
+      await bot.sendMessage(chatId, responseText);
+    }
+
+    // Сохранить ответ в SQLite
+    storeMessage({
+      id: `${messageId}-response`,
+      chat_id: chatId,
+      sender: ASSISTANT_NAME,
+      text: responseText,
+      timestamp: new Date().toISOString(),
+      is_from_me: true,
+    });
+
+    session.pendingApproval = null;
+    logger.info({ toolName: pending.tool, chatId, success: result?.success !== false }, 'Fast confirmation completed');
+    return true;
+  } catch (error: any) {
+    logger.error({ error: error.message, toolName: pending.tool }, 'Fast confirmation: unexpected error');
+    await bot.sendMessage(chatId, '❌ Произошла ошибка при выполнении операции.');
+    session.pendingApproval = null;
+    return true;
+  } finally {
+    activeRequests.delete(telegramId);
+  }
+}
 
 // === КЭШ С TTL ===
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 минут
@@ -593,6 +697,33 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     if (photoUrl && !refUrlsFromMediaGroup) {
       session.pendingReferenceImages = [photoUrl];
       logger.info({ telegramId }, 'Saved pending reference image (single photo)');
+    }
+
+    // === FAST CONFIRMATION PRE-CHECK ===
+    // Перехват "Да"/"Нет" при наличии pendingApproval — выполняем tool напрямую без Claude
+    if (session.pendingApproval && telegramId) {
+      if (isConfirmationMessage(truncatedMessage)) {
+        const handled = await handleFastConfirmation(session, telegramId, chatId, messageId);
+        if (handled) return;
+        // Если не handled (TTL expired) — продолжаем обычный flow
+      } else if (isRejectionMessage(truncatedMessage)) {
+        session.pendingApproval = null;
+        const cancelText = '↩️ Операция отменена.';
+        await bot.sendMessage(chatId, cancelText);
+        storeMessage({
+          id: `${messageId}-response`,
+          chat_id: chatId,
+          sender: ASSISTANT_NAME,
+          text: cancelText,
+          timestamp: new Date().toISOString(),
+          is_from_me: true,
+        });
+        return;
+      } else {
+        // Пользователь отправил что-то другое — сбрасываем pending
+        logger.info({ telegramId, tool: session.pendingApproval.tool }, 'Pending approval cancelled (new message)');
+        session.pendingApproval = null;
+      }
     }
 
     // === MULTI-ACCOUNT FLOW ===

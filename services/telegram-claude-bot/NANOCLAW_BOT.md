@@ -83,7 +83,7 @@
 │  context = { userAccountId, accessToken, adAccountId, ... }   │
 │                                                                │
 │  6 категорий: ads | creative | crm | tiktok | whatsapp | sys │
-│  90 tools total (бот использует подмножество — 49)           │
+│  106 tools total (бот использует подмножество — 77)          │
 └──────────────────────────────────────────────────────────────┘
                              |
                              v
@@ -108,7 +108,7 @@ services/telegram-claude-bot/
 │   ├── session.ts            # In-memory session state (stack, selectedAccount, TTL 30 min)
 │   ├── memory.ts             # Per-user memory files (store/memory/{userId}.md)
 │   ├── config.ts             # ENV переменные, пути, TRIGGER_PATTERN, таймзона
-│   ├── tools.ts              # 51 Anthropic Tool определений + executeTool()
+│   ├── tools.ts              # 77 Anthropic Tool определений + executeTool()
 │   ├── db.ts                 # SQLite: init, CRUD, getRecentMessages() для conversation memory
 │   ├── types.ts              # TypeScript интерфейсы (ResolvedUser, AdAccountInfo, UserSession...)
 │   ├── logger.ts             # Pino logger (info/warn/error/debug)
@@ -157,7 +157,7 @@ services/telegram-claude-bot/
 | `session.ts` | ~90 | In-memory session state (`Map<telegramId, UserSession>`), TTL 30 мин, auto-cleanup. `createSession`, `setSelectedAccount`, `clearSelectedAccount` (восстанавливает originalStack) |
 | `memory.ts` | ~80 | Per-user memory в файлах `store/memory/{userId}.md`. UUID-валидация для path traversal protection. `readUserMemory`, `updateUserMemory`, `getUserMemoryValue` |
 | `config.ts` | ~78 | ENV переменные, пути, regex триггер, rate limits, admin IDs, voice limits |
-| `tools.ts` | ~998 | Определения 51 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
+| `tools.ts` | ~1300 | Определения 77 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
 | `db.ts` | ~336 | SQLite инициализация, таблицы chats/messages/scheduled_tasks/task_run_logs, CRUD, `getRecentMessages()` для conversation memory |
 | `types.ts` | ~96 | Интерфейсы: Session, NewMessage, ResolvedUser, AdAccountInfo, ScheduledTask, MountAllowlist |
 | `logger.ts` | 6 | Конфигурация Pino: уровень из `LOG_LEVEL` env, pino-pretty транспорт |
@@ -302,7 +302,7 @@ const routeResult = await routeMessage(truncatedMessage, anthropic, session.stac
 
 | Домен | Keyword примеры | Tools |
 |-------|----------------|-------|
-| `ads` | кампания, бюджет, расход, CPL, направление, Facebook | 29 |
+| `ads` | кампания, бюджет, расход, CPL, направление, Facebook | 45 |
 | `creative` | креатив, баннер, картинка, карусель, оффер | 26 |
 | `crm` | лиды, продажи, воронка, WhatsApp диалог | 9 |
 | `tiktok` | tiktok, тикток | 4 |
@@ -334,7 +334,7 @@ domainTools = getToolsForDomainWithStack(routeResult.domain, session.stack);
 4. `greetingInstruction` — при первом сообщении в сессии (список подключённых сервисов)
 5. `BASE.md` + `{domain}/CLAUDE.md` — промпт домена
 
-**Fallback:** Если routing вернул null (cross-domain) или неизвестный домен → загружается `groups/main/CLAUDE.md` + все 51 tools (монолитный режим).
+**Fallback:** Если routing вернул null (cross-domain) или неизвестный домен → загружается `groups/main/CLAUDE.md` + все 77 tools (монолитный режим).
 
 Файлы промптов читаются при **каждом сообщении** (не кэшируются). Изменения применяются без перезапуска бота.
 
@@ -444,7 +444,7 @@ saveState();
 
 ### 5.1 Как Claude вызывает tools
 
-Claude Haiku 4.5 получает массив `tools` (49 определений) в каждом запросе. Когда Claude решает вызвать tool, он возвращает `stop_reason: 'tool_use'` и один или несколько блоков:
+Claude Haiku 4.5 получает массив `tools` (до 77 определений, фильтруется по домену) в каждом запросе. Когда Claude решает вызвать tool, он возвращает `stop_reason: 'tool_use'` и один или несколько блоков:
 
 ```json
 {
@@ -587,10 +587,10 @@ export const allMCPTools = [
   ...whatsappTools,    // 4 tools
   ...crmTools,         // 13 tools
   ...creativeTools,    // 23 tools
-  ...adsTools,         // 24 tools
+  ...adsTools,         // 31 tools
   ...tikTokAdsTools,  // 25 tools
-  ...systemTools       // 1 tool
-];  // ИТОГО: ~90 tools
+  ...systemTools       // 2 tools
+];  // ИТОГО: ~106 tools
 
 export function getToolByName(name) {
   return allMCPTools.find(t => t.name === name);
@@ -620,7 +620,7 @@ export function getToolByName(name) {
 
 | Категория | Путь | Tools | Описание |
 |-----------|------|-------|----------|
-| `ads` | `agents/ads/` | 24 | Facebook Ads: кампании, адсеты, бюджеты, directions |
+| `ads` | `agents/ads/` | 31 | Facebook Ads: кампании, адсеты, бюджеты, directions, insights breakdowns, targeting, scheduling, bid strategy |
 | `creative` | `agents/creative/` | 23 | Креативы: генерация, анализ, A/B тесты, скоринг |
 | `crm` | `agents/crm/` | 13 | CRM: лиды, продажи, воронка, amoCRM интеграция |
 | `tiktok` | `agents/tiktok/` | 25 | TikTok Ads: кампании, адгруппы, видео, ROI |
@@ -636,7 +636,7 @@ export function getToolByName(name) {
 
 ## 7. Список всех tools в боте
 
-### Facebook Ads — READ (13 tools)
+### Facebook Ads — READ (14 tools)
 
 | Tool | Описание | Таймаут |
 |------|----------|---------|
@@ -645,6 +645,7 @@ export function getToolByName(name) {
 | `getCampaignDetails` | Детали кампании | 30s |
 | `getAds` | Объявления адсета | 30s |
 | `getSpendReport` | Отчёт по расходам (breakdown: day/week/campaign/adset) | 30s |
+| `getInsightsBreakdown` | Метрики с разбивкой по возрасту, полу, устройству, площадке, стране | 30s |
 | `getDirections` | Направления (группы кампаний) | 30s |
 | `getDirectionMetrics` | Метрики направления | 30s |
 | `getROIReport` | ROI отчёт по креативам | 30s |
@@ -654,7 +655,7 @@ export function getToolByName(name) {
 | `getAgentBrainActions` | История действий оптимизатора | 30s |
 | `triggerBrainOptimizationRun` | Запуск Brain Mini оптимизации | 120s |
 
-### Facebook Ads — WRITE (10 tools)
+### Facebook Ads — WRITE (17 tools)
 
 | Tool | Описание | Dangerous |
 |------|----------|-----------|
@@ -665,8 +666,22 @@ export function getToolByName(name) {
 | `updateDirectionBudget` | Изменить бюджет направления | Yes |
 | `updateDirectionTargetCPL` | Изменить целевой CPL | Yes |
 | `pauseDirection` / `resumeDirection` | Пауза/возобновление направления | Yes |
+| `pauseCampaign` / `resumeCampaign` | Пауза/включение FB кампании напрямую через FB API | Yes |
 | `approveBrainActions` | Выполнить рекомендации Brain Mini | Yes |
 | `createDirection` | Создать новое направление | No |
+| `aiLaunch` | AI-оптимизация: выбор лучших креативов, пауза старых, запуск новых по всем направлениям | Yes |
+| `createAdSet` | Ручной запуск конкретных креативов в направление | Yes |
+| `updateTargeting` | Изменить таргетинг адсета (возраст, пол, страны, города) | Yes |
+| `updateSchedule` | Изменить расписание адсета (start/end time) | Yes |
+| `updateBidStrategy` | Изменить стратегию ставок адсета (LOWEST_COST, BID_CAP, COST_CAP) | Yes |
+| `renameEntity` | Переименовать кампанию, адсет или объявление | Yes |
+| `updateCampaignBudget` | Изменить бюджет кампании (для CBO кампаний) | Yes |
+
+### Facebook Ads — Flexible (1 tool)
+
+| Tool | Описание | Dangerous |
+|------|----------|-----------|
+| `customFbQuery` | Произвольный запрос к FB Graph API (endpoint, method, fields, params). Claude формирует параметры, handler просто выполняет fbGraph(). Для редких запросов, не покрытых pre-built tools. | Yes |
 
 ### Creatives — READ (10 tools)
 
@@ -1244,7 +1259,7 @@ const SUSPICIOUS_PATTERNS = [
    ```
 3. Сообщение всё равно обрабатывается (не блокируется) — Claude сам решает как ответить
 
-### 15.8 Dangerous Tools & Audit Logging
+### 15.8 Dangerous Tools, Confirmation & Fast Confirmation
 
 **Dangerous tools** — WRITE-операции, требующие подтверждения пользователя:
 
@@ -1253,17 +1268,43 @@ const DANGEROUS_TOOLS = new Set([
   'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
   'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
   'pauseDirection', 'resumeDirection', 'approveBrainActions',
+  'pauseCampaign', 'resumeCampaign',
+  'aiLaunch', 'createAdSet', 'saveCampaignMapping',
+  'updateTargeting', 'updateSchedule', 'updateBidStrategy',
+  'renameEntity', 'updateCampaignBudget', 'customFbQuery',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   'pauseTikTokCampaign', 'addSale', 'updateLeadStage',
 ]);
 ```
 
+**Confirmation flow (двухуровневый):**
+
+1. **Code-level confirmation:** Когда Claude вызывает tool из `CONFIRMATION_REQUIRED_TOOLS`, код блокирует выполнение, сохраняет `session.pendingApproval = { tool, args, timestamp }` и возвращает `approval_required: true` Claude. Claude описывает действие и спрашивает пользователя.
+
+2. **Fast Confirmation pre-check:** Когда пользователь отвечает "Да" (или "Ок", "Выполни", "Go" и т.д.), код **перехватывает сообщение до вызова Claude** и выполняет pending tool напрямую. Это устраняет двойное подтверждение и экономит один LLM-вызов.
+
+```
+Пользователь: "Останови направление X"
+    → Claude: getDirections → pauseDirection
+    → Код: BLOCKED, pendingApproval saved
+    → Claude: "Остановлю направление X. Выполнить?"
+Пользователь: "Да"
+    → Fast Confirmation: перехват → executeTool() → "✅ Направление поставлено на паузу"
+    → Claude НЕ вызывается (экономия ~2 секунды + токены)
+```
+
+**Паттерны подтверждения/отказа:**
+- Подтверждение: `да`, `ок`, `ok`, `yes`, `go`, `выполни`, `давай`, `поехали`, `ага` и др. (до 30 символов)
+- Отказ: `нет`, `отмена`, `cancel`, `no`, `стоп` → `↩️ Операция отменена`
+- Любое другое сообщение → `pendingApproval` сбрасывается, обычный flow
+
+**TTL:** 15 минут — если пользователь не ответил за 15 мин, approval сбрасывается.
+
 **Audit logging:**
 - Каждый вызов dangerous tool логируется с префиксом `AUDIT:`: `{ toolName, chatId, telegramId }`
+- Fast confirmation логируется как `AUDIT: Fast confirmation — executing tool directly`
 - Обычные tools логируются только `{ toolName }`
 - `toolInput` НЕ логируется (содержит бюджеты, campaign IDs)
-
-**Двойная защита:** В CLAUDE.md правило 6 требует подтверждение, плюс на уровне кода dangerous tools логируются для аудита.
 
 ### 15.9 Логирование (sensitive data redaction)
 
@@ -1369,3 +1410,62 @@ Tool `approveBrainActions` позволяет одобрить и выполни
 | `execution_id` | `string` | Нет | UUID конкретного выполнения (по умолчанию — последнее) |
 | `direction_id` | `string` | Нет | UUID направления |
 | `campaign_id` | `string` | Нет | ID кампании |
+
+---
+
+## 19. Direct FB API Tools (двухслойная архитектура)
+
+### Архитектура
+
+Для работы с Facebook API в боте используется **двухслойная архитектура**:
+
+**Слой 1 — Pre-built tools:** Готовые tools с жёстко заданными FB API вызовами. Haiku просто выбирает tool и передаёт простые параметры (ID, числа, даты). Вся FB API логика внутри handler'а.
+
+**Слой 2 — customFbQuery (fallback):** Для редких запросов, когда нет готового tool'а. Claude использует web search для поиска документации FB API, формирует структурированные параметры (endpoint, fields, params) и вызывает `customFbQuery`. Handler просто выполняет `fbGraph()`.
+
+### Pre-built tools (Слой 1)
+
+| Tool | Тип | Описание | Паттерн handler'а |
+|------|-----|----------|-------------------|
+| `getInsightsBreakdown` | READ | Метрики с разбивкой (age, gender, device, platform, country) | GET insights с breakdowns, parse actions для leads/CPL |
+| `updateTargeting` | WRITE | Изменить таргетинг адсета (возраст, пол, гео) | GET current → merge changes → POST targeting → GET verify |
+| `updateSchedule` | WRITE | Изменить расписание адсета (start/end time) | GET current → POST updates → GET verify |
+| `updateBidStrategy` | WRITE | Изменить стратегию ставок (LOWEST_COST, BID_CAP, COST_CAP) | GET current → POST updates → GET verify |
+| `renameEntity` | WRITE | Переименовать кампанию/адсет/объявление | GET name → POST name → GET verify |
+| `updateCampaignBudget` | WRITE | Изменить бюджет кампании (для CBO) | GET current → POST budget → GET verify |
+
+**Все WRITE tools:**
+- Валидируют "хотя бы 1 параметр для изменения"
+- Поддерживают `dry_run: true` для preview (кроме `renameEntity`)
+- Возвращают `before` / `after` для сравнения
+- Подробно логируют все шаги (starting → dry_run/applied → success/failed)
+- Добавлены в `DANGEROUS_TOOLS` + `CONFIRMATION_REQUIRED_TOOLS`
+
+### customFbQuery (Слой 2 — "тупой" исполнитель)
+
+**Было:** `customFbQuery({ user_request })` → GPT-4o-mini внутри строит запрос → fbGraph()
+**Стало:** `customFbQuery({ endpoint, method, fields, params })` → fbGraph() напрямую
+
+```javascript
+// Claude формирует параметры (с помощью web search при необходимости)
+// Handler просто выполняет:
+const resolvedEndpoint = endpoint.replace(/^account\b\/?/, `${actId}/`);
+const result = await fbGraph(method, resolvedEndpoint, accessToken, apiParams);
+```
+
+**Параметры:**
+
+| Параметр | Тип | Обязательный | Описание |
+|----------|-----|-------------|----------|
+| `endpoint` | `string` | Да | FB API endpoint (`account/insights`, `{campaign_id}/adsets`) |
+| `method` | `'GET' \| 'POST'` | Нет | HTTP метод (по умолчанию GET) |
+| `fields` | `string` | Нет | Поля через запятую (`spend,impressions,clicks`) |
+| `params` | `object` | Нет | Доп. параметры (breakdowns, time_range, filtering) |
+
+**Безопасность:**
+- Валидация endpoint на допустимые символы (`/^[\w./,-]+$/`)
+- Автосериализация `time_range` и `filtering` объектов
+- Добавлен в `DANGEROUS_TOOLS` + `CONFIRMATION_REQUIRED_TOOLS` (требует подтверждения)
+- `'account'` в начале endpoint заменяется на реальный `act_xxx`
+
+**FB API справочник** для Claude находится в `groups/ads/CLAUDE.md` — содержит Insights Fields, Breakdowns, Action Types, Time Range Format, Targeting Spec.
