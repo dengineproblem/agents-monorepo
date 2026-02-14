@@ -15,6 +15,7 @@ export interface UserSession {
   originalAnthropicApiKey: string | null; // ключ из resolve-user (восстанавливается при сбросе аккаунта)
   lastDomain: string | null; // sticky domain — последний роутинг для follow-up сообщений
   pendingReferenceImages: string[] | null; // URL'ы из media_group, автоинжект в generateCreatives
+  pendingApproval: { tool: string; args: Record<string, any>; timestamp: number } | null; // Ожидает подтверждения пользователя
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 минут
@@ -63,6 +64,7 @@ export function createSession(
     originalAnthropicApiKey: sessionAnthropicKey,
     lastDomain: null,
     pendingReferenceImages: null,
+    pendingApproval: null,
   };
   sessions.set(telegramId, session);
   logger.info({

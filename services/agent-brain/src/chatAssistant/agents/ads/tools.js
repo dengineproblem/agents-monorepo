@@ -976,6 +976,46 @@ dry_run=true ВОЗВРАЩАЕТ:
       },
       required: ['user_request']
     }
+  },
+
+  // ============================================================
+  // DIRECT FB CAMPAIGN MANAGEMENT
+  // ============================================================
+  {
+    name: 'pauseCampaign',
+    description: `Поставить FB кампанию на паузу НАПРЯМУЮ через FB Graph API.
+НЕ требует direction — работает с любой кампанией в аккаунте.
+Сначала вызови getCampaigns для получения campaign_id.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: {
+          type: 'string',
+          description: 'Facebook Campaign ID (числовой). Получи через getCampaigns'
+        },
+        reason: {
+          type: 'string',
+          description: 'Причина паузы'
+        }
+      },
+      required: ['campaign_id']
+    }
+  },
+  {
+    name: 'resumeCampaign',
+    description: `Включить FB кампанию НАПРЯМУЮ через FB Graph API.
+НЕ требует direction — работает с любой кампанией в аккаунте.
+Сначала вызови getCampaigns для получения campaign_id.`,
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: {
+          type: 'string',
+          description: 'Facebook Campaign ID (числовой). Получи через getCampaigns'
+        }
+      },
+      required: ['campaign_id']
+    }
   }
 ];
 
@@ -992,6 +1032,8 @@ export const ADS_WRITE_TOOLS = [
   'updateDirectionTargetCPL',
   'pauseDirection',
   'resumeDirection',
+  'pauseCampaign',
+  'resumeCampaign',
   'triggerBrainOptimizationRun'
 ];
 

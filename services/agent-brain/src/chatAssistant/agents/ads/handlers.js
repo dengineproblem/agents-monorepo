@@ -1718,25 +1718,41 @@ export const adsHandlers = {
 
     // Pause FB campaign if linked
     let fbPaused = false;
+    let fbError = null;
     if (direction.fb_campaign_id && accessToken) {
       try {
         await fbGraph('POST', direction.fb_campaign_id, accessToken, { status: 'PAUSED' });
         fbPaused = true;
       } catch (e) {
-        // Log but don't fail
+        fbError = e.message || 'Unknown FB API error';
+        logger.error({
+          handler: 'pauseDirection',
+          direction_id,
+          fb_campaign_id: direction.fb_campaign_id,
+          error: fbError,
+        }, 'pauseDirection: FB API call failed');
       }
     }
 
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
-      level: 'info',
+      level: fbError ? 'warning' : 'info',
       message: `Direction paused: ${direction.name}`,
-      context: { direction_id, reason, fb_paused: fbPaused, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: { direction_id, reason, fb_paused: fbPaused, fb_error: fbError, source: 'chat_assistant', agent: 'AdsAgent' }
     });
+
+    if (fbError) {
+      return {
+        success: true,
+        warning: true,
+        message: `Направление "${direction.name}" поставлено на паузу в системе, но FB кампания НЕ отключена: ${fbError}. Попробуйте ещё раз или отключите кампанию вручную в Ads Manager.`,
+        fb_campaign_id: direction.fb_campaign_id,
+      };
+    }
 
     return {
       success: true,
-      message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB кампанию)' : ''}`
+      message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB кампанию в Ads Manager)' : ' (FB кампания не привязана)'}`
     };
   },
 
@@ -1796,25 +1812,41 @@ export const adsHandlers = {
 
     // Resume FB campaign if linked
     let fbResumed = false;
+    let fbError = null;
     if (direction.fb_campaign_id && accessToken) {
       try {
         await fbGraph('POST', direction.fb_campaign_id, accessToken, { status: 'ACTIVE' });
         fbResumed = true;
       } catch (e) {
-        // Log but don't fail
+        fbError = e.message || 'Unknown FB API error';
+        logger.error({
+          handler: 'resumeDirection',
+          direction_id,
+          fb_campaign_id: direction.fb_campaign_id,
+          error: fbError,
+        }, 'resumeDirection: FB API call failed');
       }
     }
 
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
-      level: 'info',
+      level: fbError ? 'warning' : 'info',
       message: `Direction resumed: ${direction.name}`,
-      context: { direction_id, fb_resumed: fbResumed, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: { direction_id, fb_resumed: fbResumed, fb_error: fbError, source: 'chat_assistant', agent: 'AdsAgent' }
     });
+
+    if (fbError) {
+      return {
+        success: true,
+        warning: true,
+        message: `Направление "${direction.name}" возобновлено в системе, но FB кампания НЕ включена: ${fbError}. Попробуйте ещё раз или включите кампанию вручную в Ads Manager.`,
+        fb_campaign_id: direction.fb_campaign_id,
+      };
+    }
 
     return {
       success: true,
-      message: `Направление "${direction.name}" возобновлено${fbResumed ? ' (включая FB кампанию)' : ''}`
+      message: `Направление "${direction.name}" возобновлено${fbResumed ? ' (включая FB кампанию в Ads Manager)' : ' (FB кампания не привязана)'}`
     };
   },
 
@@ -2806,35 +2838,35 @@ export const adsHandlers = {
 
           switch (proposal.action) {
             case 'updateBudget':
-              executionResult = await this.updateBudget(
+              executionResult = await adsHandlers.updateBudget(
                 { adset_id: proposal.entity_id, new_budget_cents: params.new_budget_cents },
                 toolContext
               );
               break;
 
             case 'pauseAdSet':
-              executionResult = await this.pauseAdSet(
+              executionResult = await adsHandlers.pauseAdSet(
                 { adset_id: proposal.entity_id, reason: proposal.reason },
                 toolContext
               );
               break;
 
             case 'pauseAd':
-              executionResult = await this.pauseAd(
+              executionResult = await adsHandlers.pauseAd(
                 { ad_id: proposal.entity_id, reason: proposal.reason },
                 toolContext
               );
               break;
 
             case 'enableAdSet':
-              executionResult = await this.resumeAdSet(
+              executionResult = await adsHandlers.resumeAdSet(
                 { adset_id: proposal.entity_id },
                 toolContext
               );
               break;
 
             case 'enableAd':
-              executionResult = await this.resumeAd(
+              executionResult = await adsHandlers.resumeAd(
                 { ad_id: proposal.entity_id },
                 toolContext
               );
@@ -2842,7 +2874,7 @@ export const adsHandlers = {
 
             case 'createAdSet':
             case 'launchNewCreatives':
-              executionResult = await this.createAdSet(
+              executionResult = await adsHandlers.createAdSet(
                 {
                   direction_id: proposal.direction_id,
                   creative_ids: params.creative_ids || [],
@@ -2988,224 +3020,8 @@ export const adsHandlers = {
       );
 
       // ========================================
-      // EXECUTION MODE: If dry_run=false AND has proposals, execute them
-      // ========================================
-      if (!dry_run && result.proposals && result.proposals.length > 0) {
-        logger.info({
-          where: 'triggerBrainOptimizationRun',
-          phase: 'execution_mode_start',
-          proposalsCount: result.proposals.length,
-          userAccountId,
-          adAccountDbId
-        }, 'Starting execution of Brain Mini proposals');
-
-        const executionResults = [];
-        const toolContext = {
-          accessToken: finalAccessToken,
-          adAccountId: finalAdAccountId,
-          userAccountId,
-          adAccountDbId,
-          pageId
-        };
-
-        for (const proposal of result.proposals) {
-          try {
-            let executionResult;
-            const params = proposal.suggested_action_params || {};
-
-            logger.info({
-              where: 'triggerBrainOptimizationRun',
-              phase: 'executing_proposal',
-              action: proposal.action,
-              entityType: proposal.entity_type,
-              entityId: proposal.entity_id,
-              entityName: proposal.entity_name
-            }, `Executing proposal: ${proposal.action}`);
-
-            switch (proposal.action) {
-              case 'updateBudget':
-                executionResult = await this.updateBudget(
-                  { adset_id: proposal.entity_id, new_budget_cents: params.new_budget_cents },
-                  toolContext
-                );
-                break;
-
-              case 'pauseAdSet':
-                executionResult = await this.pauseAdSet(
-                  { adset_id: proposal.entity_id, reason: proposal.reason },
-                  toolContext
-                );
-                break;
-
-              case 'pauseAd':
-                executionResult = await this.pauseAd(
-                  { ad_id: proposal.entity_id, reason: proposal.reason },
-                  toolContext
-                );
-                break;
-
-              case 'enableAdSet':
-                executionResult = await this.resumeAdSet(
-                  { adset_id: proposal.entity_id },
-                  toolContext
-                );
-                break;
-
-              case 'enableAd':
-                executionResult = await this.resumeAd(
-                  { ad_id: proposal.entity_id },
-                  toolContext
-                );
-                break;
-
-              case 'createAdSet':
-                executionResult = await this.createAdSet(
-                  {
-                    direction_id: proposal.direction_id,
-                    creative_ids: params.creative_ids || [],
-                    daily_budget_cents: params.recommended_budget_cents
-                  },
-                  toolContext
-                );
-                break;
-
-              case 'launchNewCreatives':
-                // Same as createAdSet
-                executionResult = await this.createAdSet(
-                  {
-                    direction_id: proposal.direction_id,
-                    creative_ids: params.creative_ids || [],
-                    daily_budget_cents: params.recommended_budget_cents
-                  },
-                  toolContext
-                );
-                break;
-
-              case 'review':
-                // review action doesn't execute anything, just acknowledge
-                executionResult = { success: true, message: 'Отмечено для ручной проверки', skipped: true };
-                break;
-
-              default:
-                executionResult = { success: false, error: `Unknown action: ${proposal.action}` };
-            }
-
-            executionResults.push({
-              proposal: {
-                action: proposal.action,
-                entity_id: proposal.entity_id,
-                entity_name: proposal.entity_name,
-                direction_name: proposal.direction_name
-              },
-              success: executionResult.success !== false,
-              message: executionResult.message,
-              error: executionResult.error,
-              data: executionResult.data || executionResult.preview
-            });
-
-            logger.info({
-              where: 'triggerBrainOptimizationRun',
-              phase: 'proposal_executed',
-              action: proposal.action,
-              success: executionResult.success !== false,
-              message: executionResult.message,
-              error: executionResult.error
-            }, `Proposal ${proposal.action} executed`);
-
-          } catch (error) {
-            logger.error({
-              where: 'triggerBrainOptimizationRun',
-              phase: 'proposal_execution_error',
-              action: proposal.action,
-              error: error.message,
-              stack: error.stack
-            }, `Error executing proposal: ${proposal.action}`);
-
-            executionResults.push({
-              proposal: {
-                action: proposal.action,
-                entity_id: proposal.entity_id,
-                entity_name: proposal.entity_name
-              },
-              success: false,
-              error: error.message
-            });
-          }
-        }
-
-        // Calculate success stats
-        const successCount = executionResults.filter(r => r.success).length;
-        const failCount = executionResults.length - successCount;
-
-        // Log execution completion
-        await supabase.from('agent_logs').insert({
-          ad_account_id: adAccountId,
-          level: failCount > 0 ? 'warn' : 'info',
-          message: `Brain Mini execution completed: ${successCount}/${executionResults.length} successful`,
-          context: {
-            direction_id,
-            reason,
-            execution_mode: true,
-            success_count: successCount,
-            fail_count: failCount,
-            source: 'chat_assistant',
-            agent: 'AdsAgent',
-            mode: 'interactive_execute'
-          }
-        });
-
-        // Save to brain_executions for history
-        try {
-          const { error: insertError } = await supabase.from('brain_executions').insert({
-            user_account_id: userAccountId,
-            account_id: adAccountDbId,
-            execution_mode: 'manual_trigger',
-            idempotency_key: crypto.randomUUID(),
-            plan_json: {
-              triggered_by: 'brain_mini_execute',
-              reason: reason || 'Brain Mini execution',
-              direction_id: direction_id || null,
-              proposals: result.proposals.map(p => ({
-                action: p.action,
-                entity_id: p.entity_id,
-                entity_name: p.entity_name,
-                reason: p.reason
-              }))
-            },
-            actions_json: executionResults.map(r => ({
-              type: r.proposal.action,
-              params: r.proposal,
-              success: r.success,
-              message: r.message || r.error
-            })),
-            report_text: `Brain Mini: ${successCount}/${executionResults.length} действий выполнено`,
-            status: failCount === 0 ? 'success' : 'partial',
-            actions_taken: successCount,
-            actions_failed: failCount
-          });
-
-          if (insertError) {
-            logger.error({ error: insertError.message }, 'Failed to save brain_executions');
-          }
-        } catch (saveError) {
-          logger.error({ error: saveError.message }, 'Error saving to brain_executions');
-        }
-
-        // Return execution results
-        return {
-          success: failCount === 0,
-          mode: 'executed',
-          dry_run: false,
-          message: `Brain Mini: выполнено ${successCount}/${executionResults.length} действий`,
-          execution_results: executionResults,
-          summary: result.summary,
-          success_count: successCount,
-          fail_count: failCount
-        };
-      }
-
-      // ========================================
-      // ANALYSIS MODE (dry_run=true or no proposals): Return proposals for approval
+      // ANALYSIS MODE: Always return proposals for user approval
+      // Execution happens ONLY via approveBrainActions → fast path
       // ========================================
 
       // Log the action
@@ -3222,6 +3038,51 @@ export const adsHandlers = {
           mode: 'interactive'
         }
       });
+
+      // Save proposals to brain_executions so approveBrainActions can find them
+      if (result.proposals?.length > 0) {
+        const executionId = crypto.randomUUID();
+        try {
+          await supabase.from('brain_executions').insert({
+            id: executionId,
+            user_account_id: userAccountId,
+            account_id: adAccountDbId || dbAccountId,
+            execution_mode: 'manual_trigger',
+            idempotency_key: crypto.randomUUID(),
+            status: 'pending',
+            plan_json: {
+              triggered_by: 'brain_mini_analysis',
+              reason: reason || 'Brain Mini analysis via Chat Assistant',
+              direction_id: direction_id || null,
+              proposals: result.proposals.map(p => ({
+                action: p.action,
+                entity_type: p.entity_type,
+                entity_id: p.entity_id,
+                entity_name: p.entity_name,
+                direction_id: p.direction_id,
+                direction_name: p.direction_name,
+                reason: p.reason,
+                priority: p.priority,
+                health_score: p.health_score,
+                hs_class: p.hs_class,
+                metrics: p.metrics,
+                suggested_action_params: p.suggested_action_params
+              }))
+            },
+            report_text: `Brain Mini analysis: ${result.proposals.length} proposals awaiting approval`,
+            actions_taken: 0,
+            actions_failed: 0
+          });
+          logger.info({
+            where: 'triggerBrainOptimizationRun',
+            phase: 'proposals_saved',
+            executionId,
+            proposalsCount: result.proposals.length
+          }, `Proposals saved to brain_executions for approval`);
+        } catch (saveError) {
+          logger.error({ error: saveError.message }, 'Failed to save proposals to brain_executions');
+        }
+      }
 
       // Transform proposals to Plan format for frontend
       const plan = result.proposals?.length > 0 ? {
@@ -3409,7 +3270,7 @@ export const adsHandlers = {
       }, `Approving ${selectedProposals.length}/${proposals.length} proposals`);
 
       // Вызвать triggerBrainOptimizationRun fast path с отобранными proposals
-      const result = await this.triggerBrainOptimizationRun(
+      const result = await adsHandlers.triggerBrainOptimizationRun(
         {
           direction_id: direction_id || null,
           campaign_id: campaign_id || null,
@@ -4016,6 +3877,106 @@ ${errorMessage}
       last_error: lastError,
       user_request,
       suggestion: 'Попробуйте переформулировать запрос или использовать стандартные tools (getCampaigns, getSpendReport и т.д.)'
+    };
+  },
+
+  // ============================================================
+  // DIRECT FB CAMPAIGN MANAGEMENT (без привязки к directions)
+  // ============================================================
+
+  /**
+   * Pause a Facebook campaign directly via FB Graph API
+   * Works with any campaign, not just direction-linked ones
+   */
+  async pauseCampaign({ campaign_id, reason }, { accessToken, adAccountId }) {
+    // Get current status before change
+    let campaignInfo = null;
+    try {
+      campaignInfo = await fbGraph('GET', campaign_id, accessToken, { fields: 'name,status,effective_status' });
+    } catch (e) {
+      return { success: false, error: `Не удалось получить информацию о кампании ${campaign_id}: ${e.message}` };
+    }
+
+    if (campaignInfo.status === 'PAUSED') {
+      return {
+        success: true,
+        message: `Кампания "${campaignInfo.name}" уже на паузе`,
+        campaign: { id: campaign_id, name: campaignInfo.name, status: 'PAUSED' }
+      };
+    }
+
+    try {
+      await fbGraph('POST', campaign_id, accessToken, { status: 'PAUSED' });
+    } catch (e) {
+      return { success: false, error: `Не удалось поставить кампанию на паузу: ${e.message}` };
+    }
+
+    // Verify
+    let afterStatus = null;
+    try {
+      const after = await fbGraph('GET', campaign_id, accessToken, { fields: 'status' });
+      afterStatus = after.status;
+    } catch (e) { /* ignore */ }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Campaign paused directly: ${campaignInfo.name} (${campaign_id})`,
+      context: { campaign_id, reason, before: campaignInfo.status, after: afterStatus, source: 'chat_assistant' }
+    });
+
+    return {
+      success: true,
+      message: `Кампания "${campaignInfo.name}" поставлена на паузу в Facebook Ads Manager`,
+      campaign: { id: campaign_id, name: campaignInfo.name, before: campaignInfo.status, after: afterStatus || 'PAUSED' }
+    };
+  },
+
+  /**
+   * Resume a Facebook campaign directly via FB Graph API
+   * Works with any campaign, not just direction-linked ones
+   */
+  async resumeCampaign({ campaign_id }, { accessToken, adAccountId }) {
+    // Get current status before change
+    let campaignInfo = null;
+    try {
+      campaignInfo = await fbGraph('GET', campaign_id, accessToken, { fields: 'name,status,effective_status' });
+    } catch (e) {
+      return { success: false, error: `Не удалось получить информацию о кампании ${campaign_id}: ${e.message}` };
+    }
+
+    if (campaignInfo.status === 'ACTIVE') {
+      return {
+        success: true,
+        message: `Кампания "${campaignInfo.name}" уже активна`,
+        campaign: { id: campaign_id, name: campaignInfo.name, status: 'ACTIVE', effective_status: campaignInfo.effective_status }
+      };
+    }
+
+    try {
+      await fbGraph('POST', campaign_id, accessToken, { status: 'ACTIVE' });
+    } catch (e) {
+      return { success: false, error: `Не удалось включить кампанию: ${e.message}` };
+    }
+
+    // Verify
+    let afterStatus = null;
+    try {
+      const after = await fbGraph('GET', campaign_id, accessToken, { fields: 'status,effective_status' });
+      afterStatus = after.status;
+    } catch (e) { /* ignore */ }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Campaign resumed directly: ${campaignInfo.name} (${campaign_id})`,
+      context: { campaign_id, before: campaignInfo.status, after: afterStatus, source: 'chat_assistant' }
+    });
+
+    return {
+      success: true,
+      message: `Кампания "${campaignInfo.name}" включена в Facebook Ads Manager`,
+      campaign: { id: campaign_id, name: campaignInfo.name, before: campaignInfo.status, after: afterStatus || 'ACTIVE' }
     };
   },
 

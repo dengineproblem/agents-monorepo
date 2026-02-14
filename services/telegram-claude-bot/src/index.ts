@@ -208,14 +208,54 @@ function detectSuspiciousContent(text: string): boolean {
   return SUSPICIOUS_PATTERNS.some(pattern => pattern.test(text));
 }
 
-// === DANGEROUS TOOLS (audit) ===
+// === DANGEROUS TOOLS (audit logging) ===
 const DANGEROUS_TOOLS = new Set([
   'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
   'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
   'pauseDirection', 'resumeDirection', 'approveBrainActions',
+  'pauseCampaign', 'resumeCampaign',
+  'createAdSet', 'createAd', 'saveCampaignMapping',
   'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
   'pauseTikTokCampaign', 'addSale', 'updateLeadStage',
 ]);
+
+// === CONFIRMATION REQUIRED TOOLS ===
+// Подмножество DANGEROUS — требуют явного подтверждения пользователя перед выполнением.
+// Генерация контента (generateCreatives и т.д.) НЕ требует подтверждения.
+const CONFIRMATION_REQUIRED_TOOLS = new Set([
+  'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
+  'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
+  'pauseDirection', 'resumeDirection',
+  'pauseCampaign', 'resumeCampaign',
+  'createAdSet', 'createAd',
+  'pauseCreative', 'launchCreative', 'startCreativeTest', 'stopCreativeTest',
+  // approveBrainActions НЕ требует подтверждения — юзер уже подтвердил выбором proposals
+  'pauseTikTokCampaign',
+]);
+
+const CONFIRMATION_REASONS: Record<string, string> = {
+  pauseAdSet: 'Остановит адсет',
+  resumeAdSet: 'Возобновит адсет',
+  updateBudget: 'Изменит бюджет адсета',
+  scaleBudget: 'Масштабирует бюджет адсета',
+  pauseAd: 'Остановит объявление',
+  resumeAd: 'Возобновит объявление',
+  updateDirectionBudget: 'Изменит суточный бюджет направления',
+  updateDirectionTargetCPL: 'Изменит целевой CPL направления',
+  pauseDirection: 'Остановит все адсеты направления',
+  resumeDirection: 'Возобновит направление',
+  pauseCampaign: 'Остановит FB кампанию в Ads Manager',
+  resumeCampaign: 'Включит FB кампанию в Ads Manager',
+  createAdSet: 'Создаст новый адсет с креативами (начнёт расходовать бюджет)',
+  createAd: 'Добавит объявление в адсет',
+  pauseCreative: 'Остановит рекламу креатива',
+  launchCreative: 'Запустит рекламу (начнёт расходовать бюджет)',
+  startCreativeTest: 'Запустит A/B тест (~$20 бюджет)',
+  stopCreativeTest: 'Остановит A/B тест',
+  approveBrainActions: 'Выполнит рекомендации Brain оптимизатора',
+  pauseTikTokCampaign: 'Остановит TikTok кампанию',
+};
+const PENDING_APPROVAL_TTL_MS = 5 * 60 * 1000; // 5 минут
 
 // === КЭШ С TTL ===
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 минут
@@ -522,6 +562,12 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       }
     } else {
       updateActivity(telegramId!);
+      // Refresh session keys from resolved user data (DB may have been updated since session creation)
+      if (session.multiAccountEnabled && resolvedUser.anthropicApiKey && !session.anthropicApiKey) {
+        session.anthropicApiKey = resolvedUser.anthropicApiKey;
+        session.originalAnthropicApiKey = resolvedUser.anthropicApiKey;
+        logger.info({ telegramId }, 'Refreshed anthropicApiKey from resolved user');
+      }
     }
 
     // Сохраняем pendingReferenceImages в сессию (теперь сессия точно существует)
@@ -791,6 +837,9 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     let turnCount = 0;
     const MAX_TURNS = 10; // Защита от бесконечного цикла
 
+    // Собираем контекст tool вызовов для сохранения в истории (предотвращает галлюцинацию ID)
+    const toolContextEntries: string[] = [];
+
     // Цикл Tool Use: запрос → tool_use → выполнение → результат → финальный ответ
     while (continueLoop && turnCount < MAX_TURNS) {
       turnCount++;
@@ -884,12 +933,15 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
             }
 
             const isDangerous = DANGEROUS_TOOLS.has(block.name);
+            const needsConfirmation = CONFIRMATION_REQUIRED_TOOLS.has(block.name);
+
             if (isDangerous) {
               logger.info({
                 toolName: block.name,
                 chatId,
                 telegramId,
                 accountId: session.selectedAccountId || 'default',
+                needsConfirmation,
               }, 'AUDIT: Dangerous tool requested');
             } else {
               logger.info({
@@ -897,6 +949,40 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
                 chatId,
                 turnCount,
               }, 'Executing tool');
+            }
+
+            // Confirmation flow: если tool требует подтверждения — блокируем первый вызов
+            if (needsConfirmation) {
+              const pending = session.pendingApproval;
+              const isApproved = pending
+                && pending.tool === block.name
+                && (Date.now() - pending.timestamp) < PENDING_APPROVAL_TTL_MS;
+
+              if (!isApproved) {
+                // Первый вызов — блокируем, сохраняем pending
+                session.pendingApproval = {
+                  tool: block.name,
+                  args: block.input as Record<string, any>,
+                  timestamp: Date.now(),
+                };
+                const reason = CONFIRMATION_REASONS[block.name] || 'Действие может изменить рекламные кампании';
+                logger.info({ toolName: block.name, reason }, 'Tool blocked, waiting for user confirmation');
+
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: block.id,
+                  content: JSON.stringify({
+                    approval_required: true,
+                    reason,
+                    message: `Требуется подтверждение пользователя. Опиши что собираешься сделать (${reason}) и спроси "Выполнить?". НЕ вызывай tool повторно пока пользователь не подтвердит.`,
+                  }),
+                });
+                continue;
+              }
+
+              // Пользователь подтвердил — очищаем pending и выполняем
+              session.pendingApproval = null;
+              logger.info({ toolName: block.name }, 'Tool approved by user, executing');
             }
 
             // Всегда инжектим userAccountId в tool input
@@ -931,6 +1017,20 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
               tool_use_id: block.id,
               content: JSON.stringify(result),
             });
+
+            // Извлекаем ключевые ID из результатов для контекста истории
+            try {
+              if (block.name === 'getDirections' && result?.directions) {
+                const dirs = result.directions.map((d: any) => `${d.name} (id: ${d.id})`).join(', ');
+                toolContextEntries.push(`Направления: ${dirs}`);
+              } else if (block.name === 'getCampaigns' && result?.campaigns) {
+                const camps = result.campaigns.slice(0, 10).map((c: any) => `${c.name} (id: ${c.id})`).join(', ');
+                toolContextEntries.push(`Кампании: ${camps}`);
+              } else if (block.name === 'getAdSets' && result?.adSets) {
+                const sets = result.adSets.slice(0, 10).map((s: any) => `${s.name} (id: ${s.id})`).join(', ');
+                toolContextEntries.push(`Адсеты: ${sets}`);
+              }
+            } catch { /* non-critical */ }
           }
           // server_tool_use и web_search_tool_result пропускаем — они уже в response.content
         }
@@ -1012,12 +1112,15 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       }
     }
 
-    // Сохранить ответ бота в БД
+    // Сохранить ответ бота в БД (с контекстом tool вызовов для предотвращения галлюцинации ID)
+    const storedText = toolContextEntries.length > 0
+      ? agentResponse + '\n\n[Данные: ' + toolContextEntries.join('; ') + ']'
+      : agentResponse;
     storeMessage({
       id: `${messageId}-response`,
       chat_id: chatId,
       sender: ASSISTANT_NAME,
-      text: agentResponse,
+      text: storedText,
       timestamp: new Date().toISOString(),
       is_from_me: true,
     });

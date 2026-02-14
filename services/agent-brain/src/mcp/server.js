@@ -417,10 +417,13 @@ export function registerMCPRoutes(fastify) {
       if (user.multi_account_enabled) {
         const { data: accounts, error: accError } = await supabase
           .from('ad_accounts')
-          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token, is_default')
+          .select('id, name, ad_account_id, access_token, tiktok_access_token, amocrm_access_token')
           .eq('user_account_id', user.id)
           .eq('is_active', true);
 
+        if (accError) {
+          fastify.log.error({ error: accError.message, code: accError.code, details: accError.details }, 'resolve-user: failed to load ad_accounts');
+        }
         if (!accError && accounts) {
           result.adAccounts = accounts.map(acc => {
             const accStack = [];
@@ -431,7 +434,7 @@ export function registerMCPRoutes(fastify) {
               id: acc.id,
               name: acc.name || `Аккаунт ${acc.ad_account_id}`,
               adAccountId: acc.ad_account_id,
-              isDefault: !!acc.is_default,
+              isDefault: false,
               stack: accStack,
               // anthropicApiKey берётся из user_accounts (shared) — result.anthropicApiKey
             };
@@ -562,6 +565,7 @@ export function registerMCPRoutes(fastify) {
         accessToken: credentials.accessToken,
         // Internal IDs
         accountId: credentials.dbAccountId,        // UUID from ad_accounts.id (for DB queries)
+        adAccountDbId: credentials.dbAccountId,    // Same UUID, used by executor.js → handler context
         userAccountId: credentials.userAccountId,
         // Mode
         isMultiAccountMode: credentials.isMultiAccountMode,

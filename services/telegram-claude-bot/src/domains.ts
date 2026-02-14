@@ -25,12 +25,22 @@ export const DOMAINS: Record<string, DomainConfig> = {
       // READ
       'getCampaigns', 'getAdSets', 'getAds', 'getCampaignDetails',
       'getSpendReport', 'getDirections', 'getDirectionMetrics',
+      'getDirectionCreatives', 'getDirectionInsights', 'getExternalCampaignMetrics',
       'getROIReport', 'getROIComparison', 'getAdAccountStatus',
       'getLeadsEngagementRate', 'getAgentBrainActions', 'triggerBrainOptimizationRun',
-      // WRITE
+      // WRITE — Directions
+      'pauseDirection', 'resumeDirection', 'updateDirectionBudget', 'updateDirectionTargetCPL',
+      'createDirection', 'approveBrainActions',
+      // WRITE — Create AdSets & Ads
+      'createAdSet', 'createAd',
+      // WRITE — Direct FB API
+      'pauseCampaign', 'resumeCampaign',
       'pauseAdSet', 'resumeAdSet', 'updateBudget', 'scaleBudget',
-      'pauseAd', 'resumeAd', 'updateDirectionBudget', 'updateDirectionTargetCPL',
-      'pauseDirection', 'resumeDirection', 'approveBrainActions', 'createDirection',
+      'pauseAd', 'resumeAd',
+      // WRITE — External campaigns
+      'saveCampaignMapping',
+      // Flexible FB API
+      'customFbQuery',
       // Bridge: creative context for ROI
       'getCreatives', 'getTopCreatives', 'getWorstCreatives',
       ...SHARED_TOOLS,

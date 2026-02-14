@@ -175,6 +175,12 @@ export const adsTools = [
   createMCPTool('updateDirectionTargetCPL', AdsToolDefs.updateDirectionTargetCPL, adsHandlers.updateDirectionTargetCPL, 'ads'),
   createMCPTool('pauseDirection', AdsToolDefs.pauseDirection, adsHandlers.pauseDirection, 'ads'),
   createMCPTool('resumeDirection', AdsToolDefs.resumeDirection, adsHandlers.resumeDirection, 'ads'),
+  // WRITE tools - Direct FB Campaign Management
+  createMCPTool('pauseCampaign', AdsToolDefs.pauseCampaign, adsHandlers.pauseCampaign, 'ads'),
+  createMCPTool('resumeCampaign', AdsToolDefs.resumeCampaign, adsHandlers.resumeCampaign, 'ads'),
+  // WRITE tools - Create AdSets & Ads
+  createMCPTool('createAdSet', AdsToolDefs.createAdSet, adsHandlers.createAdSet, 'ads'),
+  createMCPTool('createAd', AdsToolDefs.createAd, adsHandlers.createAd, 'ads'),
   // Advanced tools
   createMCPTool('triggerBrainOptimizationRun', AdsToolDefs.triggerBrainOptimizationRun, adsHandlers.triggerBrainOptimizationRun, 'ads'),
   createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads'),

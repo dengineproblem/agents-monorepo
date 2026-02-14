@@ -354,6 +354,27 @@ export const AdsToolDefs = {
   },
 
   // ============================================================
+  // DIRECT FB CAMPAIGN MANAGEMENT (без привязки к directions)
+  // ============================================================
+
+  pauseCampaign: {
+    description: 'Поставить FB кампанию на паузу НАПРЯМУЮ через FB Graph API. НЕ требует direction. Работает с любой кампанией.',
+    schema: z.object({
+      campaign_id: z.string().min(1).describe('Facebook Campaign ID (числовой)'),
+      reason: z.string().optional().describe('Причина паузы')
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  resumeCampaign: {
+    description: 'Включить FB кампанию НАПРЯМУЮ через FB Graph API. НЕ требует direction. Работает с любой кампанией.',
+    schema: z.object({
+      campaign_id: z.string().min(1).describe('Facebook Campaign ID (числовой)')
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
   // CUSTOM FB API QUERY (LLM-powered)
   // ============================================================
 
@@ -381,6 +402,29 @@ export const AdsToolDefs = {
   // ============================================================
   // MANUAL MODE TOOLS (for users without directions)
   // ============================================================
+
+  createAdSet: {
+    description: 'Создать адсет с креативами в направлении. Таргетинг берётся из настроек direction. Используй dry_run: true для preview.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления'),
+      creative_ids: z.array(z.string().min(1)).min(1).describe('Массив ID креативов для запуска'),
+      daily_budget_cents: z.number().min(300).optional().describe('Суточный бюджет в центах (опционально, берётся из direction)'),
+      adset_name: z.string().optional().describe('Название адсета (опционально)'),
+      dry_run: dryRunOption
+    }),
+    meta: { timeout: 30000, retryable: false, dangerous: true }
+  },
+
+  createAd: {
+    description: 'Добавить одно объявление в существующий адсет.',
+    schema: z.object({
+      adset_id: nonEmptyString('adset_id').describe('ID существующего адсета Facebook'),
+      creative_id: nonEmptyString('creative_id').describe('ID креатива из user_creatives'),
+      ad_name: z.string().optional().describe('Название объявления (опционально)'),
+      dry_run: dryRunOption
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
 
   saveCampaignMapping: {
     description: `Сохранить маппинг кампании для ручного режима (пользователи без directions).

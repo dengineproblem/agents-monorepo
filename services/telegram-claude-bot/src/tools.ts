@@ -126,7 +126,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'getDirectionMetrics',
-    description: 'Метрики конкретного направления',
+    description: 'Метрики конкретного направления. Сначала вызови getDirections для получения direction_id.',
     input_schema: {
       type: 'object',
       properties: {
@@ -278,7 +278,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'updateDirectionBudget',
-    description: 'Изменить суточный бюджет направления',
+    description: 'Изменить суточный бюджет направления. ОБЯЗАТЕЛЬНО сначала вызови getDirections для получения реального direction_id!',
     input_schema: {
       type: 'object',
       properties: {
@@ -330,7 +330,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'updateDirectionTargetCPL',
-    description: 'Изменить целевой CPL направления',
+    description: 'Изменить целевой CPL направления. ОБЯЗАТЕЛЬНО сначала вызови getDirections для получения реального direction_id!',
     input_schema: {
       type: 'object',
       properties: {
@@ -343,7 +343,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'pauseDirection',
-    description: 'Поставить направление на паузу',
+    description: 'Поставить направление на паузу (и FB кампанию). ОБЯЗАТЕЛЬНО сначала вызови getDirections для получения реального direction_id!',
     input_schema: {
       type: 'object',
       properties: {
@@ -357,7 +357,7 @@ export const tools: Anthropic.Tool[] = [
   },
   {
     name: 'resumeDirection',
-    description: 'Возобновить направление',
+    description: 'Возобновить направление (и FB кампанию в Ads Manager). ОБЯЗАТЕЛЬНО сначала вызови getDirections для получения реального direction_id!',
     input_schema: {
       type: 'object',
       properties: {
@@ -365,6 +365,160 @@ export const tools: Anthropic.Tool[] = [
         direction_id: { type: 'string', description: 'UUID направления' },
       },
       required: ['userAccountId', 'direction_id'],
+    },
+  },
+  {
+    name: 'pauseCampaign',
+    description: 'Поставить FB кампанию на паузу НАПРЯМУЮ через FB API. Работает с ЛЮБОЙ кампанией, не требует direction. Сначала вызови getCampaigns для campaign_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'Facebook Campaign ID (числовой)' },
+        reason: { type: 'string', description: 'Причина паузы' },
+      },
+      required: ['userAccountId', 'campaign_id'],
+    },
+  },
+  {
+    name: 'resumeCampaign',
+    description: 'Включить FB кампанию НАПРЯМУЮ через FB API. Работает с ЛЮБОЙ кампанией, не требует direction. Сначала вызови getCampaigns для campaign_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'Facebook Campaign ID (числовой)' },
+      },
+      required: ['userAccountId', 'campaign_id'],
+    },
+  },
+  {
+    name: 'getDirectionCreatives',
+    description: 'Получить список креативов направления с их статусами и метриками. Сначала вызови getDirections для direction_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        direction_id: { type: 'string', description: 'UUID направления из таблицы directions' },
+      },
+      required: ['userAccountId', 'direction_id'],
+    },
+  },
+  {
+    name: 'getDirectionInsights',
+    description: 'Метрики направления с сравнением vs предыдущий период. Включает CPL, CTR, CPM, CPC и delta. Сначала вызови getDirections для direction_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        direction_id: { type: 'string', description: 'UUID направления' },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
+          description: 'Preset период (игнорируется если указаны date_from/date_to)',
+        },
+        date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
+        date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
+        compare: {
+          type: 'string',
+          enum: ['previous_same', 'previous_7d'],
+          description: 'Сравнить с предыдущим периодом',
+        },
+      },
+      required: ['userAccountId', 'direction_id'],
+    },
+  },
+  {
+    name: 'getExternalCampaignMetrics',
+    description: 'Метрики ВНЕШНИХ кампаний (созданных не через приложение) с CPL, health score и сравнением с target. Target CPL из маппинга (saveCampaignMapping) или fallback аккаунта.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'ID конкретной кампании (опционально). Если не указан — все external кампании' },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
+          description: 'Preset период (игнорируется если указаны date_from/date_to)',
+        },
+        date_from: { type: 'string', description: 'Начало периода YYYY-MM-DD (приоритет над period)' },
+        date_to: { type: 'string', description: 'Конец периода YYYY-MM-DD' },
+      },
+      required: ['userAccountId'],
+    },
+  },
+  {
+    name: 'saveCampaignMapping',
+    description: 'Сохранить маппинг внешней кампании → направление + целевой CPL. Используй когда пользователь указал какое направление рекламирует кампания.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        campaign_id: { type: 'string', description: 'Facebook Campaign ID' },
+        campaign_name: { type: 'string', description: 'Название кампании (для читаемости)' },
+        direction_name: { type: 'string', description: 'Название направления/услуги (Имплантация, Ремонт квартир и т.д.)' },
+        goal: {
+          type: 'string',
+          enum: ['whatsapp', 'site', 'lead_form', 'other'],
+          description: 'Цель кампании',
+        },
+        target_cpl_cents: { type: 'number', description: 'Целевой CPL в центах (10-100000)' },
+      },
+      required: ['userAccountId', 'campaign_id', 'direction_name', 'target_cpl_cents'],
+    },
+  },
+  {
+    name: 'createAdSet',
+    description: 'Создать адсет с креативами в направлении (= Запуск с AI). Бот подберёт таргетинг из настроек direction. Сначала вызови getDirections для direction_id и getDirectionCreatives для creative_ids.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        direction_id: { type: 'string', description: 'UUID направления' },
+        creative_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Массив ID креативов для запуска',
+        },
+        daily_budget_cents: { type: 'number', description: 'Суточный бюджет в центах (опционально, берётся из direction)' },
+        adset_name: { type: 'string', description: 'Название адсета (опционально)' },
+        dry_run: { type: 'boolean', description: 'Preview режим без выполнения' },
+      },
+      required: ['userAccountId', 'direction_id', 'creative_ids'],
+    },
+  },
+  {
+    name: 'createAd',
+    description: 'Добавить одно объявление в существующий адсет. Сначала вызови getAdSets для adset_id и getDirectionCreatives для creative_id.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        adset_id: { type: 'string', description: 'ID существующего адсета Facebook' },
+        creative_id: { type: 'string', description: 'ID креатива из user_creatives' },
+        ad_name: { type: 'string', description: 'Название объявления (опционально)' },
+        dry_run: { type: 'boolean', description: 'Preview режим без выполнения' },
+      },
+      required: ['userAccountId', 'adset_id', 'creative_id'],
+    },
+  },
+  {
+    name: 'customFbQuery',
+    description: 'Кастомный запрос к FB API для нестандартных метрик и статистики. LLM строит запрос, выполняет, при ошибке retry до 3 раз. Для: разбивки по возрасту/полу/устройствам, любых нестандартных метрик.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        userAccountId: { type: 'string' },
+        user_request: { type: 'string', description: 'Что нужно узнать (например: "разбивка по возрасту за неделю")' },
+        entity_type: {
+          type: 'string',
+          enum: ['account', 'campaign', 'adset', 'ad'],
+          description: 'Уровень: account, campaign, adset или ad',
+        },
+        entity_id: { type: 'string', description: 'ID сущности (если не account)' },
+        period: { type: 'string', description: 'Период: today, yesterday, last_7d, last_30d' },
+      },
+      required: ['userAccountId', 'user_request'],
     },
   },
   {
