@@ -196,6 +196,19 @@ export const aiBotApi = {
     if (!response.ok) throw new Error('Failed to fetch linked instances');
     return response.json();
   },
+
+  /**
+   * Update SendPulse settings for a WABA phone number
+   */
+  async updateSendPulseSettings(instanceName: string, settings: SendPulseSettings): Promise<{ success: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/whatsapp-phone-numbers/${encodeURIComponent(instanceName)}/sendpulse`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    if (!response.ok) throw new Error('Failed to update SendPulse settings');
+    return response.json();
+  },
 };
 
 // Types for WhatsApp instances
@@ -219,4 +232,16 @@ export interface LinkedInstance {
   instanceName: string;
   phoneNumber: string | null;
   status: string;
+  connectionType?: 'evolution' | 'waba' | null;
+  sendVia?: 'cloud_api' | 'sendpulse';
+  sendpulseBotId?: string | null;
+  sendpulseClientId?: string | null;
+  sendpulseClientSecret?: string | null;
+}
+
+export interface SendPulseSettings {
+  sendVia: 'cloud_api' | 'sendpulse';
+  sendpulseBotId?: string | null;
+  sendpulseClientId?: string | null;
+  sendpulseClientSecret?: string | null;
 }

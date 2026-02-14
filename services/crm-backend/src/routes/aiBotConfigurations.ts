@@ -1426,6 +1426,22 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
       }
 
       const instancesCount = instances?.length || 0;
+
+      // Enrich with sendpulse settings from whatsapp_phone_numbers
+      const instanceNames = (instances || []).map((i: any) => i.instance_name).filter(Boolean);
+      let phoneNumbersMap: Record<string, any> = {};
+      if (instanceNames.length > 0) {
+        const { data: phoneNumbers } = await supabase
+          .from('whatsapp_phone_numbers')
+          .select('instance_name, send_via, sendpulse_bot_id, sendpulse_client_id, sendpulse_client_secret, connection_type')
+          .in('instance_name', instanceNames)
+          .eq('is_active', true);
+
+        for (const pn of phoneNumbers || []) {
+          phoneNumbersMap[pn.instance_name] = pn;
+        }
+      }
+
       app.log.info({
         botId,
         linkedInstancesCount: instancesCount,
@@ -1435,12 +1451,20 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       return reply.send({
         success: true,
-        instances: (instances || []).map((inst: any) => ({
-          id: inst.id,
-          instanceName: inst.instance_name,
-          phoneNumber: inst.phone_number,
-          status: inst.status
-        }))
+        instances: (instances || []).map((inst: any) => {
+          const pn = phoneNumbersMap[inst.instance_name];
+          return {
+            id: inst.id,
+            instanceName: inst.instance_name,
+            phoneNumber: inst.phone_number,
+            status: inst.status,
+            connectionType: pn?.connection_type || null,
+            sendVia: pn?.send_via || 'cloud_api',
+            sendpulseBotId: pn?.sendpulse_bot_id || null,
+            sendpulseClientId: pn?.sendpulse_client_id || null,
+            sendpulseClientSecret: pn?.sendpulse_client_secret || null,
+          };
+        })
       });
     } catch (error: any) {
       app.log.error({
@@ -1453,6 +1477,63 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         error: 'Failed to fetch linked instances',
         message: error.message
       });
+    }
+  });
+
+  /**
+   * PATCH /whatsapp-phone-numbers/:instanceName/sendpulse
+   * Update SendPulse settings for a WABA phone number
+   */
+  app.patch('/whatsapp-phone-numbers/:instanceName/sendpulse', async (request, reply) => {
+    const { instanceName } = request.params as { instanceName: string };
+    const body = request.body as {
+      sendVia: 'cloud_api' | 'sendpulse';
+      sendpulseBotId?: string | null;
+      sendpulseClientId?: string | null;
+      sendpulseClientSecret?: string | null;
+    };
+
+    app.log.info({ instanceName, sendVia: body.sendVia }, '[PATCH /whatsapp-phone-numbers/:instanceName/sendpulse] Request received');
+
+    try {
+      const updatePayload: Record<string, any> = {
+        send_via: body.sendVia || 'cloud_api',
+        updated_at: new Date().toISOString(),
+      };
+
+      if (body.sendVia === 'sendpulse') {
+        updatePayload.sendpulse_bot_id = body.sendpulseBotId || null;
+        updatePayload.sendpulse_client_id = body.sendpulseClientId || null;
+        updatePayload.sendpulse_client_secret = body.sendpulseClientSecret || null;
+      } else {
+        updatePayload.sendpulse_bot_id = null;
+        updatePayload.sendpulse_client_id = null;
+        updatePayload.sendpulse_client_secret = null;
+      }
+
+      const { data, error } = await supabase
+        .from('whatsapp_phone_numbers')
+        .update(updatePayload)
+        .eq('instance_name', instanceName)
+        .eq('is_active', true)
+        .select('id, instance_name, send_via, sendpulse_bot_id')
+        .maybeSingle();
+
+      if (error) {
+        app.log.error({ error: error.message, instanceName }, '[PATCH sendpulse] Database error');
+        throw error;
+      }
+
+      if (!data) {
+        return reply.status(404).send({ error: 'Phone number not found for this instance' });
+      }
+
+      app.log.info({ instanceName, sendVia: body.sendVia }, '[PATCH sendpulse] Updated successfully');
+      return reply.send({ success: true, data });
+
+    } catch (error: any) {
+      app.log.error({ error: error.message, instanceName }, '[PATCH sendpulse] Failed');
+      return reply.status(500).send({ error: 'Failed to update SendPulse settings', message: error.message });
     }
   });
 }

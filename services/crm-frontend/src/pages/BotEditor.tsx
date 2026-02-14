@@ -38,7 +38,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { aiBotApi, type LinkedInstance, type WhatsAppInstance } from '@/services/aiBotApi';
+import { aiBotApi, type LinkedInstance, type WhatsAppInstance, type SendPulseSettings } from '@/services/aiBotApi';
 import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
 import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK, DEFAULT_CONSULTATION_SETTINGS } from '@/types/aiBot';
 import { consultationService, type Consultant } from '@/services/consultationService';
@@ -92,6 +92,84 @@ function TagsInput({
   );
 }
 
+function SendPulseSettingsForm({
+  instance,
+  onSave,
+  isSaving,
+}: {
+  instance: LinkedInstance;
+  onSave: (settings: SendPulseSettings) => void;
+  isSaving: boolean;
+}) {
+  const [sendVia, setSendVia] = useState<'cloud_api' | 'sendpulse'>(instance.sendVia || 'cloud_api');
+  const [botId, setBotId] = useState(instance.sendpulseBotId || '');
+  const [clientId, setClientId] = useState(instance.sendpulseClientId || '');
+  const [clientSecret, setClientSecret] = useState(instance.sendpulseClientSecret || '');
+
+  return (
+    <div className="border-t px-4 pb-4 pt-3 space-y-3">
+      <div className="space-y-2">
+        <Label>Сервис отправки</Label>
+        <Select value={sendVia} onValueChange={(v) => setSendVia(v as 'cloud_api' | 'sendpulse')}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cloud_api">Cloud API (прямая отправка через Meta)</SelectItem>
+            <SelectItem value="sendpulse">SendPulse (через BSP)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {sendVia === 'sendpulse' && (
+        <div className="space-y-3 pl-1">
+          <div className="space-y-1">
+            <Label className="text-sm">Bot ID</Label>
+            <Input
+              value={botId}
+              onChange={(e) => setBotId(e.target.value)}
+              placeholder="ID бота в SendPulse"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm">Client ID</Label>
+            <Input
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="OAuth2 client_id"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm">Client Secret</Label>
+            <Input
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder="OAuth2 client_secret"
+            />
+          </div>
+        </div>
+      )}
+
+      <Button
+        size="sm"
+        onClick={() =>
+          onSave({
+            sendVia,
+            sendpulseBotId: sendVia === 'sendpulse' ? botId : null,
+            sendpulseClientId: sendVia === 'sendpulse' ? clientId : null,
+            sendpulseClientSecret: sendVia === 'sendpulse' ? clientSecret : null,
+          })
+        }
+        disabled={isSaving}
+      >
+        {isSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+        Сохранить
+      </Button>
+    </div>
+  );
+}
+
 export function BotEditor() {
   const { botId } = useParams<{ botId: string }>();
   const navigate = useNavigate();
@@ -100,6 +178,7 @@ export function BotEditor() {
 
   const [formData, setFormData] = useState<Partial<AIBotConfiguration>>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [expandedSendPulse, setExpandedSendPulse] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['ai-bot', botId],
@@ -150,6 +229,18 @@ export function BotEditor() {
     },
     onError: () => {
       toast({ title: 'Ошибка', description: 'Не удалось изменить привязку', variant: 'destructive' });
+    },
+  });
+
+  const sendPulseMutation = useMutation({
+    mutationFn: ({ instanceName, settings }: { instanceName: string; settings: SendPulseSettings }) =>
+      aiBotApi.updateSendPulseSettings(instanceName, settings),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-bot-linked-instances', botId] });
+      toast({ title: 'Сохранено', description: 'Настройки SendPulse обновлены' });
+    },
+    onError: () => {
+      toast({ title: 'Ошибка', description: 'Не удалось сохранить настройки SendPulse', variant: 'destructive' });
     },
   });
 
@@ -423,27 +514,58 @@ export function BotEditor() {
               ) : (
                 <div className="space-y-3">
                   {linkedInstances.map((instance: LinkedInstance) => (
-                    <div
-                      key={instance.id}
-                      className="flex items-center justify-between p-4 rounded-lg border bg-green-50 dark:bg-green-950/30"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-                          <Smartphone className="w-4 h-4" />
+                    <div key={instance.id} className="rounded-lg border bg-green-50 dark:bg-green-950/30">
+                      <div className="flex items-center justify-between p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                            <Smartphone className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-medium">
+                              {instance.phoneNumber || instance.instanceName}
+                            </div>
+                            {instance.connectionType === 'waba' && instance.sendVia === 'sendpulse' && (
+                              <Badge variant="secondary" className="mt-1 text-xs">SendPulse</Badge>
+                            )}
+                          </div>
                         </div>
-                        <div className="font-medium">
-                          {instance.phoneNumber || instance.instanceName}
+                        <div className="flex items-center gap-2">
+                          {instance.connectionType === 'waba' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setExpandedSendPulse(
+                                expandedSendPulse === instance.instanceName ? null : instance.instanceName
+                              )}
+                            >
+                              <Settings2 className="w-4 h-4 mr-1" />
+                              Сервис отправки
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => linkMutation.mutate({ instanceId: instance.id, newBotId: null })}
+                            disabled={linkMutation.isPending}
+                          >
+                            <Unlink className="w-4 h-4 mr-1" />
+                            Отвязать
+                          </Button>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => linkMutation.mutate({ instanceId: instance.id, newBotId: null })}
-                        disabled={linkMutation.isPending}
-                      >
-                        <Unlink className="w-4 h-4 mr-1" />
-                        Отвязать
-                      </Button>
+
+                      {instance.connectionType === 'waba' && expandedSendPulse === instance.instanceName && (
+                        <SendPulseSettingsForm
+                          instance={instance}
+                          onSave={(settings) => {
+                            sendPulseMutation.mutate({
+                              instanceName: instance.instanceName,
+                              settings,
+                            });
+                          }}
+                          isSaving={sendPulseMutation.isPending}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>

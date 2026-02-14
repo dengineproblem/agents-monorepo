@@ -28,9 +28,16 @@ interface WabaChannelInfo {
   accessToken: string;
 }
 
+interface SendPulseChannelInfo {
+  botId: string;
+  clientId: string;
+  clientSecret: string;
+}
+
 type DeliveryChannel =
   | { type: 'evolution' }
-  | { type: 'waba'; info: WabaChannelInfo };
+  | { type: 'waba'; info: WabaChannelInfo }
+  | { type: 'sendpulse'; info: SendPulseChannelInfo };
 
 function formatPhoneForWhatsApp(rawPhone: string): string {
   let formattedPhone = rawPhone.replace(/\D/g, '');
@@ -97,13 +104,21 @@ async function resolveWabaAccessToken(userAccountId: string, accountId: string |
   return extractNonEmptyString((userAccount as any)?.access_token);
 }
 
-async function findWabaPhoneRecord(instanceName: string): Promise<{
+interface WabaPhoneRecord {
   waba_phone_id: string | null;
   user_account_id: string;
   account_id: string | null;
   connection_type: string | null;
   waba_access_token: string | null;
-} | null> {
+  send_via: string | null;
+  sendpulse_bot_id: string | null;
+  sendpulse_client_id: string | null;
+  sendpulse_client_secret: string | null;
+}
+
+const WABA_PHONE_SELECT = 'waba_phone_id, user_account_id, account_id, connection_type, waba_access_token, send_via, sendpulse_bot_id, sendpulse_client_id, sendpulse_client_secret';
+
+async function findWabaPhoneRecord(instanceName: string): Promise<WabaPhoneRecord | null> {
   const normalizedInstanceName = instanceName.trim();
 
   if (!normalizedInstanceName) {
@@ -112,7 +127,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
 
   const { data: byInstanceName, error: byInstanceNameError } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('waba_phone_id, user_account_id, account_id, connection_type, waba_access_token')
+    .select(WABA_PHONE_SELECT)
     .eq('instance_name', normalizedInstanceName)
     .eq('is_active', true)
     .maybeSingle();
@@ -125,13 +140,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
   }
 
   if (byInstanceName) {
-    return byInstanceName as {
-      waba_phone_id: string | null;
-      user_account_id: string;
-      account_id: string | null;
-      connection_type: string | null;
-      waba_access_token: string | null;
-    };
+    return byInstanceName as WabaPhoneRecord;
   }
 
   // Fallback for synthetic names like waba_<phone_number_id>.
@@ -141,7 +150,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
 
     const { data: byWabaPhoneId, error: byWabaPhoneIdError } = await supabase
       .from('whatsapp_phone_numbers')
-      .select('waba_phone_id, user_account_id, account_id, connection_type, waba_access_token')
+      .select(WABA_PHONE_SELECT)
       .eq('waba_phone_id', fallbackWabaPhoneId)
       .eq('is_active', true)
       .maybeSingle();
@@ -155,13 +164,7 @@ async function findWabaPhoneRecord(instanceName: string): Promise<{
     }
 
     if (byWabaPhoneId) {
-      return byWabaPhoneId as {
-        waba_phone_id: string | null;
-        user_account_id: string;
-        account_id: string | null;
-        connection_type: string | null;
-        waba_access_token: string | null;
-      };
+      return byWabaPhoneId as WabaPhoneRecord;
     }
   }
 
@@ -181,6 +184,25 @@ async function resolveDeliveryChannel(instanceName: string): Promise<DeliveryCha
     return { type: 'evolution' };
   }
 
+  // SendPulse BSP channel
+  if (wabaRecord.send_via === 'sendpulse') {
+    const botId = extractNonEmptyString(wabaRecord.sendpulse_bot_id);
+    const clientId = extractNonEmptyString(wabaRecord.sendpulse_client_id);
+    const clientSecret = extractNonEmptyString(wabaRecord.sendpulse_client_secret);
+
+    if (!botId || !clientId || !clientSecret) {
+      log.warn({ instanceName }, 'SendPulse credentials incomplete, fallback to Evolution');
+      return { type: 'evolution' };
+    }
+
+    log.debug({ instanceName, botId }, 'Delivery channel resolved to SendPulse');
+    return {
+      type: 'sendpulse',
+      info: { botId, clientId, clientSecret }
+    };
+  }
+
+  // Direct Meta Cloud API
   const wabaPhoneId = extractNonEmptyString(wabaRecord.waba_phone_id);
   if (!wabaPhoneId) {
     log.warn({ instanceName }, 'WABA connection found but waba_phone_id is missing, fallback to Evolution');
@@ -290,8 +312,95 @@ async function sendViaWaba(params: SendMessageParams, channelInfo: WabaChannelIn
   };
 }
 
+// ==================== SENDPULSE ====================
+
+const sendPulseTokenCache = new Map<string, { token: string; expiresAt: number }>();
+
+async function getSendPulseToken(clientId: string, clientSecret: string): Promise<string> {
+  const cacheKey = `${clientId}:${clientSecret}`;
+  const cached = sendPulseTokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
+  }
+
+  const response = await fetch('https://api.sendpulse.com/oauth/access_token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SendPulse OAuth error: ${response.status} - ${errorText.slice(0, 500)}`);
+  }
+
+  const data = await response.json() as { access_token: string; expires_in?: number };
+  const expiresIn = (data.expires_in || 3600) * 1000;
+
+  // Cache with 5-minute buffer
+  sendPulseTokenCache.set(cacheKey, {
+    token: data.access_token,
+    expiresAt: Date.now() + expiresIn - 5 * 60 * 1000
+  });
+
+  return data.access_token;
+}
+
+async function sendViaSendPulse(params: SendMessageParams, channelInfo: SendPulseChannelInfo): Promise<SendMessageResponse> {
+  const { instanceName, phone, message } = params;
+  const to = formatPhoneForWhatsApp(phone);
+
+  const token = await getSendPulseToken(channelInfo.clientId, channelInfo.clientSecret);
+
+  const response = await fetch('https://api.sendpulse.com/whatsapp/contacts/sendByPhone', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      bot_id: channelInfo.botId,
+      phone: to,
+      message: {
+        type: 'text',
+        text: {
+          body: message
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SendPulse API error: ${response.status} - ${errorText.slice(0, 500)}`);
+  }
+
+  const data = await response.json() as any;
+  const messageId = data.data?.id || `sp:${Date.now()}`;
+
+  log.info({
+    instanceName,
+    botId: channelInfo.botId,
+    phone: to,
+    messageId
+  }, 'Message sent via SendPulse');
+
+  return {
+    success: true,
+    key: {
+      remoteJid: `${to}@s.whatsapp.net`,
+      fromMe: true,
+      id: messageId
+    }
+  };
+}
+
 /**
- * Send text message via Evolution API or WABA Cloud API
+ * Send text message via Evolution API, WABA Cloud API, or SendPulse
  */
 export async function sendWhatsAppMessage(
   params: SendMessageParams
@@ -306,9 +415,14 @@ export async function sendWhatsAppMessage(
       channel: channel.type
     }, 'Sending WhatsApp message');
 
-    const result = channel.type === 'waba'
-      ? await sendViaWaba(params, channel.info)
-      : await sendViaEvolution(params);
+    let result: SendMessageResponse;
+    if (channel.type === 'sendpulse') {
+      result = await sendViaSendPulse(params, channel.info);
+    } else if (channel.type === 'waba') {
+      result = await sendViaWaba(params, channel.info);
+    } else {
+      result = await sendViaEvolution(params);
+    }
 
     log.info({
       instanceName,
@@ -345,9 +459,9 @@ export async function sendPresence(
   try {
     const channel = await resolveDeliveryChannel(instanceName);
 
-    // Meta Cloud API does not provide the same typing endpoint as Evolution.
-    if (channel.type === 'waba') {
-      log.debug({ instanceName, phone, presence, delayMs }, 'Skipping presence for WABA channel');
+    // Meta Cloud API and SendPulse do not provide the same typing endpoint as Evolution.
+    if (channel.type === 'waba' || channel.type === 'sendpulse') {
+      log.debug({ instanceName, phone, presence, delayMs }, 'Skipping presence for non-Evolution channel');
       return true;
     }
 
@@ -387,7 +501,7 @@ export async function checkInstanceStatus(instanceName: string): Promise<boolean
   try {
     const channel = await resolveDeliveryChannel(instanceName);
 
-    if (channel.type === 'waba') {
+    if (channel.type === 'waba' || channel.type === 'sendpulse') {
       return true;
     }
 
