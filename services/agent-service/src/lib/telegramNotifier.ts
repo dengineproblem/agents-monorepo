@@ -6,6 +6,10 @@ const log = createLogger({ module: 'telegramNotifier' });
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
+// Отдельный бот для управления закрытым каналом комьюнити (инвайты, кик)
+const COMMUNITY_BOT_TOKEN = process.env.COMMUNITY_BOT_TOKEN || TELEGRAM_BOT_TOKEN;
+const COMMUNITY_BOT_API_URL = `https://api.telegram.org/bot${COMMUNITY_BOT_TOKEN}`;
+
 interface TelegramResponse {
   ok: boolean;
   description?: string;
@@ -135,7 +139,7 @@ export async function sendTelegramNotification(
  */
 export async function createChatInviteLink(channelId: string | number): Promise<string | null> {
   try {
-    const response = await fetch(`${TELEGRAM_API_URL}/createChatInviteLink`, {
+    const response = await fetch(`${COMMUNITY_BOT_API_URL}/createChatInviteLink`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -164,7 +168,7 @@ export async function createChatInviteLink(channelId: string | number): Promise<
  */
 export async function kickFromChannel(channelId: string | number, userId: string | number): Promise<boolean> {
   try {
-    const banResponse = await fetch(`${TELEGRAM_API_URL}/banChatMember`, {
+    const banResponse = await fetch(`${COMMUNITY_BOT_API_URL}/banChatMember`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: channelId, user_id: userId }),
@@ -183,7 +187,7 @@ export async function kickFromChannel(channelId: string | number, userId: string
     }
 
     // Unban чтобы снять перманентный бан (позволяет re-join по новому инвайту)
-    await fetch(`${TELEGRAM_API_URL}/unbanChatMember`, {
+    await fetch(`${COMMUNITY_BOT_API_URL}/unbanChatMember`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: channelId, user_id: userId, only_if_banned: true }),
