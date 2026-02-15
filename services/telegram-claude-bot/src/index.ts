@@ -834,6 +834,13 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       return;
     }
 
+    // Существующий пользователь в процессе добавления аккаунта (➕ Добавить аккаунт)
+    const pendingAdd = getPendingFlow(telegramId!);
+    if (pendingAdd?.flow === 'onboarding') {
+      const handled = await handleOnboardingInput(bot, numericChatId, telegramId!, truncatedMessage);
+      if (handled) return;
+    }
+
     const userAccountId = resolvedUser.userAccountId;
 
     // Создание/обновление сессии
