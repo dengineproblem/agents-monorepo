@@ -33,14 +33,13 @@ objective = 'conversions'
 | Creative | fb_creative_id_whatsapp | fb_creative_id_site_leads |
 | CAPI source | whatsapp (AI) или crm | crm only |
 
-### 2. Цель "Lead Forms" (`lead_forms`) — CRM CAPI оптимизация
+### 2. Цель "Lead Forms" (`lead_forms`) — обычные лидформы
 
-Lead Forms используют отдельную цель `lead_forms` с опциональным CAPI toggle для CRM-оптимизации (Meta "Conversion Leads"):
+Lead Forms без CAPI оптимизации — стандартные лидформы Facebook:
 
 ```
 objective = 'lead_forms'
-  └── capi_enabled: true/false
-      └── capi_source: 'crm' (единственный вариант)
+  └── optimization_goal: LEAD_GENERATION (оптимизация по количеству заполнений)
 ```
 
 | Параметр | Значение |
@@ -50,11 +49,34 @@ objective = 'lead_forms'
 | destination_type | `ON_AD` |
 | promoted_object | `{ page_id }` (БЕЗ pixel_id) |
 | Creative | fb_creative_id_lead_forms |
+
+### 3. Канал "Lead Form" в Конверсиях — CAPI Conversion Leads
+
+Для CAPI-оптимизации лидформ используется `objective='conversions'` + `conversion_channel='lead_form'` с `optimization_goal: QUALITY_LEAD`:
+
+```
+objective = 'conversions'
+  └── conversion_channel: 'lead_form'
+      └── optimization_goal: QUALITY_LEAD (оптимизация по конвертированным лидам)
+      └── capi_source: 'crm'
+      └── capi_event_level: NULL (все уровни, Facebook оптимизирует сам через CRM воронку)
+```
+
+| Параметр | Значение |
+|----------|----------|
+| Campaign objective | `OUTCOME_LEADS` |
+| AdSet optimization_goal | `QUALITY_LEAD` |
+| destination_type | `ON_AD` |
+| promoted_object | `{ page_id }` (БЕЗ pixel_id) |
+| Creative | fb_creative_id_lead_forms |
 | CAPI source | crm only |
+| capi_event_level | NULL (все уровни всегда) |
 
-> **Важно:** Для Lead Forms `pixel_id` НЕ передаётся в `promoted_object`. Адсет настраивается как обычная лидформа. Оптимизация по CRM событиям происходит через CAPI события в датасет, матчинг по `leadgen_id`.
+> **QUALITY_LEAD vs LEAD_GENERATION:** `QUALITY_LEAD` использует CAPI события (Contact/Schedule/StartTrial) для обучения алгоритма и показывает рекламу людям, которые с большей вероятностью станут реальными клиентами. По данным Meta, снижение стоимости качественного лида ~19%.
 
-> **Ранее** Lead Form + CRM CAPI был реализован как `objective='conversions'` + `conversion_channel='lead_form'`. Сейчас это вынесено в отдельную цель `lead_forms` с CAPI toggle, т.к. на уровне Facebook API параметры кампании/адсета идентичны обычным лидформам.
+> **Уровень оптимизации** не выбирается на уровне адсета/нашей системы. Facebook автоматически использует все CAPI события для построения воронки. Целевой этап оптимизации настраивается в Events Manager → Sales Funnel.
+
+> **Важно:** `pixel_id` НЕ передаётся в `promoted_object`. Оптимизация по CRM событиям происходит через CAPI события в датасет, матчинг по `leadgen_id`.
 
 ### User matching по каналам
 

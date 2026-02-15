@@ -884,6 +884,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     )}
                   </h3>
 
+                  {/* Уровень оптимизации скрыт для lead_form — Facebook оптимизирует сам через CRM воронку */}
+                  {direction.conversion_channel !== 'lead_form' && (
                   <div className="space-y-2">
                     <Label>
                       Уровень оптимизации <span className="text-red-500">*</span>
@@ -928,6 +930,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       </div>
                     </RadioGroup>
                   </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="edit-wa-conv-number">

@@ -276,7 +276,7 @@ export async function workflowStartCreativeTest(
       const conversionChannel = direction.conversion_channel || 'whatsapp';
       if (conversionChannel === 'lead_form') {
         fb_objective = 'OUTCOME_LEADS';
-        optimization_goal = 'LEAD_GENERATION';
+        optimization_goal = 'QUALITY_LEAD';
       } else {
         fb_objective = 'OUTCOME_SALES';
         optimization_goal = 'OFFSITE_CONVERSIONS';
@@ -288,7 +288,14 @@ export async function workflowStartCreativeTest(
         }, 'Conversions direction missing conversion_channel, falling back to whatsapp');
       }
 
-      if (defaultSettings?.pixel_id) {
+      if (conversionChannel === 'lead_form') {
+        // Lead form (QUALITY_LEAD) — не требует pixel_id, только page_id
+        destination_type = 'ON_AD';
+        promoted_object = {
+          page_id: String(page_id),
+        };
+        log.info({ conversion_channel: conversionChannel, destination_type }, 'Using lead_form QUALITY_LEAD (no pixel needed)');
+      } else if (defaultSettings?.pixel_id) {
         const customEventType = getCustomEventType(direction.optimization_level, conversionChannel);
 
         if (conversionChannel === 'whatsapp') {
@@ -301,11 +308,6 @@ export async function workflowStartCreativeTest(
           if (context.whatsapp_phone_number) {
             promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
           }
-        } else if (conversionChannel === 'lead_form') {
-          destination_type = 'ON_AD';
-          promoted_object = {
-            page_id: String(page_id),
-          };
         } else if (conversionChannel === 'site') {
           destination_type = 'WEBSITE';
           promoted_object = {

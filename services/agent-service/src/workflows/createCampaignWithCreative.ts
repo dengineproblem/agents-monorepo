@@ -126,7 +126,7 @@ export async function workflowCreateCampaignWithCreative(
     case 'Conversions':
       if (conversion_channel === 'lead_form') {
         fb_objective = 'OUTCOME_LEADS';
-        optimization_goal = 'LEAD_GENERATION';
+        optimization_goal = 'QUALITY_LEAD';
       } else {
         fb_objective = 'OUTCOME_SALES';
         optimization_goal = 'OFFSITE_CONVERSIONS';
@@ -351,10 +351,10 @@ export async function workflowCreateCampaignWithCreative(
         ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
       };
     } else if (channel === 'lead_form' && page_id) {
+      // QUALITY_LEAD: promoted_object содержит только page_id (без pixel_id)
+      // Оптимизация по CRM событиям происходит через CAPI события в датасет (по leadgen_id)
       adsetBody.destination_type = 'ON_AD';
       adsetBody.promoted_object = {
-        pixel_id: String(pixelId),
-        custom_event_type: eventType,
         page_id: String(page_id),
       };
     } else if (channel === 'site') {

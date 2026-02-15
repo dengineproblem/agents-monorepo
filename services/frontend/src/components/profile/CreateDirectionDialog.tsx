@@ -493,7 +493,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         platform: directionPlatform,
         ...(needsFacebook && {
           objective,
-          ...(objective === 'conversions' && { optimization_level: optimizationLevel, conversion_channel: conversionChannel }),
+          ...(objective === 'conversions' && {
+            conversion_channel: conversionChannel,
+            ...(conversionChannel !== 'lead_form' && { optimization_level: optimizationLevel }),
+          }),
           use_instagram: useInstagram,
           advantage_audience_enabled: advantageAudienceEnabled,
           custom_audience_id: customAudienceId || null,
@@ -725,6 +728,14 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     </div>
                   </div>
                   <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="lead_form" id="channel-lead-form" />
+                    <div>
+                      <Label htmlFor="channel-lead-form" className="font-normal cursor-pointer">
+                        {CONVERSION_CHANNEL_DESCRIPTIONS.lead_form}
+                      </Label>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-2">
                     <RadioGroupItem value="site" id="channel-site" />
                     <div>
                       <Label htmlFor="channel-site" className="font-normal cursor-pointer">
@@ -736,8 +747,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </div>
             )}
 
-            {/* Уровень оптимизации для конверсий */}
-            {needsFacebook && objective === 'conversions' && (
+            {/* Уровень оптимизации для конверсий (не для lead_form — там Facebook оптимизирует сам через CRM воронку) */}
+            {needsFacebook && objective === 'conversions' && conversionChannel !== 'lead_form' && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
                   <Label>

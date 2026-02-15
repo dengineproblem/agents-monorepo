@@ -177,9 +177,9 @@ export async function workflowCreateAdSetInDirection(
       break;
     case 'conversions':
       if (direction.conversion_channel === 'lead_form') {
-        // Lead form + CRM CAPI: адсет как обычная лидформа, оптимизация через CAPI события в датасет
+        // Lead form + CRM CAPI: QUALITY_LEAD оптимизирует по конвертированным лидам через CAPI
         fb_objective = 'OUTCOME_LEADS';
-        optimization_goal = 'LEAD_GENERATION';
+        optimization_goal = 'QUALITY_LEAD';
       } else {
         fb_objective = 'OUTCOME_SALES';
         optimization_goal = 'OFFSITE_CONVERSIONS';
@@ -460,7 +460,8 @@ export async function workflowCreateAdSetInDirection(
     }
 
     const pixelId = direction.pixel_id || defaultSettings?.pixel_id;
-    if (!pixelId) {
+    // lead_form (QUALITY_LEAD) не требует pixel_id — только page_id
+    if (!pixelId && conversionChannel !== 'lead_form') {
       log.error({
         directionId: direction.id,
         directionName: direction.name,

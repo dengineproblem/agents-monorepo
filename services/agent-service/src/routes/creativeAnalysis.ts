@@ -277,7 +277,7 @@ async function fetchTopCreatives(
 
   const ads: any[] = [];
   let nextUrl: string | null = `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAccountId}/ads?` +
-    `fields=id,name,creative{id,video_id,thumbnail_url,effective_object_story_id,object_story_id}` +
+    `fields=id,name,creative{id,video_id,thumbnail_url,effective_object_story_id,object_story_id,asset_feed_spec}` +
     `&time_range=${encodeURIComponent(JSON.stringify(timeRange))}` +
     `&limit=200` +
     `&access_token=${accessToken}`;
@@ -322,6 +322,8 @@ async function fetchTopCreatives(
       name: ad.name,
       creative_id: ad.creative?.id,
       video_id: ad.creative?.video_id,
+      asset_feed_video_id: ad.creative?.asset_feed_spec?.videos?.[0]?.video_id || null,
+      has_asset_feed_spec: !!ad.creative?.asset_feed_spec,
       effective_object_story_id: ad.creative?.effective_object_story_id,
       object_story_id: ad.creative?.object_story_id,
       thumbnail_url: ad.creative?.thumbnail_url ? 'exists' : null,
@@ -461,7 +463,12 @@ async function fetchTopCreatives(
     // Ключ группировки:
     // 1. video_id для видео (дубликаты сохраняют video_id)
     // 2. creative_id для изображений
-    const videoId = ad.creative?.video_id;
+    // Fallback: для Advantage+ Creative (dynamic creative) video_id может быть в asset_feed_spec.videos
+    let videoId = ad.creative?.video_id;
+    if (!videoId && ad.creative?.asset_feed_spec?.videos?.length > 0) {
+      videoId = ad.creative.asset_feed_spec.videos[0].video_id;
+      log.debug?.({ adId: ad.id, videoId, source: 'asset_feed_spec' }, 'Found video_id via asset_feed_spec');
+    }
 
     let groupKey: string;
     if (videoId) {
@@ -749,7 +756,8 @@ async function downloadVideoWithYtDlp(
 async function downloadAndTranscribe(
   videoId: string,
   accessToken: string,
-  log: Logger
+  log: Logger,
+  creativeId?: string
 ): Promise<{ text: string; duration?: number; videoPath: string } | null> {
   const startTime = Date.now();
   const videoPath = path.join('/var/tmp', `import_${randomUUID()}.mp4`);
@@ -783,6 +791,30 @@ async function downloadAndTranscribe(
     }
   } catch (error: any) {
     log.warn({ videoId, error: error.message }, 'Failed to fetch video info from API');
+  }
+
+  // Fallback: через creative object_story_spec — альтернативный video_id
+  if (!videoSource && creativeId) {
+    try {
+      log.info({ videoId, creativeId, stage: 'creative_video_fallback' }, 'Trying to get video source via creative object_story_spec');
+      const creativeUrl = `https://graph.facebook.com/${FB_API_VERSION}/${creativeId}?fields=object_story_spec&access_token=${accessToken}`;
+      const creativeResponse = await fetchWithTimeout(creativeUrl, {}, FB_API_TIMEOUT);
+      const creativeData = await creativeResponse.json() as any;
+      const storyVideoId = creativeData?.object_story_spec?.video_data?.video_id;
+
+      if (storyVideoId && storyVideoId !== videoId) {
+        log.info({ videoId, storyVideoId }, 'Found alternative video_id from creative, fetching source');
+        const altVideoUrl = `https://graph.facebook.com/${FB_API_VERSION}/${storyVideoId}?fields=source&access_token=${accessToken}`;
+        const altResponse = await fetchWithTimeout(altVideoUrl, {}, FB_API_TIMEOUT);
+        const altData = await altResponse.json() as any;
+        if (altResponse.ok && altData.source) {
+          videoSource = altData.source;
+          log.info({ videoId, storyVideoId, hasSource: true }, 'Got video source via creative fallback');
+        }
+      }
+    } catch (error: any) {
+      log.warn({ videoId, creativeId, error: error.message }, 'Creative video fallback failed');
+    }
   }
 
   let downloadSuccess = false;
@@ -949,7 +981,7 @@ async function importSingleCreative(
     }
 
     // Скачиваем и транскрибируем
-    const transcription = await downloadAndTranscribe(creative.video_id, accessToken, log);
+    const transcription = await downloadAndTranscribe(creative.video_id, accessToken, log, creative.creative_id);
 
     if (!transcription) {
       log.warn({ adId: creative.ad_id, videoId: creative.video_id }, 'Failed to transcribe video');
