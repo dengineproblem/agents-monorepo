@@ -10,7 +10,7 @@ import {
   getPlanConfig,
   isRobokassaConfigured
 } from '../lib/robokassa.js';
-import { sendTelegramNotification, createChatInviteLink } from '../lib/telegramNotifier.js';
+import { sendTelegramNotification, sendCommunityNotification, createChatInviteLink } from '../lib/telegramNotifier.js';
 
 const logger = createLogger({ module: 'robokassaRoutes' });
 
@@ -346,13 +346,10 @@ export default async function robokassaRoutes(app: FastifyInstance) {
         if (communityChannelId) {
           const inviteLink = await createChatInviteLink(communityChannelId);
           if (inviteLink) {
-            await sendTelegramNotification(userTg.telegram_id,
-              `🔗 Ваша одноразовая ссылка для входа в закрытый канал комьюнити:`,
-              { userAccountId: user.id, source: 'bot' }
+            await sendCommunityNotification(userTg.telegram_id,
+              `🔗 Ваша одноразовая ссылка для входа в закрытый канал комьюнити:`
             );
-            await sendTelegramNotification(userTg.telegram_id, inviteLink,
-              { userAccountId: user.id, source: 'bot', skipLog: true }
-            );
+            await sendCommunityNotification(userTg.telegram_id, inviteLink);
             await supabase.from('user_accounts')
               .update({ community_channel_invited: true })
               .eq('id', user.id);

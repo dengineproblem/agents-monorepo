@@ -11,7 +11,7 @@ import cron from 'node-cron';
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
-import { kickFromChannel, sendTelegramNotification } from '../lib/telegramNotifier.js';
+import { kickFromChannel, sendCommunityNotification } from '../lib/telegramNotifier.js';
 
 const logger = createLogger({ module: 'communityChannelCron' });
 
@@ -79,9 +79,8 @@ async function processExpiredCommunityMembers(): Promise<void> {
 
         // Уведомить пользователя
         try {
-          await sendTelegramNotification(user.telegram_id,
-            '⏰ Ваша подписка истекла.\n\nДоступ к каналу комьюнити приостановлен. Используйте /subscription для продления.',
-            { userAccountId: user.id, source: 'bot' }
+          await sendCommunityNotification(user.telegram_id,
+            '⏰ Ваша подписка истекла.\n\nДоступ к каналу комьюнити приостановлен. Используйте /subscription для продления.'
           );
         } catch {
           // Пользователь мог заблокировать бота
