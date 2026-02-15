@@ -285,7 +285,7 @@ async function handleLeadEvent(
       }, 'CRM CAPI sync failed in handleLeadEvent');
     }
   } else {
-    app.log.debug({ leadId }, 'No local lead found for Bitrix24 lead');
+    app.log.info({ userAccountId, leadId }, 'No local lead found for Bitrix24 lead (bitrix24_lead_id not linked)');
   }
 }
 
@@ -391,7 +391,7 @@ async function handleDealEvent(
       }, 'CRM CAPI sync failed in handleDealEvent');
     }
   } else {
-    app.log.debug({ dealId }, 'No local lead found for Bitrix24 deal');
+    app.log.info({ userAccountId, dealId }, 'No local lead found for Bitrix24 deal (bitrix24_deal_id not linked)');
   }
 }
 
