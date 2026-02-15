@@ -1,4 +1,4 @@
-import { AdAccountInfo, ResolvedUser } from './types.js';
+import { AdAccountInfo, MenuFlowState, ResolvedUser } from './types.js';
 import { logger } from './logger.js';
 
 export interface UserSession {
@@ -17,6 +17,7 @@ export interface UserSession {
   pendingReferenceImages: string[] | null; // URL'ы из media_group, автоинжект в generateCreatives
   pendingApproval: { tool: string; args: Record<string, any>; timestamp: number } | null; // Ожидает подтверждения пользователя
   accountSwitchedAt: string | null; // ISO timestamp — conversation history до этого момента пропускается
+  menuFlow: MenuFlowState | null; // Активный menu flow (ручной запуск и т.д.)
 }
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 минут
@@ -67,6 +68,7 @@ export function createSession(
     pendingReferenceImages: null,
     pendingApproval: null,
     accountSwitchedAt: null,
+    menuFlow: null,
   };
   sessions.set(telegramId, session);
   logger.info({
@@ -103,6 +105,7 @@ export function setSelectedAccount(
     if (previousAccountId !== accountId) {
       session.accountSwitchedAt = new Date().toISOString();
       session.lastDomain = null;
+      session.menuFlow = null;
     }
     session.lastActivity = Date.now();
     logger.info({ telegramId, accountId, accountStack, switched: previousAccountId !== accountId }, 'Account selected');

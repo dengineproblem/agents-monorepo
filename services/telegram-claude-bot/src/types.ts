@@ -95,3 +95,16 @@ export interface ResolvedUser {
   adAccounts: AdAccountInfo[];
   anthropicApiKey: string | null;
 }
+
+/** Состояние многошагового menu flow (ручной запуск) */
+export interface MenuFlowState {
+  flow: 'manual_launch';
+  step: 'select_direction' | 'await_input';
+  data: {
+    directions?: Array<{ id: string; name: string }>;
+    selectedDirectionId?: string;
+    selectedDirectionName?: string;
+    creatives?: Array<{ id: string; name: string; index: number }>;
+  };
+  startedAt: number;
+}

@@ -1158,12 +1158,9 @@ export const adsHandlers = {
       .from('user_creatives')
       .select(`
         id,
-        name,
         title,
         status,
         media_type,
-        risk_score,
-        performance_tier,
         created_at,
         updated_at
       `)
@@ -1203,11 +1200,9 @@ export const adsHandlers = {
       direction_name: direction?.name,
       creatives: (creatives || []).map(c => ({
         id: c.id,
-        name: c.name || c.title,
+        name: c.title,
         status: c.status,
         media_type: c.media_type,
-        risk_score: c.risk_score,
-        performance_tier: c.performance_tier,
         created_at: c.created_at
       })),
       total: creatives?.length || 0,

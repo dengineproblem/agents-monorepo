@@ -44,6 +44,7 @@ import { tools, executeTool } from './tools.js';
 import { routeMessage, ACCOUNT_SWITCH_PATTERN } from './router.js';
 import { DOMAINS, getToolsForDomain, getToolsForDomainWithStack, getMergedToolsForDomains } from './domains.js';
 import { ensureMemoryDir, readUserMemory, getUserMemoryValue, updateUserMemory } from './memory.js';
+import { handleMenuCallback, showMainMenu, MenuHandlerContext } from './menu.js';
 import {
   UserSession,
   getSession,
@@ -859,6 +860,56 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       }
     }
 
+    // === SLASH COMMANDS ===
+    // /accounts — показать список аккаунтов для переключения
+    if (/^\/accounts\s*$/i.test(truncatedMessage) && session.multiAccountEnabled && session.adAccounts.length > 1) {
+      logger.info({ telegramId, chatId }, '/accounts command');
+      clearSelectedAccount(telegramId!);
+      session = getSession(telegramId!)!;
+      const currentName = getUserMemoryValue(userAccountId, 'selected_account_name');
+      const header = currentName
+        ? `Текущий аккаунт: *${currentName}*\n\nВыберите аккаунт:`
+        : 'Выберите аккаунт:';
+      const keyboard = session.adAccounts.map((acc, i) => ([{
+        text: acc.name + (acc.isDefault ? ' ⭐' : ''),
+        callback_data: `select_account:${i}`,
+      }]));
+      await bot.sendMessage(parseInt(chatId), header, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: keyboard },
+      });
+      return;
+    }
+
+    // /menu — главное меню (если аккаунт выбран)
+    const MENU_PATTERN = /^(меню|\/menu|главное\s+меню|menu)\s*$/i;
+    if (MENU_PATTERN.test(truncatedMessage) && session.selectedAccountId) {
+      const accName = getUserMemoryValue(userAccountId, 'selected_account_name') || 'Аккаунт';
+      await showMainMenu(bot, parseInt(chatId), accName);
+      return;
+    }
+
+    // === MENU FLOW: MANUAL LAUNCH CONTEXT INJECTION ===
+    // Если пользователь набрал текст после выбора направления и просмотра креативов —
+    // инжектим контекст для Claude чтобы он понял что нужен createAdSet
+    let manualLaunchContext = '';
+    if (session.menuFlow) {
+      if (Date.now() - session.menuFlow.startedAt > 10 * 60 * 1000) {
+        session.menuFlow = null;
+      } else if (session.menuFlow.step === 'await_input' && session.menuFlow.data.selectedDirectionId) {
+        const flow = session.menuFlow;
+        const dirName = flow.data.selectedDirectionName || 'N/A';
+        const dirId = flow.data.selectedDirectionId;
+        const creatives = flow.data.creatives || [];
+        const creativesList = creatives.map(c => `  ${c.index}. ${c.name} (ID: ${c.id})`).join('\n');
+        manualLaunchContext = `\n\n[КОНТЕКСТ: Пользователь в режиме "Ручной запуск". Направление: "${dirName}" (direction_id: ${dirId}). Доступные креативы:\n${creativesList}\nПользователь выбирает номера креативов и бюджет для создания адсета. Используй tool createAdSet с creative_ids (UUID креативов по номерам) и direction_id. НЕ меняй бюджет направления — создай новый адсет!]`;
+        session.menuFlow = null;
+        logger.info({ chatId, dirId, dirName, creativesCount: creatives.length }, 'Manual launch context injected');
+      } else {
+        session.menuFlow = null;
+      }
+    }
+
     // === MULTI-ACCOUNT FLOW ===
     if (session.multiAccountEnabled && session.adAccounts.length > 1) {
       // Переключение аккаунта по запросу
@@ -889,9 +940,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
           updateUserMemory(userAccountId, 'selected_account_name', acc.name);
           updateUserMemory(userAccountId, 'stack', acc.stack.join(','));
           logger.info({ telegramId, chatId, accountId: acc.id, accountName: acc.name }, 'Account selected by user (text)');
-          await bot.sendMessage(chatId, `Работаем с аккаунтом: *${acc.name}*. Чем могу помочь?`, {
-            parse_mode: 'Markdown',
-          });
+          await showMainMenu(bot, parseInt(chatId), acc.name);
           return;
         }
 
@@ -1151,7 +1200,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       ...historyMessages,
       {
         role: 'user',
-        content: truncatedMessage,
+        content: truncatedMessage + manualLaunchContext,
       },
     ];
 
@@ -1511,6 +1560,12 @@ async function initBot(): Promise<void> {
   // Создать бота
   bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+  // Регистрация slash-команд в меню Telegram
+  bot.setMyCommands([
+    { command: 'accounts', description: 'Выбрать аккаунт' },
+    { command: 'menu', description: 'Главное меню' },
+  ]).catch(e => logger.warn({ error: e.message }, 'Failed to set bot commands'));
+
   // Батчинг media_group (альбомов): Telegram отправляет каждое фото отдельным сообщением
   // с общим media_group_id. Собираем их в одно сообщение за 1.5 сек.
   const mediaGroupBuffer = new Map<string, { msgs: TelegramBot.Message[]; timer: ReturnType<typeof setTimeout> }>();
@@ -1545,16 +1600,15 @@ async function initBot(): Promise<void> {
     }
   });
 
-  // Обработка inline кнопок (выбор аккаунта)
+  // Обработка inline кнопок (выбор аккаунта + menu система)
   bot.on('callback_query', async (query) => {
     try {
       const data = query.data;
-      if (!data || !data.startsWith('select_account:')) {
+      if (!data) {
         await bot.answerCallbackQuery(query.id);
         return;
       }
 
-      const index = parseInt(data.split(':')[1], 10);
       const telegramId = query.from.id;
       const session = getSession(telegramId);
 
@@ -1563,31 +1617,55 @@ async function initBot(): Promise<void> {
         return;
       }
 
-      if (index < 0 || index >= session.adAccounts.length) {
-        await bot.answerCallbackQuery(query.id, { text: 'Аккаунт не найден.' });
+      // === ACCOUNT SELECTION ===
+      if (data.startsWith('select_account:')) {
+        const index = parseInt(data.split(':')[1], 10);
+
+        if (index < 0 || index >= session.adAccounts.length) {
+          await bot.answerCallbackQuery(query.id, { text: 'Аккаунт не найден.' });
+          return;
+        }
+
+        const acc = session.adAccounts[index];
+        setSelectedAccount(telegramId, acc.id, acc.stack, acc.anthropicApiKey);
+        updateUserMemory(session.userAccountId, 'selected_account', acc.id);
+        updateUserMemory(session.userAccountId, 'selected_account_name', acc.name);
+        updateUserMemory(session.userAccountId, 'stack', acc.stack.join(','));
+
+        logger.info({ telegramId, accountId: acc.id, accountName: acc.name }, 'Account selected via inline button');
+
+        await bot.answerCallbackQuery(query.id);
+
+        // После выбора аккаунта — показать главное меню
+        if (query.message) {
+          await showMainMenu(
+            bot,
+            query.message.chat.id,
+            acc.name,
+            { messageId: query.message.message_id },
+          );
+        }
         return;
       }
 
-      const acc = session.adAccounts[index];
-      setSelectedAccount(telegramId, acc.id, acc.stack, acc.anthropicApiKey);
-      updateUserMemory(session.userAccountId, 'selected_account', acc.id);
-      updateUserMemory(session.userAccountId, 'selected_account_name', acc.name);
-      updateUserMemory(session.userAccountId, 'stack', acc.stack.join(','));
-
-      logger.info({ telegramId, accountId: acc.id, accountName: acc.name }, 'Account selected via inline button');
-
-      await bot.answerCallbackQuery(query.id);
-
-      // Заменить кнопки на подтверждение
+      // === MENU SYSTEM ===
       if (query.message) {
-        const chatId = query.message.chat.id;
-        const messageId = query.message.message_id;
-        await bot.editMessageText(`✅ Аккаунт: *${acc.name}*. Чем могу помочь?`, {
-          chat_id: chatId,
-          message_id: messageId,
-          parse_mode: 'Markdown',
-        });
+        const ctx: MenuHandlerContext = {
+          bot,
+          session,
+          chatId: query.message.chat.id,
+          messageId: query.message.message_id,
+          queryId: query.id,
+          telegramId,
+          activeRequests,
+        };
+
+        const handled = await handleMenuCallback(data, ctx);
+        if (handled) return;
       }
+
+      // Неизвестный callback
+      await bot.answerCallbackQuery(query.id);
     } catch (error: any) {
       logger.error({ error: error.message }, 'Callback query error');
       try {
