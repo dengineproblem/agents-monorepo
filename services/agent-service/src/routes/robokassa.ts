@@ -329,45 +329,56 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     try {
       const { data: userTg } = await supabase
         .from('user_accounts')
-        .select('telegram_id, username, password')
+        .select('telegram_id, username, password, multi_account_enabled')
         .eq('id', user.id)
-        .maybeSingle<{ telegram_id: string | null; username: string | null; password: string | null }>();
+        .maybeSingle<{ telegram_id: string | null; username: string | null; password: string | null; multi_account_enabled: boolean | null }>();
 
       if (userTg?.telegram_id) {
         const formattedDate = newTarifExpires.split('-').reverse().join('.');
+        const isBotFlow = !!userTg.multi_account_enabled;
 
-        // 1. Уведомление об оплате с логином/паролем
-        let paymentMsg = `✅ Оплата получена! Подписка активна до ${formattedDate}.`;
-        if (userTg.username && userTg.password) {
-          paymentMsg += `\n\n🔑 Ваши данные для входа:\nЛогин: <code>${userTg.username}</code>\nПароль: <code>${userTg.password}</code>`;
-        }
+        if (isBotFlow) {
+          // === Флоу через бота (community bot 7877) ===
 
-        await sendCommunityNotification(userTg.telegram_id, paymentMsg);
-        logger.info({ userId: user.id, telegramId: userTg.telegram_id }, 'Payment TG notification sent');
-
-        // 2. Инвайт-ссылка в закрытый канал комьюнити
-        const communityChannelId = process.env.COMMUNITY_CHANNEL_ID;
-        if (communityChannelId) {
-          const inviteLink = await createChatInviteLink(communityChannelId);
-          if (inviteLink) {
-            await sendCommunityNotification(userTg.telegram_id,
-              `🔗 Ваша одноразовая ссылка для входа в закрытый канал комьюнити:`
-            );
-            await sendCommunityNotification(userTg.telegram_id, inviteLink);
-            await supabase.from('user_accounts')
-              .update({ community_channel_invited: true })
-              .eq('id', user.id);
-            logger.info({ userId: user.id }, 'Community invite link sent');
+          // 1. Уведомление об оплате с логином/паролем
+          let paymentMsg = `✅ Оплата получена! Подписка активна до ${formattedDate}.`;
+          if (userTg.username && userTg.password) {
+            paymentMsg += `\n\n🔑 Ваши данные для входа:\nЛогин: <code>${userTg.username}</code>\nПароль: <code>${userTg.password}</code>`;
           }
+          await sendCommunityNotification(userTg.telegram_id, paymentMsg);
+
+          // 2. Инвайт-ссылка в закрытый канал комьюнити
+          const communityChannelId = process.env.COMMUNITY_CHANNEL_ID;
+          if (communityChannelId) {
+            const inviteLink = await createChatInviteLink(communityChannelId);
+            if (inviteLink) {
+              await sendCommunityNotification(userTg.telegram_id,
+                `🔗 Ваша одноразовая ссылка для входа в закрытый канал комьюнити:`
+              );
+              await sendCommunityNotification(userTg.telegram_id, inviteLink);
+              await supabase.from('user_accounts')
+                .update({ community_channel_invited: true })
+                .eq('id', user.id);
+              logger.info({ userId: user.id }, 'Community invite link sent');
+            }
+          }
+
+          // 3. Кнопка «Начать настройку» для запуска онбординга
+          await sendCommunityMessageWithButton(
+            userTg.telegram_id,
+            '🚀 Нажмите кнопку ниже, чтобы настроить рекламный аккаунт:',
+            '⚙️ Начать настройку',
+            'onboard:start',
+          );
+        } else {
+          // === Флоу через приложение (основной бот 8584) ===
+          await sendTelegramNotification(userTg.telegram_id,
+            `✅ Оплата получена! Подписка активна до ${formattedDate}.`,
+            { userAccountId: user.id, source: 'bot' }
+          );
         }
 
-        // 3. Кнопка «Начать настройку» для запуска онбординга
-        await sendCommunityMessageWithButton(
-          userTg.telegram_id,
-          '🚀 Нажмите кнопку ниже, чтобы настроить рекламный аккаунт:',
-          '⚙️ Начать настройку',
-          'onboard:start',
-        );
+        logger.info({ userId: user.id, telegramId: userTg.telegram_id, isBotFlow }, 'Payment TG notification sent');
       }
     } catch (tgErr: any) {
       logger.warn({ userId: user.id, error: tgErr.message }, 'Failed to send TG payment notification');
