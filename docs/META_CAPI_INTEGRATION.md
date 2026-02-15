@@ -231,14 +231,25 @@ WhatsApp → Evolution API → agent-service
 ```
 AMO CRM / Bitrix24
         │
-        └── Webhook при изменении поля
+        └── Webhook при изменении сделки/лида
                 │
-                └── agent-service
+                └── agent-service (bitrix24Webhooks.ts / amocrmWebhooks.ts)
                         │
-                        └── Проверка capi_*_fields для направления
+                        ├── getDeal() — получить данные сделки из CRM API
+                        │
+                        ├── leads lookup по bitrix24_deal_id + user_account_id
+                        │       (PGRST116 = нет matching лида — нормально для не-Facebook сделок)
+                        │
+                        ├── Обновление leads (current_status_id, current_pipeline_id)
+                        │
+                        └── syncDirectionCrmCapiForBitrixEntity()
                                 │
-                                └── metaCapiClient → Meta CAPI
+                                ├── getDirectionCapiSettings(direction_id) → resolveCapiSettingsForDirection()
+                                ├── evaluateBitrixCapiLevelsWithDiagnostics(entity, settings)
+                                └── sendCrmCapiLevels() → chatbot-service /capi/crm-event → Meta CAPI
 ```
+
+> **Важно:** Bitrix24 шлёт вебхуки для ВСЕХ сделок CRM, а не только для созданных через Facebook. Лид в нашей системе связывается с Bitrix-сделкой через `bitrix24_deal_id` (заполняется при push в Bitrix). Webhook body парсится через `qs.parse` (не `fast-querystring`) для поддержки вложенных объектов `data[FIELDS][ID]`.
 
 ## Компоненты
 
@@ -1007,6 +1018,87 @@ Frontend логирует в консоль:
    - или этап воронки (`field_type='pipeline_stage'`, `status_id`, optional `pipeline_id`)
 3. Проверить диагностические логи `CRM CAPI: ... evaluation ...`
 4. Проверить, что webhook пришёл по нужному entity type (lead/deal) и совпадает с `entity_type` в конфиге этапа
+
+### Bitrix24 CRM CAPI: полная цепочка и частые проблемы
+
+**Цепочка для lead_forms + Bitrix24:**
+
+```
+Facebook Lead Form → agent-service (facebookWebhooks.ts)
+    → Создание лида в БД
+    → pushLeadToBitrix24Direct() (только если phone != null)
+        → Сделка создана в Bitrix24
+        → bitrix24_deal_id записывается в leads
+    → Bitrix24 CRM: сделка двигается по воронке
+        → Bitrix24 webhook (ONCRMDEALUPDATE)
+            → handleDealEvent(): getDeal() + leads lookup по bitrix24_deal_id
+            → syncDirectionCrmCapiForBitrixEntity(): evaluateBitrixCapiLevels()
+            → sendCrmCapiLevels() → chatbot-service → Meta CAPI
+```
+
+**Частые проблемы:**
+
+#### 1. `bitrix24_deal_id = NULL` у лидов
+
+**Симптом:** Лиды в таблице `leads` имеют `bitrix24_deal_id = NULL`, вебхуки не могут их найти.
+
+**Причины:**
+- Лид без телефона (`phone = NULL`) — push в Bitrix24 пропускается (строка ~415 facebookWebhooks.ts: `bitrix24Enabled && phone`)
+- Ошибка push в Bitrix24 (просроченный токен, ошибка API)
+- Лид создан не через Facebook lead form (например, с сайта)
+
+**Диагностика:**
+```sql
+-- Лиды без bitrix24_deal_id
+SELECT id, phone, bitrix24_deal_id, direction_id, source_type, created_at
+FROM leads
+WHERE user_account_id = '{UUID}' AND bitrix24_deal_id IS NULL
+ORDER BY created_at DESC LIMIT 20;
+```
+
+#### 2. Вебхуки Bitrix24 для "чужих" сделок (lookupError: PGRST116)
+
+**Симптом:** В логах массово `"No local lead found for Bitrix24 deal"`.
+
+**Это нормально!** Bitrix24 шлёт вебхуки для ВСЕХ сделок (с сайта, ручные, из других источников). В нашей системе только лиды с Facebook. Большинство вебхуков не найдут matching лид — это ожидаемое поведение. `PGRST116` = Supabase `.single()` вернул 0 строк.
+
+#### 3. Несовпадение пайплайна (CAPI evaluation "without matches")
+
+**Симптом:** Лид найден (`found: true`), но CAPI событие не отправлено.
+
+**Причина:** Лид создаётся в Bitrix24 в дефолтном пайплайне (обычно `categoryId: "0"`), а CAPI маппинги настроены для других пайплайнов (например 17, 19, 23, 29).
+
+**Решение:**
+- Настроить push лидов в нужный пайплайн через `bitrix24_pipeline_id` в конфигурации Bitrix24
+- Или добавить CAPI маппинги для дефолтного пайплайна (categoryId=0)
+- CAPI сработает когда сделку переведут в один из настроенных пайплайнов на целевую стадию
+
+**Диагностика:**
+```sql
+-- Проверить текущие стадии лидов
+SELECT id, bitrix24_deal_id, current_status_id, current_pipeline_id
+FROM leads WHERE bitrix24_deal_id IS NOT NULL AND user_account_id = '{UUID}'
+ORDER BY created_at DESC LIMIT 10;
+
+-- Проверить CAPI маппинги
+SELECT channel, capi_interest_fields, capi_qualified_fields
+FROM capi_settings WHERE account_id = '{UUID}' AND is_active = true;
+```
+
+#### 4. Дублирование вебхуков (два event_handler_id)
+
+При подключении Bitrix24 к нескольким ad_accounts одного пользователя создаются отдельные webhook handlers. Каждый handler получает ВСЕ события CRM → вебхуки приходят парами. Это не ошибка, обработка идемпотентна.
+
+**Диагностические логи (agent-service):**
+```
+"Bitrix24 deal fetched successfully"     — сделка получена из Bitrix24 API
+"Bitrix24 deal webhook: lead lookup result" — результат поиска лида (found: true/false, lookupError)
+"No local lead found for Bitrix24 deal"  — лид не найден (нормально для не-Facebook сделок)
+"Lead updated from Bitrix24 deal webhook" — лид обновлён
+"CRM CAPI settings resolved"            — CAPI настройки найдены
+"CRM CAPI: Bitrix level evaluation matched" — стадия сделки совпала с маппингом
+"CRM CAPI: levels sent"                 — CAPI события отправлены в chatbot-service
+```
 
 ### Ошибки Facebook API
 
