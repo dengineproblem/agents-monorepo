@@ -77,3 +77,7 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Payment / Subscription
+export const PAYMENT_BASE_URL = (process.env.PAYMENT_BASE_URL || 'https://app.performanteaiagency.com/api').replace(/\/$/, '');
+export const PARTNER_BUSINESS_ID = '290181230529709';

@@ -10,6 +10,7 @@ import {
   getPlanConfig,
   isRobokassaConfigured
 } from '../lib/robokassa.js';
+import { sendTelegramNotification, createChatInviteLink } from '../lib/telegramNotifier.js';
 
 const logger = createLogger({ module: 'robokassaRoutes' });
 
@@ -322,6 +323,45 @@ export default async function robokassaRoutes(app: FastifyInstance) {
 
     if (notifyError) {
       logger.warn({ userId: user.id, error: notifyError.message }, 'Failed to create payment notification');
+    }
+
+    // Send Telegram notification about successful payment
+    try {
+      const { data: userTg } = await supabase
+        .from('user_accounts')
+        .select('telegram_id')
+        .eq('id', user.id)
+        .maybeSingle<{ telegram_id: string | null }>();
+
+      if (userTg?.telegram_id) {
+        const formattedDate = newTarifExpires.split('-').reverse().join('.');
+        await sendTelegramNotification(userTg.telegram_id,
+          `✅ Оплата получена! Подписка активна до ${formattedDate}.\n\nОтправьте любое сообщение боту для продолжения настройки.`,
+          { userAccountId: user.id, source: 'bot' }
+        );
+        logger.info({ userId: user.id, telegramId: userTg.telegram_id }, 'Payment TG notification sent');
+
+        // Отправить инвайт-ссылку в закрытый канал комьюнити
+        const communityChannelId = process.env.COMMUNITY_CHANNEL_ID;
+        if (communityChannelId) {
+          const inviteLink = await createChatInviteLink(communityChannelId);
+          if (inviteLink) {
+            await sendTelegramNotification(userTg.telegram_id,
+              `🔗 Ваша одноразовая ссылка для входа в закрытый канал комьюнити:`,
+              { userAccountId: user.id, source: 'bot' }
+            );
+            await sendTelegramNotification(userTg.telegram_id, inviteLink,
+              { userAccountId: user.id, source: 'bot', skipLog: true }
+            );
+            await supabase.from('user_accounts')
+              .update({ community_channel_invited: true })
+              .eq('id', user.id);
+            logger.info({ userId: user.id }, 'Community invite link sent');
+          }
+        }
+      }
+    } catch (tgErr: any) {
+      logger.warn({ userId: user.id, error: tgErr.message }, 'Failed to send TG payment notification');
     }
 
     return reply.type('text/plain').send(`OK${invId}`);

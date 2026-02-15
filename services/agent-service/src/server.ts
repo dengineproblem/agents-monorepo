@@ -70,6 +70,7 @@ import { startUserScoringCron } from './cron/userScoringCron.js';
 import { startEngagementNotificationCron } from './cron/engagementNotificationCron.js';
 import { startNotificationCampaignCron } from './cron/notificationCampaignCron.js';
 import { startSubscriptionExpiryNotificationCron } from './cron/subscriptionExpiryNotificationCron.js';
+import { startCommunityChannelCron } from './cron/communityChannelCron.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -247,6 +248,9 @@ startEngagementNotificationCron(app as any);
 
 // Запускаем cron для напоминаний об окончании подписки (ежедневно в 10:05 по Алматы)
 startSubscriptionExpiryNotificationCron(app as any);
+
+// Запускаем cron для кика из канала комьюнити (ежедневно в 03:00 по Алматы)
+startCommunityChannelCron(app as any);
 
 // Запускаем cron для scheduled кампаний уведомлений (каждую минуту)
 startNotificationCampaignCron(app as any);

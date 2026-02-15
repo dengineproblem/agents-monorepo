@@ -131,6 +131,72 @@ export async function sendTelegramNotification(
 }
 
 /**
+ * Создаёт одноразовую инвайт-ссылку в Telegram канал/группу
+ */
+export async function createChatInviteLink(channelId: string | number): Promise<string | null> {
+  try {
+    const response = await fetch(`${TELEGRAM_API_URL}/createChatInviteLink`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: channelId,
+        member_limit: 1,
+        name: `sub-${Date.now()}`,
+      }),
+    });
+
+    const result = await response.json() as { ok: boolean; description?: string; result?: { invite_link: string } };
+
+    if (!result.ok) {
+      log.error({ channelId, description: result.description }, 'Failed to create invite link');
+      return null;
+    }
+
+    return result.result?.invite_link || null;
+  } catch (error: any) {
+    log.error({ channelId, error: error.message }, 'createChatInviteLink error');
+    return null;
+  }
+}
+
+/**
+ * Кикает пользователя из канала (ban → unban, чтобы убрать доступ без перманентного бана)
+ */
+export async function kickFromChannel(channelId: string | number, userId: string | number): Promise<boolean> {
+  try {
+    const banResponse = await fetch(`${TELEGRAM_API_URL}/banChatMember`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: channelId, user_id: userId }),
+    });
+
+    const banResult = await banResponse.json() as { ok: boolean; description?: string };
+
+    if (!banResult.ok) {
+      const desc = banResult.description || '';
+      if (desc.includes('user is not a member') || desc.includes('PARTICIPANT_NOT_FOUND') || desc.includes('USER_NOT_PARTICIPANT')) {
+        log.warn({ channelId, userId }, 'User already not in channel');
+        return true;
+      }
+      log.error({ channelId, userId, description: desc }, 'Failed to ban chat member');
+      return false;
+    }
+
+    // Unban чтобы снять перманентный бан (позволяет re-join по новому инвайту)
+    await fetch(`${TELEGRAM_API_URL}/unbanChatMember`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: channelId, user_id: userId, only_if_banned: true }),
+    });
+
+    return true;
+  } catch (error: any) {
+    log.error({ channelId, userId, error: error.message }, 'kickFromChannel error');
+    return false;
+  }
+}
+
+/**
  * Форматирует сообщение об отключении WhatsApp инстанса
  */
 export function formatDisconnectMessage(instance: {

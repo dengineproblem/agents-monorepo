@@ -53,6 +53,16 @@ import {
   setSelectedAccount,
   clearSelectedAccount,
 } from './session.js';
+import {
+  getPendingFlow,
+  clearPendingFlow,
+  showSubscriptionPlans,
+  handleSubscriptionCallback,
+  showSubscriptionStatus,
+  startOnboardingFlow,
+  handleOnboardingInput,
+  handleOnboardingCallback,
+} from './subscriptionFlow.js';
 
 // Web Search tool — встроенный в Anthropic API, обрабатывается server-side
 const webSearchTool: Anthropic.Messages.WebSearchTool20250305 = {
@@ -551,6 +561,9 @@ async function resolveUser(telegramId: number): Promise<ResolvedUser | null> {
           anthropicApiKey: acc.anthropicApiKey || null,
         })),
         anthropicApiKey: response.data.anthropicApiKey || null,
+        tarif: response.data.tarif || null,
+        tarifExpires: response.data.tarifExpires || null,
+        isActive: response.data.isActive !== false,
       };
       userCache.set(telegramId, { data: resolved, expiresAt: Date.now() + CACHE_TTL_MS });
       logger.info({ telegramId, stack: resolved.stack }, 'Resolved user');
@@ -784,8 +797,40 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       resolvedUser = await resolveUser(telegramId);
     }
 
+    const numericChatId = parseInt(chatId);
+
     if (!resolvedUser) {
-      await bot.sendMessage(chatId, 'Ваш Telegram аккаунт не привязан к системе. Обратитесь к администратору.');
+      // Проверяем pending onboarding flow (пользователь ещё не оплатил, но уже в онбординге)
+      const pending = getPendingFlow(telegramId!);
+      if (pending?.flow === 'onboarding') {
+        const handled = await handleOnboardingInput(bot, numericChatId, telegramId!, truncatedMessage);
+        if (handled) return;
+      }
+      // Показать планы подписки для незарегистрированных пользователей
+      await showSubscriptionPlans(bot, numericChatId, telegramId!);
+      return;
+    }
+
+    // Pre-registered, но не оплатил — проверяем заново
+    if (!resolvedUser.tarif && !resolvedUser.isActive) {
+      userCache.delete(telegramId!);
+      const fresh = await resolveUser(telegramId!);
+      if (fresh?.tarif && fresh.isActive) {
+        resolvedUser = fresh;
+      } else {
+        await showSubscriptionPlans(bot, numericChatId, telegramId!);
+        return;
+      }
+    }
+
+    // Оплатил, но нет ad_accounts → запуск онбординга
+    if (resolvedUser.isActive && resolvedUser.adAccounts.length === 0) {
+      const pending = getPendingFlow(telegramId!);
+      if (pending?.flow === 'onboarding') {
+        const handled = await handleOnboardingInput(bot, numericChatId, telegramId!, truncatedMessage);
+        if (handled) return;
+      }
+      await startOnboardingFlow(bot, numericChatId, telegramId!, resolvedUser.userAccountId);
       return;
     }
 
@@ -861,6 +906,12 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     }
 
     // === SLASH COMMANDS ===
+    // /subscription — статус подписки
+    if (/^\/(subscription|подписка)/i.test(truncatedMessage) || /^подписк[аие]$/i.test(truncatedMessage)) {
+      await showSubscriptionStatus(bot, numericChatId, telegramId!);
+      return;
+    }
+
     // /accounts — показать список аккаунтов для переключения
     if (/^\/accounts\s*$/i.test(truncatedMessage) && session.multiAccountEnabled && session.adAccounts.length > 1) {
       logger.info({ telegramId, chatId }, '/accounts command');
@@ -870,10 +921,11 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       const header = currentName
         ? `Текущий аккаунт: *${currentName}*\n\nВыберите аккаунт:`
         : 'Выберите аккаунт:';
-      const keyboard = session.adAccounts.map((acc, i) => ([{
+      const keyboard: Array<Array<{ text: string; callback_data: string }>> = session.adAccounts.map((acc, i) => ([{
         text: acc.name + (acc.isDefault ? ' ⭐' : ''),
         callback_data: `select_account:${i}`,
       }]));
+      keyboard.push([{ text: '➕ Добавить аккаунт', callback_data: 'add_account' }]);
       await bot.sendMessage(parseInt(chatId), header, {
         parse_mode: 'Markdown',
         reply_markup: { inline_keyboard: keyboard },
@@ -1562,8 +1614,9 @@ async function initBot(): Promise<void> {
 
   // Регистрация slash-команд в меню Telegram
   bot.setMyCommands([
-    { command: 'accounts', description: 'Выбрать аккаунт' },
+    { command: 'accounts', description: 'Аккаунты' },
     { command: 'menu', description: 'Главное меню' },
+    { command: 'subscription', description: 'Подписка' },
   ]).catch(e => logger.warn({ error: e.message }, 'Failed to set bot commands'));
 
   // Батчинг media_group (альбомов): Telegram отправляет каждое фото отдельным сообщением
@@ -1610,6 +1663,31 @@ async function initBot(): Promise<void> {
       }
 
       const telegramId = query.from.id;
+      const chatId = query.message?.chat.id;
+
+      // === SUBSCRIPTION / ONBOARDING CALLBACKS (работают БЕЗ session) ===
+      if (data.startsWith('plan:') || data.startsWith('sub:') || data.startsWith('onboard:')) {
+        await bot.answerCallbackQuery(query.id);
+        if (data.startsWith('plan:') || data.startsWith('sub:')) {
+          await handleSubscriptionCallback(data, bot, query);
+        } else {
+          await handleOnboardingCallback(data, bot, query);
+        }
+        return;
+      }
+
+      // === ADD ACCOUNT (требует session) ===
+      if (data === 'add_account') {
+        await bot.answerCallbackQuery(query.id);
+        const session = getSession(telegramId);
+        if (session && chatId) {
+          await startOnboardingFlow(bot, chatId, telegramId, session.userAccountId);
+        } else if (chatId) {
+          await bot.sendMessage(chatId, 'Сессия истекла. Отправьте новое сообщение.');
+        }
+        return;
+      }
+
       const session = getSession(telegramId);
 
       if (!session) {

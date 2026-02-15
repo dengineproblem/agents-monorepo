@@ -381,7 +381,7 @@ export function registerMCPRoutes(fastify) {
       // Keep this select minimal and based on widely-present columns.
       const { data, error } = await supabase
         .from('user_accounts')
-        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, anthropic_api_key')
+        .select('id, multi_account_enabled, access_token, tiktok_access_token, amocrm_access_token, anthropic_api_key, tarif, tarif_expires, is_active')
         // Check all supported telegram_id fields
         .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
         .limit(1);
@@ -411,6 +411,9 @@ export function registerMCPRoutes(fastify) {
         stack,
         adAccounts: [],
         anthropicApiKey: user.anthropic_api_key || null,
+        tarif: user.tarif || null,
+        tarifExpires: user.tarif_expires || null,
+        isActive: user.is_active !== false,
       };
 
       // Если мультиаккаунт включён — загрузить ad_accounts
@@ -454,6 +457,238 @@ export function registerMCPRoutes(fastify) {
       return reply.send(result);
     } catch (err) {
       fastify.log.error({ error: err.message }, 'resolve-user error');
+      return reply.code(500).send({ success: false, error: 'internal_error' });
+    }
+  });
+
+  /**
+   * POST /brain/self-register - Create new user account from Telegram bot
+   *
+   * Creates a user_accounts record with is_active=false, multi_account_enabled=true.
+   * Used when a new Telegram user starts the bot and needs to pay for subscription.
+   */
+  fastify.post('/brain/self-register', async (request, reply) => {
+    if (!verifyServiceAuth(request)) {
+      return reply.code(401).send({ success: false, error: 'unauthorized' });
+    }
+
+    const { telegram_id, first_name, last_name } = request.body || {};
+    if (!telegram_id) {
+      return reply.code(400).send({ success: false, error: 'telegram_id is required' });
+    }
+
+    const telegramIdStr = String(telegram_id).trim();
+    if (!/^-?\d+$/.test(telegramIdStr)) {
+      return reply.code(400).send({ success: false, error: 'telegram_id must be an integer' });
+    }
+
+    try {
+      // Check if telegram_id already exists
+      const { data: existing } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return reply.send({ success: false, error: 'telegram_id_already_registered', userAccountId: existing[0].id });
+      }
+
+      // Generate credentials
+      const username = 'user_' + Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+      const password = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+      const displayName = [first_name, last_name].filter(Boolean).join(' ') || null;
+
+      const { data: newUser, error: insertError } = await supabase
+        .from('user_accounts')
+        .insert({
+          telegram_id: telegramIdStr,
+          username,
+          password,
+          multi_account_enabled: true,
+          is_active: false,
+          onboarding_stage: 'registered',
+        })
+        .select('id')
+        .single();
+
+      if (insertError) {
+        fastify.log.error({ error: insertError.message }, 'self-register: insert failed');
+        return reply.code(500).send({ success: false, error: 'insert_failed', message: insertError.message });
+      }
+
+      fastify.log.info({
+        telegramId: telegramIdStr,
+        userId: newUser.id,
+        displayName,
+      }, 'self-register: user created');
+
+      return reply.send({
+        success: true,
+        userAccountId: newUser.id,
+        username,
+        password,
+      });
+    } catch (err) {
+      fastify.log.error({ error: err.message }, 'self-register error');
+      return reply.code(500).send({ success: false, error: 'internal_error' });
+    }
+  });
+
+  /**
+   * POST /brain/subscription-status - Get subscription info by telegram_id
+   */
+  fastify.post('/brain/subscription-status', async (request, reply) => {
+    if (!verifyServiceAuth(request)) {
+      return reply.code(401).send({ success: false, error: 'unauthorized' });
+    }
+
+    const { telegram_id } = request.body || {};
+    if (!telegram_id) {
+      return reply.code(400).send({ success: false, error: 'telegram_id is required' });
+    }
+
+    const telegramIdStr = String(telegram_id).trim();
+    if (!/^-?\d+$/.test(telegramIdStr)) {
+      return reply.code(400).send({ success: false, error: 'telegram_id must be an integer' });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('user_accounts')
+        .select('id, tarif, tarif_expires, is_active')
+        .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
+        .limit(1);
+
+      if (error) {
+        fastify.log.error({ error: error.message }, 'subscription-status: query failed');
+        return reply.code(500).send({ success: false, error: 'internal_error' });
+      }
+
+      if (!data || data.length === 0) {
+        return reply.send({ success: true, status: 'no_account', tarif: null, tarifExpires: null, daysLeft: null, isActive: false, userAccountId: null });
+      }
+
+      const user = data[0];
+      let daysLeft = null;
+      let status = 'no_subscription';
+
+      if (user.tarif_expires) {
+        const now = new Date();
+        const expires = new Date(user.tarif_expires + 'T23:59:59+05:00'); // Almaty timezone
+        daysLeft = Math.ceil((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (daysLeft > 7) status = 'active';
+        else if (daysLeft > 0) status = 'expiring_soon';
+        else status = 'expired';
+      }
+
+      if (!user.tarif) {
+        status = 'no_subscription';
+      }
+
+      return reply.send({
+        success: true,
+        status,
+        tarif: user.tarif || null,
+        tarifExpires: user.tarif_expires || null,
+        daysLeft,
+        isActive: user.is_active !== false,
+        userAccountId: user.id,
+      });
+    } catch (err) {
+      fastify.log.error({ error: err.message }, 'subscription-status error');
+      return reply.code(500).send({ success: false, error: 'internal_error' });
+    }
+  });
+
+  /**
+   * POST /brain/add-ad-account - Create a new ad_accounts record
+   *
+   * Used during onboarding when user adds their first (or additional) ad account.
+   */
+  fastify.post('/brain/add-ad-account', async (request, reply) => {
+    if (!verifyServiceAuth(request)) {
+      return reply.code(401).send({ success: false, error: 'unauthorized' });
+    }
+
+    const { user_account_id, name, fb_ad_account_id, fb_page_id, fb_instagram_id, fb_instagram_username, business_niche } = request.body || {};
+
+    if (!user_account_id || !name) {
+      return reply.code(400).send({ success: false, error: 'user_account_id and name are required' });
+    }
+
+    try {
+      // Check user exists
+      const { data: user, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .eq('id', user_account_id)
+        .maybeSingle();
+
+      if (userError || !user) {
+        return reply.code(404).send({ success: false, error: 'user_not_found' });
+      }
+
+      // Check account limit (max 5)
+      const { count, error: countError } = await supabase
+        .from('ad_accounts')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', user_account_id);
+
+      if (!countError && count >= 5) {
+        return reply.send({ success: false, error: 'max_accounts_reached', message: 'Максимум 5 рекламных аккаунтов' });
+      }
+
+      const isFirst = count === 0;
+
+      const insertData = {
+        user_account_id,
+        name,
+        is_active: true,
+        is_default: isFirst,
+        connection_status: 'pending',
+      };
+      if (fb_ad_account_id) insertData.fb_ad_account_id = fb_ad_account_id;
+      if (fb_page_id) insertData.fb_page_id = fb_page_id;
+      if (fb_instagram_id) insertData.fb_instagram_id = fb_instagram_id;
+      if (fb_instagram_username) insertData.fb_instagram_username = fb_instagram_username;
+
+      const { data: newAccount, error: insertError } = await supabase
+        .from('ad_accounts')
+        .insert(insertData)
+        .select('id')
+        .single();
+
+      if (insertError) {
+        fastify.log.error({ error: insertError.message }, 'add-ad-account: insert failed');
+        return reply.code(500).send({ success: false, error: 'insert_failed', message: insertError.message });
+      }
+
+      // Update onboarding_stage if first account
+      if (isFirst) {
+        await supabase
+          .from('user_accounts')
+          .update({ onboarding_stage: 'fb_pending' })
+          .eq('id', user_account_id);
+      }
+
+      fastify.log.info({
+        userId: user_account_id,
+        accountId: newAccount.id,
+        adAccountId: fb_ad_account_id,
+        isFirst,
+      }, 'add-ad-account: success');
+
+      return reply.send({
+        success: true,
+        accountId: newAccount.id,
+        isFirst,
+      });
+    } catch (err) {
+      fastify.log.error({ error: err.message }, 'add-ad-account error');
       return reply.code(500).send({ success: false, error: 'internal_error' });
     }
   });

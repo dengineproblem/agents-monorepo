@@ -42,6 +42,8 @@
 │     → userAccountId, stack, multiAccountEnabled, adAccounts  │
 │  6a. Create/restore Session (stack, selectedAccount, memory) │
 │  6b. Multi-account flow (select/switch account if needed)    │
+│  6c. Slash commands (/accounts, /menu) → inline меню         │
+│  6d. Keyword "меню" → showMainMenu() (без Claude)            │
 │  7. DOMAIN ROUTING (keyword match → LLM fallback)            │
 │     → stack-aware filtering (no TikTok if no tiktok token)  │
 │     → ads | creative | crm | tiktok | onboarding | general  │
@@ -71,6 +73,11 @@
 │                                                                │
 │  9. Send response (Markdown, fallback plain text)             │
 │  10. Store response in SQLite                                  │
+│                                                                │
+│  CALLBACK_QUERY HANDLER (inline кнопки):                       │
+│  - select_account:{i} → setSelectedAccount → showMainMenu()  │
+│  - menu:*/stats:*/ai:*/manual:*/back:* → handleMenuCallback()│
+│    → executeTool() напрямую (БЕЗ Claude) → editMessage       │
 └──────────────────────────────────────────────────────────────┘
                              |
                     POST /brain/tools/{name}
@@ -109,6 +116,7 @@ services/telegram-claude-bot/
 │   ├── memory.ts             # Per-user memory files (store/memory/{userId}.md)
 │   ├── config.ts             # ENV переменные, пути, TRIGGER_PATTERN, таймзона
 │   ├── tools.ts              # 77 Anthropic Tool определений + executeTool()
+│   ├── menu.ts               # Интерактивное inline-меню: клавиатуры, форматтеры, обработчики callback
 │   ├── db.ts                 # SQLite: init, CRUD, getRecentMessages() для conversation memory
 │   ├── types.ts              # TypeScript интерфейсы (ResolvedUser, AdAccountInfo, UserSession...)
 │   ├── logger.ts             # Pino logger (info/warn/error/debug)
@@ -151,15 +159,16 @@ services/telegram-claude-bot/
 
 | Файл | Строк | Описание |
 |------|-------|----------|
-| `index.ts` | ~830 | Главная логика: Telegram polling, handleMessage(), session management, multi-account flow, conversation memory, domain routing, Tool Use цикл, Whisper транскрибация, rate limiting, security guards |
+| `index.ts` | ~900 | Главная логика: Telegram polling, handleMessage(), session management, multi-account flow, conversation memory, domain routing, Tool Use цикл, Whisper транскрибация, rate limiting, security guards, **slash-команды** (`/accounts`, `/menu`), **inline-меню integration** (callback_query → handleMenuCallback), **menuFlow context injection** для ручного запуска |
 | `router.ts` | ~200 | Domain Router: keyword regex classifier (0ms) + LLM Haiku fallback (~300ms) + stack-aware filtering. `DOMAIN_STACK_REQUIREMENTS`, `ACCOUNT_SWITCH_PATTERN` |
 | `domains.ts` | ~130 | Маппинг доменов → tool subsets + prompt paths. `getToolsForDomainWithStack()` — фильтрует TikTok tools по стеку. `SHARED_TOOLS` включает `getUserErrors` + `getKnowledgeBase` |
-| `session.ts` | ~90 | In-memory session state (`Map<telegramId, UserSession>`), TTL 30 мин, auto-cleanup. `createSession`, `setSelectedAccount`, `clearSelectedAccount` (восстанавливает originalStack) |
+| `session.ts` | ~95 | In-memory session state (`Map<telegramId, UserSession>`), TTL 30 мин, auto-cleanup. `createSession`, `setSelectedAccount`, `clearSelectedAccount` (восстанавливает originalStack). Поле `menuFlow: MenuFlowState | null` для отслеживания multi-step inline-меню |
 | `memory.ts` | ~80 | Per-user memory в файлах `store/memory/{userId}.md`. UUID-валидация для path traversal protection. `readUserMemory`, `updateUserMemory`, `getUserMemoryValue` |
 | `config.ts` | ~78 | ENV переменные, пути, regex триггер, rate limits, admin IDs, voice limits |
 | `tools.ts` | ~1300 | Определения 77 custom tools (JSON Schema для Anthropic API) + функция executeTool() для HTTP вызова agent-brain + таймауты. Web search tool определён отдельно в index.ts |
+| `menu.ts` | ~700 | Интерактивное inline-меню: keyboard builders (5 функций), result formatters (6 функций), `handleMenuCallback()` диспетчер, `showMainMenu()`. Прямые вызовы agent-brain tools **без Claude** для типовых операций (статистика, направления, оптимизация, креативы) |
 | `db.ts` | ~336 | SQLite инициализация, таблицы chats/messages/scheduled_tasks/task_run_logs, CRUD, `getRecentMessages()` для conversation memory |
-| `types.ts` | ~96 | Интерфейсы: Session, NewMessage, ResolvedUser, AdAccountInfo, ScheduledTask, MountAllowlist |
+| `types.ts` | ~110 | Интерфейсы: Session, NewMessage, ResolvedUser, AdAccountInfo, ScheduledTask, MountAllowlist, **MenuFlowState** (flow state для ручного запуска) |
 | `logger.ts` | 6 | Конфигурация Pino: уровень из `LOG_LEVEL` env, pino-pretty транспорт |
 | `utils.ts` | 19 | Хелперы: `loadJson(path, default)`, `saveJson(path, data)` |
 | `task-scheduler.ts` | 172 | Планировщик задач: cron/interval/once, getDueTasks(), runTask() — **отключён** |
@@ -261,9 +270,10 @@ if (!session) {
 ```
 
 **Session state** (`src/session.ts`):
-- `UserSession`: userAccountId, selectedAccountId, stack, originalStack, multiAccountEnabled, adAccounts, isFirstMessage
+- `UserSession`: userAccountId, selectedAccountId, stack, originalStack, multiAccountEnabled, adAccounts, isFirstMessage, **menuFlow**
 - TTL: 30 минут, auto-cleanup каждые 5 мин
 - `originalStack` — запоминается при создании, восстанавливается при `clearSelectedAccount()`
+- `menuFlow: MenuFlowState | null` — состояние multi-step inline-меню (ручной запуск), сбрасывается при смене аккаунта и по TTL 10 мин
 
 **Multi-account flow** (если `multiAccountEnabled && adAccounts.length > 1`):
 1. Проверка `ACCOUNT_SWITCH_PATTERN` (`переключи аккаунт`, `смени аккаунт`, `другой аккаунт`)
@@ -1469,3 +1479,178 @@ const result = await fbGraph(method, resolvedEndpoint, accessToken, apiParams);
 - `'account'` в начале endpoint заменяется на реальный `act_xxx`
 
 **FB API справочник** для Claude находится в `groups/ads/CLAUDE.md` — содержит Insights Fields, Breakdowns, Action Types, Time Range Format, Targeting Spec.
+
+---
+
+## 20. Интерактивное inline-меню (menu.ts)
+
+### 20.1 Обзор
+
+После выбора аккаунта (через inline кнопку) вместо текстового приглашения показывается **интерактивное меню с 7 кнопками**. Типовые операции (статистика, направления, оптимизация, топ-креативы) выполняются **напрямую через agent-brain**, без вызова Claude — это экономит ~2 секунды и токены на каждую операцию.
+
+**Файл:** `src/menu.ts`
+
+### 20.2 Slash-команды
+
+При старте бота регистрируются Telegram команды:
+
+```typescript
+bot.setMyCommands([
+  { command: 'accounts', description: 'Выбрать аккаунт' },
+  { command: 'menu', description: 'Главное меню' },
+]);
+```
+
+| Команда | Действие |
+|---------|----------|
+| `/accounts` | Показать список аккаунтов (inline кнопки) для выбора/переключения |
+| `/menu` | Показать главное меню (если аккаунт выбран) |
+
+Дополнительно "меню" можно вызвать текстом: `меню`, `menu`, `главное меню`, `/menu`.
+
+### 20.3 Callback_data конвенция
+
+```
+select_account:{index}       — выбор аккаунта (существующий механизм)
+menu:stats                   — подменю статистики
+menu:ailaunch                — предупреждение AI запуска
+menu:manual                  — ручной запуск → загрузка направлений
+menu:dirs                    — список направлений текстом
+menu:optimize                — запуск оптимизации (dry_run)
+menu:creatives               — топ креативы за неделю
+menu:generate                — генерация креативов (переход к Claude)
+stats:today/yesterday/3d/7d  — конкретный период статистики
+ai:confirm / ai:cancel       — подтверждение/отмена AI запуска
+manual:{index}               — выбор направления по индексу
+back:main                    — возврат в главное меню
+```
+
+### 20.4 Главное меню (7 кнопок)
+
+```
+[📊 Статистика]     [🤖 Запуск AI]
+[🚀 Ручной запуск]  [📋 Направления]
+[⚡ Оптимизация]    [🎨 Креативы]
+[✨ Генерация креативов]
+```
+
+Показывается:
+- После выбора аккаунта (`select_account:{i}`)
+- По команде `/menu` или текстовому сообщению "меню"
+- По кнопке "⬅️ Назад" (`back:main`)
+
+### 20.5 Keyboard builders
+
+| Функция | Описание |
+|---------|----------|
+| `buildMainMenuKeyboard(stack)` | 7 кнопок в 2 колонки |
+| `buildStatsKeyboard()` | 4 периода (Сегодня, Вчера, 3 дня, 7 дней) + Назад |
+| `buildAiLaunchConfirmKeyboard()` | Подтвердить / Отмена |
+| `buildDirectionsKeyboard(dirs)` | Кнопки активных направлений + Назад |
+| `showMainMenu(bot, chatId, accName, stack, opts?)` | Экспортируемая функция, вызывается из index.ts |
+
+### 20.6 Обработка callback_query (диспетчер)
+
+```typescript
+export async function handleMenuCallback(data: string, ctx: MenuHandlerContext): Promise<boolean>
+```
+
+Парсит prefix из `callback_data`, роутит на обработчики:
+
+| Callback | Действие | Tool |
+|----------|----------|------|
+| `menu:stats` | Подменю периодов | — |
+| `stats:{period}` | Отчёт по расходам | `getSpendReport` |
+| `menu:ailaunch` | Предупреждение + подтверждение | — |
+| `ai:confirm` | AI-оптимизация | `aiLaunch` |
+| `ai:cancel` | "↩️ Операция отменена" | — |
+| `menu:manual` | Загрузка направлений → кнопки | `getDirections` |
+| `manual:{i}` | Креативы направления → текст | `getDirectionCreatives` |
+| `menu:dirs` | Список направлений текстом | `getDirections` |
+| `menu:optimize` | Оптимизация (dry_run) | `triggerBrainOptimizationRun` |
+| `menu:creatives` | Топ креативы за неделю | `getTopCreatives` |
+| `menu:generate` | Приглашение для Claude | — |
+| `back:main` | Возврат в главное меню | — |
+
+Возвращает `true` если callback обработан.
+
+### 20.7 Result formatters
+
+| Функция | Данные | Ключевые поля API |
+|---------|--------|-------------------|
+| `formatSpendReport(result, periodLabel)` | Расход, лиды, CPL по кампаниям | `result.data[]` (массив строк) |
+| `formatDirections(result)` | Список направлений со статусами | `d.status === 'active'`, `d.budget_per_day` |
+| `formatCreativesForManualLaunch(result, dirName)` | Нумерованный список с UUID | `c.title`, `c.status`, `c.media_type` |
+| `formatOptimizationResult(result)` | Proposals из dry_run | `proposals[].action`, `proposals[].direction_name` |
+| `formatTopCreatives(result)` | Топ креативы с метриками | `d.top_creatives[]`, `c.metrics.cpl/leads/spend` |
+| `formatAiLaunchResult(result)` | Результат AI запуска | Обработка по направлениям |
+
+**Общий паттерн:** Все форматтеры используют `extractResult()` — хелпер для распаковки обёрток agent-brain:
+
+```typescript
+function extractResult(result: any): { ok: true; data: any } | { ok: false; error: string }
+```
+
+Обрабатывает двойную обёртку: `{ success, result: { success, data } }`. Все форматтеры корректно обрабатывают `success: false` и пустые данные.
+
+### 20.8 Ручной запуск (multi-step flow)
+
+Единственный multi-step flow в меню. Использует `MenuFlowState` в session:
+
+```typescript
+interface MenuFlowState {
+  flow: 'manual_launch';
+  step: 'select_direction' | 'await_input';
+  data: {
+    directions?: Array<{ id: string; name: string }>;
+    selectedDirectionId?: string;
+    selectedDirectionName?: string;
+    creatives?: Array<{ id: string; name: string; index: number }>;
+  };
+  startedAt: number;
+}
+```
+
+**Flow:**
+
+```
+menu:manual
+    → getDirections (фильтр status === 'active')
+    → Inline кнопки направлений
+    → menuFlow = { step: 'select_direction', ... }
+
+manual:{i}
+    → getDirectionCreatives(direction_id)
+    → Текстовый список креативов (нумерованный)
+    → menuFlow = { step: 'await_input', creatives: [...] }
+
+Пользователь пишет текст (напр. "1,2 бюджет 10$")
+    → index.ts: context injection — добавляет к сообщению:
+      [КОНТЕКСТ: Ручной запуск. Направление: "Name" (direction_id: xxx).
+       Доступные креативы: 1. Name (ID: uuid), 2. ...]
+    → menuFlow сбрасывается
+    → Сообщение уходит в Claude → Claude вызывает createAdSet
+```
+
+**Context injection** (`index.ts`): Когда `menuFlow.step === 'await_input'`, в текст сообщения пользователя добавляется структурированный контекст с direction_id, названием и UUID креативов. Claude видит контекст и корректно вызывает `createAdSet` с `creative_ids` и `direction_id`.
+
+TTL: 10 минут — если пользователь не продолжил flow, `menuFlow` автоматически сбрасывается.
+
+### 20.9 Защита от параллельных запросов
+
+`activeRequests: Set<number>` передаётся через контекст. В начале `handleMenuCallback()` проверяется `activeRequests.has(telegramId)`, при обработке — `add/delete`.
+
+### 20.10 Сохранение в историю
+
+Все ответы меню сохраняются через `storeMessage()` с `is_from_me: true` — чтобы Claude видел контекст в conversation history. Особенно важно для "Ручной запуск" (Claude видит список креативов) и "Генерация" (Claude видит приглашение).
+
+### 20.11 Интеграция в index.ts
+
+**Callback query handler:** После существующего блока `select_account:` — передача в `handleMenuCallback(data, ctx)` для всех остальных callback_data.
+
+**При выборе аккаунта:** `setSelectedAccount()` → `showMainMenu()` (вместо текстового "✅ Аккаунт: ...").
+
+**MenuFlow cleanup:** Перед Claude pipeline — проверка `menuFlow`:
+- TTL > 10 мин → сбросить
+- `step === 'await_input'` → inject context → сбросить
+- Иначе → сбросить

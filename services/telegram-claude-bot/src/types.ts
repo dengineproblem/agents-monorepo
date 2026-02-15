@@ -94,6 +94,9 @@ export interface ResolvedUser {
   stack: string[];
   adAccounts: AdAccountInfo[];
   anthropicApiKey: string | null;
+  tarif: string | null;
+  tarifExpires: string | null;
+  isActive: boolean;
 }
 
 /** Состояние многошагового menu flow (ручной запуск) */
@@ -106,5 +109,13 @@ export interface MenuFlowState {
     selectedDirectionName?: string;
     creatives?: Array<{ id: string; name: string; index: number }>;
   };
+  startedAt: number;
+}
+
+/** Состояние pending flow для незарегистрированных / новых пользователей */
+export interface PendingFlowState {
+  flow: 'subscription' | 'onboarding';
+  step: string;
+  data: Record<string, any>;
   startedAt: number;
 }
