@@ -304,9 +304,16 @@ async function handleDealEvent(
   const bitrixDeal = await getDeal(domain, accessToken, dealId);
 
   if (!bitrixDeal) {
-    app.log.warn({ dealId }, 'Deal not found in Bitrix24');
+    app.log.warn({ userAccountId, dealId, domain }, 'Deal not found in Bitrix24');
     return;
   }
+
+  app.log.info({
+    dealId,
+    stageId: bitrixDeal.STAGE_ID,
+    categoryId: bitrixDeal.CATEGORY_ID,
+    title: bitrixDeal.TITLE
+  }, 'Bitrix24 deal fetched successfully');
 
   // Get qualification config
   const { data: userAccount } = await supabase
@@ -319,12 +326,24 @@ async function handleDealEvent(
   const isQualified = checkQualification(bitrixDeal, qualificationFields);
 
   // Find local lead by bitrix24_deal_id
-  const { data: localLead } = await supabase
+  const parsedDealId = parseInt(dealId, 10);
+  const { data: localLead, error: leadLookupError } = await supabase
     .from('leads')
     .select('id, current_status_id, current_pipeline_id, is_qualified, direction_id, chat_id, phone')
     .eq('user_account_id', userAccountId)
-    .eq('bitrix24_deal_id', parseInt(dealId, 10))
+    .eq('bitrix24_deal_id', parsedDealId)
     .single();
+
+  app.log.info({
+    userAccountId,
+    dealId,
+    parsedDealId,
+    found: !!localLead,
+    leadId: localLead?.id || null,
+    lookupError: leadLookupError?.code || null,
+    stageId: bitrixDeal.STAGE_ID,
+    categoryId: bitrixDeal.CATEGORY_ID
+  }, 'Bitrix24 deal webhook: lead lookup result');
 
   if (localLead) {
     // Update existing lead
