@@ -168,6 +168,44 @@ export async function sendCommunityNotification(
 }
 
 /**
+ * Отправляет сообщение с inline-кнопкой от community-бота
+ */
+export async function sendCommunityMessageWithButton(
+  chatId: string | number,
+  message: string,
+  buttonText: string,
+  callbackData: string,
+): Promise<boolean> {
+  try {
+    const response = await fetch(`${COMMUNITY_BOT_API_URL}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: {
+          inline_keyboard: [[{ text: buttonText, callback_data: callbackData }]],
+        },
+      }),
+    });
+
+    const result: TelegramResponse = await response.json();
+
+    if (!result.ok) {
+      log.error({ msg: 'community_bot_button_send_failed', chatId, description: result.description }, 'Failed to send community bot message with button');
+      return false;
+    }
+
+    return true;
+  } catch (error: any) {
+    log.error({ msg: 'community_bot_button_error', chatId, error: error.message }, 'Community bot button message error');
+    return false;
+  }
+}
+
+/**
  * Создаёт одноразовую инвайт-ссылку в Telegram канал/группу
  */
 export async function createChatInviteLink(channelId: string | number): Promise<string | null> {

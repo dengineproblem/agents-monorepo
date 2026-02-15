@@ -481,6 +481,17 @@ export async function handleOnboardingCallback(
   const telegramId = query.from.id;
   if (!chatId) return false;
 
+  if (data === 'onboard:start') {
+    // Кнопка «Начать настройку» из уведомления об оплате (agent-service → community bot)
+    const resolveResult = await callBrain('/brain/resolve-user', { telegram_id: telegramId });
+    if (!resolveResult?.success || !resolveResult.userAccountId) {
+      await bot.sendMessage(chatId, 'Не удалось найти ваш аккаунт. Отправьте любое сообщение чтобы начать.');
+      return true;
+    }
+    await startOnboardingFlow(bot, chatId, telegramId, resolveResult.userAccountId);
+    return true;
+  }
+
   if (data === 'onboard:help') {
     const helpMsg = `📖 *Инструкция по выдаче партнёрского доступа*
 

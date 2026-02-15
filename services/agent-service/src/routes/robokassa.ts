@@ -10,7 +10,7 @@ import {
   getPlanConfig,
   isRobokassaConfigured
 } from '../lib/robokassa.js';
-import { sendTelegramNotification, sendCommunityNotification, createChatInviteLink } from '../lib/telegramNotifier.js';
+import { sendTelegramNotification, sendCommunityNotification, sendCommunityMessageWithButton, createChatInviteLink } from '../lib/telegramNotifier.js';
 
 const logger = createLogger({ module: 'robokassaRoutes' });
 
@@ -329,19 +329,23 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     try {
       const { data: userTg } = await supabase
         .from('user_accounts')
-        .select('telegram_id')
+        .select('telegram_id, username, password')
         .eq('id', user.id)
-        .maybeSingle<{ telegram_id: string | null }>();
+        .maybeSingle<{ telegram_id: string | null; username: string | null; password: string | null }>();
 
       if (userTg?.telegram_id) {
         const formattedDate = newTarifExpires.split('-').reverse().join('.');
-        await sendTelegramNotification(userTg.telegram_id,
-          `✅ Оплата получена! Подписка активна до ${formattedDate}.\n\nОтправьте любое сообщение боту для продолжения настройки.`,
-          { userAccountId: user.id, source: 'bot' }
-        );
+
+        // 1. Уведомление об оплате с логином/паролем
+        let paymentMsg = `✅ Оплата получена! Подписка активна до ${formattedDate}.`;
+        if (userTg.username && userTg.password) {
+          paymentMsg += `\n\n🔑 Ваши данные для входа:\nЛогин: <code>${userTg.username}</code>\nПароль: <code>${userTg.password}</code>`;
+        }
+
+        await sendCommunityNotification(userTg.telegram_id, paymentMsg);
         logger.info({ userId: user.id, telegramId: userTg.telegram_id }, 'Payment TG notification sent');
 
-        // Отправить инвайт-ссылку в закрытый канал комьюнити
+        // 2. Инвайт-ссылка в закрытый канал комьюнити
         const communityChannelId = process.env.COMMUNITY_CHANNEL_ID;
         if (communityChannelId) {
           const inviteLink = await createChatInviteLink(communityChannelId);
@@ -356,6 +360,14 @@ export default async function robokassaRoutes(app: FastifyInstance) {
             logger.info({ userId: user.id }, 'Community invite link sent');
           }
         }
+
+        // 3. Кнопка «Начать настройку» для запуска онбординга
+        await sendCommunityMessageWithButton(
+          userTg.telegram_id,
+          '🚀 Нажмите кнопку ниже, чтобы настроить рекламный аккаунт:',
+          '⚙️ Начать настройку',
+          'onboard:start',
+        );
       }
     } catch (tgErr: any) {
       logger.warn({ userId: user.id, error: tgErr.message }, 'Failed to send TG payment notification');
