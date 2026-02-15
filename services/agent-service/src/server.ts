@@ -1,6 +1,7 @@
 import fastify from 'fastify';
 import cors from "@fastify/cors";
 import formbody from "@fastify/formbody";
+import qs from "qs";
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { actionsRoutes } from './routes/actions.js';
@@ -158,8 +159,9 @@ app.register(cors, {
     "Tus-Extension", "Upload-Metadata", "Upload-Defer-Length", "Upload-Concat"
   ]
 });
-// Поддержка application/x-www-form-urlencoded (для Tilda webhook)
-app.register(formbody);
+// Поддержка application/x-www-form-urlencoded (для Bitrix24, Tilda webhooks)
+// qs.parse поддерживает вложенные объекты: data[FIELDS][ID]=123 → { data: { FIELDS: { ID: '123' } } }
+app.register(formbody, { parser: (str: string) => qs.parse(str) });
 // ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
 // См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
 app.register(actionsRoutes);

@@ -83,6 +83,16 @@ export default async function bitrix24WebhooksRoutes(app: FastifyInstance) {
       const { event, data, auth } = payload;
       const entityId = data?.FIELDS?.ID;
 
+      if (!entityId) {
+        app.log.warn({
+          userAccountId,
+          event,
+          payloadKeys: Object.keys(payload),
+          hasData: !!data,
+          sampleKey: Object.keys(payload).find(k => k.includes('FIELDS'))
+        }, 'Bitrix24 webhook: entityId is missing from payload');
+      }
+
       app.log.info({
         userAccountId,
         accountId,
