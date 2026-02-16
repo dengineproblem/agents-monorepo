@@ -246,6 +246,7 @@ services:
     volumes:
       - ./nginx-production.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/letsencrypt:/var/www/letsencrypt:ro
     depends_on:
       - frontend
       - frontend-appreview
