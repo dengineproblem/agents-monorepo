@@ -665,18 +665,66 @@ export class PlanExecutor {
    * Generate mini report for brain_executions
    */
   generateMiniReport(results, steps) {
-    const successCount = results.filter(r => r.success).length;
-    let report = `Brain Mini оптимизация\n`;
-    report += `Выполнено ${successCount}/${results.length} действий\n\n`;
+    const ACTION_LABELS = {
+      updateBudget: '💰 Изменение бюджета',
+      pauseAdSet: '⏸️ Пауза группы',
+      pauseAd: '⏸️ Пауза объявления',
+      enableAdSet: '▶️ Включение группы',
+      enableAd: '▶️ Включение объявления',
+      createAdSet: '➕ Создание группы',
+      launchNewCreatives: '🚀 Запуск креативов',
+      review: '👀 Требует внимания'
+    };
 
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.length - successCount;
+    const lines = [];
+
+    if (failCount === 0) {
+      lines.push(`✅ Brain Mini: все ${results.length} действий выполнены успешно`);
+    } else {
+      lines.push(`⚠️ Brain Mini: ${successCount}/${results.length} действий выполнено`);
+    }
+    lines.push('');
+
+    // Группируем по direction_name
+    const grouped = new Map();
     results.forEach((r, i) => {
-      const icon = r.success ? '✓' : '✗';
-      report += `${icon} ${r.description || r.action}\n`;
-      if (r.message) report += `   ${r.message}\n`;
-      if (r.error) report += `   Ошибка: ${r.error}\n`;
+      const step = steps[i] || {};
+      const dirName = step.params?.direction_name || 'Общие';
+      if (!grouped.has(dirName)) grouped.set(dirName, []);
+      grouped.get(dirName).push({ result: r, step });
     });
 
-    return report;
+    for (const [dirName, items] of grouped) {
+      if (grouped.size > 1 || dirName !== 'Общие') {
+        lines.push(`📁 ${dirName}`);
+      }
+
+      for (const { result: r, step } of items) {
+        const action = r.action || step.action || 'unknown';
+        const label = ACTION_LABELS[action] || action;
+        const icon = r.success ? '✓' : '✗';
+
+        lines.push(`  ${icon} ${label}`);
+        if (r.description) lines.push(`    ${r.description}`);
+        if (step.params?.entity_name) lines.push(`    ${step.params.entity_name}`);
+
+        // Детали бюджета
+        const params = step.params || {};
+        if (action === 'updateBudget' && params.current_budget_cents && params.new_budget_cents) {
+          const current = `$${(params.current_budget_cents / 100).toFixed(2)}`;
+          const next = `$${(params.new_budget_cents / 100).toFixed(2)}`;
+          lines.push(`    ${current} → ${next}`);
+        }
+
+        if (r.message) lines.push(`    ${r.message}`);
+        if (r.error) lines.push(`    ❌ ${r.error}`);
+        lines.push('');
+      }
+    }
+
+    return lines.join('\n').trim();
   }
 
   /**

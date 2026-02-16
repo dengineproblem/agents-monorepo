@@ -16,7 +16,6 @@ import {
   CheckCircle2,
   XCircle,
   FileText,
-  Eye,
   Building2,
   Brain
 } from 'lucide-react';
@@ -90,7 +89,6 @@ export function AllAccountsExecutionsSection({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedExecution, setSelectedExecution] = useState<BrainExecution | null>(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
-  const [actionsDialogOpen, setActionsDialogOpen] = useState(false);
 
   // Создаём map для быстрого поиска имени аккаунта по ID
   const accountsMap = React.useMemo(() => {
@@ -134,11 +132,6 @@ export function AllAccountsExecutionsSection({
   const openReport = (exec: BrainExecution) => {
     setSelectedExecution(exec);
     setReportDialogOpen(true);
-  };
-
-  const openActions = (exec: BrainExecution) => {
-    setSelectedExecution(exec);
-    setActionsDialogOpen(true);
   };
 
   const getAccountName = (accountId: string | null): string => {
@@ -249,7 +242,7 @@ export function AllAccountsExecutionsSection({
                               )}
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
-                              {exec.report_text && (
+                              {(exec.report_text || (exec.actions_json && exec.actions_json.length > 0)) && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -258,17 +251,6 @@ export function AllAccountsExecutionsSection({
                                 >
                                   <FileText className="h-3.5 w-3.5 md:mr-1" />
                                   <span className="hidden md:inline">Отчёт</span>
-                                </Button>
-                              )}
-                              {exec.actions_json && exec.actions_json.length > 0 && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-1 md:px-2 text-xs"
-                                  onClick={() => openActions(exec)}
-                                >
-                                  <Eye className="h-3.5 w-3.5 md:mr-1" />
-                                  <span className="hidden md:inline">Действия ({exec.actions_json.length})</span>
                                 </Button>
                               )}
                             </div>
@@ -317,7 +299,7 @@ export function AllAccountsExecutionsSection({
         </CardContent>
       </Card>
 
-      {/* Диалог отчёта */}
+      {/* Диалог отчёта (объединённый: текст + действия) */}
       <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] bg-white dark:bg-zinc-900">
           <DialogHeader>
@@ -333,104 +315,84 @@ export function AllAccountsExecutionsSection({
             )}
           </DialogHeader>
           <ScrollArea className="max-h-[60vh]">
-            <pre className="text-sm whitespace-pre-wrap font-sans p-4">
-              {selectedExecution?.report_text || 'Нет отчёта'}
-            </pre>
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
-      {/* Диалог действий */}
-      <Dialog open={actionsDialogOpen} onOpenChange={setActionsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] bg-white dark:bg-zinc-900">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Действия ({selectedExecution?.actions_json?.length || 0})
-            </DialogTitle>
-            {selectedExecution?.account_id && (
-              <p className="text-sm text-muted-foreground flex items-center gap-2">
-                <Building2 className="h-4 w-4" />
-                {getAccountName(selectedExecution.account_id)}
-              </p>
+            {/* Текст отчёта */}
+            {selectedExecution?.report_text && (
+              <pre className="text-sm whitespace-pre-wrap font-sans p-4 pb-2">
+                {selectedExecution.report_text}
+              </pre>
             )}
-          </DialogHeader>
-          <ScrollArea className="max-h-[60vh]">
-            <div className="space-y-3 p-1">
-              {(() => {
-                const actions = selectedExecution?.actions_json || [];
-                // Группируем по direction_name
-                const grouped = new Map<string, typeof actions>();
-                actions.forEach((action: any) => {
-                  const dirName = action.params?.direction_name || 'Общие';
-                  if (!grouped.has(dirName)) {
-                    grouped.set(dirName, []);
-                  }
-                  grouped.get(dirName)!.push(action);
-                });
 
-                const showGroups = grouped.size > 1 || !grouped.has('Общие');
+            {/* Карточки действий */}
+            {selectedExecution?.actions_json && selectedExecution.actions_json.length > 0 && (
+              <div className="px-4 pb-4 space-y-3">
+                {selectedExecution.report_text && (
+                  <div className="border-t pt-3">
+                    <p className="text-sm font-medium text-muted-foreground mb-2">
+                      Детали действий ({selectedExecution.actions_json.length})
+                    </p>
+                  </div>
+                )}
+                {(() => {
+                  const actions = selectedExecution.actions_json;
+                  const grouped = new Map<string, typeof actions>();
+                  actions.forEach((action: any) => {
+                    const dirName = action.params?.direction_name || 'Общие';
+                    if (!grouped.has(dirName)) grouped.set(dirName, []);
+                    grouped.get(dirName)!.push(action);
+                  });
+                  const showGroups = grouped.size > 1 || !grouped.has('Общие');
 
-                return Array.from(grouped.entries()).map(([dirName, groupActions]) => (
-                  <div key={dirName} className="space-y-2">
-                    {showGroups && (
-                      <div className="flex items-center gap-2 mt-2 mb-1">
-                        <Badge variant="outline" className="text-xs font-medium">
-                          📁 {dirName}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          ({groupActions.length})
-                        </span>
-                      </div>
-                    )}
-                    {groupActions.map((action: any, index: number) => {
-                      const actionType = action.type || action.action;
-                      const actionLabel = getActionLabel(actionType);
-                      const entityName = action.params?.entity_name;
-                      const params = action.params || {};
+                  return Array.from(grouped.entries()).map(([dirName, groupActions]) => (
+                    <div key={dirName} className="space-y-2">
+                      {showGroups && (
+                        <div className="flex items-center gap-2 mt-2 mb-1">
+                          <Badge variant="outline" className="text-xs font-medium">📁 {dirName}</Badge>
+                          <span className="text-xs text-muted-foreground">({groupActions.length})</span>
+                        </div>
+                      )}
+                      {groupActions.map((action: any, index: number) => {
+                        const actionType = action.type || action.action;
+                        const actionLabel = getActionLabel(actionType);
+                        const entityName = action.params?.entity_name;
+                        const params = action.params || {};
+                        const isSuccess = action.success !== false;
+                        const reason = action.params?.reason;
 
-                      // Детали для бюджетных изменений
-                      let budgetDetail = null;
-                      if (actionType === 'updateBudget' || actionType === 'UpdateAdSetDailyBudget') {
-                        const current = params.current_budget_cents;
-                        const newBudget = params.new_budget_cents || params.daily_budget_cents;
-                        if (current && newBudget) {
-                          const percent = params.increase_percent
-                            ? `+${params.increase_percent}%`
-                            : params.decrease_percent
-                              ? `-${params.decrease_percent}%`
-                              : '';
-                          budgetDetail = `$${(current / 100).toFixed(2)} → $${(newBudget / 100).toFixed(2)}${percent ? ` (${percent})` : ''}`;
+                        let budgetDetail = null;
+                        if (actionType === 'updateBudget' || actionType === 'UpdateAdSetDailyBudget') {
+                          const current = params.current_budget_cents;
+                          const newBudget = params.new_budget_cents || params.daily_budget_cents;
+                          if (current && newBudget) {
+                            const percent = params.increase_percent ? `+${params.increase_percent}%` : params.decrease_percent ? `-${params.decrease_percent}%` : '';
+                            budgetDetail = `$${(current / 100).toFixed(2)} → $${(newBudget / 100).toFixed(2)}${percent ? ` (${percent})` : ''}`;
+                          }
                         }
-                      }
 
-                      return (
-                        <div
-                          key={`${dirName}-${index}`}
-                          className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/30"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium">{actionLabel}</p>
-                              {entityName && (
-                                <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                  {entityName}
-                                </p>
-                              )}
-                              {budgetDetail && (
-                                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 font-medium">
-                                  {budgetDetail}
-                                </p>
-                              )}
+                        return (
+                          <div key={`${dirName}-${index}`} className={cn("p-3 rounded-lg border", isSuccess ? "border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/30" : "border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/20")}>
+                            <div className="flex items-start gap-2">
+                              {isSuccess ? <CheckCircle2 className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" /> : <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium">{actionLabel}</p>
+                                {entityName && <p className="text-xs text-muted-foreground mt-0.5">{entityName}</p>}
+                                {budgetDetail && <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 font-medium">{budgetDetail}</p>}
+                                {reason && <p className="text-xs text-muted-foreground mt-1 italic">{reason}</p>}
+                                {action.message && !isSuccess && <p className="text-xs text-red-600 dark:text-red-400 mt-1">{action.message}</p>}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ));
-              })()}
-            </div>
+                        );
+                      })}
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+
+            {/* Пустое состояние */}
+            {!selectedExecution?.report_text && (!selectedExecution?.actions_json || selectedExecution.actions_json.length === 0) && (
+              <p className="text-sm text-muted-foreground text-center p-4">Нет данных</p>
+            )}
           </ScrollArea>
         </DialogContent>
       </Dialog>

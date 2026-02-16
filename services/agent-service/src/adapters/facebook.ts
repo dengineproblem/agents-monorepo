@@ -1221,6 +1221,55 @@ export async function createWhatsAppImageCreative(
       }
     }
 
+    // Если невалидный instagram_user_id (code 100) — пробуем без него
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({
+        adAccountId,
+        instagramId: params.instagramId,
+        msg: 'instagram_user_id invalid, retrying without it'
+      }, 'WhatsApp image creative: невалидный instagram_user_id, создаем без него (только Facebook)');
+
+      // Пробуем с page_welcome_message но без instagram
+      const objectStorySpecWithoutIg: any = {
+        page_id: params.pageId,
+        link_data: {
+          image_hash: params.imageHash,
+          link: "https://www.facebook.com/",
+          message: params.message,
+          call_to_action: callToAction,
+          page_welcome_message: pageWelcomeMessage
+        }
+        // instagram_user_id убран
+      };
+
+      try {
+        return await graph('POST', `${adAccountId}/adcreatives`, token, {
+          name: "Image CTWA – WhatsApp",
+          object_story_spec: JSON.stringify(objectStorySpecWithoutIg)
+        });
+      } catch (retryError: any) {
+        // Если и без instagram не работает с welcome_message — пробуем без обоих
+        const isWelcomeError = retryError?.fb?.error_subcode === 1815166 || retryError?.fb?.error_subcode === 1487194;
+        if (isWelcomeError) {
+          const objectStorySpecMinimal = {
+            page_id: params.pageId,
+            link_data: {
+              image_hash: params.imageHash,
+              link: "https://www.facebook.com/",
+              message: params.message,
+              call_to_action: callToAction
+            }
+          };
+          return await graph('POST', `${adAccountId}/adcreatives`, token, {
+            name: "Image CTWA – WhatsApp",
+            object_story_spec: JSON.stringify(objectStorySpecMinimal)
+          });
+        }
+        throw retryError;
+      }
+    }
+
     // Другие ошибки пробрасываем дальше
     throw error;
   }
@@ -1302,7 +1351,24 @@ export async function createWebsiteLeadsImageCreative(
     object_story_spec: objectStorySpec
   };
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    // Если невалидный instagram_user_id (code 100) — пробуем без него
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({
+        adAccountId,
+        instagramId: params.instagramId,
+        msg: 'instagram_user_id invalid, retrying without it'
+      }, 'Website Leads image creative: невалидный instagram_user_id, создаем без него');
+
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = objectStorySpec;
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1349,7 +1415,23 @@ export async function createAppInstallsImageCreative(
     object_story_spec: objectStorySpec
   };
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({
+        adAccountId,
+        instagramId: params.instagramId,
+        msg: 'instagram_user_id invalid, retrying without it'
+      }, 'App Installs image creative: невалидный instagram_user_id, создаем без него');
+
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = objectStorySpec;
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1398,7 +1480,23 @@ export async function createLeadFormImageCreative(
     object_story_spec: objectStorySpec
   };
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({
+        adAccountId,
+        instagramId: params.instagramId,
+        msg: 'instagram_user_id invalid, retrying without it'
+      }, 'Lead Form image creative: невалидный instagram_user_id, создаем без него');
+
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = objectStorySpec;
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 // ============================================
@@ -1691,6 +1789,43 @@ export async function createWhatsAppCarouselCreative(
       });
     }
 
+    // Если невалидный instagram_user_id (code 100) — пробуем без него
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({ adAccountId, instagramId: params.instagramId }, 'WhatsApp carousel: невалидный instagram_user_id, создаем без него');
+
+      const objectStorySpecWithoutIg: any = {
+        page_id: params.pageId,
+        link_data: {
+          message: params.message,
+          link: whatsappLink,
+          multi_share_optimized: true,
+          child_attachments: childAttachments,
+          call_to_action: {
+            type: "WHATSAPP_MESSAGE",
+            value: { app_destination: "WHATSAPP" }
+          },
+          page_welcome_message: pageWelcomeMessage
+        }
+      };
+
+      try {
+        return await graph('POST', `${adAccountId}/adcreatives`, token, {
+          name: "Carousel CTWA – WhatsApp",
+          object_story_spec: JSON.stringify(objectStorySpecWithoutIg)
+        });
+      } catch (retryError: any) {
+        if (retryError?.fb?.error_subcode === 1815166) {
+          delete objectStorySpecWithoutIg.link_data.page_welcome_message;
+          return await graph('POST', `${adAccountId}/adcreatives`, token, {
+            name: "Carousel CTWA – WhatsApp",
+            object_story_spec: JSON.stringify(objectStorySpecWithoutIg)
+          });
+        }
+        throw retryError;
+      }
+    }
+
     // Другие ошибки пробрасываем дальше
     throw error;
   }
@@ -1801,7 +1936,19 @@ export async function createWebsiteLeadsCarouselCreative(
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Website Leads carousel creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({ adAccountId, instagramId: params.instagramId }, 'Website Leads carousel: невалидный instagram_user_id, создаем без него');
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = JSON.stringify(objectStorySpec);
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1861,7 +2008,19 @@ export async function createAppInstallsCarouselCreative(
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating App Installs carousel creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({ adAccountId, instagramId: params.instagramId }, 'App Installs carousel: невалидный instagram_user_id, создаем без него');
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = JSON.stringify(objectStorySpec);
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1917,7 +2076,19 @@ export async function createLeadFormCarouselCreative(
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length, leadFormId: params.leadFormId }, 'Creating Lead Form carousel creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+
+  try {
+    return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  } catch (error: any) {
+    const isInvalidInstagramError = error?.fb?.code === 100 && error?.message?.includes('instagram_user_id');
+    if (isInvalidInstagramError && params.instagramId) {
+      log.warn({ adAccountId, instagramId: params.instagramId }, 'Lead Form carousel: невалидный instagram_user_id, создаем без него');
+      delete objectStorySpec.instagram_user_id;
+      payload.object_story_spec = JSON.stringify(objectStorySpec);
+      return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    }
+    throw error;
+  }
 }
 
 export async function createLookalikeAudience(
