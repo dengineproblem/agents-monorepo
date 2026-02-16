@@ -30,9 +30,13 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   const { directions } = useDirections(userAccountId, currentAdAccountId, directionsPlatform);
 
   // Проверяем, есть ли хотя бы одно WhatsApp направление
+  // objective='whatsapp' — переписки, objective='conversions' + conversion_channel='whatsapp' — конверсии через WA
   const hasWhatsAppDirections = useMemo(() => {
     if (platform === 'tiktok') return false;
-    return directions.some(d => d.objective === 'whatsapp');
+    return directions.some(d =>
+      d.objective === 'whatsapp' ||
+      (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
+    );
   }, [directions, platform]);
 
   // Load AmoCRM qualified leads data when date range changes

@@ -1262,7 +1262,10 @@ const AccountRow: React.FC<AccountRowProps> = ({
 
   // Проверяем, есть ли хотя бы одно WhatsApp направление
   // Качество лидов показываем только для WhatsApp (messaging_apps), не для лид-форм
-  const hasWhatsAppDirections = directions.some(d => d.objective === 'whatsapp');
+  const hasWhatsAppDirections = directions.some(d =>
+    d.objective === 'whatsapp' ||
+    (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
+  );
 
   // Debug: log when campaigns change for this account
   React.useEffect(() => {
@@ -1574,7 +1577,10 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   const direction = directions.find(d => d.fb_campaign_id === campaign.campaign_id);
 
   // Качество лидов показываем если есть хотя бы один WhatsApp direction в аккаунте
-  const hasWhatsAppDirections = directions.some(d => d.objective === 'whatsapp');
+  const hasWhatsAppDirections = directions.some(d =>
+    d.objective === 'whatsapp' ||
+    (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
+  );
   const isWhatsAppCampaign = hasWhatsAppDirections;
   const displayQualityRate = isWhatsAppCampaign ? campaign.qualityRate : 0;
   const displayCpql = isWhatsAppCampaign ? campaign.cpql : 0;
