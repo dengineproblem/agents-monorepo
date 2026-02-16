@@ -77,7 +77,7 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
       await salesApi.addSale({
         client_phone: normalizedPhone,
         amount: amount,
-        business_id: businessId,
+        user_account_id: businessId,
         account_id: accountId || undefined  // UUID для мультиаккаунтности
       });
       
@@ -186,7 +186,7 @@ export function SaleUpload({ accountId }: SaleUploadProps) {
       await salesApi.addSale({
         client_phone: normalizedPhone,
         amount: amount,
-        business_id: businessId,
+        user_account_id: businessId,
         manual_source_id: selectedCampaign.id,
         manual_creative_url: selectedCampaign.creative_url || '',
         account_id: accountId || undefined  // UUID для мультиаккаунтности

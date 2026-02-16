@@ -1094,7 +1094,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       await salesApi.addSale({
         client_phone: normalizedPhone,
         amount: amount,
-        user_account_id: userAccountId
+        user_account_id: userAccountId,
+        account_id: currentAdAccountId || undefined
       });
       
       toast.success('Продажа успешно добавлена! 🎉');
@@ -1280,6 +1281,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         client_phone: normalizedPhone,
         amount: amount,
         user_account_id: userAccountId,
+        account_id: currentAdAccountId || undefined,
         creative_id: selectedCreative.id,
         creative_url: selectedCreative.image_url || '',
         direction_id: selectedCreative.direction_id

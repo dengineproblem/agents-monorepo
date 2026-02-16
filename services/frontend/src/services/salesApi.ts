@@ -90,12 +90,21 @@ class SalesApiService {
       // Получаем уникальные телефоны для поиска связанных лидов
       const phones = [...new Set(purchases.map((p: any) => p.client_phone))];
 
-      // Загружаем лиды с creative_id для этих телефонов
+      // Генерируем все возможные форматы для поиска по chat_id и phone
+      const chatIdCandidates: string[] = [];
+      const phoneCandidates: string[] = [];
+      for (const phone of phones) {
+        const digits = phone.replace(/\D/g, '');
+        chatIdCandidates.push(digits, `${digits}@s.whatsapp.net`, `${digits}@c.us`);
+        phoneCandidates.push(digits, `+${digits}`);
+      }
+
+      // Загружаем лиды с creative_id — ищем по обеим колонкам (chat_id и phone)
       const { data: leads } = await (supabase as any)
         .from('leads')
-        .select('chat_id, creative_id')
+        .select('chat_id, phone, creative_id')
         .eq('user_account_id', userAccountId)
-        .in('chat_id', phones)
+        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`)
         .not('creative_id', 'is', null);
 
       if (!leads || leads.length === 0) {
@@ -109,13 +118,21 @@ class SalesApiService {
         .select('id, title')
         .in('id', creativeIds);
 
-      // Создаём map phone -> creative_id -> title
-      const phoneToCreativeId = new Map(leads.map((l: any) => [l.chat_id, l.creative_id]));
+      // Создаём map: нормализованный телефон -> creative_id
+      const phoneToCreativeId = new Map<string, string>();
+      for (const lead of leads) {
+        // Нормализуем chat_id или phone к цифрам для сопоставления с client_phone
+        const leadPhone = (lead.chat_id || lead.phone || '').replace(/@.*$/, '').replace(/\D/g, '');
+        if (leadPhone && lead.creative_id) {
+          phoneToCreativeId.set(leadPhone, lead.creative_id);
+        }
+      }
       const creativeIdToTitle = new Map(creatives?.map((c: any) => [c.id, c.title]) || []);
 
       // Добавляем название креатива к каждой продаже
       const enrichedPurchases = purchases.map((p: any) => {
-        const creativeId = phoneToCreativeId.get(p.client_phone);
+        const normalizedPhone = (p.client_phone || '').replace(/\D/g, '');
+        const creativeId = phoneToCreativeId.get(normalizedPhone);
         const creativeName = creativeId ? creativeIdToTitle.get(creativeId) : null;
         return {
           ...p,
@@ -456,7 +473,7 @@ class SalesApiService {
       // ШАГ 3: Загружаем лиды для расчёта выручки (связь с purchases)
       let leadsQuery = (supabase as any)
         .from('leads')
-        .select('id, chat_id, creative_id, direction_id, is_qualified')
+        .select('id, chat_id, phone, creative_id, direction_id, is_qualified')
         .eq('user_account_id', userAccountId)
         .in('creative_id', creativeIds);
 
@@ -501,7 +518,13 @@ class SalesApiService {
       console.log('📊 Загружено лидов для выручки:', leadsData?.length || 0);
 
       // ШАГ 4: Загружаем продажи для расчёта выручки
-      const leadPhones = leadsData?.map((l: any) => l.chat_id).filter(Boolean) || [];
+      // Нормализуем телефоны лидов к цифрам (purchases.client_phone хранит цифры)
+      const leadPhoneDigits = new Set<string>();
+      for (const lead of leadsData || []) {
+        const phone = (lead.chat_id || lead.phone || '').replace(/@.*$/, '').replace(/\D/g, '');
+        if (phone) leadPhoneDigits.add(phone);
+      }
+      const leadPhones = [...leadPhoneDigits];
 
       let purchasesQuery = (supabase as any)
         .from('purchases')
@@ -551,8 +574,10 @@ class SalesApiService {
         if (lead.id && lead.creative_id) {
           leadIdToCreativeId.set(lead.id, lead.creative_id);
         }
-        if (lead.chat_id && lead.creative_id) {
-          phoneToCreativeId.set(lead.chat_id, lead.creative_id);
+        // Нормализуем телефон к цифрам для сопоставления
+        const normalizedPhone = (lead.chat_id || lead.phone || '').replace(/@.*$/, '').replace(/\D/g, '');
+        if (normalizedPhone && lead.creative_id) {
+          phoneToCreativeId.set(normalizedPhone, lead.creative_id);
         }
       }
 
@@ -588,9 +613,12 @@ class SalesApiService {
         if (event.lead_id && leadIdToCreativeId.has(event.lead_id)) {
           creativeId = leadIdToCreativeId.get(event.lead_id);
         }
-        // Если нет lead_id, пробуем через contact_phone
-        else if (event.contact_phone && phoneToCreativeId.has(event.contact_phone)) {
-          creativeId = phoneToCreativeId.get(event.contact_phone);
+        // Если нет lead_id, пробуем через contact_phone (нормализуем к цифрам)
+        else if (event.contact_phone) {
+          const normalizedEventPhone = event.contact_phone.replace(/@.*$/, '').replace(/\D/g, '');
+          if (phoneToCreativeId.has(normalizedEventPhone)) {
+            creativeId = phoneToCreativeId.get(normalizedEventPhone);
+          }
         }
 
         if (!creativeId) continue;
@@ -623,7 +651,9 @@ class SalesApiService {
           rev.qualifiedCount++;
         }
 
-        const purchaseData = purchasesByPhone.get(lead.chat_id);
+        // Нормализуем телефон лида к цифрам для сопоставления с purchases.client_phone
+        const leadPhone = (lead.chat_id || lead.phone || '').replace(/@.*$/, '').replace(/\D/g, '');
+        const purchaseData = purchasesByPhone.get(leadPhone);
         if (purchaseData) {
           rev.revenue += purchaseData.amount;
           rev.conversions += purchaseData.count;
@@ -838,7 +868,7 @@ class SalesApiService {
   private async updateLeadSaleAmount(clientPhone: string, userAccountId: string) {
     try {
       console.log('🔄 Обновляем sale_amount в лиде...');
-      
+
       // Считаем общую сумму всех продаж клиента
       const { data: totalSales, error: sumError } = await (supabase as any)
         .from('purchases')
@@ -854,15 +884,27 @@ class SalesApiService {
       const totalAmount = totalSales?.reduce((sum, sale) => sum + Number(sale.amount), 0) || 0;
       console.log('💰 Общая сумма продаж клиента:', totalAmount);
 
-      // Обновляем sale_amount в лиде
+      // Лиды хранят телефон в chat_id (WhatsApp) или phone (сайт)
+      const digits = clientPhone.replace(/\D/g, '');
+      const chatIdCandidates = [
+        digits,
+        `${digits}@s.whatsapp.net`,
+        `${digits}@c.us`,
+      ];
+      const phoneCandidates = [
+        digits,
+        `+${digits}`,
+      ];
+
+      // Обновляем sale_amount в лиде (ищем по обеим колонкам)
       const { error: updateError } = await (supabase as any)
         .from('leads')
-        .update({ 
+        .update({
           sale_amount: totalAmount,
           updated_at: new Date().toISOString()
         })
-        .eq('chat_id', clientPhone)
-        .eq('user_account_id', userAccountId);
+        .eq('user_account_id', userAccountId)
+        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`);
 
       if (updateError) {
         console.error('❌ Ошибка обновления sale_amount в лиде:', updateError);
@@ -1041,18 +1083,37 @@ class SalesApiService {
       console.log('📋 Source ID:', saleData.manual_source_id);
 
       // Проверяем есть ли лид с таким номером у текущего пользователя
-      const { data: existingLead, error: leadCheckError } = await (supabase as any)
+      // Лиды хранят телефон в двух колонках:
+      //   chat_id — WhatsApp формат: '77029992936@s.whatsapp.net', '77029992936@c.us', или просто цифры
+      //   phone  — сайтовые лиды: '+77029992936', '77029992936', '+7 702 999 29 36' и т.д.
+      const digits = saleData.client_phone.replace(/\D/g, '');
+      const chatIdCandidates = [
+        digits,
+        `${digits}@s.whatsapp.net`,
+        `${digits}@c.us`,
+      ];
+      const phoneCandidates = [
+        digits,
+        `+${digits}`,
+      ];
+
+      // Ищем по обеим колонкам: chat_id (WhatsApp лиды) и phone (сайтовые лиды)
+      const { data: existingLeads, error: leadCheckError } = await (supabase as any)
         .from('leads')
         .select('id, source_id, creative_url, direction_id, user_account_id, creative_id')
         .eq('user_account_id', saleData.user_account_id)
-        .eq('chat_id', saleData.client_phone)
-        .single();
+        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`)
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-      console.log('🔍 Поиск лида по user_account_id:', saleData.user_account_id, 'и chat_id:', saleData.client_phone);
+      const existingLead = existingLeads?.[0] || null;
+
+      console.log('🔍 Поиск лида по user_account_id:', saleData.user_account_id);
+      console.log('🔍 chat_id candidates:', chatIdCandidates, 'phone candidates:', phoneCandidates);
       console.log('🔍 Результат:', existingLead);
       console.log('🔍 Ошибка:', leadCheckError);
 
-      if (leadCheckError && leadCheckError.code !== 'PGRST116') {
+      if (leadCheckError) {
         console.error('❌ Ошибка проверки лида:', leadCheckError);
         throw leadCheckError;
       }
