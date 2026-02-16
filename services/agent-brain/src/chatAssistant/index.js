@@ -878,6 +878,19 @@ export function registerChatRoutes(fastify) {
         return reply.raw.end();
       }
 
+      // Step 2.5: Get OpenAI API key from user_accounts
+      let openaiApiKey = null;
+      try {
+        const { data: userAccount } = await supabase
+          .from('user_accounts')
+          .select('openai_api_key')
+          .eq('id', userAccountId)
+          .single();
+        openaiApiKey = userAccount?.openai_api_key || null;
+      } catch (e) {
+        logger.warn({ error: e.message, userAccountId }, 'Failed to fetch openai_api_key from user_accounts');
+      }
+
       // Step 3: Run Brain Mini directly (bypass orchestrator)
       // Если переданы готовые proposals - пропускаем анализ
       if (proposals?.length > 0) {
@@ -890,7 +903,8 @@ export function registerChatRoutes(fastify) {
         userAccountId,
         adAccountId: fbId,
         adAccountDbId: dbId,
-        accessToken
+        accessToken,
+        openaiApiKey
       };
 
       // Call triggerBrainOptimizationRun directly
