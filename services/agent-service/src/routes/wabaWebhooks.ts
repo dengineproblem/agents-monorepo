@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
+import { resolveChannelFromDirection } from '../lib/capiSettingsResolver.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import {
   WabaWebhookPayload,
@@ -588,7 +589,7 @@ async function processWabaAdLead(params: WabaLeadParams, app: FastifyInstance) {
 
   // 4. Reset CAPI counter only for directions with whatsapp source
   const capiSource = await getDirectionCapiSource(directionId || null);
-  const shouldTrackWhatsappCapi = capiSource !== 'crm';
+  const shouldTrackWhatsappCapi = capiSource === 'whatsapp';
 
   if (shouldTrackWhatsappCapi) {
     await supabase
@@ -770,13 +771,42 @@ async function getDirectionCapiSource(directionId: string | null | undefined): P
 
   const { data: direction } = await supabase
     .from('account_directions')
-    .select('capi_source')
+    .select('capi_source, capi_enabled, user_account_id, account_id, objective, conversion_channel')
     .eq('id', directionId)
     .maybeSingle();
 
-  const source = direction?.capi_source;
-  if (source === 'crm' || source === 'whatsapp') {
-    return source;
+  if (!direction) return null;
+
+  // Legacy path: check account_directions.capi_source
+  if (direction.capi_enabled) {
+    const source = direction.capi_source;
+    if (source === 'crm' || source === 'whatsapp') {
+      return source;
+    }
+  }
+
+  // New table path: check capi_settings
+  if (direction.user_account_id) {
+    const channel = resolveChannelFromDirection(direction.objective, direction.conversion_channel);
+    if (channel) {
+      let query = supabase
+        .from('capi_settings')
+        .select('capi_source')
+        .eq('user_account_id', direction.user_account_id)
+        .eq('channel', channel)
+        .eq('is_active', true);
+
+      if (direction.account_id) {
+        query = query.eq('account_id', direction.account_id);
+      } else {
+        query = query.is('account_id', null);
+      }
+
+      const { data: settings } = await query.maybeSingle();
+      if (settings?.capi_source === 'crm' || settings?.capi_source === 'whatsapp') {
+        return settings.capi_source;
+      }
+    }
   }
 
   return null;
@@ -814,7 +844,7 @@ async function upsertDialogAnalysis(params: {
   const isFromAd = leadAttribution.isFromAd;
   const effectiveDirectionId = directionId || existing?.direction_id || leadAttribution.directionId || null;
   const capiSource = isFromAd ? await getDirectionCapiSource(effectiveDirectionId) : null;
-  const isWhatsappCapiTrackingEnabled = capiSource !== 'crm';
+  const isWhatsappCapiTrackingEnabled = capiSource === 'whatsapp';
 
   if (existing) {
     // Update existing record
