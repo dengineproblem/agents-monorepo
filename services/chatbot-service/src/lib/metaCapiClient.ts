@@ -973,10 +973,9 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
       : (userAccountData?.page_id || null);
 
     // Event level: per-direction (stays in account_directions)
-    const explicitLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
-    const optimizationLevel = (direction as Record<string, unknown>).optimization_level as string | null;
-    const optimizationLevelMap: Record<string, number> = { level_1: 1, level_2: 2, level_3: 3 };
-    const capiEventLevel = explicitLevel ?? (optimizationLevel ? optimizationLevelMap[optimizationLevel] ?? null : null);
+    // Only use explicit capi_event_level, NOT optimization_level as fallback.
+    // optimization_level controls ad optimization, not which CAPI events to send.
+    const capiEventLevel = ((direction as Record<string, unknown>).capi_event_level as number) ?? null;
 
     // 1. Try capi_settings table first (new architecture)
     const resolved = await resolveCapiSettingsForDirection(directionId);
