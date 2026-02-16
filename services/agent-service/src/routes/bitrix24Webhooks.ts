@@ -225,7 +225,7 @@ async function handleLeadEvent(
   // Find local lead by bitrix24_lead_id
   const { data: localLead } = await supabase
     .from('leads')
-    .select('id, current_status_id, is_qualified, direction_id, chat_id, phone')
+    .select('id, current_status_id, is_qualified, direction_id, chat_id, phone, fbc, fbp')
     .eq('user_account_id', userAccountId)
     .eq('bitrix24_lead_id', parseInt(leadId, 10))
     .single();
@@ -329,7 +329,7 @@ async function handleDealEvent(
   const parsedDealId = parseInt(dealId, 10);
   const { data: localLead, error: leadLookupError } = await supabase
     .from('leads')
-    .select('id, current_status_id, current_pipeline_id, is_qualified, direction_id, chat_id, phone')
+    .select('id, current_status_id, current_pipeline_id, is_qualified, direction_id, chat_id, phone, fbc, fbp')
     .eq('user_account_id', userAccountId)
     .eq('bitrix24_deal_id', parsedDealId)
     .single();
@@ -624,7 +624,9 @@ async function syncDirectionCrmCapiForBitrixEntity(params: {
     directionId: localLead.direction_id,
     contactPhone,
     crmType: 'bitrix24',
-    levels: matches
+    levels: matches,
+    fbc: localLead.fbc || undefined,
+    fbp: localLead.fbp || undefined,
   }, app);
 }
 

@@ -341,11 +341,13 @@ app.post('/capi/crm-event', async (request, reply) => {
   const startTime = Date.now();
 
   try {
-    const { userAccountId, directionId, contactPhone, crmType, levels } = request.body as {
+    const { userAccountId, directionId, contactPhone, crmType, levels, fbc, fbp } = request.body as {
       userAccountId: string;
       directionId: string;
       contactPhone: string;
       crmType: 'amocrm' | 'bitrix24';
+      fbc?: string;
+      fbp?: string;
       levels: {
         interest?: boolean;
         qualified?: boolean;
@@ -374,7 +376,7 @@ app.post('/capi/crm-event', async (request, reply) => {
       });
     }
 
-    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS, getCrmEventByLevel } = await import('./lib/metaCapiClient.js');
+    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS, getCrmEventByLevel, getSiteEventByLevel } = await import('./lib/metaCapiClient.js');
     const { supabase } = await import('./lib/supabase.js');
     const { resolveCapiSettingsForDirection } = await import('./lib/capiSettingsResolver.js');
 
@@ -437,16 +439,18 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     // Choose event name based on conversion channel:
     // WhatsApp → LeadSubmitted (Messaging dataset)
-    // CRM (lead_forms / site) → per-level events (Contact/Schedule/StartTrial)
+    // Site → CompleteRegistration/AddToCart/Purchase (matches promoted_object)
+    // CRM (lead_forms) → Contact/Schedule/StartTrial
     const isMessagingDataset = directionSettings.conversion_channel === 'whatsapp';
+    const isSiteChannel = directionSettings.conversion_channel === 'site';
 
     const phoneCandidates = buildPhoneCandidates(contactPhone);
     const digitsCandidate = phoneCandidates.find((value) => /^\d+$/.test(value)) || contactPhone.replace(/\D/g, '');
 
-    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; email?: string | null; name?: string | null; ctwa_clid?: string | null; leadgen_id?: string | null } | null = null;
+    let leadRecord: { id: string | number; chat_id?: string | null; phone?: string | null; email?: string | null; name?: string | null; ctwa_clid?: string | null; leadgen_id?: string | null; fbc?: string | null; fbp?: string | null } | null = null;
     const { data: leadByChat } = await supabase
       .from('leads')
-      .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
+      .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id, fbc, fbp')
       .eq('user_account_id', userAccountId)
       .eq('direction_id', directionId)
       .in('chat_id', phoneCandidates)
@@ -459,7 +463,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord) {
       const { data: leadByPhone } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
+        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id, fbc, fbp')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .in('phone', phoneCandidates)
@@ -472,7 +476,7 @@ app.post('/capi/crm-event', async (request, reply) => {
     if (!leadRecord && digitsCandidate) {
       const { data: leadByLike } = await supabase
         .from('leads')
-        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id')
+        .select('id, chat_id, phone, email, name, ctwa_clid, leadgen_id, fbc, fbp')
         .eq('user_account_id', userAccountId)
         .eq('direction_id', directionId)
         .ilike('chat_id', `%${digitsCandidate}%`)
@@ -512,6 +516,8 @@ app.post('/capi/crm-event', async (request, reply) => {
       || (digitsCandidate || contactPhone);
 
     const ctwaClid = dialogRecord?.ctwa_clid || leadRecord?.ctwa_clid || undefined;
+    const resolvedFbc = fbc || leadRecord?.fbc || undefined;
+    const resolvedFbp = fbp || leadRecord?.fbp || undefined;
     const leadId = leadRecord?.id ? String(leadRecord.id) : undefined;
     const leadgenId = leadRecord?.leadgen_id || undefined; // Meta's lead form ID (15-17 digits)
     const leadEmail = leadRecord?.email || undefined;
@@ -533,10 +539,12 @@ app.post('/capi/crm-event', async (request, reply) => {
 
     for (const requestedLevel of requestedLevels) {
       // Filter by capiEventLevel: if set, only send for that specific level
-      // Per-level event name: WhatsApp → LeadSubmitted, CRM → Contact/Schedule/StartTrial
+      // Per-level event name: WhatsApp → LeadSubmitted, Site → CompleteRegistration/AddToCart/Purchase, CRM → Contact/Schedule/StartTrial
       const eventName = isMessagingDataset
         ? CAPI_EVENTS.LEAD_SUBMITTED
-        : getCrmEventByLevel(requestedLevel.level);
+        : isSiteChannel
+          ? getSiteEventByLevel(requestedLevel.level)
+          : getCrmEventByLevel(requestedLevel.level);
 
       if (capiEventLevel !== null && capiEventLevel !== requestedLevel.level) {
         results.push({
@@ -602,6 +610,10 @@ app.post('/capi/crm-event', async (request, reply) => {
         pageId: isMessagingDataset ? (directionPageId || undefined) : undefined,
         // Meta's lead form ID for matching (highest priority per Meta docs)
         leadgenId: leadgenId || undefined,
+        // Site CAPI attribution: fbc/fbp cookies (NOT hashed)
+        fbc: resolvedFbc,
+        fbp: resolvedFbp,
+        conversionChannel: directionSettings.conversion_channel || undefined,
         dialogAnalysisId,
         leadId,
         userAccountId,

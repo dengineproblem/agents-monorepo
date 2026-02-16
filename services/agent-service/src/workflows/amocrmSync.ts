@@ -263,7 +263,9 @@ async function syncDirectionCrmCapiForAmoLead(params: {
     directionId: lead.direction_id,
     contactPhone,
     crmType: 'amocrm',
-    levels: matches
+    levels: matches,
+    fbc: lead.fbc || undefined,
+    fbp: lead.fbp || undefined,
   }, app);
 }
 

@@ -131,6 +131,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
       // Формат TILDAUTM: utm_source=value|||utm_campaign=value|||utm_content=value
       let utmParams: any = {};
       let fbcAdId: string | null = null;
+      let rawFbc: string | null = null;    // raw _fbc cookie for CAPI
+      let rawFbp: string | null = null;    // raw _fbp cookie for CAPI
 
       if (body.COOKIES) {
         // 1. Парсим TILDAUTM cookie
@@ -157,7 +159,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
         const fbcMatch = body.COOKIES.match(/_fbc=([^;]+)/);
         if (fbcMatch) {
           try {
-            const fbcValue = fbcMatch[1];
+            const fbcValue = decodeURIComponent(fbcMatch[1]);
+            rawFbc = fbcValue; // save raw _fbc for CAPI
             // _fbc содержит закодированные данные, попробуем извлечь ad_id
             // Формат новый: fb.1.timestamp.PAZXh0bg... (base64 с ad данными)
             const parts = fbcValue.split('.');
@@ -176,11 +179,29 @@ export default async function leadsRoutes(app: FastifyInstance) {
                 // base64 декодирование не удалось, это нормально для старого формата
               }
             }
-            app.log.info({ fbcValue, fbcAdId }, 'Parsed _fbc cookie');
+            app.log.info({ fbcValue, fbcAdId, rawFbc }, 'Parsed _fbc cookie');
           } catch (e) {
             app.log.warn({ error: e }, 'Failed to parse _fbc cookie');
           }
         }
+
+        // 3. Парсим _fbp cookie (Facebook Browser Pixel)
+        const fbpMatch = body.COOKIES.match(/_fbp=([^;]+)/);
+        if (fbpMatch) {
+          try {
+            rawFbp = decodeURIComponent(fbpMatch[1]);
+            app.log.info({ rawFbp }, 'Parsed _fbp cookie');
+          } catch (e) {
+            app.log.warn({ error: e }, 'Failed to parse _fbp cookie');
+          }
+        }
+      }
+
+      // Generate fbc from fbclid if _fbc cookie is missing
+      const fbclid = body.fbclid || body.FBCLID || undefined;
+      if (!rawFbc && fbclid) {
+        rawFbc = `fb.1.${Date.now()}.${fbclid}`;
+        app.log.info({ rawFbc, fbclid }, 'Generated fbc from fbclid');
       }
 
       // Нормализуем данные от Tilda (поля могут быть Name, Phone или name, phone)
@@ -390,6 +411,10 @@ export default async function leadsRoutes(app: FastifyInstance) {
           utm_campaign: leadData.utm_campaign || null,
           utm_term: leadData.utm_term || null,
           utm_content: leadData.utm_content || null,
+
+          // Facebook cookies for site CAPI attribution (NOT hashed)
+          fbc: rawFbc || null,
+          fbp: rawFbp || null,
 
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()

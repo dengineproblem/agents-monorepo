@@ -544,8 +544,10 @@ export async function sendCrmCapiLevels(params: {
   contactPhone: string;
   crmType: 'amocrm' | 'bitrix24';
   levels: CapiLevelMatches;
+  fbc?: string | null;
+  fbp?: string | null;
 }, app: FastifyInstance): Promise<void> {
-  const { userAccountId, directionId, contactPhone, crmType, levels } = params;
+  const { userAccountId, directionId, contactPhone, crmType, levels, fbc, fbp } = params;
 
   if (!levels.interest && !levels.qualified && !levels.scheduled) {
     app.log.debug({ userAccountId, directionId, contactPhone, crmType }, 'CRM CAPI: no matched levels, skipping send');
@@ -566,7 +568,9 @@ export async function sendCrmCapiLevels(params: {
         directionId,
         contactPhone,
         crmType,
-        levels
+        levels,
+        fbc: fbc || undefined,
+        fbp: fbp || undefined,
       })
     });
 

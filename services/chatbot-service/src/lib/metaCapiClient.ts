@@ -111,6 +111,17 @@ export const CRM_LEVEL_EVENTS: Record<number, string> = {
 export function getCrmEventByLevel(level: CapiEventLevel): string {
   return CRM_LEVEL_EVENTS[level] || 'Contact';
 }
+
+// Site dataset: события для site conversion_channel (должны совпадать с promoted_object.custom_event_type)
+export const SITE_LEVEL_EVENTS: Record<number, string> = {
+  1: 'CompleteRegistration',  // matches promoted_object COMPLETE_REGISTRATION
+  2: level2Event,             // matches promoted_object ADD_TO_CART/SUBSCRIBE
+  3: 'Purchase',              // matches promoted_object PURCHASE
+};
+
+export function getSiteEventByLevel(level: CapiEventLevel): string {
+  return SITE_LEVEL_EVENTS[level] || 'CompleteRegistration';
+}
 const PURCHASE_CURRENCY = 'KZT';
 const PURCHASE_DEFAULT_VALUE = 1;
 
@@ -142,6 +153,11 @@ export interface CapiEventParams {
   ctwaClid?: string;     // Click-to-WhatsApp Click ID (in user_data for Messaging dataset)
   pageId?: string;       // Facebook Page ID (in user_data for Messaging dataset)
   leadgenId?: string;    // Meta's lead form ID (15-17 digits, highest priority for CRM matching)
+
+  // Site channel fields (NOT hashed, sent as-is per Meta docs)
+  fbc?: string;              // Facebook Click Cookie (fb.1.{timestamp}.{fbclid})
+  fbp?: string;              // Facebook Browser Pixel cookie
+  conversionChannel?: string; // 'whatsapp' | 'lead_form' | 'site'
 
   // Context
   dialogAnalysisId?: string;
@@ -361,7 +377,14 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     safeFallbackActionSource = 'system_generated';
   }
 
-  const actionSource = useBusinessMessaging ? 'business_messaging' : safeFallbackActionSource;
+  let actionSource: string;
+  if (useBusinessMessaging) {
+    actionSource = 'business_messaging';
+  } else if (params.conversionChannel === 'site') {
+    actionSource = 'website';
+  } else {
+    actionSource = safeFallbackActionSource;
+  }
 
   log.info({
     correlationId,
@@ -467,6 +490,14 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     // page_id in user_data (required for Messaging dataset)
     if (params.pageId) {
       userData.page_id = params.pageId;
+    }
+
+    // Site channel: fbc/fbp cookies for website attribution (NOT hashed per Meta docs)
+    if (params.fbc) {
+      userData.fbc = params.fbc;
+    }
+    if (params.fbp) {
+      userData.fbp = params.fbp;
     }
 
     // Country hash for better matching (Kazakhstan)
