@@ -6,6 +6,7 @@ import { createLogger } from '../lib/logger.js';
 import {
   buildPaymentFormScriptSrc,
   buildPaymentPageUrl,
+  buildPaymentPageUrlWithTelegram,
   buildResultSignature,
   getPlanConfig,
   isRobokassaConfigured
@@ -163,45 +164,42 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     const query = request.query as Record<string, any>;
     const planRaw = extractParam(query, 'plan');
     const userIdRaw = extractParam(query, 'user_id') || extractParam(request.headers as any, 'x-user-id');
+    const telegramIdRaw = extractParam(query, 'telegram_id');
 
     const planParse = planSchema.safeParse(planRaw);
-    const userParse = uuidSchema.safeParse(userIdRaw);
 
-    if (!planParse.success || !userParse.success) {
-      return reply.status(400).type('text/plain').send('Invalid plan or user_id');
-    }
-
-    const plan = getPlanConfig(planParse.data);
+    const plan = getPlanConfig(planParse.success ? planParse.data : null);
     if (!plan) {
       return reply.status(400).type('text/plain').send('Unknown plan');
     }
 
-    const { data: user, error: userError } = await supabase
-      .from('user_accounts')
-      .select('id')
-      .eq('id', userParse.data)
-      .maybeSingle<{ id: string }>();
-
-    if (userError || !user) {
-      return reply.status(404).type('text/plain').send('User not found');
-    }
-
     const paymentId = crypto.randomUUID();
     const invId = generateInvId();
-    const scriptSrc = buildPaymentFormScriptSrc({
-      plan,
-      userId: user.id,
-      paymentId,
-      invId
-    });
 
-    const redirectUrl = buildPaymentPageUrl({
-      plan,
-      userId: user.id,
-      paymentId,
-      invId
-    });
-    return reply.redirect(redirectUrl);
+    // Option 1: user_id provided (existing user, e.g. renewal)
+    const userParse = uuidSchema.safeParse(userIdRaw);
+    if (userParse.success) {
+      const { data: user, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .eq('id', userParse.data)
+        .maybeSingle<{ id: string }>();
+
+      if (userError || !user) {
+        return reply.status(404).type('text/plain').send('User not found');
+      }
+
+      const redirectUrl = buildPaymentPageUrl({ plan, userId: user.id, paymentId, invId });
+      return reply.redirect(redirectUrl);
+    }
+
+    // Option 2: telegram_id provided (new user — account created AFTER payment in webhook)
+    if (telegramIdRaw && /^-?\d+$/.test(telegramIdRaw)) {
+      const redirectUrl = buildPaymentPageUrlWithTelegram({ plan, telegramId: telegramIdRaw, paymentId, invId });
+      return reply.redirect(redirectUrl);
+    }
+
+    return reply.status(400).type('text/plain').send('Invalid user_id or telegram_id');
   });
 
   const handleResult = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -219,11 +217,12 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     const signature = extractParam(payload, 'SignatureValue') || extractParam(payload, 'Signature') || '';
     const customParams = collectCustomParams(payload);
     const userId = customParams.shp_user_id;
+    const telegramId = customParams.shp_telegram_id;
     const planSlug = customParams.shp_plan;
     const paymentId = customParams.shp_payment_id;
 
-    if (!outSum || !signature || !userId || !planSlug || !paymentId) {
-      logger.warn({ outSum, invId, hasSignature: Boolean(signature), userId, planSlug, paymentId }, 'Missing Robokassa params');
+    if (!outSum || !signature || !planSlug || !paymentId || (!userId && !telegramId)) {
+      logger.warn({ outSum, invId, hasSignature: Boolean(signature), userId, telegramId, planSlug, paymentId }, 'Missing Robokassa params');
       return reply.status(400).type('text/plain').send('Invalid params');
     }
 
@@ -239,7 +238,7 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     });
 
     if (normalizeSignature(signature) !== normalizeSignature(expectedSignature)) {
-      logger.warn({ invId, userId, plan: planSlug }, 'Robokassa signature mismatch');
+      logger.warn({ invId, userId, telegramId, plan: planSlug }, 'Robokassa signature mismatch');
       return reply.status(403).type('text/plain').send('Invalid signature');
     }
 
@@ -249,13 +248,8 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     }
 
     if (Math.abs(amountNumber - plan.amount) > 0.01) {
-      logger.warn({ invId, userId, plan: plan.slug, outSum }, 'OutSum mismatch');
+      logger.warn({ invId, userId, telegramId, plan: plan.slug, outSum }, 'OutSum mismatch');
       return reply.status(400).type('text/plain').send('OutSum mismatch');
-    }
-
-    const userParse = uuidSchema.safeParse(userId);
-    if (!userParse.success) {
-      return reply.status(400).type('text/plain').send('Invalid user_id');
     }
 
     const paymentParse = uuidSchema.safeParse(paymentId);
@@ -263,14 +257,63 @@ export default async function robokassaRoutes(app: FastifyInstance) {
       return reply.status(400).type('text/plain').send('Invalid payment_id');
     }
 
-    const { data: user, error: userError } = await supabase
-      .from('user_accounts')
-      .select('id, created_at, tarif_expires')
-      .eq('id', userParse.data)
-      .maybeSingle<{ id: string; created_at: string | null; tarif_expires: string | null }>();
+    let user: { id: string; created_at: string | null; tarif_expires: string | null };
 
-    if (userError || !user) {
-      return reply.status(404).type('text/plain').send('User not found');
+    if (userId) {
+      // Existing user flow (renewal, user_id passed)
+      const userParse = uuidSchema.safeParse(userId);
+      if (!userParse.success) {
+        return reply.status(400).type('text/plain').send('Invalid user_id');
+      }
+
+      const { data: existingUser, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id, created_at, tarif_expires')
+        .eq('id', userParse.data)
+        .maybeSingle<{ id: string; created_at: string | null; tarif_expires: string | null }>();
+
+      if (userError || !existingUser) {
+        return reply.status(404).type('text/plain').send('User not found');
+      }
+      user = existingUser;
+    } else {
+      // New user flow (telegram_id passed — create account AFTER payment)
+      // Check if already registered
+      const { data: existing } = await supabase
+        .from('user_accounts')
+        .select('id, created_at, tarif_expires')
+        .or(`telegram_id.eq.${telegramId},telegram_id_2.eq.${telegramId},telegram_id_3.eq.${telegramId},telegram_id_4.eq.${telegramId}`)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        user = existing[0] as { id: string; created_at: string | null; tarif_expires: string | null };
+      } else {
+        // Self-register: create user_accounts
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        const username = 'user_' + Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+        const password = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+
+        const { data: newUser, error: insertError } = await supabase
+          .from('user_accounts')
+          .insert({
+            telegram_id: telegramId,
+            username,
+            password,
+            multi_account_enabled: true,
+            is_active: false,
+            onboarding_stage: 'registered',
+          })
+          .select('id, created_at, tarif_expires')
+          .single();
+
+        if (insertError || !newUser) {
+          logger.error({ error: insertError?.message, telegramId }, 'Self-register after payment failed');
+          return reply.status(500).type('text/plain').send('Registration failed');
+        }
+
+        logger.info({ telegramId, userId: newUser.id }, 'User created after successful payment');
+        user = newUser as { id: string; created_at: string | null; tarif_expires: string | null };
+      }
     }
 
     const todayAlmaty = getAlmatyTodayDateString();
@@ -297,7 +340,7 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     });
 
     if (rpcError) {
-      logger.error({ invId, userId, error: rpcError.message }, 'Failed to apply Robokassa payment');
+      logger.error({ invId, userId: user.id, error: rpcError.message }, 'Failed to apply Robokassa payment');
       return reply.status(500).type('text/plain').send('Server error');
     }
 

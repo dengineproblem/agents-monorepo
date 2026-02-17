@@ -264,47 +264,36 @@ export async function handleSubscriptionCallback(
       return true;
     }
 
-    // Self-register (create user_accounts with is_active=false)
-    await bot.sendMessage(chatId, '⏳ Создаём аккаунт...');
-
-    const registerResult = await callBrain('/brain/self-register', {
-      telegram_id: telegramId,
-      first_name: query.from.first_name,
-      last_name: query.from.last_name,
-    });
-
-    let userId: string;
-    if (registerResult.success) {
-      userId = registerResult.userAccountId;
-    } else if (registerResult.error === 'telegram_id_already_registered') {
-      userId = registerResult.userAccountId;
-    } else {
-      await bot.sendMessage(chatId, `Ошибка регистрации: ${registerResult.error || 'unknown'}`);
-      return true;
-    }
-
-    // Build payment URL
-    const paymentUrl = `${PAYMENT_BASE_URL}/robokassa/redirect?plan=${slug}&user_id=${userId}`;
+    // Build payment URL with telegram_id (account created at redirect, not here)
+    const paymentUrl = `${PAYMENT_BASE_URL}/robokassa/redirect?plan=${slug}&telegram_id=${telegramId}`;
 
     // Edit original message or send new
     if (query.message?.message_id) {
       try {
         await bot.editMessageText(
-          `Аккаунт создан. Нажмите кнопку ниже для оплаты подписки (${plan.amount} ₸):`,
+          `Нажмите кнопку ниже для оплаты подписки (${plan.amount.toLocaleString('ru')} ₸):`,
           {
             chat_id: chatId,
             message_id: query.message.message_id,
             reply_markup: {
               inline_keyboard: [
-                [{ text: `💳 Оплатить ${plan.amount} ₸`, url: paymentUrl }],
+                [{ text: `💳 Оплатить ${plan.amount.toLocaleString('ru')} ₸`, url: paymentUrl }],
+                [{ text: '⬅️ Назад', callback_data: 'pay:kz' }],
               ],
             },
           },
         );
       } catch {
         await bot.sendMessage(chatId,
-          `Нажмите кнопку ниже для оплаты подписки (${plan.amount} ₸):`,
-          { reply_markup: { inline_keyboard: [[{ text: `💳 Оплатить ${plan.amount} ₸`, url: paymentUrl }]] } },
+          `Нажмите кнопку ниже для оплаты подписки (${plan.amount.toLocaleString('ru')} ₸):`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: `💳 Оплатить ${plan.amount.toLocaleString('ru')} ₸`, url: paymentUrl }],
+                [{ text: '⬅️ Назад', callback_data: 'pay:kz' }],
+              ],
+            },
+          },
         );
       }
     }
@@ -312,11 +301,11 @@ export async function handleSubscriptionCallback(
     pendingFlows.set(telegramId, {
       flow: 'subscription',
       step: 'awaiting_payment',
-      data: { slug, paymentUrl, userId },
+      data: { slug, paymentUrl },
       startedAt: Date.now(),
     });
 
-    logger.info({ telegramId, slug, userId }, 'Subscription: payment URL sent');
+    logger.info({ telegramId, slug }, 'Subscription: payment URL sent');
     return true;
   }
 

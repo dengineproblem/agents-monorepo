@@ -185,3 +185,37 @@ export function buildPaymentPageUrl(params: {
 
   return `${payUrl}?${urlParams.toString()}`;
 }
+
+export function buildPaymentPageUrlWithTelegram(params: {
+  plan: RobokassaPlanConfig;
+  telegramId: string;
+  paymentId: string;
+  invId?: string;
+}): string {
+  const { merchantLogin, payUrl, isTest } = getRobokassaConfig();
+  const invId = params.invId ?? '0';
+  const outSum = String(params.plan.amount);
+  const customParams = {
+    shp_payment_id: params.paymentId,
+    shp_plan: params.plan.slug,
+    shp_telegram_id: params.telegramId,
+  };
+
+  const signature = buildFormSignature({ outSum, invId, customParams });
+  const urlParams = new URLSearchParams({
+    MerchantLogin: merchantLogin,
+    OutSum: outSum,
+    InvId: invId,
+    Description: params.plan.description,
+    Culture: 'ru',
+    SignatureValue: signature,
+    ...customParams,
+  });
+  urlParams.append('InvoiceID', invId);
+
+  if (isTest) {
+    urlParams.set('IsTest', '1');
+  }
+
+  return `${payUrl}?${urlParams.toString()}`;
+}
