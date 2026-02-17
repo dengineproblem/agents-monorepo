@@ -388,6 +388,7 @@ export default async function robokassaRoutes(app: FastifyInstance) {
           if (userTg.username && userTg.password) {
             paymentMsg += `\n\n🔑 Ваши данные для входа:\nЛогин: <code>${userTg.username}</code>\nПароль: <code>${userTg.password}</code>`;
           }
+          paymentMsg += `\n\n🌐 Личный кабинет: <a href="https://app.performanteaiagency.com">app.performanteaiagency.com</a>\nТакже доступен как мини-приложение — кнопка <b>prfmnt</b> в боте.`;
           await sendCommunityNotification(userTg.telegram_id, paymentMsg);
 
           // 2. Инвайт-ссылка в закрытый канал комьюнити
