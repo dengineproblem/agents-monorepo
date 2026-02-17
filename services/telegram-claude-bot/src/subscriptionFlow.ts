@@ -73,8 +73,8 @@ async function callBrain(endpoint: string, body: object): Promise<any> {
 // ======================================================================
 
 const SUBSCRIPTION_PLANS = [
-  { slug: '1m-29k', label: '📦 Базовый — 29 000 ₸ (до 5 кабинетов)', amount: 29000 },
-  { slug: '1m-49k', label: '⭐ Премиум — 49 000 ₸ (до 20 кабинетов)', amount: 49000 },
+  { slug: '1m-29k', label: '📦 Базовый — 29 000 ₸/мес (до 5 кабинетов)', amount: 29000 },
+  { slug: '1m-49k', label: '⭐ Премиум — 49 000 ₸/мес (до 20 кабинетов)', amount: 49000 },
 ];
 
 export async function showSubscriptionPlans(
