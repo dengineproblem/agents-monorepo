@@ -101,7 +101,7 @@ export async function showSubscriptionPlans(
 
   // Step 1: Choose payment method
   await bot.sendMessage(chatId,
-    '👋 Добро пожаловать в Performante AI!\n\n' +
+    '👋 Добро пожаловать!\n\n' +
     'Выберите способ оплаты:',
     {
       reply_markup: {
@@ -211,7 +211,7 @@ export async function handleSubscriptionCallback(
     if (query.message?.message_id) {
       try {
         await bot.editMessageText(
-          '👋 Добро пожаловать в Performante AI!\n\n' +
+          '👋 Добро пожаловать!\n\n' +
           'Выберите способ оплаты:',
           {
             chat_id: chatId,
