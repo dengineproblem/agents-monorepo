@@ -166,10 +166,10 @@ const Header: React.FC<HeaderProps> = ({
         return;
       }
 
-      // Запрашиваем актуальные данные из user_accounts
+      // Запрашиваем актуальные данные из user_accounts (без токенов)
       const { data: userAccount, error: dbError } = await supabase
         .from('user_accounts')
-        .select('access_token, ad_account_id, page_id, instagram_id')
+        .select('ad_account_id, page_id, instagram_id')
         .eq('id', userData.id)
         .single();
 
@@ -178,17 +178,6 @@ const Header: React.FC<HeaderProps> = ({
           success: false,
           error: appReviewText('Failed to load data', 'Ошибка загрузки данных'),
           details: dbError?.message || appReviewText('Unable to load account data', 'Не удалось загрузить данные учетной записи')
-        });
-        setIsValidating(false);
-        return;
-      }
-
-      // Проверяем наличие обязательных полей
-      if (!userAccount.access_token) {
-        setValidationResult({
-          success: false,
-          error: appReviewText('Facebook not connected', 'Facebook не подключен'),
-          details: appReviewText('Missing access token. Connect Facebook in the profile.', 'Отсутствует токен доступа. Подключите Facebook в профиле.')
         });
         setIsValidating(false);
         return;
@@ -204,16 +193,16 @@ const Header: React.FC<HeaderProps> = ({
         return;
       }
 
-      // Вызываем backend endpoint /facebook/validate
+      // Вызываем backend endpoint /facebook/validate (бэкенд сам возьмёт токен из БД)
       const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
         || (import.meta.env.DEV ? 'http://localhost:8082' : 'https://app.performanteaiagency.com/api');
       const response = await fetch(`${apiBaseUrl}/facebook/validate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-user-id': userData.id,
         },
         body: JSON.stringify({
-          accessToken: userAccount.access_token,
           adAccountId: userAccount.ad_account_id,
           pageId: userAccount.page_id,
         })

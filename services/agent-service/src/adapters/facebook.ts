@@ -42,8 +42,7 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
     ? `https://graph.facebook.com/${FB_API_VERSION}/${path}?${usp.toString()}`
     : `https://graph.facebook.com/${FB_API_VERSION}/${path}`;
 
-  console.log('[graph] URL:', url.replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
-  console.log('[graph] Body:', usp.toString().replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
+  log.debug({ method, path }, '[graph] Request');
 
   // Retry logic для сетевых ошибок (fetch failed, timeout)
   const MAX_RETRIES = 5;
@@ -104,11 +103,11 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   }
 
   const text = await res.text();
-  console.log('[graph] Ответ от Facebook API:', text.substring(0, 500));
+  log.debug({ status: res.status, length: text.length }, '[graph] Response received');
 
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!res.ok) {
-    console.error('[graph] Ошибка от Facebook API:', json);
+    log.error({ status: res.status, error: json?.error?.message }, '[graph] Facebook API error');
     const g = json?.error || {};
     const err: any = new Error(g?.message || text || `HTTP ${res.status}`);
     err.fb = {

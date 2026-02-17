@@ -12,10 +12,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) {
   throw new Error('Supabase credentials not configured');
 }
 
-console.log('Supabase initialized:', {
-  url: SUPABASE_URL,
-  key_prefix: SUPABASE_SERVICE_ROLE.substring(0, 20) + '...'
-});
+console.log('Supabase initialized: credentials present');
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
   auth: { persistSession: false, autoRefreshToken: false }

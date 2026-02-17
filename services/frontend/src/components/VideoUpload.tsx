@@ -273,9 +273,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             console.error('Ошибка загрузки данных пользователя из Supabase:', error);
             setUserData(localUserData); // fallback
           } else if (data) {
-            console.log('Получены данные пользователя из Supabase:', data);
+            console.log('Получены данные пользователя из Supabase');
             const combinedData = { ...localUserData, ...data };
-            localStorage.setItem('user', JSON.stringify(combinedData));
+            // SECURITY: НЕ сохраняем токены обратно в localStorage
+            const { access_token, tiktok_access_token, openai_api_key, gemini_api_key, anthropic_api_key, ...safeData } = combinedData;
+            localStorage.setItem('user', JSON.stringify(safeData));
+            // Но в state оставляем полные данные (для webhook вызовов)
             setUserData(combinedData);
           }
         } else {

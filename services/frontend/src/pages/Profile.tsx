@@ -319,7 +319,7 @@ const Profile: React.FC = () => {
         // Загружаем актуальные данные из Supabase
         const { data, error } = await (supabase
           .from('user_accounts')
-          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, gemini_api_key, anthropic_api_key, ig_seed_audience_id, tilda_utm_field')
+          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, page_id, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, gemini_api_key, anthropic_api_key, ig_seed_audience_id, tilda_utm_field')
           .eq('id', user.id)
           .single() as any);
 
@@ -696,10 +696,9 @@ const Profile: React.FC = () => {
         return;
       }
 
-      // Обновляем localStorage
-      const updatedUser = { 
-        ...user, 
-        access_token: '',
+      // Обновляем localStorage (очищаем Facebook данные)
+      const updatedUser = {
+        ...user,
         page_id: '',
         ad_account_id: '',
         instagram_id: ''
@@ -757,10 +756,9 @@ const Profile: React.FC = () => {
         throw new Error(data.error || 'Failed to save selection');
       }
 
-      // Update localStorage
+      // Update localStorage (SECURITY: access_token НЕ сохраняем — на бэкенде)
       const updatedUser = {
         ...user,
-        access_token: facebookData.access_token,
         ad_account_id: selectedAdAccount,
         page_id: selectedPage,
         instagram_id: instagramId,
@@ -794,7 +792,7 @@ const Profile: React.FC = () => {
         // Мультиаккаунт режим: обновляем ad_accounts через API
         const response = await fetch(`${import.meta.env.VITE_API_URL}/ad-accounts/${currentAdAccountId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
           body: JSON.stringify({
             tiktok_access_token: null,
             tiktok_business_id: null,
@@ -1315,12 +1313,12 @@ const Profile: React.FC = () => {
   // Facebook: в мульти-режиме проверяем connection_status, иначе user_accounts
   const isFbConnected = multiAccountEnabled
     ? currentAdAccount?.connection_status === 'connected'
-    : Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '');
+    : Boolean(user?.ad_account_id && user?.ad_account_id !== '');
 
   // Instagram: в мульти-режиме это часть FB подключения
   const isIgConnected = multiAccountEnabled
     ? currentAdAccount?.connection_status === 'connected'
-    : Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '');
+    : Boolean(user?.ad_account_id && user?.ad_account_id !== '' && user?.page_id && user?.page_id !== '');
 
   // TikTok: в мульти-режиме из ad_accounts, иначе из user_accounts
   console.log('[Profile] TikTok check:', {
@@ -1333,8 +1331,8 @@ const Profile: React.FC = () => {
     user_tiktok: user?.tiktok_access_token ? '***set***' : null,
   });
   const isTikTokConnected = multiAccountEnabled
-    ? Boolean(currentAdAccount?.tiktok_access_token && currentAdAccount?.tiktok_business_id)
-    : Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
+    ? Boolean(currentAdAccount?.tiktok_business_id && currentAdAccount?.tiktok_account_id)
+    : Boolean(user?.tiktok_business_id);
 
   // Tilda: проверяем наличие tilda_utm_field (всегда есть дефолт, считаем подключённым)
   const isTildaConnected = multiAccountEnabled

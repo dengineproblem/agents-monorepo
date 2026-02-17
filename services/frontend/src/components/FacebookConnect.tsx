@@ -30,7 +30,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
       if (storedUser) {
         try {
           const parsedUser = JSON.parse(storedUser);
-          if (parsedUser.access_token && parsedUser.ad_account_id) {
+          if (parsedUser.ad_account_id) {
             setIsConnected(true);
             setFbData({
               ad_accounts: parsedUser.ad_accounts || [],
@@ -123,13 +123,12 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
         return;
       }
 
-      // Update user data with Facebook info
+      // Update user data with Facebook info (SECURITY: access_token НЕ сохраняем — на бэкенде)
       const updatedUser = {
         ...currentUser,
         facebook_user_id: data.user.id,
         facebook_name: data.user.name,
         facebook_email: data.user.email,
-        access_token: data.access_token,
         ad_account_id: data.ad_accounts[0].id,
         ad_accounts: data.ad_accounts,
         page_id: data.pages[0].id,

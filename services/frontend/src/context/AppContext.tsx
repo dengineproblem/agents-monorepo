@@ -204,7 +204,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         
         const { data, error } = await supabase
           .from('user_accounts')
-          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_access_token, tiktok_account_id, tiktok_business_id, prompt1, access_token, ad_account_id, page_id, instagram_id')
+          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_account_id, tiktok_business_id, prompt1, ad_account_id, page_id, instagram_id')
           .eq('id', userData.id)
           .single();
           
@@ -237,9 +237,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             const existingStored = localStorage.getItem('user');
             const storedJson = existingStored ? JSON.parse(existingStored) : {};
             const merged = { ...storedJson };
-            if ((data as any).tiktok_access_token) {
-              merged.tiktok_access_token = (data as any).tiktok_access_token;
-            }
+            // SECURITY: НЕ синхронизируем access_token и tiktok_access_token в localStorage
+            // Токены остаются на бэкенде, фронтенд использует proxy
             if ((data as any).tiktok_business_id) {
               merged.tiktok_business_id = (data as any).tiktok_business_id;
             }
@@ -250,10 +249,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             if ((data as any).prompt1 !== undefined) {
               merged.prompt1 = (data as any).prompt1;
             }
-            // Синхронизация Facebook полей (КРИТИЧНО для legacy пользователей!)
-            if ((data as any).access_token) {
-              merged.access_token = (data as any).access_token;
-            }
+            // Синхронизация Facebook полей (без access_token — он на бэкенде!)
             if ((data as any).ad_account_id) {
               merged.ad_account_id = (data as any).ad_account_id;
             }
@@ -269,10 +265,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               localStorage.setItem('user', JSON.stringify(merged));
               console.log('[AppContext] Синхронизированы поля из Supabase в localStorage (Facebook, TikTok, prompt1)');
             }
-            setTiktokConnected(!!merged.tiktok_business_id && !!merged.tiktok_access_token);
+            setTiktokConnected(!!merged.tiktok_business_id && !!merged.tiktok_account_id);
           } catch (e) {
             console.warn('Не удалось синхронизировать поля в localStorage:', e);
-            setTiktokConnected(!!(data as any).tiktok_business_id && !!(data as any).tiktok_access_token);
+            setTiktokConnected(!!(data as any).tiktok_business_id && !!(data as any).tiktok_account_id);
           }
         }
 
@@ -503,7 +499,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       console.log('Пользователь авторизован:', {
         username: userData.username,
-        hasFacebookData: !!(userData.access_token && userData.ad_account_id)
+        hasFacebookData: !!userData.ad_account_id
       });
       return true;
     } catch (e) {
@@ -548,7 +544,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         console.log('[AppContext] Мультиаккаунт: hasFacebookData =', hasFacebookData, { ad_account_id: currentAcc?.ad_account_id, currentAdAccountId: storedCurrentAdAccountId });
       } else {
         // Legacy режим — проверяем в user_accounts
-        hasFacebookData = !!(userData?.access_token && userData?.ad_account_id);
+        hasFacebookData = !!userData?.ad_account_id;
       }
 
       if (!hasFacebookData) {
@@ -927,12 +923,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           tarif_expires: acc.tarif_expires,
           connection_status: computedStatus as 'pending' | 'connected' | 'error',
           ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
-          access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
+          // SECURITY: access_token НЕ сохраняем — все вызовы через /fb-proxy
           page_id: acc.fb_page_id,              // Бэкенд возвращает fb_page_id (для Lead Forms)
           fb_page_id: acc.fb_page_id,           // Для аватара (используется в компонентах)
           fb_instagram_id: acc.fb_instagram_id || null, // Instagram Account ID (опционален)
-          // TikTok
-          tiktok_access_token: acc.tiktok_access_token,
+          // TikTok — ID сохраняем, токен нет
           tiktok_business_id: acc.tiktok_business_id,
           tiktok_account_id: acc.tiktok_account_id,
         };
@@ -959,10 +954,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               const userData = JSON.parse(storedUser);
               const legacyAccount = mappedAccounts[0]; // берем первый аккаунт
 
-              // Обновляем поля для facebookApi (если они есть в БД)
-              if (legacyAccount.access_token) {
-                userData.access_token = legacyAccount.access_token;
-              }
+              // Обновляем поля для facebookApi (без access_token — он на бэкенде)
               if (legacyAccount.ad_account_id) {
                 userData.ad_account_id = legacyAccount.ad_account_id;
               }

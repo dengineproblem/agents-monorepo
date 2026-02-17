@@ -144,14 +144,13 @@ const AppRoutes = () => {
         result,
       });
     } else {
-      // Legacy: проверяем access_token в user
+      // Legacy: проверяем ad_account_id в user (access_token теперь на бэкенде)
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
         try {
           const parsed = JSON.parse(storedUser);
-          result = !!(parsed.access_token && parsed.ad_account_id);
+          result = !!parsed.ad_account_id;
           console.log('[isFbConnected] Legacy mode:', {
-            hasAccessToken: !!parsed.access_token,
             hasAdAccountId: !!parsed.ad_account_id,
             result,
           });
@@ -274,7 +273,7 @@ const AppRoutes = () => {
           }, 500);
         } else {
           // Legacy режим: проверяем есть ли подключение в user
-          const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
+          const hasFacebookConnection = parsedUser.ad_account_id && parsedUser.ad_account_id !== '';
           const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
 
           if (!hasFacebookConnection && !isPendingReview) {

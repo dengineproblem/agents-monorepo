@@ -358,7 +358,7 @@ const Dashboard: React.FC = () => {
             isFbConnected = !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
           } else {
             // Legacy режим — проверяем в user_accounts
-            isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';
+            isFbConnected = !!u?.ad_account_id && u?.ad_account_id !== '';
           }
           const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
 

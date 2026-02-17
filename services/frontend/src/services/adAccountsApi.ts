@@ -94,7 +94,8 @@ export const adAccountsApi = {
    */
   async update(
     adAccountId: string,
-    payload: UpdateAdAccountPayload
+    payload: UpdateAdAccountPayload,
+    userAccountId?: string
   ): Promise<{
     success: boolean;
     adAccount?: AdAccount;
@@ -103,9 +104,17 @@ export const adAccountsApi = {
     try {
       console.log('[adAccountsApi.update] Обновление аккаунта:', adAccountId);
 
+      // Resolve userAccountId from parameter or localStorage
+      const userId = userAccountId || (() => {
+        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
+      })();
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (userId) headers['x-user-id'] = userId;
+
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
       });
 
@@ -131,12 +140,20 @@ export const adAccountsApi = {
   /**
    * Удалить рекламный аккаунт
    */
-  async delete(adAccountId: string): Promise<{ success: boolean; error?: string }> {
+  async delete(adAccountId: string, userAccountId?: string): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('[adAccountsApi.delete] Удаление аккаунта:', adAccountId);
 
+      const userId = userAccountId || (() => {
+        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
+      })();
+
+      const headers: Record<string, string> = {};
+      if (userId) headers['x-user-id'] = userId;
+
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'DELETE',
+        headers,
       });
 
       if (!response.ok) {
@@ -156,12 +173,20 @@ export const adAccountsApi = {
   /**
    * Обновить аватар страницы для одного аккаунта
    */
-  async refreshPicture(adAccountId: string): Promise<{ success: boolean; page_picture_url?: string; error?: string }> {
+  async refreshPicture(adAccountId: string, userAccountId?: string): Promise<{ success: boolean; page_picture_url?: string; error?: string }> {
     try {
       console.log('[adAccountsApi.refreshPicture] Обновление аватара:', adAccountId);
 
+      const userId = userAccountId || (() => {
+        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
+      })();
+
+      const headers: Record<string, string> = {};
+      if (userId) headers['x-user-id'] = userId;
+
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}/refresh-picture`, {
         method: 'POST',
+        headers,
       });
 
       if (!response.ok) {

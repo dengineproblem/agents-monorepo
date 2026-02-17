@@ -350,12 +350,11 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               // Автоматически вычисляем connection_status на основе полей
               const hasAllFbFields = !!(
                 account.fb_page_id &&
-                account.fb_access_token &&
                 account.fb_ad_account_id
               );
               const hasTikTokFields = !!(
-                account.tiktok_access_token &&
-                account.tiktok_business_id
+                account.tiktok_business_id &&
+                account.tiktok_account_id
               );
               const computedStatus = hasAllFbFields ? 'connected' : (account.connection_status || 'pending');
               const status = STATUS_CONFIG[computedStatus] || STATUS_CONFIG.pending;
@@ -510,7 +509,7 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const isTikTokConnected = Boolean(formData.tiktok_access_token && formData.tiktok_business_id);
+  const isTikTokConnected = Boolean(formData.tiktok_business_id && formData.tiktok_account_id);
 
   const handleConnectTikTok = (accountId: string | undefined) => {
     try {

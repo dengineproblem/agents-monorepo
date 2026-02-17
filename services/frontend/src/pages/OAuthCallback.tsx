@@ -116,18 +116,18 @@ const OAuthCallback = () => {
         throw new Error(data.error || 'Failed to connect TikTok');
       }
 
-      // Update localStorage with TikTok data only for legacy mode (no ad_account_id)
-      // In multi-account mode, credentials are saved to ad_accounts table by backend
+      // SECURITY: TikTok credentials сохраняются ТОЛЬКО в БД (через бэкенд)
+      // НЕ сохраняем access_token в localStorage
       if (!adAccountId) {
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
           try {
             const userData = JSON.parse(storedUser);
-            userData.tiktok_access_token = data.access_token;
+            // Сохраняем только IDs (без access_token)
             userData.tiktok_business_id = data.business_id;
             userData.tiktok_account_id = data.account_id;
             localStorage.setItem('user', JSON.stringify(userData));
-            console.log('Updated localStorage with TikTok credentials (legacy mode)');
+            console.log('Updated localStorage with TikTok IDs (legacy mode, token on backend)');
           } catch (e) {
             console.error('Failed to update localStorage:', e);
           }

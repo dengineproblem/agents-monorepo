@@ -62,6 +62,7 @@ import adInsightsRoutes from './routes/adInsights.js';
 import budgetForecastRoutes from './routes/budgetForecast.js';
 import tusUploadRoutes from './routes/tusUpload.js';
 import creativeAnalysisRoutes from './routes/creativeAnalysis.js';
+import { fbProxyRoutes } from './routes/fbProxy.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
@@ -203,8 +204,8 @@ app.register(carouselCreativeRoutes);
 app.register(autopilotRoutes);
 app.register(competitorsRoutes);
 app.register(adAccountsRoutes);
+app.register(fbProxyRoutes);
 app.register(analyticsRoutes);
-app.register(onboardingRoutes);
 app.register(notificationsRoutes);
 app.register(robokassaRoutes);
 app.register(brainProposalsRoutes);
@@ -229,6 +230,7 @@ app.register(async (adminApp) => {
   adminApp.register(adminNotificationsRoutes);
   adminApp.register(adminSettingsRoutes);
   adminApp.register(adInsightsRoutes);
+  adminApp.register(onboardingRoutes);
 });
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)

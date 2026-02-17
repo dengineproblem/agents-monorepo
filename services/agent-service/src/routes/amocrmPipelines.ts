@@ -13,6 +13,7 @@ import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { getValidAmoCRMToken } from '../lib/amocrmTokens.js';
 import { getPipelines, getLeadCustomFields, getContactCustomFields } from '../adapters/amocrm.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { requireTechAdmin } from '../middleware/adminAuth.js';
 
 const UserAccountIdSchema = z.object({
   userAccountId: z.string().uuid()
@@ -669,7 +670,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    *
    * Returns: Detailed phone matching information for debugging
    */
-  app.get('/amocrm/debug-phone-matching', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/amocrm/debug-phone-matching', { preHandler: [requireTechAdmin] }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { userAccountId, phone, leadId } = request.query as {
         userAccountId?: string;

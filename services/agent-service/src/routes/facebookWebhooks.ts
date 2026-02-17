@@ -825,11 +825,23 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Validating Facebook connection');
 
-      const { accessToken, adAccountId, pageId } = req.body as {
+      const { accessToken: bodyToken, adAccountId, pageId } = req.body as {
         accessToken?: string;
         adAccountId?: string;
         pageId?: string;
       };
+
+      // SECURITY: Получаем токен из БД по x-user-id, а не из тела запроса
+      let accessToken = bodyToken; // fallback для обратной совместимости
+      const userId = req.headers['x-user-id'] as string;
+      if (userId && !bodyToken) {
+        const { data: userAcc } = await supabase
+          .from('user_accounts')
+          .select('access_token')
+          .eq('id', userId)
+          .single();
+        accessToken = userAcc?.access_token || undefined;
+      }
 
       if (!accessToken) {
         log.error('Missing access token');

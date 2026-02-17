@@ -108,24 +108,21 @@ const Login = () => {
         hasFacebookData: !!(user.access_token && user.ad_account_id && user.page_id)
       });
       
-      // Создаем данные сессии (Facebook данные опциональны)
+      // Создаем данные сессии (SECURITY: access_token НЕ сохраняем — на бэкенде)
       const sessionUser = {
         id: user.id,
         username: user.username,
         ad_account_id: user.ad_account_id || '',
         page_id: user.page_id || '',
-        access_token: user.access_token || '',
         prompt1: user.prompt1 || null,
         is_tech_admin: user.is_tech_admin || false
       };
-      
-      // Подробно логируем данные, сохраняемые в localStorage
+
       console.log('Сохраняем данные пользователя в localStorage:', {
         id: sessionUser.id,
         username: sessionUser.username,
         ad_account_id: sessionUser.ad_account_id,
         page_id: sessionUser.page_id,
-        access_token_length: sessionUser.access_token?.length || 0
       });
       
       // Сохраняем данные в localStorage

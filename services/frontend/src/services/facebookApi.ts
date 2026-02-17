@@ -84,11 +84,11 @@ const getCurrentUserConfig = async () => {
           console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, currentAcc.fb_page_id);
         }
 
-        if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {
+        if (currentAcc && currentAcc.ad_account_id) {
           console.log('[facebookApi] >>> ИСПОЛЬЗУЕМ:', currentAcc.name, currentAcc.ad_account_id);
 
           return {
-            access_token: currentAcc.access_token,
+            access_token: '', // токен теперь на бэкенде, не передаём на фронтенд
             ad_account_id: currentAcc.ad_account_id,
             api_version: 'v18.0',
             base_url: 'https://graph.facebook.com'
@@ -97,25 +97,21 @@ const getCurrentUserConfig = async () => {
       }
 
       // Legacy режим — берём данные из user_accounts
-      if (userData && userData.ad_account_id && userData.access_token) {
+      if (userData && userData.ad_account_id) {
         console.log('Используем учетные данные пользователя:', {
           username: userData.username,
           ad_account_id: userData.ad_account_id,
-          // Скрываем токен из логов
-          access_token_length: userData.access_token ? userData.access_token.length : 0
         });
 
         return {
-          access_token: userData.access_token,
+          access_token: '', // токен теперь на бэкенде
           ad_account_id: userData.ad_account_id,
           api_version: 'v18.0',
           base_url: 'https://graph.facebook.com'
         };
       } else {
-        // Логируем, каких данных не хватает
         console.error('Недостаточно данных пользователя:', {
           hasAdAccountId: !!userData?.ad_account_id,
-          hasAccessToken: !!userData?.access_token
         });
       }
     } catch (error) {
@@ -135,82 +131,65 @@ const getCurrentUserConfig = async () => {
   };
 };
 
-// Вспомогательная функция для запросов к Facebook API
+// Получить userId для x-user-id header
+const getUserId = (): string | undefined => {
+  try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
+};
+
+// Получить текущий internal adAccountId (UUID из нашей БД, не Facebook act_XXX)
+const getCurrentInternalAdAccountId = (): string | undefined => {
+  return localStorage.getItem('currentAdAccountId') || undefined;
+};
+
+// Вспомогательная функция для запросов к Facebook API через бэкенд-proxy
 const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, string> = {}) => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  
-  // Проверяем, есть ли необходимые данные для запроса
-  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
-    console.error('Отсутствуют необходимые данные для запроса к Facebook API:', {
-      hasToken: !!FB_API_CONFIG.access_token,
-      hasAdAccountId: !!FB_API_CONFIG.ad_account_id
-    });
-    throw new Error('Не удалось выполнить запрос: отсутствует токен или ID рекламного кабинета');
+
+  if (!FB_API_CONFIG.ad_account_id) {
+    console.error('Отсутствует ad_account_id для запроса к Facebook API');
+    throw new Error('Не удалось выполнить запрос: отсутствует ID рекламного кабинета');
   }
-  
-  const url = new URL(`${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${endpoint}`);
-  
-  // Добавляем обязательный параметр access_token
-  url.searchParams.append('access_token', FB_API_CONFIG.access_token);
-  
-  // Добавляем остальные параметры
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.append(key, value);
-  });
-  
-  console.log(`Выполняем запрос к Facebook API: ${endpoint}`);
-  
+
+  console.log(`[fbProxy] Запрос: ${endpoint}`);
+
+  const userId = getUserId();
+  const adAccountId = getCurrentInternalAdAccountId();
+
   try {
-    const response = await fetch(url.toString());
-    
+    const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'x-user-id': userId } : {}),
+      },
+      body: JSON.stringify({
+        path: endpoint,
+        params,
+        method: 'GET',
+        adAccountId,
+      }),
+    });
+
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Ошибка Facebook API:', errorData);
-      const errorDetails = {
-        code: errorData?.error?.code,
-        error_subcode: errorData?.error?.error_subcode,
-        type: errorData?.error?.type,
-        message: errorData?.error?.message,
-        fbtrace_id: errorData?.error?.fbtrace_id,
-      };
-      console.error('Facebook API Error Details:', errorDetails);
-      console.error(`[FB Error] Code: ${errorDetails.code}, Type: ${errorDetails.type}, Message: ${errorDetails.message}`);
+      const errorData = await response.json().catch(() => ({}));
+      const fbError = errorData.facebook_error;
 
       // Проверка на истекший или недействительный токен
-      if (errorData?.error?.code === 190) {
-        console.error('Токен доступа недействителен или истек срок его действия');
+      if (fbError?.code === 190) {
         toastT.error('facebookAuthError');
-        // Очистка токена, чтобы пользователь мог повторно авторизоваться
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            const userData = JSON.parse(storedUser);
-            userData.access_token = ''; // Сбрасываем токен
-            localStorage.setItem('user', JSON.stringify(userData));
-          } catch (e) {
-            console.error('Ошибка при обновлении данных пользователя:', e);
-          }
-        }
       }
 
-      // Проверка на rate limit (код 4, 17, или 613)
-      if (errorData?.error?.code === 4 || errorData?.error?.code === 17 || errorData?.error?.code === 613) {
-        console.error('Достигнут лимит запросов Facebook API. Подождите несколько минут.');
+      // Проверка на rate limit
+      if (fbError?.code === 4 || fbError?.code === 17 || fbError?.code === 613) {
         toastT.error('rateLimitError');
       }
 
-      throw new Error(`Ошибка Facebook API: ${errorData?.error?.message || response.statusText}`);
+      throw new Error(`Ошибка Facebook API: ${fbError?.message || errorData.error || response.statusText}`);
     }
-    
-    const data = await response.json();
-    console.log(`Успешный ответ от Facebook API для ${endpoint}:`, {
-      status: response.status,
-      dataSize: data ? 'Данные получены' : 'Нет данных'
-    });
-    
-    return data;
+
+    return await response.json();
   } catch (error) {
-    console.error('Ошибка при запросе к Facebook API:', error);
+    console.error('[fbProxy] Ошибка:', error);
     throw error;
   }
 };
@@ -325,17 +304,10 @@ const generateMockStats = (dateRange: DateRange): CampaignStat[] => {
   return stats;
 };
 
-// Проверка наличия токена и ID рекламного кабинета
+// Проверка наличия ID рекламного кабинета (токен теперь на бэкенде)
 const hasValidConfig = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  const isValid = !!FB_API_CONFIG.access_token && !!FB_API_CONFIG.ad_account_id;
-  
-  console.log('Проверка конфигурации Facebook API:', {
-    hasToken: !!FB_API_CONFIG.access_token,
-    hasAdAccountId: !!FB_API_CONFIG.ad_account_id,
-    isValid: isValid
-  });
-  
+  const isValid = !!FB_API_CONFIG.ad_account_id && !!getUserId();
   return isValid;
 };
 
@@ -353,8 +325,8 @@ const LEAD_ACTION_TYPES = [
 // Получить adset-ы для кампании
 const getAdsetsByCampaign = async (campaignId: string) => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
-    throw new Error('Нет access_token или ad_account_id');
+  if (!FB_API_CONFIG.ad_account_id) {
+    throw new Error('Нет ad_account_id');
   }
   // ИСПРАВЛЕНО: Используем прямой endpoint кампании вместо фильтрации
   // Фильтрация через ad_account_id/adsets?filtering=... не работает для некоторых аккаунтов
@@ -383,7 +355,7 @@ const getAdsetsByCampaign = async (campaignId: string) => {
 // Получить статистику для ad sets кампании за период
 const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+  if (!FB_API_CONFIG.ad_account_id) {
     return [];
   }
 
@@ -470,69 +442,77 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
   }
 };
 
-// Изменить daily_budget adset-а
+// Изменить daily_budget adset-а (через бэкенд proxy)
 const updateAdsetBudget = async (adsetId: string, newBudget: number) => {
-  const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token) throw new Error('Нет access_token');
-  const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${adsetId}`;
-  const formData = new URLSearchParams();
-  formData.append('access_token', FB_API_CONFIG.access_token);
-  formData.append('daily_budget', String(newBudget));
-  const response = await fetch(url, {
+  const userId = getUserId();
+  const adAccountId = getCurrentInternalAdAccountId();
+  const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'x-user-id': userId } : {}),
+    },
+    body: JSON.stringify({
+      path: adsetId,
+      params: { daily_budget: String(newBudget) },
+      method: 'POST',
+      adAccountId,
+    }),
   });
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData?.error?.message || response.statusText);
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.facebook_error?.message || errorData?.error || response.statusText);
   }
   return await response.json();
 };
 
-// Изменить статус adset-а (ACTIVE/PAUSED)
+// Изменить статус adset-а (ACTIVE/PAUSED) (через бэкенд proxy)
 const updateAdsetStatus = async (adsetId: string, isActive: boolean) => {
-  const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token) throw new Error('Нет access_token');
-  const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${adsetId}`;
-  const formData = new URLSearchParams();
-  formData.append('access_token', FB_API_CONFIG.access_token);
-  formData.append('status', isActive ? 'ACTIVE' : 'PAUSED');
-  const response = await fetch(url, {
+  const userId = getUserId();
+  const adAccountId = getCurrentInternalAdAccountId();
+  const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'x-user-id': userId } : {}),
+    },
+    body: JSON.stringify({
+      path: adsetId,
+      params: { status: isActive ? 'ACTIVE' : 'PAUSED' },
+      method: 'POST',
+      adAccountId,
+    }),
   });
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData?.error?.message || response.statusText);
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.facebook_error?.message || errorData?.error || response.statusText);
   }
   return await response.json();
 };
 
 /**
- * Обновить статус объявления (ACTIVE/PAUSED)
+ * Обновить статус объявления (ACTIVE/PAUSED) (через бэкенд proxy)
  */
 const updateAdStatus = async (adId: string, isActive: boolean) => {
-  const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token) {
-    throw new Error('Нет access_token');
-  }
-
-  const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${adId}`;
-  const formData = new URLSearchParams();
-  formData.append('access_token', FB_API_CONFIG.access_token);
-  formData.append('status', isActive ? 'ACTIVE' : 'PAUSED');
-
-  const response = await fetch(url, {
+  const userId = getUserId();
+  const adAccountId = getCurrentInternalAdAccountId();
+  const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'x-user-id': userId } : {}),
+    },
+    body: JSON.stringify({
+      path: adId,
+      params: { status: isActive ? 'ACTIVE' : 'PAUSED' },
+      method: 'POST',
+      adAccountId,
+    }),
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData?.error?.message || response.statusText);
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.facebook_error?.message || errorData?.error || response.statusText);
   }
 
   return await response.json();
@@ -541,29 +521,28 @@ const updateAdStatus = async (adId: string, isActive: boolean) => {
 // Получить статус рекламного кабинета и данные по бюджету
 const getAccountStatus = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+  if (!FB_API_CONFIG.ad_account_id) {
     throw new Error('Нет access_token или ad_account_id');
   }
   const endpoint = `${FB_API_CONFIG.ad_account_id}`;
   const params = { fields: 'spend_cap,amount_spent,balance,account_status,disable_reason' };
   const data = await fetchFromFacebookAPI(endpoint, params);
 
-  // Пагинация по activities для поиска последнего ad_account_billing_charge
+  // Пагинация по activities для поиска последнего ad_account_billing_charge (через proxy)
   let threshold_amount = null;
   let last_billing_date = null;
-  let after = undefined;
+  let after: string | undefined = undefined;
   let found = false;
-  let debug_activities = [];
+  let debug_activities: any[] = [];
   try {
     while (!found) {
-      const url = new URL(`${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${endpoint}/activities`);
-      url.searchParams.append('access_token', FB_API_CONFIG.access_token);
-      url.searchParams.append('fields', 'event_time,event_type,extra_data');
-      url.searchParams.append('category', 'ACCOUNT');
-      url.searchParams.append('limit', '100');
-      if (after) url.searchParams.append('after', after);
-      const response = await fetch(url.toString());
-      const activitiesData = await response.json();
+      const actParams: Record<string, string> = {
+        fields: 'event_time,event_type,extra_data',
+        category: 'ACCOUNT',
+        limit: '100',
+      };
+      if (after) actParams.after = after;
+      const activitiesData = await fetchFromFacebookAPI(`${endpoint}/activities`, actParams);
       const activities = activitiesData.data || [];
       debug_activities.push(...activities.slice(0, 20).map((a: any) => ({ event_type: a.event_type, extra_data: a.extra_data, event_time: a.event_time })));
       const billingEvent = activities.find((a: any) => a.event_type === 'ad_account_billing_charge' && a.extra_data);
@@ -578,7 +557,7 @@ const getAccountStatus = async () => {
         found = true;
         break;
       }
-      if (activitiesData.paging && activitiesData.paging.next && activitiesData.paging.cursors && activitiesData.paging.cursors.after) {
+      if (activitiesData.paging?.cursors?.after) {
         after = activitiesData.paging.cursors.after;
       } else {
         break;
@@ -595,7 +574,7 @@ const getAccountStatus = async () => {
 // Получить текущий расход в сутки (сумма daily_budget всех активных adset-ов)
 const getCurrentDailySpend = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
-  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+  if (!FB_API_CONFIG.ad_account_id) {
     throw new Error('Нет access_token или ad_account_id');
   }
   const endpoint = `${FB_API_CONFIG.ad_account_id}/adsets`;
@@ -661,66 +640,29 @@ export const facebookApi = {
     }
 
     try {
-      const FB_API_CONFIG = await getCurrentUserConfig();
+      // Используем специализированный бэкенд-endpoint для lead forms
+      // (он сам получает Page Access Token через /me/accounts)
+      console.log('Запрашиваем лидформы через proxy для страницы:', pageId);
 
-      // Получаем все страницы через /me/accounts с пагинацией
-      console.log('Запрашиваем Page Access Token для страницы:', pageId);
+      const userId = getUserId();
+      const adAccountId = getCurrentInternalAdAccountId();
 
-      let allPages: any[] = [];
-      let nextUrl: string | null = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/me/accounts?access_token=${encodeURIComponent(FB_API_CONFIG.access_token)}&fields=id,name,access_token&limit=100`;
+      const response = await fetch(`${API_BASE_URL}/fb-proxy/lead-forms`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userId ? { 'x-user-id': userId } : {}),
+        },
+        body: JSON.stringify({ pageId, adAccountId }),
+      });
 
-      while (nextUrl) {
-        const response = await fetch(nextUrl);
-        const data = await response.json();
-
-        if (data.error) {
-          console.error('Ошибка получения списка страниц:', data.error);
-          break;
-        }
-
-        if (data.data) {
-          allPages = allPages.concat(data.data);
-        }
-
-        // Проверяем есть ли следующая страница
-        nextUrl = data.paging?.next || null;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData?.facebook_error?.message || errorData?.error || response.statusText);
       }
 
-      console.log(`Всего страниц получено: ${allPages.length}`);
-
-      let accessTokenToUse = FB_API_CONFIG.access_token; // По умолчанию используем User Token
-
-      if (allPages.length > 0) {
-        const page = allPages.find((p: any) => p.id === pageId);
-        if (page?.access_token) {
-          accessTokenToUse = page.access_token;
-          console.log('Используем Page Access Token для:', page.name);
-        } else {
-          console.log('Page не найден в /me/accounts, пробуем с User Access Token напрямую');
-        }
-      } else {
-        console.log('Нет доступных страниц, пробуем с User Access Token напрямую');
-      }
-
-      // Запрашиваем лидформы
-      const formsUrl = new URL(`${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${pageId}/leadgen_forms`);
-      formsUrl.searchParams.append('access_token', accessTokenToUse);
-      formsUrl.searchParams.append('fields', 'id,name,status');
-      formsUrl.searchParams.append('limit', '100');
-
-      const formsResponse = await fetch(formsUrl.toString());
-      const formsData = await formsResponse.json();
-
-      if (formsData.error) {
-        console.error('Ошибка получения лидформ:', formsData.error);
-        throw new Error(formsData.error.message);
-      }
-
-      const forms = (formsData.data || []).map((f: any) => ({
-        id: String(f.id),
-        name: f.name || f.id,
-        status: f.status || 'ACTIVE'
-      }));
+      const formsData = await response.json();
+      const forms = formsData.data || [];
 
       console.log(`Получено лидформ: ${forms.length}`);
 
@@ -1008,48 +950,46 @@ export const facebookApi = {
     }
     
     try {
-      const FB_API_CONFIG = await getCurrentUserConfig();
-      const endpoint = `${campaignId}`;
       const status = isActive ? 'ACTIVE' : 'PAUSED';
-      
-      // Для POST запросов нужно использовать fetch напрямую
-      const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${endpoint}`;
-      
       console.log(`Изменяем статус кампании ${campaignId} на ${status}`);
-      
-      const formData = new URLSearchParams();
-      formData.append('access_token', FB_API_CONFIG.access_token);
-      formData.append('status', status);
-      
-      const response = await fetch(url, {
+
+      const userId = getUserId();
+      const adAccountId = getCurrentInternalAdAccountId();
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/json',
+          ...(userId ? { 'x-user-id': userId } : {}),
         },
-        body: formData
+        body: JSON.stringify({
+          path: campaignId,
+          params: { status },
+          method: 'POST',
+          adAccountId,
+        }),
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         console.error('Ошибка Facebook API при изменении статуса:', errorData);
-        
+
         // Проверка на истекший токен
-        if (errorData?.error?.code === 190) {
+        if (errorData?.facebook_error?.code === 190) {
           toastT.error('statusAuthError');
         } else {
           toastT.error('statusUpdateError');
         }
-        
-        throw new Error(`Ошибка Facebook API: ${errorData?.error?.message || response.statusText}`);
+
+        throw new Error(`Ошибка Facebook API: ${errorData?.facebook_error?.message || errorData?.error || response.statusText}`);
       }
-      
+
       const result = await response.json();
       console.log('Результат изменения статуса кампании:', result);
 
       if (result.success === true) {
         toastT.success(isActive ? 'campaignResumed' : 'campaignPaused');
       }
-      
+
       return result.success === true;
     } catch (error) {
       console.error('Ошибка при изменении статуса кампании:', error);
@@ -1064,7 +1004,7 @@ export const facebookApi = {
   getAdsetBudgetsByAccount: async (): Promise<Array<{ id: string; campaign_id: string; daily_budget: number; status: string }>> => {
     try {
       const FB_API_CONFIG = await getCurrentUserConfig();
-      if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+      if (!FB_API_CONFIG.ad_account_id) {
         return [];
       }
       const endpoint = `${FB_API_CONFIG.ad_account_id}/adsets`;
@@ -1085,18 +1025,36 @@ export const facebookApi = {
     }
   },
 
-  // Получить бюджеты адсетов для конкретного аккаунта (с явными параметрами)
-  // Возвращает только активные адсеты из активных кампаний
-  getAdsetBudgetsForAccount: async (adAccountId: string, accessToken: string): Promise<{ totalBudget: number; activeAdsetsCount: number }> => {
+  // Получить бюджеты адсетов для конкретного аккаунта через бэкенд proxy
+  // adAccountId — Facebook act_XXX, internalId — UUID из нашей БД (для proxy)
+  getAdsetBudgetsForAccount: async (adAccountId: string, _accessToken: string, internalId?: string): Promise<{ totalBudget: number; activeAdsetsCount: number }> => {
     try {
-      // Параллельно получаем кампании и адсеты
+      const userId = getUserId();
+      const proxyBody = (path: string) => ({
+        path,
+        params: {},
+        method: 'GET' as const,
+        adAccountId: internalId || getCurrentInternalAdAccountId(),
+      });
+      const proxyHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(userId ? { 'x-user-id': userId } : {}),
+      };
+
+      // Параллельно получаем кампании и адсеты через proxy
       const [campaignsRes, adsetsRes] = await Promise.all([
-        fetch(`https://graph.facebook.com/v18.0/${adAccountId}/campaigns?access_token=${accessToken}&fields=id,status&limit=500`),
-        fetch(`https://graph.facebook.com/v18.0/${adAccountId}/adsets?access_token=${accessToken}&fields=id,campaign_id,daily_budget,status&limit=500`)
+        fetch(`${API_BASE_URL}/fb-proxy`, {
+          method: 'POST', headers: proxyHeaders,
+          body: JSON.stringify({ ...proxyBody(`${adAccountId}/campaigns`), params: { fields: 'id,status', limit: '500' } }),
+        }),
+        fetch(`${API_BASE_URL}/fb-proxy`, {
+          method: 'POST', headers: proxyHeaders,
+          body: JSON.stringify({ ...proxyBody(`${adAccountId}/adsets`), params: { fields: 'id,campaign_id,daily_budget,status', limit: '500' } }),
+        }),
       ]);
 
       if (!campaignsRes.ok || !adsetsRes.ok) {
-        throw new Error('Failed to fetch data');
+        throw new Error('Failed to fetch data from proxy');
       }
 
       const [campaignsData, adsetsData] = await Promise.all([
@@ -1104,14 +1062,12 @@ export const facebookApi = {
         adsetsRes.json()
       ]);
 
-      // Создаём Set активных кампаний
       const activeCampaignIds = new Set(
         (campaignsData.data || [])
           .filter((c: any) => c.status === 'ACTIVE')
           .map((c: any) => c.id)
       );
 
-      // Фильтруем адсеты: активные И из активных кампаний
       const activeAdsets = (adsetsData.data || []).filter((a: any) =>
         a.status === 'ACTIVE' && activeCampaignIds.has(a.campaign_id)
       );

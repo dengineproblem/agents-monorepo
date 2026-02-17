@@ -415,8 +415,8 @@ const MultiAccountDashboard: React.FC = () => {
       if (storedAdAccounts) {
         const adAccountsList = JSON.parse(storedAdAccounts);
         const budgetPromises = adAccountsList.map(async (acc: any) => {
-          if (!acc.ad_account_id || !acc.access_token) return { id: acc.id, budget: 0 };
-          const result = await facebookApi.getAdsetBudgetsForAccount(acc.ad_account_id, acc.access_token);
+          if (!acc.ad_account_id) return { id: acc.id, budget: 0 };
+          const result = await facebookApi.getAdsetBudgetsForAccount(acc.ad_account_id, '', acc.id);
           logger.info('Account budget calculation', {
             accountName: acc.name,
             activeAdsetsCount: result.activeAdsetsCount,

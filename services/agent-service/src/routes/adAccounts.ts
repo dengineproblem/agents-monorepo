@@ -128,27 +128,79 @@ type UpdateAdAccountInput = z.infer<typeof UpdateAdAccountSchema>;
  * Frontend: fb_ad_account_id, fb_page_id, fb_instagram_id, fb_business_id
  */
 function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unknown> {
+  // SECURITY: Явный whitelist полей (вместо ...dbRecord spread).
+  // FB/TikTok токены возвращаем — фронтенд использует их для прямых Graph API запросов.
+  // AI API ключи маскируем — используются только на бэкенде.
+  // IDOR-защита гарантирует что пользователь видит только СВОИ аккаунты.
+  const maskSecret = (val: unknown): string | null => val ? '***' : null;
+
   return {
-    ...dbRecord,
-    // Facebook: маппим поля БД -> fb_* формат
+    // Идентификация
+    id: dbRecord.id,
+    user_account_id: dbRecord.user_account_id,
+    name: dbRecord.name,
+    username: dbRecord.username,
+    is_active: dbRecord.is_active,
+    created_at: dbRecord.created_at,
+    updated_at: dbRecord.updated_at,
+
+    // Facebook (маппинг DB → fb_* формат) — токен НЕ отдаём, все вызовы через /fb-proxy
     fb_ad_account_id: dbRecord.ad_account_id,
     fb_page_id: dbRecord.page_id,
     fb_instagram_id: dbRecord.instagram_id,
     fb_instagram_username: dbRecord.instagram_username,
-    fb_access_token: dbRecord.access_token,
     fb_business_id: dbRecord.business_id,
+    fb_access_token: maskSecret(dbRecord.access_token),
+    ig_seed_audience_id: dbRecord.ig_seed_audience_id,
+
+    // TikTok — токен маскируем, бэкенд использует из БД
+    tiktok_account_id: dbRecord.tiktok_account_id,
+    tiktok_business_id: dbRecord.tiktok_business_id,
+    tiktok_access_token: maskSecret(dbRecord.tiktok_access_token),
+
+    // AI API Keys — маскируем, используются только на бэкенде
+    openai_api_key: maskSecret(dbRecord.openai_api_key),
+    gemini_api_key: maskSecret(dbRecord.gemini_api_key),
+    anthropic_api_key: maskSecret(dbRecord.anthropic_api_key),
+
     // Аватар страницы
     page_picture_url: dbRecord.page_picture_url,
-    // Autopilot settings
+
+    // Telegram
+    telegram_id: dbRecord.telegram_id,
+    telegram_id_2: dbRecord.telegram_id_2,
+    telegram_id_3: dbRecord.telegram_id_3,
+    telegram_id_4: dbRecord.telegram_id_4,
+
+    // Промпты
+    prompt1: dbRecord.prompt1,
+    prompt2: dbRecord.prompt2,
+    prompt3: dbRecord.prompt3,
+    prompt4: dbRecord.prompt4,
+
+    // Статус
+    connection_status: dbRecord.connection_status,
+    last_error: dbRecord.last_error,
+
+    // Autopilot
     autopilot: dbRecord.autopilot ?? false,
     autopilot_tiktok: dbRecord.autopilot_tiktok ?? false,
     optimization: dbRecord.optimization ?? false,
     plan_daily_budget_cents: dbRecord.plan_daily_budget_cents ?? null,
     default_cpl_target_cents: dbRecord.default_cpl_target_cents ?? null,
-    // Brain settings
+
+    // Brain
     brain_mode: dbRecord.brain_mode || 'report',
     brain_schedule_hour: dbRecord.brain_schedule_hour ?? 8,
     brain_timezone: dbRecord.brain_timezone || 'Asia/Almaty',
+
+    // Тариф
+    tarif: dbRecord.tarif,
+    tarif_expires: dbRecord.tarif_expires,
+    tarif_renewal_cost: dbRecord.tarif_renewal_cost,
+
+    // Custom audiences
+    custom_audiences: dbRecord.custom_audiences,
   };
 }
 
@@ -176,17 +228,12 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         .eq('id', userAccountId)
         .single();
 
-      log.info({ user, userError }, '[DEBUG] User data from Supabase');
-
       if (userError || !user) {
-        log.error({ userError }, '[DEBUG] User not found or error');
+        log.warn({ userAccountId, userError }, 'User not found');
         return reply.status(404).send({ error: 'User not found' });
       }
 
-      log.info({ multi_account_enabled: user.multi_account_enabled, type: typeof user.multi_account_enabled }, '[DEBUG] multi_account_enabled value');
-
       if (!user.multi_account_enabled) {
-        log.info('[DEBUG] Returning multi_account_enabled: false');
         return reply.send({
           multi_account_enabled: false,
           ad_accounts: [],
@@ -579,14 +626,22 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     reply: FastifyReply
   ) => {
     const { adAccountId } = req.params;
+    const userAccountId = req.headers['x-user-id'] as string;
+
+    if (!userAccountId) {
+      return reply.status(401).send({ error: 'x-user-id header is required' });
+    }
 
     try {
       const validated = UpdateAdAccountSchema.parse(req.body);
 
-      log.info({ adAccountId, updates: Object.keys(validated) }, 'Updating ad account');
+      log.info({ adAccountId, userAccountId, updates: Object.keys(validated) }, 'Updating ad account');
 
       // Маппинг полей frontend -> DB
       const dbData: Record<string, unknown> = {};
+
+      // SECURITY: Игнорируем маскированные токены — '***' означает "без изменений"
+      const isMasked = (val: unknown): boolean => val === '***';
 
       if (validated.name !== undefined) dbData.name = validated.name;
       if (validated.username !== undefined) dbData.username = validated.username;
@@ -597,12 +652,12 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       if (validated.fb_page_id !== undefined) dbData.page_id = validated.fb_page_id;
       if (validated.fb_instagram_id !== undefined) dbData.instagram_id = validated.fb_instagram_id;
       if (validated.fb_instagram_username !== undefined) dbData.instagram_username = validated.fb_instagram_username;
-      if (validated.fb_access_token !== undefined) dbData.access_token = validated.fb_access_token;
+      if (validated.fb_access_token !== undefined && !isMasked(validated.fb_access_token)) dbData.access_token = validated.fb_access_token;
       if (validated.fb_business_id !== undefined) dbData.business_id = validated.fb_business_id;
       if (validated.ig_seed_audience_id !== undefined) dbData.ig_seed_audience_id = validated.ig_seed_audience_id;
 
       // If access_token is being updated and we have page_id, try to get Page Access Token
-      if (validated.fb_access_token && (validated.fb_page_id || dbData.page_id)) {
+      if (validated.fb_access_token && !isMasked(validated.fb_access_token) && (validated.fb_page_id || dbData.page_id)) {
         const pageId = validated.fb_page_id || dbData.page_id as string;
         try {
           const pageToken = await getPageAccessToken(pageId, validated.fb_access_token);
@@ -632,7 +687,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
           action: validated.tiktok_business_id ? 'connect' : 'disconnect'
         }, 'Updating TikTok business ID');
       }
-      if (validated.tiktok_access_token !== undefined) {
+      if (validated.tiktok_access_token !== undefined && !isMasked(validated.tiktok_access_token)) {
         dbData.tiktok_access_token = validated.tiktok_access_token;
         log.info({
           adAccountId,
@@ -653,10 +708,10 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       if (validated.telegram_id_3 !== undefined) dbData.telegram_id_3 = validated.telegram_id_3;
       if (validated.telegram_id_4 !== undefined) dbData.telegram_id_4 = validated.telegram_id_4;
 
-      // API Keys
-      if (validated.openai_api_key !== undefined) dbData.openai_api_key = validated.openai_api_key;
-      if (validated.gemini_api_key !== undefined) dbData.gemini_api_key = validated.gemini_api_key;
-      if (validated.anthropic_api_key !== undefined) dbData.anthropic_api_key = validated.anthropic_api_key;
+      // API Keys (игнорируем маскированные значения)
+      if (validated.openai_api_key !== undefined && !isMasked(validated.openai_api_key)) dbData.openai_api_key = validated.openai_api_key;
+      if (validated.gemini_api_key !== undefined && !isMasked(validated.gemini_api_key)) dbData.gemini_api_key = validated.gemini_api_key;
+      if (validated.anthropic_api_key !== undefined && !isMasked(validated.anthropic_api_key)) dbData.anthropic_api_key = validated.anthropic_api_key;
 
       // Custom audiences
       if (validated.custom_audiences !== undefined) dbData.custom_audiences = validated.custom_audiences;
@@ -692,19 +747,16 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         .from('ad_accounts')
         .update(dbData)
         .eq('id', adAccountId)
+        .eq('user_account_id', userAccountId)
         .select()
         .single();
 
-      if (error) {
-        log.error({ error }, 'Error updating ad account');
-        return reply.status(500).send({ error: 'Failed to update ad account' });
-      }
-
-      if (!adAccount) {
+      if (error || !adAccount) {
+        log.warn({ adAccountId, userAccountId, error }, 'Ad account not found or access denied');
         return reply.status(404).send({ error: 'Ad account not found' });
       }
 
-      log.info({ adAccountId }, 'Ad account updated successfully');
+      log.info({ adAccountId, userAccountId }, 'Ad account updated successfully');
       return reply.send(mapDbToFrontend(adAccount));
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -735,21 +787,40 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     reply: FastifyReply
   ) => {
     const { adAccountId } = req.params;
+    const userAccountId = req.headers['x-user-id'] as string;
 
-    log.info({ adAccountId }, 'Deleting ad account');
+    if (!userAccountId) {
+      return reply.status(401).send({ error: 'x-user-id header is required' });
+    }
+
+    log.info({ adAccountId, userAccountId }, 'Deleting ad account');
 
     try {
+      // Сначала проверяем что аккаунт принадлежит пользователю
+      const { data: existing } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('id', adAccountId)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (!existing) {
+        log.warn({ adAccountId, userAccountId }, 'Ad account not found or access denied for delete');
+        return reply.status(404).send({ error: 'Ad account not found' });
+      }
+
       const { error } = await supabase
         .from('ad_accounts')
         .delete()
-        .eq('id', adAccountId);
+        .eq('id', adAccountId)
+        .eq('user_account_id', userAccountId);
 
       if (error) {
         log.error({ error }, 'Error deleting ad account');
         return reply.status(500).send({ error: 'Failed to delete ad account' });
       }
 
-      log.info({ adAccountId }, 'Ad account deleted successfully');
+      log.info({ adAccountId, userAccountId }, 'Ad account deleted successfully');
       return reply.status(204).send();
     } catch (error: any) {
       log.error({ error }, 'Error deleting ad account');
@@ -777,15 +848,21 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     reply: FastifyReply
   ) => {
     const { adAccountId } = req.params;
+    const userAccountId = req.headers['x-user-id'] as string;
 
-    log.info({ adAccountId }, 'Refreshing page picture');
+    if (!userAccountId) {
+      return reply.status(401).send({ error: 'x-user-id header is required' });
+    }
+
+    log.info({ adAccountId, userAccountId }, 'Refreshing page picture');
 
     try {
-      // Получаем аккаунт с токеном и page_id
+      // Получаем аккаунт с токеном и page_id (с проверкой владельца)
       const { data: adAccount, error: fetchError } = await supabase
         .from('ad_accounts')
         .select('page_id, access_token')
         .eq('id', adAccountId)
+        .eq('user_account_id', userAccountId)
         .single();
 
       if (fetchError || !adAccount) {

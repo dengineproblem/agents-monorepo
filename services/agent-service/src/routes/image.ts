@@ -446,11 +446,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        // Вернём как есть, чтобы фронт увидел причину
         return reply.status(500).send({
           success: false,
           error: processingError?.message || 'Internal error',
-          stack: processingError?.stack,
           facebook_error: processingError?.fb
         });
       }

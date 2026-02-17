@@ -189,41 +189,34 @@ class SalesApiService {
     }
   }
 
-  // Функция для получения затрат по конкретному объявлению
-  private async getAdSpend(accessToken: string, adId: string, datePreset: 'last_7d' | 'last_30d' | 'last_90d'): Promise<number> {
+  // Функция для получения затрат по конкретному объявлению (через proxy)
+  private async getAdSpend(userAccountId: string, adId: string, datePreset: 'last_7d' | 'last_30d' | 'last_90d'): Promise<number> {
     try {
-      // Validate Ad ID format - must be all digits
       if (!/^\d+$/.test(adId)) {
-        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Facebook Ad ID должен содержать только цифры. Пропускаем запрос к Facebook API.`);
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Пропускаем запрос.`);
         return 0;
       }
 
-      const baseUrl = 'https://graph.facebook.com/v18.0';
-      const url = new URL(`${baseUrl}/${adId}/insights`);
-      url.searchParams.append('access_token', accessToken);
-      
-      // Используем кастомный диапазон дат вместо date_preset
-      // Это гарантирует получение данных даже для остановленных объявлений
-      const timeRanges: { [key: string]: number } = {
-        'last_7d': 7,
-        'last_30d': 30,
-        'last_90d': 90
-      };
-      
+      const timeRanges: { [key: string]: number } = { 'last_7d': 7, 'last_30d': 30, 'last_90d': 90 };
       const daysBack = timeRanges[datePreset];
       const since = new Date();
       since.setDate(since.getDate() - daysBack);
-      const sinceStr = since.toISOString().split('T')[0]; // YYYY-MM-DD
-      const untilStr = new Date().toISOString().split('T')[0]; // Сегодня
-      
-      url.searchParams.append('time_range', JSON.stringify({
-        since: sinceStr,
-        until: untilStr
-      }));
-      url.searchParams.append('fields', 'spend');
+      const sinceStr = since.toISOString().split('T')[0];
+      const untilStr = new Date().toISOString().split('T')[0];
 
-      const response = await fetch(url.toString());
-      
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        body: JSON.stringify({
+          path: `${adId}/insights`,
+          params: {
+            time_range: JSON.stringify({ since: sinceStr, until: untilStr }),
+            fields: 'spend',
+          },
+          method: 'GET',
+        }),
+      });
+
       if (!response.ok) {
         console.warn(`⚠️ Не удалось получить затраты для объявления ${adId}: ${response.status}`);
         return 0;
@@ -232,63 +225,62 @@ class SalesApiService {
       const data = await response.json();
       const spend = data.data?.[0]?.spend || 0;
       return parseFloat(spend);
-      
     } catch (error) {
       console.error(`❌ Ошибка получения затрат для объявления ${adId}:`, error);
       return 0;
     }
   }
 
-  // Функция для получения ID кампании по ID объявления
-  private async getCampaignIdByAdId(accessToken: string, adId: string): Promise<string | null> {
+  // Функция для получения ID кампании по ID объявления (через proxy)
+  private async getCampaignIdByAdId(userAccountId: string, adId: string): Promise<string | null> {
     try {
-      // Validate Ad ID format - must be all digits
       if (!/^\d+$/.test(adId)) {
-        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Пропускаем запрос к Facebook API.`);
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Пропускаем запрос.`);
         return null;
       }
 
-      const baseUrl = 'https://graph.facebook.com/v18.0';
-      const url = new URL(`${baseUrl}/${adId}`);
-      url.searchParams.append('access_token', accessToken);
-      url.searchParams.append('fields', 'campaign_id');
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        body: JSON.stringify({
+          path: adId,
+          params: { fields: 'campaign_id' },
+          method: 'GET',
+        }),
+      });
 
-      const response = await fetch(url.toString());
-      
       if (!response.ok) {
         console.log(`⚠️ Не удалось получить campaign_id для объявления ${adId}`);
         return null;
       }
 
       const data = await response.json();
-      console.log(`📋 Объявление ${adId} → Кампания ${data.campaign_id}`);
       return data.campaign_id || null;
-      
     } catch (error) {
       console.error(`❌ Ошибка получения campaign_id для объявления ${adId}:`, error);
       return null;
     }
   }
 
-  // Функция для получения данных кампаний из Facebook API
-  private async getFacebookCampaignsData(accessToken: string, adAccountId: string): Promise<Map<string, { name: string; spend: number }>> {
+  // Функция для получения данных кампаний из Facebook API (через proxy)
+  private async getFacebookCampaignsData(userAccountId: string, adAccountId: string): Promise<Map<string, { name: string; spend: number }>> {
     const campaignsMap = new Map<string, { name: string; spend: number }>();
-    const accountId = adAccountId; // Используем актуальный ID кабинета из базы данных
-    const baseUrl = 'https://graph.facebook.com/v18.0';
-    
+
     try {
       console.log('🔄 Загружаем данные кампаний из Facebook API...');
-      
-      const url = new URL(`${baseUrl}/${accountId}`);
-      url.searchParams.append('access_token', accessToken);
-      
-      // Используем ваш запрос без фильтрации по активным кампаниям
-      url.searchParams.append('fields', 
-        'campaigns{id,name,adsets.limit(1){id,name,ads.limit(1){id,name,insights.date_preset(maximum){spend}}}}'
-      );
 
-      const response = await fetch(url.toString());
-      
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        body: JSON.stringify({
+          path: adAccountId,
+          params: {
+            fields: 'campaigns{id,name,adsets.limit(1){id,name,ads.limit(1){id,name,insights.date_preset(maximum){spend}}}}',
+          },
+          method: 'GET',
+        }),
+      });
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ Facebook API error:', response.status, errorText);
@@ -296,7 +288,6 @@ class SalesApiService {
       }
 
       const data = await response.json();
-      console.log('📊 Facebook API response:', data);
       
       if (data.campaigns?.data) {
         data.campaigns.data.forEach((campaign: any) => {
@@ -798,18 +789,18 @@ class SalesApiService {
       try {
         const { data: userData, error: userError } = await (supabase as any)
           .from('user_accounts')
-          .select('access_token, ad_account_id')
+          .select('ad_account_id')
           .eq('id', userAccountId)
           .single();
 
-        if (!userError && userData?.access_token && userData?.ad_account_id) {
+        if (!userError && userData?.ad_account_id) {
           console.log('✅ Загружаем реальные названия кампаний из Facebook API...');
-          const facebookCampaigns = await this.getFacebookCampaignsData(userData.access_token, userData.ad_account_id);
+          const facebookCampaigns = await this.getFacebookCampaignsData(userAccountId, userData.ad_account_id);
 
           // Обновляем названия кампаний
           for (const [sourceId, campaignInfo] of uniqueCampaigns) {
             try {
-              const campaignId = await this.getCampaignIdByAdId(userData.access_token, sourceId);
+              const campaignId = await this.getCampaignIdByAdId(userAccountId, sourceId);
               if (campaignId) {
                 const fbCampaign = facebookCampaigns.get(campaignId);
                 if (fbCampaign) {
