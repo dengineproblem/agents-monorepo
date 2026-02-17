@@ -558,7 +558,7 @@ export function registerMCPRoutes(fastify) {
     try {
       const { data, error } = await supabase
         .from('user_accounts')
-        .select('id, tarif, tarif_expires, is_active')
+        .select('id, tarif, tarif_expires, tarif_renewal_cost, is_active')
         .or(`telegram_id.eq.${telegramIdStr},telegram_id_2.eq.${telegramIdStr},telegram_id_3.eq.${telegramIdStr},telegram_id_4.eq.${telegramIdStr}`)
         .limit(1);
 
@@ -594,6 +594,7 @@ export function registerMCPRoutes(fastify) {
         status,
         tarif: user.tarif || null,
         tarifExpires: user.tarif_expires || null,
+        tarifRenewalCost: user.tarif_renewal_cost ? Number(user.tarif_renewal_cost) : null,
         daysLeft,
         isActive: user.is_active !== false,
         userAccountId: user.id,
@@ -621,10 +622,10 @@ export function registerMCPRoutes(fastify) {
     }
 
     try {
-      // Check user exists
+      // Check user exists and get tariff info for account limit
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('id')
+        .select('id, tarif_renewal_cost')
         .eq('id', user_account_id)
         .maybeSingle();
 
@@ -632,14 +633,16 @@ export function registerMCPRoutes(fastify) {
         return reply.code(404).send({ success: false, error: 'user_not_found' });
       }
 
-      // Check account limit (max 5)
+      // Dynamic account limit based on tariff (Premium 49k+ → 20, Basic → 5)
+      const maxAccounts = (user.tarif_renewal_cost && Number(user.tarif_renewal_cost) >= 49000) ? 20 : 5;
+
       const { count, error: countError } = await supabase
         .from('ad_accounts')
         .select('id', { count: 'exact', head: true })
         .eq('user_account_id', user_account_id);
 
-      if (!countError && count >= 5) {
-        return reply.send({ success: false, error: 'max_accounts_reached', message: 'Максимум 5 рекламных аккаунтов' });
+      if (!countError && count >= maxAccounts) {
+        return reply.send({ success: false, error: 'max_accounts_reached', message: `Максимум ${maxAccounts} рекламных аккаунтов для вашего тарифа` });
       }
 
       const isFirst = count === 0;

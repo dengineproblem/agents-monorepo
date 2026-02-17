@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-export type RobokassaPlanSlug = '1m-49k' | '3m-99k' | '1m-35k' | 'test-500';
+export type RobokassaPlanSlug = '1m-49k' | '3m-99k' | '1m-35k' | '1m-29k' | 'test-500';
 
 export interface RobokassaPlanConfig {
   slug: RobokassaPlanSlug;
@@ -18,12 +18,19 @@ const ROBO_PAY_URL = process.env.ROBO_PAY_URL || 'https://auth.robokassa.kz/Merc
 const ROBO_IS_TEST = ['1', 'true', 'yes'].includes(String(process.env.ROBO_IS_TEST || '').toLowerCase());
 
 const PLAN_CONFIGS: Record<RobokassaPlanSlug, RobokassaPlanConfig> = {
+  '1m-29k': {
+    slug: '1m-29k',
+    months: 1,
+    amount: 29000,
+    title: 'Tariff Basic 1 month',
+    description: 'Тариф Базовый 1 месяц',
+  },
   '1m-49k': {
     slug: '1m-49k',
     months: 1,
     amount: 49000,
-    title: 'Tariff 1 month',
-    description: 'Тариф 1 месяц',
+    title: 'Tariff Premium 1 month',
+    description: 'Тариф Премиум 1 месяц',
   },
   '3m-99k': {
     slug: '3m-99k',

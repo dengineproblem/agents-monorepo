@@ -73,7 +73,8 @@ async function callBrain(endpoint: string, body: object): Promise<any> {
 // ======================================================================
 
 const SUBSCRIPTION_PLANS = [
-  { slug: 'test-500', label: '💳 Оформить подписку — 500 ₸ (тест)', amount: 500 },
+  { slug: '1m-29k', label: '📦 Базовый — 29 000 ₸ (до 5 кабинетов)', amount: 29000 },
+  { slug: '1m-49k', label: '⭐ Премиум — 49 000 ₸ (до 20 кабинетов)', amount: 49000 },
 ];
 
 export async function showSubscriptionPlans(
@@ -98,22 +99,50 @@ export async function showSubscriptionPlans(
     return;
   }
 
-  const keyboard = SUBSCRIPTION_PLANS.map(plan => [
-    { text: plan.label, callback_data: `plan:${plan.slug}` },
-  ]);
-
+  // Step 1: Choose payment method
   await bot.sendMessage(chatId,
     '👋 Добро пожаловать в Performante AI!\n\n' +
-    'Для начала работы оформите подписку:',
-    { reply_markup: { inline_keyboard: keyboard } },
+    'Выберите способ оплаты:',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🇰🇿 Оплата картой Казахстана', callback_data: 'pay:kz' }],
+          [{ text: '🌍 Другой способ оплаты', callback_data: 'pay:other' }],
+        ],
+      },
+    },
   );
 
   pendingFlows.set(telegramId, {
     flow: 'subscription',
-    step: 'select_plan',
+    step: 'select_payment_method',
     data: {},
     startedAt: Date.now(),
   });
+}
+
+function showTariffButtons(
+  bot: TelegramBot,
+  chatId: number,
+  messageId?: number,
+): Promise<any> {
+  const keyboard = SUBSCRIPTION_PLANS.map(plan => [
+    { text: plan.label, callback_data: `plan:${plan.slug}` },
+  ]);
+  keyboard.push([{ text: '⬅️ Назад', callback_data: 'pay:back' }]);
+
+  const text = 'Выберите тарифный план:';
+
+  if (messageId) {
+    return bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: keyboard },
+    }).catch(() =>
+      bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: keyboard } }),
+    );
+  }
+  return bot.sendMessage(chatId, text, { reply_markup: { inline_keyboard: keyboard } });
 }
 
 export async function handleSubscriptionCallback(
@@ -129,6 +158,84 @@ export async function handleSubscriptionCallback(
   if (data === 'sub:reselect') {
     clearPendingFlow(telegramId);
     await showSubscriptionPlans(bot, chatId, telegramId);
+    return true;
+  }
+
+  // pay:kz — карта Казахстана → показать тарифы
+  if (data === 'pay:kz') {
+    pendingFlows.set(telegramId, {
+      flow: 'subscription',
+      step: 'select_plan',
+      data: {},
+      startedAt: Date.now(),
+    });
+    await showTariffButtons(bot, chatId, query.message?.message_id);
+    return true;
+  }
+
+  // pay:other — альтернативный способ оплаты
+  if (data === 'pay:other') {
+    const text = 'Для подбора альтернативного способа оплаты обратитесь в техподдержку:\n\n' +
+      '👉 [Написать в техподдержку](https://t.me/anatoliymarketolog)';
+    if (query.message?.message_id) {
+      try {
+        await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: query.message.message_id,
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '⬅️ Назад', callback_data: 'pay:back' }],
+            ],
+          },
+        });
+      } catch {
+        await bot.sendMessage(chatId, text, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '⬅️ Назад', callback_data: 'pay:back' }],
+            ],
+          },
+        });
+      }
+    }
+    return true;
+  }
+
+  // pay:back — вернуться к выбору способа оплаты
+  if (data === 'pay:back') {
+    clearPendingFlow(telegramId);
+    if (query.message?.message_id) {
+      try {
+        await bot.editMessageText(
+          '👋 Добро пожаловать в Performante AI!\n\n' +
+          'Выберите способ оплаты:',
+          {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🇰🇿 Оплата картой Казахстана', callback_data: 'pay:kz' }],
+                [{ text: '🌍 Другой способ оплаты', callback_data: 'pay:other' }],
+              ],
+            },
+          },
+        );
+      } catch {
+        await showSubscriptionPlans(bot, chatId, telegramId);
+      }
+    } else {
+      await showSubscriptionPlans(bot, chatId, telegramId);
+    }
+    pendingFlows.set(telegramId, {
+      flow: 'subscription',
+      step: 'select_payment_method',
+      data: {},
+      startedAt: Date.now(),
+    });
     return true;
   }
 
@@ -256,7 +363,7 @@ export async function showSubscriptionStatus(
   const keyboard: TelegramBot.InlineKeyboardButton[][] = [];
   if (result.userAccountId) {
     // Determine renewal plan slug
-    const renewSlug = 'test-500'; // TODO: resolve from current tarif
+    const renewSlug = (result.tarifRenewalCost >= 49000) ? '1m-49k' : '1m-29k';
     keyboard.push([{ text: '🔄 Продлить подписку', callback_data: `sub:renew:${renewSlug}` }]);
   }
 
