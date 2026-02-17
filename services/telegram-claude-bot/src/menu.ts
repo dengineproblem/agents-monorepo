@@ -34,6 +34,9 @@ export function buildMainMenuKeyboard(): TelegramBot.InlineKeyboardMarkup {
       [
         { text: '\u2728 \u0413\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F \u043A\u0440\u0435\u0430\u0442\u0438\u0432\u043E\u0432', callback_data: 'menu:generate' },
       ],
+      [
+        { text: '🛟 Техподдержка', url: 'https://t.me/Moltbot_prfmnt_bot' },
+      ],
     ],
   };
 }

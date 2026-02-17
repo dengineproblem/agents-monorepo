@@ -1673,9 +1673,9 @@ async function initBot(): Promise<void> {
       const chatId = query.message?.chat.id;
 
       // === SUBSCRIPTION / ONBOARDING CALLBACKS (работают БЕЗ session) ===
-      if (data.startsWith('plan:') || data.startsWith('sub:') || data.startsWith('onboard:')) {
+      if (data.startsWith('plan:') || data.startsWith('sub:') || data.startsWith('pay:') || data.startsWith('onboard:')) {
         await bot.answerCallbackQuery(query.id);
-        if (data.startsWith('plan:') || data.startsWith('sub:')) {
+        if (data.startsWith('plan:') || data.startsWith('sub:') || data.startsWith('pay:')) {
           await handleSubscriptionCallback(data, bot, query);
         } else {
           await handleOnboardingCallback(data, bot, query);
