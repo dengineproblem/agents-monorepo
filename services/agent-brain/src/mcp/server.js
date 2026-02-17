@@ -615,7 +615,7 @@ export function registerMCPRoutes(fastify) {
       return reply.code(401).send({ success: false, error: 'unauthorized' });
     }
 
-    const { user_account_id, name, fb_ad_account_id, fb_page_id, fb_instagram_id, fb_instagram_username, business_niche } = request.body || {};
+    const { user_account_id, name, fb_ad_account_id, fb_page_id, fb_instagram_id, fb_instagram_username, business_niche, target_audience, geography, main_services, competitive_advantages } = request.body || {};
 
     if (!user_account_id || !name) {
       return reply.code(400).send({ success: false, error: 'user_account_id and name are required' });
@@ -625,7 +625,7 @@ export function registerMCPRoutes(fastify) {
       // Check user exists and get tariff info for account limit
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, tarif_renewal_cost')
+        .select('id, tarif_renewal_cost, telegram_id, username')
         .eq('id', user_account_id)
         .maybeSingle();
 
@@ -651,13 +651,12 @@ export function registerMCPRoutes(fastify) {
         user_account_id,
         name,
         is_active: true,
-        is_default: isFirst,
         connection_status: 'pending',
       };
-      if (fb_ad_account_id) insertData.fb_ad_account_id = fb_ad_account_id;
-      if (fb_page_id) insertData.fb_page_id = fb_page_id;
-      if (fb_instagram_id) insertData.fb_instagram_id = fb_instagram_id;
-      if (fb_instagram_username) insertData.fb_instagram_username = fb_instagram_username;
+      if (fb_ad_account_id) insertData.ad_account_id = fb_ad_account_id;
+      if (fb_page_id) insertData.page_id = fb_page_id;
+      if (fb_instagram_id) insertData.instagram_id = fb_instagram_id;
+      if (fb_instagram_username) insertData.instagram_username = fb_instagram_username;
 
       const { data: newAccount, error: insertError } = await supabase
         .from('ad_accounts')
@@ -684,6 +683,36 @@ export function registerMCPRoutes(fastify) {
         adAccountId: fb_ad_account_id,
         isFirst,
       }, 'add-ad-account: success');
+
+      // Send admin notification about new ad account
+      try {
+        const ADMIN_CHAT_ID = '-5079020326';
+        const botToken = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
+        if (botToken) {
+          const text = `🔔 <b>Новый рекламный аккаунт (бот)</b>\n\n` +
+            `👤 Пользователь: ${user.username || user_account_id}\n` +
+            (user.telegram_id ? `📱 Telegram: ${user.telegram_id}\n` : '') +
+            `\n📋 <b>Бизнес:</b>\n` +
+            `• Название: ${name}\n` +
+            (business_niche ? `• Ниша: ${business_niche}\n` : '') +
+            (target_audience ? `• ЦА: ${target_audience}\n` : '') +
+            (geography ? `• Гео: ${geography}\n` : '') +
+            (main_services ? `• Услуги: ${main_services}\n` : '') +
+            (competitive_advantages ? `• Преимущества: ${competitive_advantages}\n` : '') +
+            `\n🔗 <b>Facebook IDs:</b>\n` +
+            (fb_ad_account_id ? `• Ad Account: <code>${fb_ad_account_id}</code>\n` : '• Ad Account: не указан\n') +
+            (fb_page_id ? `• Page ID: <code>${fb_page_id}</code>\n` : '• Page ID: не указан\n') +
+            (fb_instagram_id ? `• Instagram ID: <code>${fb_instagram_id}</code>\n` : '• Instagram ID: не указан\n') +
+            `\n⏳ Статус: ожидает проверки`;
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text, parse_mode: 'HTML' }),
+          }).catch(err => fastify.log.warn({ error: err.message }, 'add-ad-account: admin notification failed'));
+        }
+      } catch (notifyErr) {
+        fastify.log.warn({ error: notifyErr.message }, 'add-ad-account: admin notification error');
+      }
 
       return reply.send({
         success: true,

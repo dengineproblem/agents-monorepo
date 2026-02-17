@@ -367,30 +367,69 @@ export async function showSubscriptionStatus(
 }
 
 // ======================================================================
-// ONBOARDING — ad account setup (7 steps)
+// PROMPT GENERATION — call agent-service to generate AI prompts
+// ======================================================================
+
+async function generatePromptsForAccount(
+  userId: string,
+  adAccountId: string,
+  data: Record<string, any>,
+): Promise<void> {
+  const url = `${PAYMENT_BASE_URL}/briefing/update-prompts`;
+  try {
+    const response = await axios.post(url, {
+      user_id: userId,
+      ad_account_id: adAccountId,
+      business_name: data.business_name || '',
+      business_niche: data.business_niche || '',
+      target_audience: data.target_audience || '',
+      geography: data.geography || '',
+      main_services: data.main_services || '',
+      competitive_advantages: data.competitive_advantages || '',
+    }, { timeout: 120_000 });
+    if (response.data?.success) {
+      logger.info({ userId, adAccountId }, 'Prompts generated successfully');
+    } else {
+      logger.warn({ userId, adAccountId, error: response.data?.error }, 'Prompt generation returned error');
+    }
+  } catch (error: any) {
+    logger.error({ userId, adAccountId, error: error.message }, 'Prompt generation HTTP call failed');
+  }
+}
+
+// ======================================================================
+// ONBOARDING — ad account setup (10 steps)
 // ======================================================================
 
 const ONBOARDING_STEPS = [
   'business_name',
   'business_niche',
-  'instagram_url',
+  'target_audience',
+  'geography',
+  'main_services',
+  'competitive_advantages',
   'ad_account_id',
   'page_id',
   'instagram_id',
   'partner_access',
 ] as const;
 
+const TOTAL_STEPS = ONBOARDING_STEPS.length; // 10
+
 const STEP_PROMPTS: Record<string, string> = {
-  business_name: '📝 *Шаг 1/7.* Как называется ваш бизнес?',
-  business_niche: '📝 *Шаг 2/7.* Какая у вас ниша? (напр. стоматология, фитнес, образование)',
-  instagram_url: '📝 *Шаг 3/7.* Instagram вашего бизнеса?\n\n_Отправьте ссылку или @username. Отправьте `-` чтобы пропустить._',
-  ad_account_id: '📝 *Шаг 4/7.* Facebook Ad Account ID\n\nФормат: `act_123456789`\n\n_Найти можно в Facebook Ads Manager → Настройки рекламного аккаунта._',
-  page_id: '📝 *Шаг 5/7.* Facebook Page ID (числовой)\n\n_Найти: откройте вашу страницу Facebook → О странице → ID страницы._',
-  instagram_id: '📝 *Шаг 6/7.* Instagram Account ID (числовой, напр. 17841...)\n\n_Это технический ID. Если не знаете — отправьте `-`, администратор настроит._',
+  business_name: `📝 *Шаг 1/${TOTAL_STEPS}.* Как называется бизнес, который вы продвигаете?`,
+  business_niche: `📝 *Шаг 2/${TOTAL_STEPS}.* Какая ниша у этого бизнеса?\n\n_Например: стоматология, фитнес, образование, автосервис_`,
+  target_audience: `📝 *Шаг 3/${TOTAL_STEPS}.* Кто ваши клиенты?\n\n_Опишите целевую аудиторию: возраст, пол, интересы, потребности._`,
+  geography: `📝 *Шаг 4/${TOTAL_STEPS}.* География работы?\n\n_Город, регион или страна, где вы работаете._`,
+  main_services: `📝 *Шаг 5/${TOTAL_STEPS}.* Основные услуги или продукты?\n\n_Перечислите основные направления, которые продвигаете._`,
+  competitive_advantages: `📝 *Шаг 6/${TOTAL_STEPS}.* Конкурентные преимущества?\n\n_Чем вы отличаетесь от конкурентов? Что делает вас особенными?_`,
+  ad_account_id: `📝 *Шаг 7/${TOTAL_STEPS}.* Facebook Ad Account ID\n\nФормат: \`act_123456789\`\n\n_Найти: [business.facebook.com](https://business.facebook.com) → Настройки → Рекламные аккаунты._\n\n_Нужна помощь? [Написать в техподдержку](https://t.me/anatoliymarketolog)_`,
+  page_id: `📝 *Шаг 8/${TOTAL_STEPS}.* Facebook Page ID (числовой)\n\n_Найти: [business.facebook.com](https://business.facebook.com) → Аккаунты → Страницы → выберите страницу → ID._\n\n_Нужна помощь? [Написать в техподдержку](https://t.me/anatoliymarketolog)_`,
+  instagram_id: `📝 *Шаг 9/${TOTAL_STEPS}.* Instagram Account ID (числовой, напр. 17841...)\n\n_Это технический ID. Если не знаете — отправьте \`-\`, администратор настроит._\n\n_Нужна помощь? [Написать в техподдержку](https://t.me/anatoliymarketolog)_`,
 };
 
 function getPartnerAccessMessage(): string {
-  return `📋 *Шаг 7/7. Партнёрский доступ*
+  return `📋 *Шаг ${TOTAL_STEPS}/${TOTAL_STEPS}. Партнёрский доступ*
 
 Последний шаг — выдайте нам партнёрский доступ к рекламному кабинету:
 
@@ -413,7 +452,7 @@ async function sendStepPrompt(bot: TelegramBot, chatId: number, step: string): P
   const prompt = STEP_PROMPTS[step];
   if (!prompt) return;
   try {
-    await bot.sendMessage(chatId, prompt, { parse_mode: 'Markdown' });
+    await bot.sendMessage(chatId, prompt, { parse_mode: 'Markdown', disable_web_page_preview: true });
   } catch {
     await bot.sendMessage(chatId, prompt.replace(/[*_`[\]()]/g, ''));
   }
@@ -480,17 +519,36 @@ export async function handleOnboardingInput(
       flow.data.business_niche = trimmed;
       break;
     }
-    case 'instagram_url': {
-      if (trimmed === '-') {
-        flow.data.instagram_url = null;
-      } else {
-        // Normalize: extract handle from URL or @username
-        let handle = trimmed;
-        handle = handle.replace(/^https?:\/\/(www\.)?instagram\.com\//i, '');
-        handle = handle.replace(/^@/, '');
-        handle = handle.replace(/[/?].*$/, ''); // remove query/trailing
-        flow.data.instagram_url = handle ? `https://instagram.com/${handle}` : null;
+    case 'target_audience': {
+      if (trimmed.length < 3) {
+        await bot.sendMessage(chatId, 'Опишите целевую аудиторию подробнее (минимум 3 символа):');
+        return true;
       }
+      flow.data.target_audience = trimmed;
+      break;
+    }
+    case 'geography': {
+      if (trimmed.length < 2) {
+        await bot.sendMessage(chatId, 'Укажите географию (минимум 2 символа):');
+        return true;
+      }
+      flow.data.geography = trimmed;
+      break;
+    }
+    case 'main_services': {
+      if (trimmed.length < 3) {
+        await bot.sendMessage(chatId, 'Перечислите услуги/продукты (минимум 3 символа):');
+        return true;
+      }
+      flow.data.main_services = trimmed;
+      break;
+    }
+    case 'competitive_advantages': {
+      if (trimmed.length < 3) {
+        await bot.sendMessage(chatId, 'Опишите преимущества (минимум 3 символа):');
+        return true;
+      }
+      flow.data.competitive_advantages = trimmed;
       break;
     }
     case 'ad_account_id': {
@@ -632,11 +690,22 @@ export async function handleOnboardingCallback(
       fb_page_id: flow.data.fb_page_id || null,
       fb_instagram_id: flow.data.fb_instagram_id || null,
       business_niche: flow.data.business_niche || null,
+      target_audience: flow.data.target_audience || null,
+      geography: flow.data.geography || null,
+      main_services: flow.data.main_services || null,
+      competitive_advantages: flow.data.competitive_advantages || null,
     });
 
     if (!result.success) {
       await bot.sendMessage(chatId, `❌ Ошибка создания аккаунта: ${result.message || result.error}`);
       return true;
+    }
+
+    // Generate AI prompts in background (don't block the user)
+    if (result.accountId && flow.data.business_name) {
+      generatePromptsForAccount(flow.data.userAccountId, result.accountId, flow.data).catch(err => {
+        logger.warn({ error: err.message, accountId: result.accountId }, 'Prompt generation failed (non-critical)');
+      });
     }
 
     clearPendingFlow(telegramId);
@@ -655,7 +724,7 @@ export async function handleOnboardingCallback(
       `📋 Название: ${flow.data.business_name}\n` +
       (flow.data.fb_ad_account_id ? `🔗 Ad Account: \`${flow.data.fb_ad_account_id}\`\n` : '') +
       '\nАдминистратор проверит партнёрский доступ и активирует аккаунт.\n' +
-      'После активации вы сможете пользоваться всеми функциями бота.\n\n' +
+      'AI-промпты генерируются автоматически на основе ваших данных.\n\n' +
       'Отправьте любое сообщение чтобы продолжить.';
 
     try {

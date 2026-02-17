@@ -510,5 +510,83 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
   );
+
+  /**
+   * POST /briefing/update-prompts
+   *
+   * Генерирует промпты для существующего ad_account (Telegram-бот онбординг).
+   * Не создаёт новый аккаунт — обновляет существующий.
+   *
+   * @body { ad_account_id, user_id, business_name, business_niche, target_audience, geography, main_services, competitive_advantages }
+   * @returns { success: true }
+   */
+  fastify.post(
+    '/update-prompts',
+    async (request: FastifyRequest<{ Body: BriefingData & { user_id: string; ad_account_id: string } }>, reply) => {
+      const reqLog = (request as any).log || log;
+      const { user_id, ad_account_id, ...briefingData } = request.body;
+
+      if (!user_id || !ad_account_id) {
+        return reply.status(400).send({ success: false, error: 'user_id and ad_account_id are required' });
+      }
+
+      reqLog.info({ user_id, ad_account_id, business_name: briefingData.business_name }, 'Generating prompts for existing ad_account (bot onboarding)');
+
+      try {
+        // Generate all prompts in parallel
+        const [generatedPrompt1, generatedPrompt2, generatedPrompt4] = await Promise.all([
+          generatePrompt1(briefingData),
+          generatePrompt2(briefingData),
+          generatePrompt4(briefingData),
+        ]);
+
+        // Update existing ad_account with prompts
+        const { error: updateError } = await supabase
+          .from('ad_accounts')
+          .update({
+            prompt1: generatedPrompt1,
+            prompt2: generatedPrompt2,
+            prompt4: generatedPrompt4,
+          })
+          .eq('id', ad_account_id)
+          .eq('user_account_id', user_id);
+
+        if (updateError) {
+          reqLog.error({ error: updateError, ad_account_id }, 'Failed to update ad_account with prompts');
+          return reply.status(500).send({ success: false, error: 'Failed to save prompts' });
+        }
+
+        // Save briefing responses
+        const { error: briefingError } = await supabase
+          .from('user_briefing_responses')
+          .insert({
+            user_id,
+            account_id: ad_account_id,
+            business_name: briefingData.business_name,
+            business_niche: briefingData.business_niche,
+            target_audience: briefingData.target_audience,
+            geography: briefingData.geography,
+            main_services: briefingData.main_services,
+            competitive_advantages: briefingData.competitive_advantages,
+          });
+
+        if (briefingError) {
+          reqLog.warn({ error: briefingError, user_id, ad_account_id }, 'Failed to save briefing responses (non-critical)');
+        }
+
+        reqLog.info({
+          user_id,
+          ad_account_id,
+          prompt1_length: generatedPrompt1.length,
+          prompt4_length: generatedPrompt4.length,
+        }, 'Prompts generated and saved for bot onboarding');
+
+        return reply.send({ success: true });
+      } catch (error: any) {
+        reqLog.error({ error: error.message, user_id, ad_account_id }, 'Error generating prompts for bot onboarding');
+        return reply.status(500).send({ success: false, error: 'Prompt generation failed' });
+      }
+    }
+  );
 };
 
