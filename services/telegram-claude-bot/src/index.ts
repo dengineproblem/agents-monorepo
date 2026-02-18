@@ -849,7 +849,7 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
       session = createSession(telegramId!, resolvedUser);
 
       // Восстановить выбранный аккаунт из memory файла
-      if (session.multiAccountEnabled && session.adAccounts.length > 1) {
+      if (session.multiAccountEnabled && session.adAccounts.length >= 1) {
         const savedAccountId = getUserMemoryValue(userAccountId, 'selected_account');
         if (savedAccountId) {
           const acc = session.adAccounts.find(a => a.id === savedAccountId);
@@ -860,6 +860,16 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
           } else {
             logger.info({ telegramId, savedAccountId }, 'Saved account no longer in ad_accounts, ignoring');
           }
+        }
+
+        // Авто-выбор единственного аккаунта если ничего не восстановлено
+        if (!session.selectedAccountId && session.adAccounts.length === 1) {
+          const acc = session.adAccounts[0];
+          setSelectedAccount(telegramId!, acc.id, acc.stack, acc.anthropicApiKey);
+          session = getSession(telegramId!)!;
+          updateUserMemory(userAccountId, 'selected_account', acc.id);
+          updateUserMemory(userAccountId, 'selected_account_name', acc.name);
+          logger.info({ telegramId, accountId: acc.id, accountName: acc.name }, 'Auto-selected single ad account');
         }
       }
     } else {
