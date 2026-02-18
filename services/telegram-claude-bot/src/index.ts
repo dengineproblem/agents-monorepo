@@ -920,8 +920,26 @@ async function handleMessage(msg: TelegramBot.Message): Promise<void> {
     }
 
     // /accounts — показать список аккаунтов для переключения
-    if (/^\/accounts\s*$/i.test(truncatedMessage) && session.multiAccountEnabled && session.adAccounts.length > 1) {
+    if (/^\/accounts\s*$/i.test(truncatedMessage) && session.multiAccountEnabled) {
       logger.info({ telegramId, chatId }, '/accounts command');
+
+      if (session.adAccounts.length === 0) {
+        await bot.sendMessage(parseInt(chatId), 'У вас пока нет подключённых рекламных аккаунтов.');
+        return;
+      }
+
+      if (session.adAccounts.length === 1) {
+        // Один аккаунт — автоматически выбираем и показываем меню
+        const acc = session.adAccounts[0];
+        setSelectedAccount(telegramId!, acc.id, acc.stack, acc.anthropicApiKey);
+        session = getSession(telegramId!)!;
+        updateUserMemory(userAccountId, 'selected_account', acc.id);
+        updateUserMemory(userAccountId, 'selected_account_name', acc.name);
+        await bot.sendMessage(parseInt(chatId), `✅ Аккаунт: *${acc.name}*`, { parse_mode: 'Markdown' });
+        await showMainMenu(bot, parseInt(chatId), acc.name);
+        return;
+      }
+
       clearSelectedAccount(telegramId!);
       session = getSession(telegramId!)!;
       const currentName = getUserMemoryValue(userAccountId, 'selected_account_name');
