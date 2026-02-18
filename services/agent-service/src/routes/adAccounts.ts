@@ -178,8 +178,12 @@ function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unkn
     prompt3: dbRecord.prompt3,
     prompt4: dbRecord.prompt4,
 
-    // Статус
-    connection_status: dbRecord.connection_status,
+    // Статус — вычисляем из данных, а не из БД
+    connection_status: (dbRecord.access_token && dbRecord.ad_account_id)
+      ? 'connected'
+      : (dbRecord.page_id || dbRecord.ad_account_id)
+        ? 'pending_review'
+        : (dbRecord.connection_status || 'pending'),
     last_error: dbRecord.last_error,
 
     // Autopilot
