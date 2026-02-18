@@ -388,7 +388,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Facebook className="h-3 w-3" />
-                          {hasAllFbFields ? (
+                          {hasIds ? (
                             <span className="text-green-600">{account.fb_ad_account_id}</span>
                           ) : (
                             <span className="text-yellow-600">не настроен</span>
