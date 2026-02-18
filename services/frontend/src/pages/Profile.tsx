@@ -330,7 +330,7 @@ const Profile: React.FC = () => {
           setTarifExpires(user.tarif_expires ?? null);
           setTarifRenewalCost((user as any).tarif_renewal_cost ?? null);
           setTelegramIds([
-            user.telegram_id || '',
+            user.telegram_id || null,
             (user as any).telegram_id_2 || null,
             (user as any).telegram_id_3 || null,
             (user as any).telegram_id_4 || null
@@ -345,7 +345,7 @@ const Profile: React.FC = () => {
           setTarifExpires(data.tarif_expires ?? null);
           setTarifRenewalCost(data.tarif_renewal_cost ?? null);
           setTelegramIds([
-            data.telegram_id || '',
+            data.telegram_id || null,
             data.telegram_id_2 || null,
             data.telegram_id_3 || null,
             data.telegram_id_4 || null
@@ -369,7 +369,7 @@ const Profile: React.FC = () => {
         setTarifExpires(user.tarif_expires ?? null);
         setTarifRenewalCost((user as any).tarif_renewal_cost ?? null);
         setTelegramIds([
-          user.telegram_id || '',
+          user.telegram_id || null,
           (user as any).telegram_id_2 || null,
           (user as any).telegram_id_3 || null,
           (user as any).telegram_id_4 || null
