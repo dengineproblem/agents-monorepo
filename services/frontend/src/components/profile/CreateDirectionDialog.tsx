@@ -25,7 +25,7 @@ import type {
   OptimizationLevel,
 } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
-import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
+import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
@@ -275,19 +275,28 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   }, [tiktokObjective, open, needsTikTok]);
 
   const handleCitySelection = (cityId: string) => {
-    // Простая логика как в VideoUpload
     let nextSelection = [...selectedCities];
     if (nextSelection.includes(cityId)) {
-      // Снимаем выбор
       nextSelection = nextSelection.filter(id => id !== cityId);
     } else {
-      // Добавляем выбор
       if (cityId === 'KZ') {
-        // "Весь Казахстан" отменяет все остальные города
-        nextSelection = ['KZ'];
-      } else {
-        // Убираем "Весь Казахстан" если был выбран
+        // "Весь Казахстан" убирает KZ-города, но оставляет другие страны/города
+        nextSelection = nextSelection.filter(id => COUNTRY_IDS.includes(id) || CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (cityId === 'CY') {
+        // "Весь Кипр" убирает кипрские регионы/города, но оставляет остальное
+        nextSelection = nextSelection.filter(id => !CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (CYPRUS_GEO_IDS.includes(cityId)) {
+        // Кипрский регион/город — убираем "Весь Кипр"
+        nextSelection = nextSelection.filter(id => id !== 'CY');
+        nextSelection = [...nextSelection, cityId];
+      } else if (!COUNTRY_IDS.includes(cityId)) {
+        // KZ-город — убираем "Весь Казахстан"
         nextSelection = nextSelection.filter(id => id !== 'KZ');
+        nextSelection = [...nextSelection, cityId];
+      } else {
+        // Другая страна — просто добавляем
         nextSelection = [...nextSelection, cityId];
       }
     }
@@ -300,9 +309,18 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       nextSelection = nextSelection.filter(id => id !== cityId);
     } else {
       if (cityId === 'KZ') {
-        nextSelection = ['KZ'];
-      } else {
+        nextSelection = nextSelection.filter(id => COUNTRY_IDS.includes(id) || CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (cityId === 'CY') {
+        nextSelection = nextSelection.filter(id => !CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (CYPRUS_GEO_IDS.includes(cityId)) {
+        nextSelection = nextSelection.filter(id => id !== 'CY');
+        nextSelection = [...nextSelection, cityId];
+      } else if (!COUNTRY_IDS.includes(cityId)) {
         nextSelection = nextSelection.filter(id => id !== 'KZ');
+        nextSelection = [...nextSelection, cityId];
+      } else {
         nextSelection = [...nextSelection, cityId];
       }
     }
@@ -1050,13 +1068,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       <div className="font-medium text-sm mb-2">Выберите города или страны</div>
                       <div className="flex flex-col gap-1">
                         {CITIES_AND_COUNTRIES.map(city => {
-                          const isKZ = city.id === 'KZ';
-                          const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
+                          const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
+                          const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
+                          const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
+                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
                           const isKZSelected = selectedCities.includes('KZ');
+                          const isCYSelected = selectedCities.includes('CY');
                           const isDisabled = isSubmitting ||
-                            (isKZ && anyCitySelected) ||
-                            (!isKZ && !isOtherCountry && isKZSelected);
+                            (city.id === 'KZ' && anyCitySelected) ||
+                            (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
+                            (city.id === 'CY' && selectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
+                            (isCyprusGeo && isCYSelected);
                           
                           return (
                             <div
@@ -1351,13 +1373,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         <div className="font-medium text-sm mb-2">Выберите города или страны</div>
                         <div className="flex flex-col gap-1">
                           {CITIES_AND_COUNTRIES.map(city => {
-                            const isKZ = city.id === 'KZ';
-                            const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                            const anyCitySelected = tiktokSelectedCities.some(id => !COUNTRY_IDS.includes(id));
+                            const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
+                            const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
+                            const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
+                            const anyCitySelected = tiktokSelectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
                             const isKZSelected = tiktokSelectedCities.includes('KZ');
+                            const isCYSelected = tiktokSelectedCities.includes('CY');
                             const isDisabled = isSubmitting ||
-                              (isKZ && anyCitySelected) ||
-                              (!isKZ && !isOtherCountry && isKZSelected);
+                              (city.id === 'KZ' && anyCitySelected) ||
+                              (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
+                              (city.id === 'CY' && tiktokSelectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
+                              (isCyprusGeo && isCYSelected);
                             
                             return (
                               <div

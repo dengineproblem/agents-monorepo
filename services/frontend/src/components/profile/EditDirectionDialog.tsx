@@ -22,7 +22,7 @@ import type {
   OptimizationLevel
 } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS } from '@/types/direction';
-import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
+import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
@@ -265,19 +265,23 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   };
 
   const handleCitySelection = (cityId: string) => {
-    // Простая логика как в VideoUpload
     let nextSelection = [...selectedCities];
     if (nextSelection.includes(cityId)) {
-      // Снимаем выбор
       nextSelection = nextSelection.filter(id => id !== cityId);
     } else {
-      // Добавляем выбор
       if (cityId === 'KZ') {
-        // "Весь Казахстан" отменяет все остальные города
-        nextSelection = ['KZ'];
-      } else {
-        // Убираем "Весь Казахстан" если был выбран
+        nextSelection = nextSelection.filter(id => COUNTRY_IDS.includes(id) || CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (cityId === 'CY') {
+        nextSelection = nextSelection.filter(id => !CYPRUS_GEO_IDS.includes(id));
+        nextSelection = [...nextSelection, cityId];
+      } else if (CYPRUS_GEO_IDS.includes(cityId)) {
+        nextSelection = nextSelection.filter(id => id !== 'CY');
+        nextSelection = [...nextSelection, cityId];
+      } else if (!COUNTRY_IDS.includes(cityId)) {
         nextSelection = nextSelection.filter(id => id !== 'KZ');
+        nextSelection = [...nextSelection, cityId];
+      } else {
         nextSelection = [...nextSelection, cityId];
       }
     }
@@ -649,13 +653,17 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       <div className="font-medium text-sm mb-2">Выберите города или страны</div>
                       <div className="flex flex-col gap-1">
                         {CITIES_AND_COUNTRIES.map(city => {
-                          const isKZ = city.id === 'KZ';
-                          const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
+                          const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
+                          const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
+                          const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
+                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
                           const isKZSelected = selectedCities.includes('KZ');
+                          const isCYSelected = selectedCities.includes('CY');
                           const isDisabled = isSubmitting ||
-                            (isKZ && anyCitySelected) ||
-                            (!isKZ && !isOtherCountry && isKZSelected);
+                            (city.id === 'KZ' && anyCitySelected) ||
+                            (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
+                            (city.id === 'CY' && selectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
+                            (isCyprusGeo && isCYSelected);
                           
                           return (
                             <div

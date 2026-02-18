@@ -25,6 +25,13 @@ export const CITIES = [
   { id: '1298077', name: 'Уральск' },
   { id: '1298160', name: 'Усть-Каменогорск' },
   { id: '1300313', name: 'Шымкент' },
+  // Кипр — регионы и города
+  { id: 'CY', name: 'Весь Кипр' },
+  { id: '792', name: 'Larnaca District' },
+  { id: '794', name: 'Limassol District' },
+  { id: '795', name: 'Paphos District' },
+  { id: '514564', name: 'Limassol' },
+  { id: '515017', name: 'Paphos' },
 ];
 
 // Список стран
@@ -57,7 +64,10 @@ export const CITIES_AND_COUNTRIES = [
 ];
 
 // ID стран для проверок
-export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE', 'KR'];
+export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE', 'KR', 'CY'];
+
+// Кипрские регионы/города (без CY-страны) — для взаимоисключения с "Весь Кипр"
+export const CYPRUS_GEO_IDS = ['792', '794', '795', '514564', '515017'];
 
 // Дефолтный UTM-тег
 export const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}';
