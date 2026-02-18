@@ -272,7 +272,7 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             connection_status: 'pending',
             // FB credentials НЕ копируем — каждый ad_account подключается отдельно
             instagram_username: briefingData.instagram_url || null,
-            // Настройки бюджета для Brain Mini (конвертируем рубли в центы)
+            // Настройки бюджета для Brain Mini (конвертируем доллары в центы)
             plan_daily_budget_cents: briefingData.plan_daily_budget
               ? Math.round(briefingData.plan_daily_budget * 100)
               : null,

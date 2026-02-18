@@ -71,7 +71,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
               id="dailyBudget"
               type="text"
               inputMode="decimal"
-              placeholder="Например: 5000"
+              placeholder="Например: 50"
               value={dailyBudget}
               onChange={(e) => handleNumberInput(e.target.value, setDailyBudget)}
               className="pr-12"
@@ -96,7 +96,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
               id="targetCPL"
               type="text"
               inputMode="decimal"
-              placeholder="Например: 500"
+              placeholder="Например: 5"
               value={targetCPL}
               onChange={(e) => handleNumberInput(e.target.value, setTargetCPL)}
               className="pr-16"
