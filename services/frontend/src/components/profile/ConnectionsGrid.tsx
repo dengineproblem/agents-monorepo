@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X, Activity, Settings } from 'lucide-react';
+import { Instagram, CheckCircle2, CircleDashed, Clock, Link, Plus, X, Activity, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../i18n/LanguageContext';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
@@ -26,6 +26,7 @@ export interface ConnectionItem {
   id: 'facebook' | 'instagram' | 'tiktok' | 'amocrm' | 'bitrix24' | 'tilda' | 'meta_capi';
   title: string;
   connected: boolean;
+  pendingReview?: boolean;
   onClick: () => void;
   disabled?: boolean;
   badge?: string;
@@ -123,7 +124,12 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                    {it.connected ? (
+                    {it.pendingReview ? (
+                      <>
+                        <Clock className="h-3.5 w-3.5 text-orange-500" />
+                        <span className="text-orange-500">Ожидает проверки</span>
+                      </>
+                    ) : it.connected ? (
                       <>
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                         <span className="text-emerald-600">{t('profile.connected')}</span>

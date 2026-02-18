@@ -30,6 +30,7 @@ import { tiktokApi } from '@/services/tiktokApi';
 import { useOptimization, type OptimizationScope } from '@/hooks/useOptimization';
 import { OptimizeButton, OptimizationModal } from '@/components/optimization';
 import { AllAccountsExecutionsSection } from '@/components/AllAccountsExecutionsSection';
+import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 
 // =============================================================================
 // TYPES
@@ -45,7 +46,7 @@ interface AccountStats {
   id: string;
   name: string;
   fb_page_id: string | null;
-  connection_status: 'pending' | 'connected' | 'error';
+  connection_status: 'pending' | 'pending_review' | 'connected' | 'error';
   is_active: boolean;
   fb_account_status: FbAccountStatus;
   fb_disable_reason: number | null;
@@ -287,6 +288,10 @@ const MultiAccountDashboard: React.FC = () => {
   // Account-level budgets (сумма бюджетов активных адсетов по аккаунту)
   const [accountBudgets, setAccountBudgets] = useState<Record<string, number>>({});
 
+  // Facebook connect modal state
+  const [fbConnectModalOpen, setFbConnectModalOpen] = useState(false);
+  const [fbConnectAccountId, setFbConnectAccountId] = useState<string | null>(null);
+
   // Optimization hook
   const optimization = useOptimization();
 
@@ -449,7 +454,7 @@ const MultiAccountDashboard: React.FC = () => {
         id: acc.id,
         name: acc.name,
         fb_page_id: acc.fb_page_id || null,
-        connection_status: (acc.connection_status as 'pending' | 'connected' | 'error') || 'pending',
+        connection_status: (acc.connection_status as 'pending' | 'pending_review' | 'connected' | 'error') || 'pending',
         is_active: acc.is_active !== false,
         fb_account_status: null,
         fb_disable_reason: null,
@@ -1144,6 +1149,10 @@ const MultiAccountDashboard: React.FC = () => {
                     directions={directionsData[account.id] || []}
                     onOptimize={optimization.startOptimization}
                     accountBudget={accountBudgets[account.id]}
+                    onConnectFacebook={(accountId) => {
+                      setFbConnectAccountId(accountId);
+                      setFbConnectModalOpen(true);
+                    }}
                   />
                 ))}
               </div>
@@ -1161,6 +1170,19 @@ const MultiAccountDashboard: React.FC = () => {
       </div>
 
       <DateRangePicker open={datePickerOpen} onOpenChange={setDatePickerOpen} />
+
+      {/* Facebook Manual Connect Modal */}
+      <FacebookManualConnectModal
+        open={fbConnectModalOpen}
+        onOpenChange={setFbConnectModalOpen}
+        onComplete={() => {
+          setFbConnectModalOpen(false);
+          setFbConnectAccountId(null);
+          window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
+          handleRefresh();
+        }}
+        accountId={fbConnectAccountId || undefined}
+      />
 
       {/* Brain Mini Optimization Modal */}
       <OptimizationModal
@@ -1236,6 +1258,7 @@ interface AccountRowProps {
   directions: Direction[];
   onOptimize: (scope: OptimizationScope) => void;
   accountBudget?: number;
+  onConnectFacebook?: (accountId: string) => void;
 }
 
 const AccountRow: React.FC<AccountRowProps> = ({
@@ -1256,6 +1279,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
   directions,
   onOptimize,
   accountBudget,
+  onConnectFacebook,
 }) => {
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -1366,6 +1390,28 @@ const AccountRow: React.FC<AccountRowProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="font-medium truncate text-sm">{account.name}</p>
+              {/* Per-account Facebook connection status */}
+              {account.connection_status === 'pending_review' && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 h-4 flex-shrink-0 bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-700"
+                >
+                  Ожидает проверки
+                </Badge>
+              )}
+              {!account.fb_page_id && account.connection_status !== 'pending_review' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-5 px-2 text-[10px] border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/30 flex-shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onConnectFacebook?.(account.id);
+                  }}
+                >
+                  Подключить Facebook
+                </Button>
+              )}
               {(() => {
                 const statusInfo = getFbAccountStatusInfo(account.fb_account_status);
                 if (!statusInfo) return null;

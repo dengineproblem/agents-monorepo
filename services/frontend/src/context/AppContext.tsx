@@ -906,13 +906,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       });
 
       const mappedAccounts = response.ad_accounts.map(acc => {
-        // Автоматически определяем connection_status на основе наличия всех обязательных полей
-        const hasAllFbFields = !!(
-          acc.fb_page_id &&
-          acc.fb_access_token &&
-          acc.fb_ad_account_id
-        );
-        const computedStatus = hasAllFbFields ? 'connected' : (acc.connection_status || 'pending');
+        // Вычисляем статус из данных: есть токен = подключён, есть IDs но нет токена = на проверке
+        const hasToken = !!(acc.fb_access_token && acc.fb_access_token !== '****');
+        const hasIds = !!(acc.fb_page_id || acc.fb_ad_account_id);
+        const computedStatus = (hasToken && acc.fb_ad_account_id)
+          ? 'connected'
+          : hasIds
+            ? 'pending_review'
+            : 'pending';
 
         return {
           id: acc.id,
@@ -921,7 +922,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           is_active: acc.is_active,
           tarif: acc.tarif,
           tarif_expires: acc.tarif_expires,
-          connection_status: computedStatus as 'pending' | 'connected' | 'error',
+          connection_status: computedStatus as 'pending' | 'pending_review' | 'connected' | 'error',
           ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
           // SECURITY: access_token НЕ сохраняем — все вызовы через /fb-proxy
           page_id: acc.fb_page_id,              // Бэкенд возвращает fb_page_id (для Lead Forms)

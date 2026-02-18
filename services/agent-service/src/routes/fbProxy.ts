@@ -26,8 +26,7 @@ const FbProxySchema = z.object({
  * Вспомогательная функция: получить access_token пользователя из БД
  */
 async function resolveAccessToken(userAccountId: string, adAccountId?: string): Promise<string | null> {
-  let accessToken: string | null = null;
-
+  // Если передан конкретный ad_account — используем ТОЛЬКО его токен, без фолбэков
   if (adAccountId) {
     const { data: acc } = await supabase
       .from('ad_accounts')
@@ -35,31 +34,17 @@ async function resolveAccessToken(userAccountId: string, adAccountId?: string): 
       .eq('id', adAccountId)
       .eq('user_account_id', userAccountId)
       .single();
-    accessToken = acc?.access_token || null;
+    return acc?.access_token || null;
   }
 
-  if (!accessToken) {
-    const { data: userAcc } = await supabase
-      .from('user_accounts')
-      .select('access_token')
-      .eq('id', userAccountId)
-      .single();
+  // Legacy режим (без adAccountId) — берём из user_accounts
+  const { data: userAcc } = await supabase
+    .from('user_accounts')
+    .select('access_token')
+    .eq('id', userAccountId)
+    .single();
 
-    if (userAcc?.access_token) {
-      accessToken = userAcc.access_token;
-    } else {
-      const { data: firstAcc } = await supabase
-        .from('ad_accounts')
-        .select('access_token')
-        .eq('user_account_id', userAccountId)
-        .not('access_token', 'is', null)
-        .limit(1)
-        .single();
-      accessToken = firstAcc?.access_token || null;
-    }
-  }
-
-  return accessToken;
+  return userAcc?.access_token || null;
 }
 
 export async function fbProxyRoutes(app: FastifyInstance) {

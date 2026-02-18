@@ -75,7 +75,7 @@ export interface AdAccount {
   brain_timezone: string;
 
   // Status
-  connection_status: 'pending' | 'connected' | 'error';
+  connection_status: 'pending' | 'pending_review' | 'connected' | 'error';
   last_error: string | null;
 
   created_at: string;
@@ -90,7 +90,7 @@ export interface AdAccountSummary {
   is_active: boolean;
   tarif: string | null;
   tarif_expires: string | null;
-  connection_status: 'pending' | 'connected' | 'error';
+  connection_status: 'pending' | 'pending_review' | 'connected' | 'error';
   // Facebook данные для проверки подключения (маппятся из fb_*)
   ad_account_id: string | null;   // из fb_ad_account_id
   access_token: string | null;    // из fb_access_token
@@ -189,7 +189,7 @@ export interface UpdateAdAccountPayload {
   tarif_renewal_cost?: number | null;
 
   // Status
-  connection_status?: 'pending' | 'connected' | 'error';
+  connection_status?: 'pending' | 'pending_review' | 'connected' | 'error';
   last_error?: string | null;
 
   // Autopilot
@@ -213,12 +213,14 @@ export interface AdAccountsResponse {
 // Статусы подключения
 export const CONNECTION_STATUS_LABELS: Record<string, string> = {
   pending: 'Ожидает настройки',
+  pending_review: 'Ожидает проверки',
   connected: 'Подключён',
   error: 'Ошибка',
 };
 
 export const CONNECTION_STATUS_COLORS: Record<string, string> = {
   pending: 'text-yellow-500',
+  pending_review: 'text-orange-500',
   connected: 'text-green-500',
   error: 'text-red-500',
 };

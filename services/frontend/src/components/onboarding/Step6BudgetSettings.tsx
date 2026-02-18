@@ -35,13 +35,6 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
     });
   };
 
-  const handleSkip = () => {
-    onNext({
-      plan_daily_budget: undefined,
-      default_cpl_target: undefined,
-    });
-  };
-
   const handleNumberInput = (
     value: string,
     setter: React.Dispatch<React.SetStateAction<string>>
@@ -142,14 +135,9 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
         <Button type="button" variant="outline" onClick={onBack}>
           Назад
         </Button>
-        <div className="flex gap-2">
-          <Button type="button" variant="ghost" onClick={handleSkip}>
-            Пропустить
-          </Button>
-          <Button type="submit" size="lg">
-            {dailyBudget || targetCPL ? 'Далее' : 'Пропустить'}
-          </Button>
-        </div>
+        <Button type="submit" size="lg">
+          {dailyBudget || targetCPL ? 'Далее' : 'Пропустить'}
+        </Button>
       </div>
     </form>
   );

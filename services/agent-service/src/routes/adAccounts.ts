@@ -99,7 +99,7 @@ const UpdateAdAccountSchema = z.object({
   tarif_renewal_cost: z.number().nullable().optional(),
 
   // Status
-  connection_status: z.enum(['pending', 'connected', 'error']).optional(),
+  connection_status: z.enum(['pending', 'pending_review', 'connected', 'error']).optional(),
   last_error: z.string().nullable().optional(),
 
   // Autopilot settings
@@ -350,16 +350,23 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       // Подготавливаем базовые данные аккаунтов
-      const accountsBase = (adAccounts || []).map(account => ({
-        id: account.id,
-        name: account.name,
-        // Передаём fb_page_id для формирования URL аватарки на клиенте
-        fb_page_id: account.page_id,
-        connection_status: account.connection_status || 'pending',
-        is_active: account.is_active !== false,
-        fb_ad_account_id: account.ad_account_id,
-        access_token: account.access_token,
-      }));
+      const accountsBase = (adAccounts || []).map(account => {
+        // Вычисляем статус из данных: есть токен = подключён, есть IDs но нет токена = на проверке
+        const computedStatus = (account.access_token && account.ad_account_id)
+          ? 'connected'
+          : (account.page_id || account.ad_account_id)
+            ? 'pending_review'
+            : 'pending';
+        return {
+          id: account.id,
+          name: account.name,
+          fb_page_id: account.page_id,
+          connection_status: computedStatus,
+          is_active: account.is_active !== false,
+          fb_ad_account_id: account.ad_account_id,
+          access_token: account.access_token,
+        };
+      });
 
       // Фильтруем аккаунты с credentials
       const accountsWithCredentials = accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id);
@@ -662,7 +669,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         try {
           const pageToken = await getPageAccessToken(pageId, validated.fb_access_token);
           if (pageToken) {
-            dbData.page_access_token = pageToken;
+            dbData.fb_page_access_token = pageToken;
             log.info({ adAccountId, pageId }, 'Obtained Page Access Token for ad account');
           }
         } catch (err) {

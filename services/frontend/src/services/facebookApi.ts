@@ -1514,7 +1514,7 @@ export const facebookApi = {
         return { success: false, error: 'ID пользователя не найден' };
       }
 
-      // Для мультиаккаунтного режима: получаем текущий account_id
+      // Для мультиаккаунтного режима: используем переданный account_id или fallback на localStorage
       const multiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
       const currentAdAccountId = data.account_id || localStorage.getItem('currentAdAccountId');
 
@@ -1562,6 +1562,7 @@ export const facebookApi = {
                   ad_account_id: data.ad_account_id.startsWith('act_')
                     ? data.ad_account_id
                     : `act_${data.ad_account_id}`,
+                  connection_status: 'pending_review',
                 };
               }
               return acc;

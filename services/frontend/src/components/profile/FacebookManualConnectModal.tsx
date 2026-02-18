@@ -22,6 +22,7 @@ interface FacebookManualConnectModalProps {
   onSkip?: () => void;
   showSkipButton?: boolean;
   demoMode?: boolean;
+  accountId?: string; // UUID ad_accounts.id для мультиаккаунтного режима
 }
 
 const PARTNER_ID = '290181230529709';
@@ -44,6 +45,7 @@ export function FacebookManualConnectModal({
   onSkip,
   showSkipButton = false,
   demoMode = false,
+  accountId,
 }: FacebookManualConnectModalProps) {
   const [part, setPart] = useState<'instruction' | 'form' | 'success'>('instruction');
   const [instructionStep, setInstructionStep] = useState(1);
@@ -132,6 +134,7 @@ export function FacebookManualConnectModal({
         page_id: formData.page_id.trim(),
         instagram_id: formData.instagram_id.trim() || undefined,
         ad_account_id: formData.ad_account_id.trim(),
+        account_id: accountId,
       });
 
       if (result.success) {

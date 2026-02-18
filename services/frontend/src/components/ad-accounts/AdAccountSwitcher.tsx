@@ -20,12 +20,14 @@ interface AdAccountSwitcherProps {
 const STATUS_ICONS = {
   connected: CheckCircle,
   pending: Clock,
+  pending_review: Clock,
   error: AlertCircle,
 };
 
 const STATUS_COLORS = {
   connected: 'text-green-500',
   pending: 'text-yellow-500',
+  pending_review: 'text-orange-500',
   error: 'text-red-500',
 };
 
@@ -133,6 +135,7 @@ export function AdAccountSwitcher({ className, showAddButton = true, compact = f
                 <span className={cn('absolute bottom-0 right-0 h-2 w-2 rounded-full border border-background', {
                   'bg-green-500': currentAccount.connection_status === 'connected',
                   'bg-yellow-500': currentAccount.connection_status === 'pending',
+                  'bg-orange-500': currentAccount.connection_status === 'pending_review',
                   'bg-red-500': currentAccount.connection_status === 'error',
                 })} />
               )}

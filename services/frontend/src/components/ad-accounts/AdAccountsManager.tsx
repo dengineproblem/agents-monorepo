@@ -285,9 +285,10 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
     );
   }
 
-  const STATUS_CONFIG = {
+  const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle; color: string; label: string }> = {
     connected: { icon: CheckCircle, color: 'text-green-500', label: 'Подключён' },
     pending: { icon: Clock, color: 'text-yellow-500', label: 'Ожидает' },
+    pending_review: { icon: Clock, color: 'text-orange-500', label: 'На проверке' },
     error: { icon: AlertCircle, color: 'text-red-500', label: 'Ошибка' },
   };
 
@@ -347,16 +348,14 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
         ) : (
           <div className="space-y-3">
             {accounts.map((account) => {
-              // Автоматически вычисляем connection_status на основе полей
-              const hasAllFbFields = !!(
-                account.fb_page_id &&
-                account.fb_ad_account_id
-              );
+              // Вычисляем статус из данных: есть ad_account_id = как минимум на проверке
+              const hasIds = !!(account.fb_page_id || account.fb_ad_account_id);
               const hasTikTokFields = !!(
                 account.tiktok_business_id &&
                 account.tiktok_account_id
               );
-              const computedStatus = hasAllFbFields ? 'connected' : (account.connection_status || 'pending');
+              // connection_status уже вычислен в AppContext, используем напрямую
+              const computedStatus = account.connection_status || (hasIds ? 'pending_review' : 'pending');
               const status = STATUS_CONFIG[computedStatus] || STATUS_CONFIG.pending;
               const StatusIcon = status.icon;
 

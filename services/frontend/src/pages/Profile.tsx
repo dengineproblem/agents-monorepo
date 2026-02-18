@@ -1311,6 +1311,7 @@ const Profile: React.FC = () => {
     : null;
 
   // Facebook: в мульти-режиме проверяем connection_status, иначе user_accounts
+  const isFbPendingReview = multiAccountEnabled && currentAdAccount?.connection_status === 'pending_review';
   const isFbConnected = multiAccountEnabled
     ? currentAdAccount?.connection_status === 'connected'
     : Boolean(user?.ad_account_id && user?.ad_account_id !== '');
@@ -1553,7 +1554,12 @@ const Profile: React.FC = () => {
                 id: 'facebook',
                 title: 'Facebook Ads',
                 connected: isFbConnected,
+                pendingReview: isFbPendingReview,
                 onClick: () => {
+                  if (isFbPendingReview) {
+                    toast.info('Аккаунт находится на проверке. Пожалуйста, дождитесь подтверждения.');
+                    return;
+                  }
                   if (isFbConnected) {
                     if (confirm(t('profile.confirmDisconnectFacebook'))) {
                       handleDisconnectInstagram();
@@ -2271,9 +2277,10 @@ const Profile: React.FC = () => {
           onOpenChange={setFacebookManualModal}
           onComplete={() => {
             setFacebookManualModal(false);
-            // window.location.reload(); // Reload to update UI with new status
+            window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
           }}
           showSkipButton={false}
+          accountId={multiAccountEnabled && currentAdAccountId ? currentAdAccountId : undefined}
         />
 
         {/* Tilda Instructions Modal */}

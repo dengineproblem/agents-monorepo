@@ -1027,31 +1027,11 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         ad_account_id: normalizedAdAccountId
       }, 'Saving manual Facebook connection');
 
-      // Update user_accounts with provided IDs and set status to pending_review
-      // Also update onboarding_stage to 'fb_pending'
-      const { error: updateError } = await supabase
-        .from('user_accounts')
-        .update({
-          page_id,
-          instagram_id: instagram_id || null,
-          ad_account_id: normalizedAdAccountId,
-          fb_connection_status: 'pending_review',
-          onboarding_stage: 'fb_pending',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', user_id);
+      // Определяем режим работы: multi-account или legacy
+      const isMultiAccount = await shouldFilterByAccountId(supabase, user_id, account_id);
 
-      if (updateError) {
-        log.error({ error: updateError, user_id }, 'Failed to save manual Facebook connection');
-        return res.status(500).send({
-          success: false,
-          error: 'Ошибка сохранения данных'
-        });
-      }
-
-      // Для мультиаккаунтного режима: обновляем конкретный ad_account по account_id
-      // Проверяем режим через shouldFilterByAccountId (см. MULTI_ACCOUNT_GUIDE.md)
-      if (await shouldFilterByAccountId(supabase, user_id, account_id)) {
+      if (isMultiAccount) {
+        // MULTI-ACCOUNT РЕЖИМ: пишем ТОЛЬКО в ad_accounts
         const { error: adAccountError } = await supabase
           .from('ad_accounts')
           .update({
@@ -1064,9 +1044,34 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           .eq('user_account_id', user_id); // Проверка принадлежности
 
         if (adAccountError) {
-          log.warn({ error: adAccountError, account_id }, 'Failed to update ad_account with Facebook data');
-        } else {
-          log.info({ account_id, page_id, fb_ad_account_id: normalizedAdAccountId }, 'Updated ad_account with Facebook data');
+          log.error({ error: adAccountError, account_id, user_id }, 'Failed to update ad_account with Facebook data');
+          return res.status(500).send({
+            success: false,
+            error: 'Ошибка сохранения данных'
+          });
+        }
+
+        log.info({ account_id, page_id, fb_ad_account_id: normalizedAdAccountId }, 'Updated ad_account with Facebook data (multi-account mode)');
+      } else {
+        // LEGACY РЕЖИМ: пишем в user_accounts как раньше
+        const { error: updateError } = await supabase
+          .from('user_accounts')
+          .update({
+            page_id,
+            instagram_id: instagram_id || null,
+            ad_account_id: normalizedAdAccountId,
+            fb_connection_status: 'pending_review',
+            onboarding_stage: 'fb_pending',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user_id);
+
+        if (updateError) {
+          log.error({ error: updateError, user_id }, 'Failed to save manual Facebook connection');
+          return res.status(500).send({
+            success: false,
+            error: 'Ошибка сохранения данных'
+          });
         }
       }
 
@@ -1077,17 +1082,28 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         status: 'pending_review'
       }, 'Manual Facebook connection saved successfully');
 
-      // Get user info for notification
+      // Get user info and account name for notification
       const { data: userData } = await supabase
         .from('user_accounts')
         .select('username, telegram_id')
         .eq('id', user_id)
         .single();
 
+      let accountName = '';
+      if (isMultiAccount && account_id) {
+        const { data: adAccountData } = await supabase
+          .from('ad_accounts')
+          .select('name')
+          .eq('id', account_id)
+          .single();
+        accountName = adAccountData?.name || '';
+      }
+
       // Send Telegram notification to tech specialists
       const notificationText = `🔔 <b>Новая заявка на подключение Facebook</b>
 
 👤 Пользователь: ${userData?.username || user_id}
+${accountName ? `📦 Аккаунт: ${accountName}` : ''}
 ${userData?.telegram_id ? `📱 Telegram: ${userData.telegram_id}` : ''}
 
 📋 <b>Данные для проверки:</b>

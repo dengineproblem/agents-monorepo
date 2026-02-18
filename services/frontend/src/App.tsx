@@ -266,11 +266,9 @@ const AppRoutes = () => {
         const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
 
         if (isMultiAccount) {
-          // В мультиаккаунтном режиме показываем модалку подключения Facebook
-          // с небольшой задержкой, чтобы дать время на загрузку нового аккаунта
-          setTimeout(() => {
-            setShowFacebookManualModal(true);
-          }, 500);
+          // В мультиаккаунтном режиме НЕ показываем модалку автоматически —
+          // подключение Facebook теперь per-account на MultiAccountDashboard
+          // Пользователь увидит кнопку "Подключить FB" рядом с каждым аккаунтом
         } else {
           // Legacy режим: проверяем есть ли подключение в user
           const hasFacebookConnection = parsedUser.ad_account_id && parsedUser.ad_account_id !== '';

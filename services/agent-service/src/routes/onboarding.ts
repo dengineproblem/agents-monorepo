@@ -88,7 +88,8 @@ const UpdateTagsSchema = z.object({
 });
 
 const ApproveFbSchema = z.object({
-  sendNotification: z.boolean().default(true)
+  sendNotification: z.boolean().default(true),
+  account_id: z.string().uuid().optional(), // UUID ad_accounts.id для мультиаккаунтного режима
 });
 
 // =====================================================
@@ -594,14 +595,14 @@ export default async function onboardingRoutes(app: FastifyInstance) {
   app.post('/onboarding/approve-fb/:userId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { userId } = request.params as { userId: string };
     const parsed = ApproveFbSchema.safeParse(request.body || {});
-    const { sendNotification } = parsed.success ? parsed.data : { sendNotification: true };
+    const { sendNotification, account_id } = parsed.success ? parsed.data : { sendNotification: true, account_id: undefined };
     const changedBy = (request.headers['x-user-id'] as string) || undefined;
 
     try {
       // Получаем пользователя
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('username, onboarding_stage, telegram_id')
+        .select('username, onboarding_stage, telegram_id, multi_account_enabled')
         .eq('id', userId)
         .single();
 
@@ -611,7 +612,26 @@ export default async function onboardingRoutes(app: FastifyInstance) {
 
       const stageFrom = user.onboarding_stage;
 
-      // Обновляем статус и этап
+      // Для multi-account: обновляем ad_accounts.connection_status
+      if (user.multi_account_enabled && account_id) {
+        const { error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .update({
+            connection_status: 'connected',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', account_id)
+          .eq('user_account_id', userId);
+
+        if (adAccountError) {
+          logger.error({ error: adAccountError.message, userId, account_id }, 'Failed to approve ad_account FB connection');
+          return reply.code(500).send({ error: adAccountError.message });
+        }
+
+        logger.info({ userId, account_id }, 'Ad account FB connection approved (multi-account mode)');
+      }
+
+      // Обновляем статус и этап в user_accounts (для legacy и общего отслеживания)
       const { error } = await supabase
         .from('user_accounts')
         .update({
@@ -627,7 +647,7 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       }
 
       // Логируем изменение этапа
-      await logStageChange(userId, stageFrom, 'fb_connected', changedBy, 'FB подключение подтверждено');
+      await logStageChange(userId, stageFrom, 'fb_connected', changedBy, `FB подключение подтверждено${account_id ? ` (account: ${account_id.slice(0, 8)})` : ''}`);
 
       // Создаём и отправляем уведомление
       if (sendNotification) {
