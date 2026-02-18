@@ -172,24 +172,6 @@ export function AllAccountsExecutionsSection({
                 </p>
               </div>
             </div>
-            {onOptimize && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => {
-                  // Если есть аккаунты - оптимизируем первый, иначе без accountId (legacy)
-                  const defaultAccount = adAccounts[0];
-                  onOptimize({
-                    accountId: defaultAccount?.id || '',
-                    accountName: defaultAccount?.name || 'Все кампании',
-                  });
-                }}
-              >
-                <Brain className="h-4 w-4" />
-                Brain Mini
-              </Button>
-            )}
           </div>
         </CardHeader>
 
