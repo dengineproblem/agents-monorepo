@@ -24,7 +24,7 @@ import type {
   TikTokObjective,
   OptimizationLevel,
 } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -62,6 +62,7 @@ export interface CreateDirectionFormData {
   tiktok_daily_budget?: number;
   tiktok_target_cpl_kzt?: number;
   tiktok_instant_page_id?: string;
+  cta_type?: string;
   whatsapp_phone_number?: string;
   whatsapp_connection_type?: ConnectionType;
   whatsapp_waba_phone_id?: string;
@@ -140,6 +141,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
   const [appStoreUrl, setAppStoreUrl] = useState('');
   const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
+
+  // CTA кнопка
+  const [ctaType, setCtaType] = useState('');
 
   // TikTok Instant Page ID (Lead Forms) - ручной ввод
   const [tiktokInstantPageId, setTikTokInstantPageId] = useState('');
@@ -449,6 +453,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         return;
       }
 
+      if (needsSiteFields && !pixelId) {
+        setError('Выберите Meta Pixel для направления Site Leads');
+        return;
+      }
+
       if (needsLeadFormFields && !leadFormId) {
         setError('Выберите лидформу');
         return;
@@ -520,6 +529,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           custom_audience_id: customAudienceId || null,
           daily_budget_cents: Math.round(budgetValue * 100),
           target_cpl_cents: Math.round(cplValue * 100),
+          ...(ctaType && { cta_type: ctaType }),
           whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
           ...(whatsappPhoneNumber.trim() && {
             whatsapp_connection_type: whatsappConnectionType,
@@ -572,6 +582,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setTikTokDailyBudget(String(TIKTOK_MIN_DAILY_BUDGET));
     setTikTokTargetCpl('');
     setSeparateTikTokSettings(false);
+    setCtaType('');
     setWhatsappPhoneNumber('');
     setWhatsappConnectionType('evolution');
     setWhatsappWabaPhoneId('');
@@ -1787,7 +1798,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5">
-                  <Label htmlFor="pixel-id">Pixel ID (опционально)</Label>
+                  <Label htmlFor="pixel-id">Pixel ID <span className="text-red-500">*</span></Label>
                   <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_PIXEL_ID} />
                 </div>
                 <Select
@@ -1838,6 +1849,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <p className="text-xs text-muted-foreground">
                   Используйте переменные: {'{'}{'{'} campaign.name {'}'}{'}' }, {'{'}{'{'}  adset.name {'}'}{'}'}, {'{'}{'{'}  ad.name {'}'}{'}'}
                 </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cta-type-site">Кнопка действия</Label>
+                <Select
+                  value={ctaType || 'SIGN_UP'}
+                  onValueChange={(value) => setCtaType(value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CTA_OPTIONS_SITE.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}
@@ -1908,6 +1939,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <p className="text-xs text-muted-foreground">
                   Если не указан, вы сможете создавать только видео объявления на эту лид-форму.
                 </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cta-type-lead">Кнопка действия</Label>
+                <Select
+                  value={ctaType || 'LEARN_MORE'}
+                  onValueChange={(value) => setCtaType(value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CTA_OPTIONS_LEAD_FORM.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}

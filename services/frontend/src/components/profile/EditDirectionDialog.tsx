@@ -21,7 +21,7 @@ import type {
   UpdateDefaultSettingsInput,
   OptimizationLevel
 } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS } from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -52,6 +52,7 @@ interface EditDirectionDialogProps {
     optimization_level?: OptimizationLevel;
     advantage_audience_enabled?: boolean;
     custom_audience_id?: string | null;
+    cta_type?: string | null;
     capiSettings?: EditDirectionCapiSettings;
   }) => Promise<void>;
 }
@@ -89,6 +90,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
   const [description, setDescription] = useState('Напишите нам, чтобы узнать подробности');
   
+  // CTA кнопка
+  const [ctaType, setCtaType] = useState('');
+
   // Специфичные для целей
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState('');
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.');
@@ -184,6 +188,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setWhatsappPhoneNumber(direction.whatsapp_phone_number || '');
     setAdvantageAudienceEnabled(direction.advantage_audience_enabled !== false);
     setCustomAudienceId(direction.custom_audience_id || '');
+    setCtaType(direction.cta_type || '');
     setError(null);
 
     if (isTikTok) {
@@ -394,6 +399,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               ...(direction.objective === 'conversions' && { optimization_level: optimizationLevel }),
               advantage_audience_enabled: advantageAudienceEnabled,
               custom_audience_id: customAudienceId || null,
+              cta_type: ctaType || null,
               capiSettings: {
                 capi_event_level: null,
               },
@@ -956,6 +962,28 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
                     </p>
                   </div>
+
+                  {(direction.conversion_channel === 'site' || direction.conversion_channel === 'lead_form') && (
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-cta-type-conv">Кнопка действия</Label>
+                      <Select
+                        value={ctaType || (direction.conversion_channel === 'site' ? 'SIGN_UP' : 'LEARN_MORE')}
+                        onValueChange={(value) => setCtaType(value)}
+                        disabled={isSubmitting}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(direction.conversion_channel === 'site' ? CTA_OPTIONS_SITE : CTA_OPTIONS_LEAD_FORM).map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1048,6 +1076,26 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       Используйте переменные: {'{'}{'{'} campaign.name {'}'}{'}' }, {'{'}{'{'}  adset.name {'}'}{'}'}, {'{'}{'{'}  ad.name {'}'}{'}'}
                     </p>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-cta-type-site">Кнопка действия</Label>
+                    <Select
+                      value={ctaType || 'SIGN_UP'}
+                      onValueChange={(value) => setCtaType(value)}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CTA_OPTIONS_SITE.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
 
@@ -1070,6 +1118,26 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     <p className="text-xs text-muted-foreground">
                       Обязательно для креативов с картинками. Для видео креативов не требуется.
                     </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-cta-type-lead">Кнопка действия</Label>
+                    <Select
+                      value={ctaType || 'LEARN_MORE'}
+                      onValueChange={(value) => setCtaType(value)}
+                      disabled={isSubmitting}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CTA_OPTIONS_LEAD_FORM.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}

@@ -62,6 +62,8 @@ export interface Direction {
   capi_event_level?: number | null; // 1=Интерес, 2=Квалификация, 3=Запись
   // Conversions channel (whatsapp, lead_form, site)
   conversion_channel?: ConversionChannel | null;
+  // CTA кнопка (null = дефолт по objective)
+  cta_type?: string | null;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Instagram account usage
@@ -92,6 +94,8 @@ export interface CreateDirectionPayload {
   tiktok_default_settings?: DirectionDefaultSettingsInput;
   // Conversions channel
   conversion_channel?: ConversionChannel;
+  // CTA кнопка
+  cta_type?: string;
   // CAPI settings (direction-level)
   capi_enabled?: boolean;
   capi_source?: CapiSource | null;
@@ -149,12 +153,55 @@ export interface UpdateDirectionPayload {
   capi_scheduled_fields?: CapiFieldConfig[];
   capi_access_token?: string | null;
   capi_event_level?: number | null;
+  // CTA кнопка
+  cta_type?: string;
   // Conversions optimization level
   optimization_level?: OptimizationLevel;
   // Audience controls
   advantage_audience_enabled?: boolean;
   custom_audience_id?: string | null;
 }
+
+// CTA опции для site_leads / conversions(site)
+export const CTA_OPTIONS_SITE: { value: string; label: string }[] = [
+  { value: 'SIGN_UP', label: 'Зарегистрироваться' },
+  { value: 'LEARN_MORE', label: 'Подробнее' },
+  { value: 'SUBSCRIBE', label: 'Подписаться' },
+  { value: 'GET_OFFER', label: 'Получить предложение' },
+  { value: 'GET_QUOTE', label: 'Получить расчёт' },
+  { value: 'CONTACT_US', label: 'Связаться с нами' },
+  { value: 'APPLY_NOW', label: 'Подать заявку' },
+  { value: 'BOOK_NOW', label: 'Забронировать' },
+  { value: 'DOWNLOAD', label: 'Скачать' },
+  { value: 'SHOP_NOW', label: 'В магазин' },
+  { value: 'ORDER_NOW', label: 'Заказать' },
+];
+
+// CTA опции для lead_forms / conversions(lead_form)
+export const CTA_OPTIONS_LEAD_FORM: { value: string; label: string }[] = [
+  { value: 'LEARN_MORE', label: 'Подробнее' },
+  { value: 'SIGN_UP', label: 'Зарегистрироваться' },
+  { value: 'SUBSCRIBE', label: 'Подписаться' },
+  { value: 'GET_OFFER', label: 'Получить предложение' },
+  { value: 'GET_QUOTE', label: 'Получить расчёт' },
+  { value: 'APPLY_NOW', label: 'Подать заявку' },
+  { value: 'DOWNLOAD', label: 'Скачать' },
+];
+
+// Маппинг CTA value → русский лейбл (для отображения)
+export const CTA_LABELS: Record<string, string> = {
+  SIGN_UP: 'Зарегистрироваться',
+  LEARN_MORE: 'Подробнее',
+  SUBSCRIBE: 'Подписаться',
+  GET_OFFER: 'Получить предложение',
+  GET_QUOTE: 'Получить расчёт',
+  CONTACT_US: 'Связаться с нами',
+  APPLY_NOW: 'Подать заявку',
+  BOOK_NOW: 'Забронировать',
+  DOWNLOAD: 'Скачать',
+  SHOP_NOW: 'В магазин',
+  ORDER_NOW: 'Заказать',
+};
 
 // Дефолтные настройки рекламы для направления
 export interface DefaultAdSettings {

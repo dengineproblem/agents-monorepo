@@ -666,7 +666,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     if (directionId) {
       const { data: directionData } = await supabase
         .from('account_directions')
-        .select('objective, use_instagram, conversion_channel')
+        .select('objective, use_instagram, conversion_channel, cta_type')
         .eq('id', directionId)
         .maybeSingle();
 
@@ -755,7 +755,8 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         message: description,
         siteUrl: siteUrl,
         utm: utm,
-        thumbnailHash: thumbnailResult.hash
+        thumbnailHash: thumbnailResult.hash,
+        ctaType: direction?.cta_type || undefined,
       });
       fbCreativeId = websiteCreative.id;
     } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
@@ -768,7 +769,8 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         instagramId: instagramId,
         message: description,
         leadFormId: leadFormId,
-        thumbnailHash: thumbnailResult.hash
+        thumbnailHash: thumbnailResult.hash,
+        ctaType: direction?.cta_type || undefined,
       });
       fbCreativeId = leadFormCreative.id;
     } else if (objective === 'app_installs') {

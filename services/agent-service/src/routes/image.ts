@@ -231,7 +231,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           // Загружаем direction для получения objective и conversion_channel
           const { data: directionData } = await supabase
             .from('account_directions')
-            .select('objective, platform, conversion_channel')
+            .select('objective, platform, conversion_channel, cta_type')
             .eq('id', body.direction_id)
             .maybeSingle();
 
@@ -321,7 +321,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             instagramId: instagramId,
             message: description,
             siteUrl: siteUrl,
-            utm: utm || undefined
+            utm: utm || undefined,
+            ctaType: direction?.cta_type || undefined,
           });
           fbCreativeId = websiteCreative.id;
         } else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) {
@@ -340,7 +341,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             instagramId: instagramId,
             message: description,
             leadFormId: leadFormId,
-            link: siteUrl
+            link: siteUrl,
+            ctaType: direction?.cta_type || undefined,
           });
           fbCreativeId = leadFormCreative.id;
         } else if (objective === 'app_installs') {
@@ -558,7 +560,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       // 3. Загружаем direction для получения objective и conversion_channel
       const { data: direction, error: directionError } = await supabase
         .from('account_directions')
-        .select('objective, platform, conversion_channel')
+        .select('objective, platform, conversion_channel, cta_type')
         .eq('id', direction_id)
         .single();
 
@@ -730,7 +732,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           instagramId: instagramId,
           message: description,
           siteUrl: siteUrl,
-          utm: utm || undefined
+          utm: utm || undefined,
+          ctaType: (direction as any)?.cta_type || undefined,
         });
         fbCreativeId = result.id;
       } else if (objective === 'lead_forms' || (objective === 'conversions' && (direction as any).conversion_channel === 'lead_form')) {
@@ -755,7 +758,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           instagramId: instagramId,
           message: description,
           leadFormId: leadFormId,
-          link: siteUrl
+          link: siteUrl,
+          ctaType: (direction as any)?.cta_type || undefined,
         });
         fbCreativeId = result.id;
       } else if (objective === 'app_installs') {

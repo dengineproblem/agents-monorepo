@@ -1094,7 +1094,7 @@ async function importSingleCreative(
           // Загружаем настройки направления
           const { data: direction } = await supabase
             .from('account_directions')
-            .select('objective, use_instagram, conversion_channel')
+            .select('objective, use_instagram, conversion_channel, cta_type')
             .eq('id', directionId)
             .maybeSingle();
 
@@ -1152,7 +1152,8 @@ async function importSingleCreative(
                   message: description,
                   siteUrl: siteUrl,
                   utm: utm,
-                  imageUrl: creative.thumbnail_url || undefined
+                  imageUrl: creative.thumbnail_url || undefined,
+                  ctaType: direction?.cta_type || undefined,
                 });
                 fbCreativeId = websiteCreative.id;
               }
@@ -1164,7 +1165,8 @@ async function importSingleCreative(
                   instagramId: fullCredentials.instagramId || undefined,
                   message: description,
                   leadFormId: leadFormId,
-                  imageUrl: creative.thumbnail_url || undefined
+                  imageUrl: creative.thumbnail_url || undefined,
+                  ctaType: direction?.cta_type || undefined,
                 });
                 fbCreativeId = leadFormCreative.id;
               }

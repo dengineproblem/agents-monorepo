@@ -544,15 +544,9 @@ export async function workflowCreateAdSetInDirection(
         source: direction.pixel_id ? 'direction' : 'defaultSettings'
       }, 'Using pixel_id for site_leads');
     } else {
-      // Если pixel не настроен - создаём без пикселя (допустимо для Facebook)
-      adsetBody.promoted_object = {
-        custom_event_type: 'LEAD'
-      };
-
-      log.warn({
-        directionId: direction.id,
-        directionName: direction.name
-      }, 'Creating site_leads adset without pixel_id - tracking will be limited');
+      throw new Error(
+        `Для направления "${direction.name}" не настроен Meta Pixel. Укажите Pixel ID в настройках направления.`
+      );
     }
   }
 

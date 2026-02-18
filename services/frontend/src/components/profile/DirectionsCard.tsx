@@ -106,6 +106,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       ...(data.tiktok_daily_budget !== undefined && { tiktok_daily_budget: data.tiktok_daily_budget }),
       ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
       ...(data.tiktok_instant_page_id && { tiktok_instant_page_id: data.tiktok_instant_page_id }),
+      ...(data.cta_type && { cta_type: data.cta_type }),
       ...(facebookSettings && { facebook_default_settings: facebookSettings }),
       ...(tiktokSettings && { tiktok_default_settings: tiktokSettings }),
       ...(sharedSettings && !facebookSettings && !tiktokSettings && { default_settings: sharedSettings }),
@@ -137,6 +138,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     optimization_level?: 'level_1' | 'level_2' | 'level_3';
     advantage_audience_enabled?: boolean;
     custom_audience_id?: string | null;
+    cta_type?: string | null;
     capiSettings?: EditDirectionCapiSettings;
   }) => {
     if (!selectedDirection) return;
@@ -155,6 +157,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         advantage_audience_enabled: data.advantage_audience_enabled,
       }),
       ...(data.custom_audience_id !== undefined && { custom_audience_id: data.custom_audience_id }),
+      ...(data.cta_type !== undefined && { cta_type: data.cta_type }),
       // CAPI settings
       ...(data.capiSettings && {
         capi_enabled: data.capiSettings.capi_enabled,

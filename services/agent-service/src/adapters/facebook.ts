@@ -870,6 +870,7 @@ export async function createWebsiteLeadsCreative(
     utm?: string;
     thumbnailHash?: string;
     imageUrl?: string; // Для импортированных видео
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({
@@ -885,7 +886,7 @@ export async function createWebsiteLeadsCreative(
     video_id: params.videoId,
     message: params.message,
     call_to_action: {
-      type: "SIGN_UP",
+      type: params.ctaType || "SIGN_UP",
       value: {
         link: params.siteUrl
       }
@@ -997,6 +998,7 @@ export async function createLeadFormVideoCreative(
     leadFormId: string;
     thumbnailHash?: string;
     imageUrl?: string; // Для импортированных видео
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createLeadFormVideoCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form video creative');
@@ -1005,7 +1007,7 @@ export async function createLeadFormVideoCreative(
     video_id: params.videoId,
     message: params.message,
     call_to_action: {
-      type: "LEARN_MORE",
+      type: params.ctaType || "LEARN_MORE",
       value: {
         lead_gen_form_id: params.leadFormId
       }
@@ -1322,6 +1324,7 @@ export async function createWebsiteLeadsImageCreative(
     message: string;
     siteUrl: string;
     utm?: string;
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createWebsiteLeadsImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads image creative');
@@ -1333,7 +1336,7 @@ export async function createWebsiteLeadsImageCreative(
       message: params.message,
       link: params.siteUrl,
       call_to_action: {
-        type: "SIGN_UP",
+        type: params.ctaType || "SIGN_UP",
         value: {
           link: params.siteUrl
         }
@@ -1447,6 +1450,7 @@ export async function createLeadFormImageCreative(
     message: string;
     leadFormId: string;
     link: string;  // Required by Facebook API for link_data structure
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createLeadFormImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form image creative');
@@ -1459,7 +1463,7 @@ export async function createLeadFormImageCreative(
     message: params.message,
     link: params.link,
     call_to_action: {
-      type: "LEARN_MORE",
+      type: params.ctaType || "LEARN_MORE",
       value: {
         lead_gen_form_id: params.leadFormId
       }
@@ -1615,6 +1619,7 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
     message: string;
     siteUrl: string;
     utm?: string;
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createWebsiteLeadsImageCreativeMultiFormat', pageId: params.pageId, hasInstagramId: !!params.instagramId, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads multi-format image creative');
@@ -1626,7 +1631,7 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
       link: params.siteUrl,
       message: params.message,
       call_to_action: {
-        type: "SIGN_UP",
+        type: params.ctaType || "SIGN_UP",
         value: { link: params.siteUrl }
       }
     }
@@ -1896,17 +1901,19 @@ export async function createWebsiteLeadsCarouselCreative(
     message: string;
     siteUrl: string;
     utm?: string;
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createWebsiteLeadsCarouselCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, cardsCount: params.cards.length, siteUrl: params.siteUrl }, '[FB Creative] Building Website Leads carousel creative');
 
+  const ctaType = params.ctaType || "SIGN_UP";
   const childAttachments = params.cards.map((card) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50),
     description: card.text,
     link: card.link || params.siteUrl,
     call_to_action: {
-      type: "SIGN_UP",
+      type: ctaType,
       value: { link: card.link || params.siteUrl }
     }
   }));
@@ -1919,7 +1926,7 @@ export async function createWebsiteLeadsCarouselCreative(
       multi_share_optimized: true,
       child_attachments: childAttachments,
       call_to_action: {
-        type: "SIGN_UP",
+        type: ctaType,
         value: { link: params.siteUrl }
       }
     }
@@ -2035,16 +2042,18 @@ export async function createLeadFormCarouselCreative(
     instagramId?: string | null;
     message: string;
     leadFormId: string;
+    ctaType?: string;
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createLeadFormCarouselCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId, cardsCount: params.cards.length, leadFormId: params.leadFormId }, '[FB Creative] Building Lead Form carousel creative');
 
+  const ctaType = params.ctaType || "LEARN_MORE";
   const childAttachments = params.cards.map((card) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50),
     description: card.text,
     call_to_action: {
-      type: "LEARN_MORE",
+      type: ctaType,
       value: {
         lead_gen_form_id: params.leadFormId
       }
@@ -2058,7 +2067,7 @@ export async function createLeadFormCarouselCreative(
       multi_share_optimized: true,
       child_attachments: childAttachments,
       call_to_action: {
-        type: "LEARN_MORE",
+        type: ctaType,
         value: {
           lead_gen_form_id: params.leadFormId
         }

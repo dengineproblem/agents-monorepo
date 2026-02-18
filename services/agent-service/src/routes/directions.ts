@@ -29,16 +29,28 @@ const DefaultSettingsSchema = z.object({
   // WhatsApp specific
   client_question: z.string().optional(),
   // Instagram specific
-  instagram_url: z.string().url().optional(),
+  instagram_url: z.preprocess((v) => {
+    if (!v || v === '') return undefined;
+    const s = String(v);
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }, z.string().url().optional()),
   // Site Leads specific
-  site_url: z.string().url().optional(),
+  site_url: z.preprocess((v) => {
+    if (!v || v === '') return undefined;
+    const s = String(v);
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }, z.string().url().optional()),
   pixel_id: z.string().nullable().optional(),
   utm_tag: z.string().optional(),
   // Lead Forms specific
   lead_form_id: z.string().optional(),
   // App Installs specific
   app_id: z.string().optional(),
-  app_store_url: z.string().url().optional(),
+  app_store_url: z.preprocess((v) => {
+    if (!v || v === '') return undefined;
+    const s = String(v);
+    return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  }, z.string().url().optional()),
   is_skadnetwork_attribution: z.boolean().optional(),
 });
 
@@ -114,6 +126,7 @@ const CreateDirectionSchema = z.object({
   tiktok_target_cpl: z.number().min(0).optional(),
   tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
   tiktok_instant_page_id: z.string().optional(),
+  cta_type: z.string().optional(),
   // Опциональные дефолтные настройки рекламы
   default_settings: DefaultSettingsSchema.optional(),
   facebook_default_settings: DefaultSettingsSchema.optional(),
@@ -206,6 +219,7 @@ const UpdateDirectionSchema = z.object({
   tiktok_target_cpl: z.number().min(0).optional(),
   tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
   tiktok_instant_page_id: z.string().nullable().optional(),
+  cta_type: z.string().nullable().optional(),
   // CAPI event level per-direction (CAPI config now in capi_settings table)
   capi_event_level: z.number().int().min(1).max(3).nullable().optional(),
   // Conversions optimization level
@@ -1301,6 +1315,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               fb_campaign_id: fbCampaign.campaign_id,
               campaign_status: fbCampaign.status,
               is_active: true,
+              cta_type: input.cta_type || null,
               // CAPI event level per-direction (config now in capi_settings table)
               capi_event_level: input.capi_event_level ?? null,
               // Conversions optimization level
