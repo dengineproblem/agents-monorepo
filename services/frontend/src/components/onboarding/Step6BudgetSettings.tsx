@@ -71,7 +71,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
         <div>
           <Label htmlFor="dailyBudget" className="flex items-center gap-2">
             <DollarSign className="h-4 w-4 text-green-600" />
-            Плановый дневной бюджет (руб.)
+            Плановый дневной бюджет ($)
           </Label>
           <div className="relative mt-1.5">
             <Input
@@ -84,7 +84,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
               className="pr-12"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-              руб/день
+              $/день
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
@@ -96,7 +96,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
         <div>
           <Label htmlFor="targetCPL" className="flex items-center gap-2">
             <Target className="h-4 w-4 text-blue-600" />
-            Целевая стоимость заявки — CPL (руб.)
+            Целевая стоимость заявки — CPL ($)
           </Label>
           <div className="relative mt-1.5">
             <Input
@@ -109,7 +109,7 @@ export const Step6BudgetSettings: React.FC<Step6Props> = ({ data, onNext, onBack
               className="pr-16"
             />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-              руб/заявка
+              $/заявка
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
