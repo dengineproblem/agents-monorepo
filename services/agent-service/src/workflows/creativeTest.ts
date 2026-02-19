@@ -195,6 +195,29 @@ export async function workflowStartCreativeTest(
   // ===================================================
   const defaultSettings = await getDirectionSettings(creative.direction_id);
 
+  // Fallback: pixel_id из capi_settings
+  let capiPixelId: string | null = null;
+  if (!defaultSettings?.pixel_id && direction.objective === 'conversions') {
+    const conversionChannel = direction.conversion_channel || 'whatsapp';
+    const capiChannel = conversionChannel === 'lead_form' ? 'lead_forms' : conversionChannel;
+    const capiQuery = supabase
+      .from('capi_settings')
+      .select('pixel_id')
+      .eq('user_account_id', user_id)
+      .eq('channel', capiChannel)
+      .eq('is_active', true);
+    if (db_ad_account_id) {
+      capiQuery.eq('account_id', db_ad_account_id);
+    } else {
+      capiQuery.is('account_id', null);
+    }
+    const { data: capiSettings } = await capiQuery.maybeSingle();
+    if (capiSettings?.pixel_id) {
+      capiPixelId = capiSettings.pixel_id;
+      log.info({ pixel_id: capiPixelId, source: 'capi_settings', channel: capiChannel }, 'Resolved pixel_id from capi_settings');
+    }
+  }
+
   log.info({
     directionId: creative.direction_id,
     hasSettings: Boolean(defaultSettings)
@@ -243,17 +266,20 @@ export async function workflowStartCreativeTest(
       optimization_goal = 'OFFSITE_CONVERSIONS';
       destination_type = 'WEBSITE';
 
-      if (defaultSettings?.pixel_id) {
-        promoted_object = {
-          pixel_id: String(defaultSettings.pixel_id),
-          custom_event_type: 'LEAD'
-        };
-        log.info({ pixel_id: defaultSettings.pixel_id }, 'Using pixel_id for site_leads');
-      } else {
-        promoted_object = {
-          custom_event_type: 'LEAD'
-        };
-        log.warn('No pixel_id found in default settings for site_leads - creating without pixel tracking');
+      {
+        const sitePixelId = defaultSettings?.pixel_id || capiPixelId;
+        if (sitePixelId) {
+          promoted_object = {
+            pixel_id: String(sitePixelId),
+            custom_event_type: 'LEAD'
+          };
+          log.info({ pixel_id: sitePixelId, source: defaultSettings?.pixel_id ? 'defaultSettings' : 'capi_settings' }, 'Using pixel_id for site_leads');
+        } else {
+          promoted_object = {
+            custom_event_type: 'LEAD'
+          };
+          log.warn('No pixel_id found for site_leads - creating without pixel tracking');
+        }
       }
       break;
 
@@ -295,13 +321,26 @@ export async function workflowStartCreativeTest(
           page_id: String(page_id),
         };
         log.info({ conversion_channel: conversionChannel, destination_type }, 'Using lead_form QUALITY_LEAD (no pixel needed)');
-      } else if (defaultSettings?.pixel_id) {
+      } else {
+        const effectivePixelId = defaultSettings?.pixel_id || capiPixelId;
+        if (!effectivePixelId) {
+          log.error({
+            directionId: direction.id,
+            directionName: direction.name,
+            conversion_channel: conversionChannel,
+          }, 'Conversions requires pixel_id but none configured');
+          throw new Error(
+            `Cannot create conversions test: pixel_id not configured for direction "${direction.name}". ` +
+            `Please configure Meta Pixel in direction settings.`
+          );
+        }
+
         const customEventType = getCustomEventType(direction.optimization_level, conversionChannel);
 
         if (conversionChannel === 'whatsapp') {
           destination_type = 'WHATSAPP';
           promoted_object = {
-            pixel_id: String(defaultSettings.pixel_id),
+            pixel_id: String(effectivePixelId),
             custom_event_type: customEventType,
             page_id: String(page_id),
           };
@@ -311,14 +350,13 @@ export async function workflowStartCreativeTest(
         } else if (conversionChannel === 'site') {
           destination_type = 'WEBSITE';
           promoted_object = {
-            pixel_id: String(defaultSettings.pixel_id),
+            pixel_id: String(effectivePixelId),
             custom_event_type: customEventType,
           };
         } else {
-          // Fallback на whatsapp
           destination_type = 'WHATSAPP';
           promoted_object = {
-            pixel_id: String(defaultSettings.pixel_id),
+            pixel_id: String(effectivePixelId),
             custom_event_type: customEventType,
             page_id: String(page_id),
           };
@@ -328,22 +366,13 @@ export async function workflowStartCreativeTest(
         }
 
         log.info({
-          pixel_id: defaultSettings.pixel_id,
+          pixel_id: effectivePixelId,
+          pixel_source: defaultSettings?.pixel_id ? 'defaultSettings' : 'capi_settings',
           optimization_level: direction.optimization_level || 'level_1',
           custom_event_type: customEventType,
           conversion_channel: conversionChannel,
           destination_type,
         }, 'Using pixel_id for conversions');
-      } else {
-        log.error({
-          directionId: direction.id,
-          directionName: direction.name,
-          conversion_channel: conversionChannel,
-        }, 'Conversions requires pixel_id but none configured');
-        throw new Error(
-          `Cannot create conversions test: pixel_id not configured for direction "${direction.name}". ` +
-          `Please configure Meta Pixel in direction settings.`
-        );
       }
       break;
     }

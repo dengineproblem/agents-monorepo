@@ -286,6 +286,29 @@ export async function workflowCreateAdSetInDirection(
     .eq('direction_id', direction_id)
     .maybeSingle();
 
+  // Fallback: pixel_id из capi_settings (если не задан в direction/defaultSettings)
+  let capiPixelId: string | null = null;
+  if (!direction.pixel_id && !defaultSettings?.pixel_id && direction.objective === 'conversions') {
+    const conversionChannel = direction.conversion_channel || 'whatsapp';
+    const capiChannel = conversionChannel === 'lead_form' ? 'lead_forms' : conversionChannel;
+    const capiQuery = supabase
+      .from('capi_settings')
+      .select('pixel_id')
+      .eq('user_account_id', user_account_id)
+      .eq('channel', capiChannel)
+      .eq('is_active', true);
+    if (context_account_id) {
+      capiQuery.eq('account_id', context_account_id);
+    } else {
+      capiQuery.is('account_id', null);
+    }
+    const { data: capiSettings } = await capiQuery.maybeSingle();
+    if (capiSettings?.pixel_id) {
+      capiPixelId = capiSettings.pixel_id;
+      log.info({ pixel_id: capiPixelId, source: 'capi_settings', channel: capiChannel }, 'Resolved pixel_id from capi_settings');
+    }
+  }
+
   const directionAudienceControls = {
     advantageAudienceEnabled: direction.advantage_audience_enabled !== false,
     customAudienceId: direction.custom_audience_id || null,
@@ -459,7 +482,7 @@ export async function workflowCreateAdSetInDirection(
       }, 'Conversions direction missing conversion_channel, falling back to whatsapp');
     }
 
-    const pixelId = direction.pixel_id || defaultSettings?.pixel_id;
+    const pixelId = direction.pixel_id || defaultSettings?.pixel_id || capiPixelId;
     // lead_form (QUALITY_LEAD) не требует pixel_id — только page_id
     if (!pixelId && conversionChannel !== 'lead_form') {
       log.error({
@@ -520,7 +543,7 @@ export async function workflowCreateAdSetInDirection(
       conversion_channel: conversionChannel,
       optimization_level: direction.optimization_level,
       pixel_id: pixelId,
-      pixel_source: direction.pixel_id ? 'direction' : 'defaultSettings',
+      pixel_source: direction.pixel_id ? 'direction' : defaultSettings?.pixel_id ? 'defaultSettings' : 'capi_settings',
       custom_event_type: customEventType,
       page_id: effective_page_id || null,
       whatsapp_phone_number: whatsapp_phone_number || null,
@@ -532,16 +555,17 @@ export async function workflowCreateAdSetInDirection(
   if (direction.objective === 'site_leads') {
     adsetBody.destination_type = 'WEBSITE';
 
-    // Проверяем ОБА источника: direction.pixel_id (fallback) и defaultSettings.pixel_id (основной)
-    if (direction.pixel_id || defaultSettings?.pixel_id) {
+    // Проверяем ВСЕ источники: direction.pixel_id, defaultSettings.pixel_id, capi_settings
+    const sitePixelId = direction.pixel_id || defaultSettings?.pixel_id || capiPixelId;
+    if (sitePixelId) {
       adsetBody.promoted_object = {
-        pixel_id: String(direction.pixel_id || defaultSettings.pixel_id),
+        pixel_id: String(sitePixelId),
         custom_event_type: 'LEAD'
       };
 
       log.info({
-        pixel_id: direction.pixel_id || defaultSettings.pixel_id,
-        source: direction.pixel_id ? 'direction' : 'defaultSettings'
+        pixel_id: sitePixelId,
+        source: direction.pixel_id ? 'direction' : defaultSettings?.pixel_id ? 'defaultSettings' : 'capi_settings'
       }, 'Using pixel_id for site_leads');
     } else {
       throw new Error(
