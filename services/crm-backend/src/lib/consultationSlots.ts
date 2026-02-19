@@ -79,7 +79,7 @@ function normalizeTime(time: string): string {
 /**
  * Форматирует дату и время для клиента
  */
-function formatSlotForClient(date: string, startTime: string, consultantName: string): string {
+function formatSlotForClient(date: string, startTime: string): string {
   const slotDate = new Date(date);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -103,7 +103,7 @@ function formatSlotForClient(date: string, startTime: string, consultantName: st
     dateStr = `${day} ${month} (${dayOfWeek})`;
   }
 
-  return `${dateStr} в ${startTime} — ${consultantName}`;
+  return `${dateStr} в ${startTime}`;
 }
 
 /**
@@ -456,7 +456,7 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
           date: dateStr,
           start_time: slot.start,
           end_time: slot.end,
-          formatted: formatSlotForClient(dateStr, slot.start, consultantName)
+          formatted: formatSlotForClient(dateStr, slot.start)
         });
       }
     }
@@ -685,7 +685,7 @@ export async function getClientConsultations(dialogAnalysisId: string): Promise<
       start_time: normalizedStartTime,
       end_time: normalizeTime(c.end_time),
       consultant_name: consultantName,
-      formatted: formatSlotForClient(normalizedDate, normalizedStartTime, consultantName)
+      formatted: formatSlotForClient(normalizedDate, normalizedStartTime)
     };
   });
 
