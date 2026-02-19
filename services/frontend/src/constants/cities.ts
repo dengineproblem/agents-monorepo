@@ -70,5 +70,9 @@ export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA'
 // Кипрские регионы/города (без CY-страны) — для взаимоисключения с "Весь Кипр"
 export const CYPRUS_GEO_IDS = ['792', '794', '795', '514564', '515017'];
 
+// Facebook region IDs (districts) — НЕ города!
+// Эти ID нужно отправлять как geo_locations.regions, а НЕ geo_locations.cities
+export const REGION_IDS = ['792', '794', '795']; // Larnaca, Limassol, Paphos Districts
+
 // Дефолтный UTM-тег
 export const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}';

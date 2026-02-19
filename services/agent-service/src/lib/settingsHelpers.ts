@@ -129,18 +129,27 @@ export function buildTargeting(
     targeting.genders = settings.gender === 'male' ? [1] : [2];
   }
 
+  // Facebook region IDs (districts) — отправляются как geo_locations.regions, НЕ cities
+  // 792 = Larnaca District (CY), 794 = Limassol District (CY), 795 = Paphos District (CY)
+  const REGION_IDS = new Set(['792', '794', '795']);
+
   // Гео-локации (читаем из поля cities в БД)
   if (settings.cities && Array.isArray(settings.cities) && settings.cities.length > 0) {
     const countries: string[] = [];
+    const regions: string[] = [];
     const cities: string[] = [];
 
     for (const item of settings.cities) {
-      if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
-        // 2 заглавные буквы = код страны (RU, KZ, BY, US)
-        countries.push(item);
+      const id = String(item);
+      if (id.length === 2 && id === id.toUpperCase()) {
+        // 2 заглавные буквы = код страны (RU, KZ, BY, US, CY)
+        countries.push(id);
+      } else if (REGION_IDS.has(id)) {
+        // Известные region/district ID
+        regions.push(id);
       } else {
         // Все остальное = ID города
-        cities.push(String(item));
+        cities.push(id);
       }
     }
 
@@ -150,6 +159,12 @@ export function buildTargeting(
       targeting.geo_locations.countries = countries;
     }
 
+    if (regions.length > 0) {
+      targeting.geo_locations.regions = regions.map((regionId: string) => ({
+        key: regionId,
+      }));
+    }
+
     if (cities.length > 0) {
       targeting.geo_locations.cities = cities.map((cityId: string) => ({
         key: cityId,
@@ -157,11 +172,11 @@ export function buildTargeting(
     }
 
     // Если ничего не распознано - ошибка валидации
-    if (countries.length === 0 && cities.length === 0) {
+    if (countries.length === 0 && regions.length === 0 && cities.length === 0) {
       log.error({ cities: settings.cities }, 'Invalid cities format in settings');
       throw new Error(
         'Invalid cities format in settings. Cities should be either 2-letter country codes (RU, KZ) ' +
-        'or city IDs (2643743, 1289662)'
+        'or city/region IDs (2643743, 1289662, 794)'
       );
     }
   } else {
@@ -175,6 +190,7 @@ export function buildTargeting(
   log.info({
     objective,
     countries: finalTargeting.geo_locations?.countries?.length || 0,
+    regions: finalTargeting.geo_locations?.regions?.length || 0,
     cities: finalTargeting.geo_locations?.cities?.length || 0,
     advantageAudienceEnabled: controls.advantageAudienceEnabled !== false,
     hasCustomAudience: Boolean(controls.customAudienceId)
