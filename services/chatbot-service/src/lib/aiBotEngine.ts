@@ -2971,43 +2971,119 @@ export async function processIncomingMessage(
 
       lead = newLead;
       ctxLog.info({ leadId: maskUuid(newLead.id) }, '[processIncomingMessage] New lead created', ['db']);
+    }
 
-      // Автоматически назначаем консультанта новому лиду (round-robin)
-      try {
-        const { data: consultantId, error: assignError } = await supabase
-          .rpc('assign_lead_to_consultant', {
-            p_user_account_id: botConfig.user_account_id
-          });
+    // === Автоназначение консультанта из настроек бота (bot-scoped round-robin) ===
+    if (lead.assigned_consultant_id) {
+      ctxLog.debug({
+        leadId: maskUuid(lead.id),
+        consultantId: maskUuid(lead.assigned_consultant_id)
+      }, '[ConsultantAssign] Lead already has consultant, skipping', ['db']);
+    } else if (!botConfig.consultation_integration_enabled) {
+      ctxLog.debug({
+        leadId: maskUuid(lead.id),
+        botName: botConfig.name
+      }, '[ConsultantAssign] Consultation integration disabled for this bot', ['db']);
+    } else {
+      const botConsultantIds = botConfig.consultation_settings?.consultant_ids;
+      if (!botConsultantIds?.length) {
+        ctxLog.debug({
+          leadId: maskUuid(lead.id),
+          botName: botConfig.name
+        }, '[ConsultantAssign] No consultant_ids configured in bot settings', ['db']);
+      } else {
+        ctxLog.info({
+          leadId: maskUuid(lead.id),
+          botName: botConfig.name,
+          configuredCount: botConsultantIds.length
+        }, '[ConsultantAssign] Starting bot-scoped assignment', ['db']);
 
-        if (!assignError && consultantId) {
-          // Обновляем assigned_consultant_id в созданном лиде
-          await supabase
-            .from('dialog_analysis')
-            .update({ assigned_consultant_id: consultantId })
-            .eq('id', newLead.id);
+        try {
+          // Шаг 1: Получаем активных консультантов из списка бота
+          const { data: candidates, error: candidatesError } = await supabase
+            .from('consultants')
+            .select('id, name')
+            .in('id', botConsultantIds)
+            .eq('is_active', true)
+            .eq('accepts_new_leads', true);
 
-          ctxLog.info({
-            leadId: maskUuid(newLead.id),
-            consultantId: maskUuid(consultantId)
-          }, '[processIncomingMessage] Lead assigned to consultant (round-robin)', ['db']);
+          if (candidatesError) {
+            ctxLog.warn({
+              leadId: maskUuid(lead.id),
+              error: candidatesError.message
+            }, '[ConsultantAssign] Error fetching candidates (non-fatal)', ['db']);
+          } else if (!candidates?.length) {
+            ctxLog.warn({
+              leadId: maskUuid(lead.id),
+              botName: botConfig.name,
+              configuredIds: botConsultantIds.length
+            }, '[ConsultantAssign] No active consultants accepting leads from bot config', ['db']);
+          } else {
+            // Шаг 2: Считаем лидов у каждого кандидата (через count запросы)
+            const candidateIds = candidates.map(c => c.id);
+            const countMap = new Map<string, number>();
 
-          // Обновляем lead объект с назначенным консультантом
-          lead.assigned_consultant_id = consultantId;
-        } else if (assignError) {
+            // Параллельно запрашиваем count для каждого консультанта
+            const countPromises = candidateIds.map(async (id) => {
+              const { count, error } = await supabase
+                .from('dialog_analysis')
+                .select('id', { count: 'exact', head: true })
+                .eq('assigned_consultant_id', id);
+              return { id, count: error ? 0 : (count ?? 0) };
+            });
+            const counts = await Promise.all(countPromises);
+            counts.forEach(({ id, count }) => countMap.set(id, count));
+
+            // Шаг 3: Выбираем с минимумом лидов (стабильная сортировка по ID при равенстве)
+            const sorted = [...countMap.entries()]
+              .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
+            const selectedId = sorted[0]?.[0];
+            const selectedName = candidates.find(c => c.id === selectedId)?.name;
+
+            ctxLog.info({
+              leadId: maskUuid(lead.id),
+              distribution: Object.fromEntries(
+                sorted.map(([id, count]) => [
+                  candidates.find(c => c.id === id)?.name || maskUuid(id),
+                  count
+                ])
+              )
+            }, '[ConsultantAssign] Round-robin distribution calculated', ['db']);
+
+            if (selectedId) {
+              // Шаг 4: Назначаем консультанта
+              const { error: updateError } = await supabase
+                .from('dialog_analysis')
+                .update({ assigned_consultant_id: selectedId })
+                .eq('id', lead.id);
+
+              if (updateError) {
+                ctxLog.warn({
+                  leadId: maskUuid(lead.id),
+                  consultantId: maskUuid(selectedId),
+                  error: updateError.message
+                }, '[ConsultantAssign] Failed to update lead (non-fatal)', ['db']);
+              } else {
+                lead.assigned_consultant_id = selectedId;
+
+                ctxLog.info({
+                  leadId: maskUuid(lead.id),
+                  consultantId: maskUuid(selectedId),
+                  consultantName: selectedName,
+                  botName: botConfig.name,
+                  candidateCount: candidateIds.length,
+                  leadCount: countMap.get(selectedId) ?? 0
+                }, '[ConsultantAssign] Lead assigned to consultant (bot-scoped round-robin)', ['db']);
+              }
+            }
+          }
+        } catch (assignErr: any) {
           ctxLog.warn({
-            leadId: maskUuid(newLead.id),
-            error: assignError.message
-          }, '[processIncomingMessage] Failed to assign consultant (non-fatal)', ['db']);
-        } else {
-          ctxLog.debug({
-            leadId: maskUuid(newLead.id)
-          }, '[processIncomingMessage] No consultants available for assignment', ['db']);
+            leadId: maskUuid(lead.id),
+            error: assignErr.message,
+            stack: assignErr.stack?.split('\n').slice(0, 3).join(' | ')
+          }, '[ConsultantAssign] Unexpected error during assignment (non-fatal)', ['db']);
         }
-      } catch (assignErr: any) {
-        ctxLog.warn({
-          leadId: maskUuid(newLead.id),
-          error: assignErr.message
-        }, '[processIncomingMessage] Error assigning consultant (non-fatal)', ['db']);
       }
     }
 

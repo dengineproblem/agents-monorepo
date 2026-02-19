@@ -19,6 +19,7 @@ import {
   Plus,
   Trash2,
   MessagesSquare,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +38,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { aiBotApi, type LinkedInstance, type WhatsAppInstance, type SendPulseSettings } from '@/services/aiBotApi';
 import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
@@ -946,16 +948,25 @@ export function BotEditor() {
                         {consultants.length === 0 ? (
                           <p className="text-sm text-muted-foreground">Нет консультантов</p>
                         ) : (
-                          consultants.map((consultant: Consultant) => (
-                            <Badge
-                              key={consultant.id}
-                              variant={consultationSettings.consultantIds?.includes(consultant.id) ? 'default' : 'outline'}
-                              className="cursor-pointer"
-                              onClick={() => toggleConsultant(consultant.id)}
-                            >
-                              {consultant.name}
-                            </Badge>
-                          ))
+                          consultants.map((consultant: Consultant) => {
+                            const isSelected = consultationSettings.consultantIds?.includes(consultant.id);
+                            return (
+                              <button
+                                key={consultant.id}
+                                type="button"
+                                onClick={() => toggleConsultant(consultant.id)}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
+                                  isSelected
+                                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                                    : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                                )}
+                              >
+                                {isSelected && <Check className="h-3.5 w-3.5" />}
+                                {consultant.name}
+                              </button>
+                            );
+                          })
                         )}
                       </div>
                     </div>
