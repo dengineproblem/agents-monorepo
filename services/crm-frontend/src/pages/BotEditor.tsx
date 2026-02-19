@@ -1026,6 +1026,16 @@ export function BotEditor() {
                 </div>
                 {formData.delayedScheduleEnabled && (
                   <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>Не отправлять после записи на консультацию</Label>
+                        <p className="text-sm text-muted-foreground">Follow-up отменяются если клиент записался</p>
+                      </div>
+                      <Switch
+                        checked={formData.delayedStopOnConsultation ?? true}
+                        onCheckedChange={(checked) => updateField('delayedStopOnConsultation', checked)}
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Рабочие часы: начало</Label>

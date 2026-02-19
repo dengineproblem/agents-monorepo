@@ -17,6 +17,7 @@
 import OpenAI from 'openai';
 import { createLogger } from './logger.js';
 import { ContextLogger, createContextLogger, maskPhone, maskUuid, classifyError } from './logUtils.js';
+import { cancelPendingFollowUps } from './delayedFollowUps.js';
 
 const baseLog = createLogger({ module: 'consultationTools' });
 
@@ -875,6 +876,16 @@ export async function handleBookConsultation(
       consultationId: data.consultation?.id ? maskUuid(data.consultation.id) : null,
       confirmed: !!data.confirmation_message
     }, '[handleBookConsultation] Consultation booked successfully', ['consultation']);
+
+    // Отменяем pending follow-ups — клиент записался, догонять не нужно
+    try {
+      const cancelled = await cancelPendingFollowUps(lead.id);
+      if (cancelled > 0) {
+        log.info({ cancelledCount: cancelled }, '[handleBookConsultation] Cancelled pending follow-ups');
+      }
+    } catch (e) {
+      log.warn({ error: (e as any)?.message }, '[handleBookConsultation] Failed to cancel follow-ups (non-fatal)');
+    }
 
     return data.confirmation_message || 'Вы успешно записаны на консультацию!';
   } catch (error: any) {

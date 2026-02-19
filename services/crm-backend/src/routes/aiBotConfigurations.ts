@@ -113,6 +113,7 @@ const UpdateBotSchema = z.object({
   delayedScheduleEnabled: z.boolean().optional(),
   delayedScheduleHoursStart: z.number().int().min(0).max(23).optional(),
   delayedScheduleHoursEnd: z.number().int().min(0).max(23).optional(),
+  delayedStopOnConsultation: z.boolean().optional(),
 
   // Сообщения
   startMessage: z.string().nullish(),

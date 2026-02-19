@@ -218,12 +218,13 @@ async function checkAndRescheduleIfNeeded(
  */
 async function checkDialogState(
   dialogAnalysisId: string,
-  scheduledAt: string
+  scheduledAt: string,
+  stopOnConsultation: boolean = true
 ): Promise<string | null> {
   try {
     const { data: lead, error } = await supabase
       .from('dialog_analysis')
-      .select('bot_paused, assigned_to_human, last_client_message_at')
+      .select('bot_paused, assigned_to_human, last_client_message_at, funnel_stage')
       .eq('id', dialogAnalysisId)
       .single();
 
@@ -239,6 +240,14 @@ async function checkDialogState(
     // Проверяем передачу оператору
     if (lead.assigned_to_human) {
       return 'Assigned to human';
+    }
+
+    // Проверяем запись на консультацию — follow-up не нужен
+    if (stopOnConsultation) {
+      const consultationStages = ['consultation_booked', 'consultation_scheduled', 'consultation_completed'];
+      if (lead.funnel_stage && consultationStages.includes(lead.funnel_stage)) {
+        return 'Consultation booked';
+      }
     }
 
     // Проверяем свежие сообщения клиента (race condition protection)
@@ -359,8 +368,9 @@ async function processFollowUp(followUp: any): Promise<void> {
       return;
     }
 
-    // 3. Проверяем состояние диалога (пауза, оператор, свежие сообщения)
-    const cancelReason = await checkDialogState(dialog_analysis_id, scheduled_at);
+    // 3. Проверяем состояние диалога (пауза, оператор, свежие сообщения, консультация)
+    const stopOnConsultation = botConfig.delayed_stop_on_consultation ?? true;
+    const cancelReason = await checkDialogState(dialog_analysis_id, scheduled_at, stopOnConsultation);
     if (cancelReason) {
       log.info({ followUpId: id, reason: cancelReason }, 'Cancelling follow-up due to dialog state');
       await updateFollowUpStatus(id, 'cancelled', cancelReason);

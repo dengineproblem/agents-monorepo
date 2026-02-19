@@ -31,6 +31,7 @@ interface BotConfigForFollowUp {
   delayed_schedule_hours_start?: number;
   delayed_schedule_hours_end?: number;
   delayed_messages?: DelayedMessage[];
+  delayed_stop_on_consultation?: boolean;
   timezone: string;
 }
 
@@ -428,6 +429,7 @@ export async function getBotConfigForFollowUp(botId: string): Promise<BotConfigF
         delayed_schedule_hours_start,
         delayed_schedule_hours_end,
         delayed_messages,
+        delayed_stop_on_consultation,
         timezone
       `)
       .eq('id', botId)

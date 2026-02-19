@@ -116,6 +116,7 @@ export interface AIBotConfiguration {
   delayedScheduleEnabled: boolean;
   delayedScheduleHoursStart: number;
   delayedScheduleHoursEnd: number;
+  delayedStopOnConsultation: boolean;
 
   // Сообщения
   startMessage: string;
