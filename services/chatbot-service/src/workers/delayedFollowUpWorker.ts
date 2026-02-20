@@ -62,8 +62,8 @@ async function getDialogHistory(dialogAnalysisId: string): Promise<string> {
       return '';
     }
 
-    // Берём последние 10 сообщений
-    const recentMessages = messages.slice(-10);
+    // Берём последние 30 сообщений
+    const recentMessages = messages.slice(-30);
 
     // Формируем краткую историю
     const history = recentMessages
