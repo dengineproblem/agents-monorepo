@@ -170,6 +170,63 @@ export interface Sale {
   created_at: string;
 }
 
+export interface ConsultationSummary {
+  brief: string;
+  client_situation: string;
+  discussed_topics: string[];
+  client_needs: string[];
+  objections: string[];
+  agreements: string[];
+  next_steps: string[];
+  client_readiness: 'hot' | 'warm' | 'cold';
+  budget_discussed: boolean;
+  budget_details?: string | null;
+  decision_maker?: string | null;
+}
+
+export interface ConsultantReview {
+  overall_score: number;
+  scores: {
+    rapport: number;
+    discovery: number;
+    presentation: number;
+    objection_handling: number | null;
+    closing: number;
+  };
+  strengths: string[];
+  improvements: string[];
+  critical_moments: string[];
+  missed_opportunities: string[];
+  recommendation: string;
+}
+
+export interface CallAnalysis {
+  consultation_summary: ConsultationSummary;
+  consultant_review: ConsultantReview;
+}
+
+export interface CallRecording {
+  id: string;
+  consultant_id: string;
+  lead_id?: string;
+  file_url?: string;
+  file_size_bytes?: number;
+  duration_seconds?: number;
+  transcription?: string;
+  transcription_status: 'pending' | 'processing' | 'completed' | 'failed';
+  analysis?: CallAnalysis;
+  analysis_status: 'pending' | 'processing' | 'completed' | 'failed';
+  title?: string;
+  notes?: string;
+  recording_mode: 'tab' | 'mic_only';
+  file_deleted_at?: string;
+  created_at: string;
+  lead?: {
+    contact_name?: string;
+    contact_phone?: string;
+  };
+}
+
 // API методы
 
 export const consultantApi = {
@@ -458,5 +515,52 @@ export const consultantApi = {
   // Получить количество непрочитанных сообщений
   getUnreadCount: async (): Promise<{ unreadCount: number }> => {
     return fetchWithAuth('/consultant/unread-count');
+  },
+
+  // Call Recordings
+  uploadCallRecording: async (formData: FormData): Promise<CallRecording> => {
+    const userId = getUserId();
+    const response = await fetch(`${API_BASE_URL}/consultant/call-recordings/upload`, {
+      method: 'POST',
+      headers: { 'x-user-id': userId },
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Upload failed');
+    }
+    return response.json();
+  },
+
+  getCallRecordings: async (params?: {
+    limit?: number;
+    offset?: number;
+    lead_id?: string;
+    consultantId?: string;
+  }): Promise<{ recordings: CallRecording[]; total: number }> => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) query.append(key, String(value));
+      });
+    }
+    return fetchWithAuth(`/consultant/call-recordings?${query}`);
+  },
+
+  getCallRecording: async (id: string): Promise<CallRecording> => {
+    return fetchWithAuth(`/consultant/call-recordings/${id}`);
+  },
+
+  deleteCallRecording: async (id: string): Promise<{ success: boolean }> => {
+    return fetchWithAuth(`/consultant/call-recordings/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  updateCallRecording: async (id: string, data: { title?: string; notes?: string }): Promise<CallRecording> => {
+    return fetchWithAuth(`/consultant/call-recordings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
   },
 };

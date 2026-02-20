@@ -14,6 +14,7 @@ import { ProfileTab } from '@/components/consultant/ProfileTab';
 import { ScheduleTab } from '@/components/consultant/ScheduleTab';
 import { SalesTab } from '@/components/consultant/SalesTab';
 import { TasksTab } from '@/components/consultant/TasksTab';
+import { RecordingsTab } from '@/components/consultant/RecordingsTab';
 import { addMonths, addWeeks, differenceInCalendarDays, endOfMonth, endOfWeek, format, startOfDay, startOfMonth, startOfWeek } from 'date-fns';
 import {
   Users,
@@ -24,11 +25,10 @@ import {
   LogOut,
   UserCircle,
   Settings,
-  MessageSquare,
-  Briefcase,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  Mic,
 } from 'lucide-react';
 
 export function ConsultantPage() {
@@ -105,7 +105,10 @@ export function ConsultantPage() {
   }, [consultantId, toast, periodType, periodStart]);
 
   // Загрузка счетчика непрочитанных с polling и toast уведомлениями
+  // Только для консультантов — админы видят страницу, но не имеют consultant-only доступа
   useEffect(() => {
+    if (!isConsultant) return;
+
     const loadUnreadCount = async () => {
       try {
         const data = await consultantApi.getUnreadCount();
@@ -134,7 +137,7 @@ export function ConsultantPage() {
     // Polling каждые 30 секунд
     const interval = setInterval(loadUnreadCount, 30000);
     return () => clearInterval(interval);
-  }, [toast, prevUnreadCount]);
+  }, [toast, prevUnreadCount, isConsultant]);
 
   const handleLogout = () => {
     logout();
@@ -424,7 +427,7 @@ export function ConsultantPage() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="calendar">
               <Calendar className="h-4 w-4 mr-2" />
               Календарь
@@ -441,6 +444,10 @@ export function ConsultantPage() {
             <TabsTrigger value="tasks">
               <CheckSquare className="h-4 w-4 mr-2" />
               Задачи
+            </TabsTrigger>
+            <TabsTrigger value="recordings">
+              <Mic className="h-4 w-4 mr-2" />
+              Записи
             </TabsTrigger>
             <TabsTrigger value="schedule">
               <Clock className="h-4 w-4 mr-2" />
@@ -466,6 +473,10 @@ export function ConsultantPage() {
 
           <TabsContent value="tasks" className="space-y-4">
             <TasksTab />
+          </TabsContent>
+
+          <TabsContent value="recordings" className="space-y-4">
+            <RecordingsTab />
           </TabsContent>
 
           <TabsContent value="schedule" className="space-y-4">

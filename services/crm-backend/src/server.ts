@@ -22,6 +22,8 @@ import { adminConsultantManagementRoutes } from './routes/adminConsultantManagem
 import { consultantSalesRoutes } from './routes/consultantSales.js';
 import { consultantTasksRoutes } from './routes/consultantTasks.js';
 import { subscriptionBillingRoutes } from './routes/subscriptionBilling.js';
+import { authRoutes } from './routes/auth.js';
+import { consultantCallRecordingsRoutes } from './routes/consultantCallRecordings.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
@@ -43,10 +45,10 @@ app.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
 });
 
-// Register multipart for file uploads (audio transcription)
+// Register multipart for file uploads (audio transcription + call recordings)
 app.register(multipart, {
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25 MB (Whisper API limit)
+    fileSize: 100 * 1024 * 1024, // 100 MB (call recordings up to ~2h)
   }
 });
 
@@ -71,6 +73,8 @@ app.register(adminConsultantManagementRoutes);
 app.register(consultantSalesRoutes);
 app.register(consultantTasksRoutes);
 app.register(subscriptionBillingRoutes);
+app.register(authRoutes);
+app.register(consultantCallRecordingsRoutes);
 
 // Start notification cron job
 startNotificationCron();

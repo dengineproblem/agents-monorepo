@@ -17,8 +17,9 @@ const openai = new OpenAI({
  * @returns Transcribed text in Russian
  */
 export async function transcribeAudio(
-  audioBuffer: Buffer, 
-  filename: string
+  audioBuffer: Buffer,
+  filename: string,
+  options?: { language?: string }
 ): Promise<string> {
   try {
     log.info({ filename, size: audioBuffer.length }, 'Starting audio transcription');
@@ -32,7 +33,7 @@ export async function transcribeAudio(
     const response = await openai.audio.transcriptions.create({
       file: file,
       model: 'whisper-1',
-      language: 'ru', // Russian language
+      language: options?.language ?? 'ru',
       response_format: 'text',
     });
 
