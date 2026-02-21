@@ -36,6 +36,7 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 
 ## Скиллы
 Инструкции по каждой задаче — в директории `skills/`. Читай SKILL.md перед выполнением:
+- `fb-onboarding/SKILL.md` — **первичная настройка** (запусти если config пустой)
 - `fb-dashboard/SKILL.md` — дашборд, метрики
 - `fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
 - `fb-campaign/SKILL.md` — создание кампаний
@@ -43,6 +44,13 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 - `fb-leads/SKILL.md` — управление лидами
 - `fb-creative-test/SKILL.md` — A/B тесты
 - `fb-report/SKILL.md` — отчёты
+
+## Автозапуск онбординга
+При первом обращении проверь config:
+```sql
+SELECT fb_access_token FROM config WHERE id = 1;
+```
+Если `fb_access_token` IS NULL — автоматически запусти `fb-onboarding/SKILL.md`.
 
 ## Upload креативов
 URL для загрузки: https://app.performanteaiagency.com/openclaw/upload/

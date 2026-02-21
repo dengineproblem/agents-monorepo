@@ -53,11 +53,11 @@ echo "  Schema applied (11 tables)"
 echo "[3/5] Creating workspace at ${CLIENT_DIR}..."
 mkdir -p "${WORKSPACE_DIR}"
 
-# Symlink skills into workspace
+# Copy skills into workspace (symlinks don't work — only .openclaw is mounted into container)
 if [ -d "${BASE_DIR}/skills" ]; then
-  rm -f "${WORKSPACE_DIR}/skills"
-  ln -sf "${BASE_DIR}/skills" "${WORKSPACE_DIR}/skills"
-  echo "  Skills symlinked"
+  rm -rf "${WORKSPACE_DIR}/skills"
+  cp -r "${BASE_DIR}/skills" "${WORKSPACE_DIR}/skills"
+  echo "  Skills copied ($(ls "${WORKSPACE_DIR}/skills" | wc -l) skills)"
 fi
 
 # 4. Generate CLAUDE.md + openclaw.json (port inside container is always 18789)
