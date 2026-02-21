@@ -33,13 +33,15 @@ openclaw-standalone/
 │
 ├── templates/
 │   ├── openclaw.json.template     # Конфиг gateway (port + mode + trustedProxies)
-│   └── CLAUDE.md.template         # Инструкции агенту (DB, skills, API)
+│   ├── CLAUDE.md.template         # Project instructions (DB, skills, API)
+│   └── TOOLS.md.template          # Environment config для агента (DB, skills, onboarding)
 │
 ├── db/
 │   ├── init.sql                   # Инициализация PostgreSQL (pgcrypto)
 │   └── schema.sql                 # Схема БД (11 таблиц, идемпотентная)
 │
-└── skills/                         # 7 skills для Facebook Ads
+└── skills/                         # 8 skills для Facebook Ads
+    ├── fb-onboarding/SKILL.md      # Первичная настройка клиента (8 шагов)
     ├── fb-dashboard/SKILL.md       # Дашборд, метрики
     ├── fb-optimize/SKILL.md        # Health Score, оптимизация бюджетов
     ├── fb-campaign/SKILL.md        # Создание кампаний
@@ -122,9 +124,33 @@ map $openclaw_slug $openclaw_port {
     ├── canvas/                  # Canvas для агента
     ├── cron/                    # Cron jobs
     └── workspace/
-        ├── CLAUDE.md            # Инструкции агенту (DB connection, skills)
-        └── skills -> /home/openclaw/agents-monorepo/openclaw-standalone/skills
+        ├── CLAUDE.md            # Project instructions (DB, skills, API)
+        ├── TOOLS.md             # Environment config (DB connection, skills, onboarding)
+        ├── AGENTS.md            # OpenClaw agent framework (auto-generated)
+        ├── SOUL.md              # Личность агента (auto-generated)
+        ├── USER.md              # Информация о юзере (auto-generated)
+        ├── MEMORY.md            # Долгосрочная память агента (auto-generated)
+        ├── memory/              # Ежедневные заметки агента
+        └── skills/              # Копия skills/ (НЕ симлинка!)
+            ├── fb-onboarding/
+            ├── fb-dashboard/
+            └── ...
 ```
+
+### Система файлов агента (OpenClaw Framework)
+
+OpenClaw создаёт и читает свои файлы при каждой сессии:
+
+| Файл | Назначение | Генерация |
+|------|-----------|-----------|
+| `AGENTS.md` | Инструкции: что читать при старте сессии | OpenClaw (auto) |
+| `SOUL.md` | Личность, поведение, стиль общения | OpenClaw (auto) |
+| `USER.md` | Имя, язык, таймзона юзера | OpenClaw (auto) |
+| `MEMORY.md` | Долгосрочная память агента | Агент обновляет |
+| `TOOLS.md` | **Environment config: БД, API, скиллы** | **Мы генерируем** |
+| `CLAUDE.md` | Project instructions (дублирует TOOLS.md) | Мы генерируем |
+
+**ВАЖНО:** Агент читает `TOOLS.md` для environment-специфичных настроек (подключение к БД, скиллы, API). Именно туда нужно класть всю конфигурацию. `CLAUDE.md` загружается как project instructions, но `TOOLS.md` — основной файл конфигурации среды.
 
 ## База данных
 
@@ -160,8 +186,8 @@ map $openclaw_slug $openclaw_port {
 Скрипт автоматически:
 1. Создаёт БД `openclaw_<slug>` (если не существует)
 2. Применяет schema.sql (11 таблиц)
-3. Создаёт workspace + symlink на skills
-4. Генерирует CLAUDE.md (подставляет slug) и openclaw.json (с trustedProxies)
+3. Создаёт workspace + **копирует** skills (не симлинка!)
+4. Генерирует CLAUDE.md, TOOLS.md (подставляет slug) и openclaw.json
 5. Генерирует gateway auth token
 6. Устанавливает permissions (chown 1001:1001)
 7. Запускает Docker контейнер с маппингом портов
@@ -188,13 +214,31 @@ map $openclaw_slug $openclaw_port {
    docker exec -it openclaw-<slug> openclaw configure
    ```
 
-4. **Настроить Facebook токены**:
-   ```bash
-   docker exec -i openclaw-postgres psql -U postgres -d openclaw_<slug> <<< \
-     "UPDATE config SET fb_access_token='...', fb_ad_account_id='act_...', fb_page_id='...' WHERE id=1;"
-   ```
+4. **Открыть UI**: `https://<slug>.openclaw.performanteaiagency.com/#token=<gateway_token>`
 
-5. **Открыть UI**: `https://<slug>.openclaw.performanteaiagency.com/#token=<gateway_token>`
+5. **Онбординг запустится автоматически** — агент проверит config и запустит `fb-onboarding/SKILL.md` если FB токен не настроен.
+
+### Обновление skills для существующего клиента
+
+```bash
+# Удалить старые (могут быть симлинкой)
+rm -rf /home/openclaw/clients/<slug>/.openclaw/workspace/skills
+# Скопировать новые
+cp -r ~/agents-monorepo/openclaw-standalone/skills /home/openclaw/clients/<slug>/.openclaw/workspace/skills
+chown -R 1001:1001 /home/openclaw/clients/<slug>/.openclaw/workspace/skills
+```
+
+### Обновление TOOLS.md / CLAUDE.md для существующего клиента
+
+```bash
+cd ~/agents-monorepo/openclaw-standalone
+sed "s/{{SLUG}}/<slug>/g" templates/TOOLS.md.template > /home/openclaw/clients/<slug>/.openclaw/workspace/TOOLS.md
+sed "s/{{SLUG}}/<slug>/g" templates/CLAUDE.md.template > /home/openclaw/clients/<slug>/.openclaw/workspace/CLAUDE.md
+chown 1001:1001 /home/openclaw/clients/<slug>/.openclaw/workspace/TOOLS.md
+chown 1001:1001 /home/openclaw/clients/<slug>/.openclaw/workspace/CLAUDE.md
+```
+
+Перезапуск контейнера **не нужен** — агент читает файлы при каждом новом сообщении.
 
 ## Сборка и запуск
 
@@ -262,6 +306,12 @@ Gateway не доверял соединениям через socat proxy → т
 ### Device pairing
 Даже с token auth, gateway требует явное одобрение каждого нового устройства (браузера). При первом подключении нужно: `openclaw devices approve <request-id>`.
 
+### Skills: симлинка vs копия
+Симлинки не работают внутри контейнера — только `.openclaw/` монтируется как volume, и симлинка указывает на несуществующий путь. Решение: `cp -r` вместо `ln -sf` в create-client.sh.
+
+### TOOLS.md — основной конфиг для агента
+OpenClaw имеет свою систему файлов (AGENTS.md, SOUL.md, USER.md). Агент читает `TOOLS.md` для environment-специфичных настроек. Первоначально конфиг был только в `CLAUDE.md`, но агент не видел его. Решение: дублировать конфигурацию в `TOOLS.md.template`.
+
 ## Следующие шаги
 
 ### 1. Telegram интеграция
@@ -299,4 +349,9 @@ docker exec -i openclaw-postgres psql -U postgres -d openclaw_<slug> -c "SELECT 
 
 # Рестарт контейнера клиента
 docker restart openclaw-<slug>
+
+# Обновить skills у клиента
+rm -rf /home/openclaw/clients/<slug>/.openclaw/workspace/skills
+cp -r ~/agents-monorepo/openclaw-standalone/skills /home/openclaw/clients/<slug>/.openclaw/workspace/skills
+chown -R 1001:1001 /home/openclaw/clients/<slug>/.openclaw/workspace/skills
 ```
