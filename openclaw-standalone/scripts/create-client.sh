@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 SCHEMA_FILE="${BASE_DIR}/db/schema.sql"
 CLAUDE_TEMPLATE="${BASE_DIR}/templates/CLAUDE.md.template"
+TOOLS_TEMPLATE="${BASE_DIR}/templates/TOOLS.md.template"
 CONFIG_TEMPLATE="${BASE_DIR}/templates/openclaw.json.template"
 CLIENT_DIR="/home/openclaw/clients/${SLUG}"
 OPENCLAW_DIR="${CLIENT_DIR}/.openclaw"
@@ -63,11 +64,12 @@ fi
 # 4. Generate CLAUDE.md + openclaw.json (port inside container is always 18789)
 echo "[4/5] Generating workspace files..."
 sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
+sed "s/{{SLUG}}/${SLUG}/g" "$TOOLS_TEMPLATE" > "${WORKSPACE_DIR}/TOOLS.md"
 cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
 
 # Fix permissions — container runs as openclaw (UID 1001, node:22-slim has 'node' at 1000)
 chown -R 1001:1001 "${OPENCLAW_DIR}"
-echo "  CLAUDE.md + openclaw.json generated"
+echo "  CLAUDE.md + TOOLS.md + openclaw.json generated"
 
 # 5. Start container
 echo "[5/5] Starting container ${CONTAINER_NAME}..."

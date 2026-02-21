@@ -1,0 +1,59 @@
+# TOOLS.md - Окружение и инструменты
+
+## Язык
+Общайся на русском языке.
+
+## PostgreSQL
+Строка подключения:
+```
+postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}
+```
+
+Примеры:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT * FROM config WHERE id = 1"
+```
+
+Многострочные запросы:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" <<'SQL'
+SELECT d.name, d.target_cpl_cents, d.is_active
+FROM directions d
+ORDER BY d.name;
+SQL
+```
+
+## Facebook Ads API
+Токены и настройки хранятся в таблице `config`. Перед любым действием:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT fb_access_token, fb_ad_account_id, fb_page_id FROM config WHERE id = 1;"
+```
+
+Для вызовов Facebook API:
+```bash
+curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
+```
+
+## Скиллы
+Инструкции по задачам — в директории `skills/`. Читай SKILL.md перед выполнением:
+- `skills/fb-onboarding/SKILL.md` — **первичная настройка** (запусти если config пустой)
+- `skills/fb-dashboard/SKILL.md` — дашборд, метрики
+- `skills/fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
+- `skills/fb-campaign/SKILL.md` — создание кампаний
+- `skills/fb-scoring/SKILL.md` — крон скоринга
+- `skills/fb-leads/SKILL.md` — управление лидами
+- `skills/fb-creative-test/SKILL.md` — A/B тесты
+- `skills/fb-report/SKILL.md` — отчёты
+
+## Автозапуск онбординга
+При первом обращении проверь config:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT fb_access_token FROM config WHERE id = 1;"
+```
+Если `fb_access_token` IS NULL — автоматически прочитай и выполни `skills/fb-onboarding/SKILL.md`.
+
+## Upload креативов
+URL для загрузки: https://app.performanteaiagency.com/openclaw/upload/
+
+## Webhook URL
+Facebook Lead Gen webhook: `https://app.performanteaiagency.com/openclaw/webhook/{{SLUG}}`
