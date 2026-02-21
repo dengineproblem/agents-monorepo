@@ -65,8 +65,8 @@ echo "[4/5] Generating workspace files..."
 sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
 cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
 
-# Fix permissions — container runs as openclaw (UID 1000)
-chown -R 1000:1000 "${OPENCLAW_DIR}"
+# Fix permissions — container runs as openclaw (UID 1001, node:22-slim has 'node' at 1000)
+chown -R 1001:1001 "${OPENCLAW_DIR}"
 echo "  CLAUDE.md + openclaw.json generated"
 
 # 5. Start container

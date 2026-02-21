@@ -15,8 +15,8 @@ RUN npm install -g --ignore-scripts openclaw@2026.2.17
 # Run postinstall for everything except node-llama-cpp
 RUN cd /usr/local/lib/node_modules/openclaw && npm rebuild --ignore-scripts 2>/dev/null; true
 
-# Create non-root user
-RUN useradd -m -d /home/openclaw openclaw
+# Create non-root user (node:22-slim already has 'node' at UID 1000, so openclaw gets 1001)
+RUN useradd -m -d /home/openclaw -u 1001 openclaw
 
 # Copy entrypoint
 COPY --chown=openclaw:openclaw entrypoint.sh /home/openclaw/entrypoint.sh
