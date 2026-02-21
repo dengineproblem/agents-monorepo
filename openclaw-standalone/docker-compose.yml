@@ -1,0 +1,62 @@
+name: openclaw-standalone
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: openclaw-postgres
+    environment:
+      POSTGRES_DB: openclaw
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
+    ports:
+      - "5435:5432"
+    volumes:
+      - openclaw-pgdata:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - openclaw-net
+
+  webhook:
+    build: ./webhook-service
+    container_name: openclaw-webhook
+    ports:
+      - "9000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-openclaw_local}@postgres:5432/openclaw
+      FB_WEBHOOK_VERIFY_TOKEN: ${FB_WEBHOOK_VERIFY_TOKEN:-openclaw_leadgen_2026}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - openclaw-net
+
+  upload:
+    build: ./upload-service
+    container_name: openclaw-upload
+    ports:
+      - "9001:3001"
+    volumes:
+      - openclaw-uploads:/app/uploads
+    environment:
+      PORT: 3001
+      MAX_FILE_SIZE_MB: 500
+    restart: unless-stopped
+    networks:
+      - openclaw-net
+
+volumes:
+  openclaw-pgdata:
+  openclaw-uploads:
+
+networks:
+  openclaw-net:
+    name: openclaw-net
