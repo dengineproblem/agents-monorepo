@@ -484,21 +484,32 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 ...(whatsapp_phone_number && { whatsapp_phone_number })
               };
             } else if (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp') {
-              // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
-              // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
-              const pixelId = defaultSettings?.pixel_id;
+              // WhatsApp-конверсии: CAPI оптимизация — pixel_id берём из capi_settings (messaging dataset)
+              const capiQuery = supabase
+                .from('capi_settings')
+                .select('pixel_id')
+                .eq('user_account_id', user_account_id)
+                .eq('channel', 'whatsapp')
+                .eq('is_active', true);
+              if (direction.account_id) {
+                capiQuery.eq('account_id', direction.account_id);
+              } else {
+                capiQuery.is('account_id', null);
+              }
+              const { data: capiSettings } = await capiQuery.maybeSingle();
+              const pixelId = capiSettings?.pixel_id;
               if (!pixelId) {
                 log.warn({
                   directionId: direction.id,
                   directionName: direction.name,
                   objective: direction.objective,
                   conversion_channel: direction.conversion_channel,
-                }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен. Пропускаем направление.');
+                }, 'WhatsApp-конверсии требуют pixel_id в capi_settings, но он не настроен. Пропускаем направление.');
                 results.push({
                   direction_id: direction.id,
                   direction_name: direction.name,
                   success: false,
-                  error: 'WhatsApp-конверсии требуют настроенный Meta Pixel',
+                  error: 'WhatsApp-конверсии требуют настроенный Messaging Dataset в capi_settings',
                 });
                 continue;
               }
@@ -950,19 +961,30 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
         } else if (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp') {
-          // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
-          // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
-          const pixelId = defaultSettings?.pixel_id;
+          // WhatsApp-конверсии: CAPI оптимизация — pixel_id берём из capi_settings (messaging dataset)
+          const capiQuery = supabase
+            .from('capi_settings')
+            .select('pixel_id')
+            .eq('user_account_id', user_account_id)
+            .eq('channel', 'whatsapp')
+            .eq('is_active', true);
+          if (account_id) {
+            capiQuery.eq('account_id', account_id);
+          } else {
+            capiQuery.is('account_id', null);
+          }
+          const { data: capiSettings } = await capiQuery.maybeSingle();
+          const pixelId = capiSettings?.pixel_id;
           if (!pixelId) {
             log.error({
               directionId: direction.id,
               directionName: direction.name,
               objective: direction.objective,
               conversion_channel: direction.conversion_channel,
-            }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен');
+            }, 'WhatsApp-конверсии требуют pixel_id в capi_settings, но он не настроен');
             return reply.code(400).send({
               success: false,
-              error: 'WhatsApp-конверсии требуют настроенный Meta Pixel. Добавьте Pixel в настройках направления.',
+              error: 'WhatsApp-конверсии требуют настроенный Messaging Dataset в capi_settings.',
             });
           }
 

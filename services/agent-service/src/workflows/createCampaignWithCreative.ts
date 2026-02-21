@@ -331,14 +331,33 @@ export async function workflowCreateCampaignWithCreative(
       console.warn('[CreateCampaignWithCreative] Conversions objective missing conversion_channel, falling back to whatsapp');
     }
 
-    const pixelId = defaultSettings?.pixel_id;
-    if (!pixelId) {
-      throw new Error('Conversions requires pixel_id in default settings');
+    const isWhatsApp = channel === 'whatsapp';
+
+    // Для WhatsApp: pixel_id из capi_settings (messaging dataset)
+    // Для остальных каналов: из default_ad_settings
+    let pixelId: string | null = null;
+    if (isWhatsApp) {
+      const capiQuery = supabase
+        .from('capi_settings')
+        .select('pixel_id')
+        .eq('user_account_id', user_account_id)
+        .eq('channel', 'whatsapp')
+        .eq('is_active', true);
+      if (context.account_id) {
+        capiQuery.eq('account_id', context.account_id);
+      } else {
+        capiQuery.is('account_id', null);
+      }
+      const { data: capiSettings } = await capiQuery.maybeSingle();
+      pixelId = capiSettings?.pixel_id || null;
+    } else {
+      pixelId = defaultSettings?.pixel_id || null;
     }
 
-    // WhatsApp: LeadSubmitted — кастомное messaging событие, нужен OTHER + custom_event_str
-    // Остальные каналы: стандартный LEAD
-    const isWhatsApp = channel === 'whatsapp';
+    if (!pixelId && channel !== 'lead_form') {
+      throw new Error(`Conversions (${channel}) requires pixel_id — configure ${isWhatsApp ? 'capi_settings' : 'default_ad_settings'}`);
+    }
+
     const eventType = isWhatsApp ? 'OTHER' : 'LEAD';
 
     if (isWhatsApp && page_id) {

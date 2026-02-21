@@ -286,9 +286,9 @@ export async function workflowCreateAdSetInDirection(
     .eq('direction_id', direction_id)
     .maybeSingle();
 
-  // Fallback: pixel_id из capi_settings (если не задан в direction/defaultSettings)
+  // pixel_id из capi_settings для conversions
   let capiPixelId: string | null = null;
-  if (!direction.pixel_id && !defaultSettings?.pixel_id && direction.objective === 'conversions') {
+  if (direction.objective === 'conversions') {
     const conversionChannel = direction.conversion_channel || 'whatsapp';
     const capiChannel = conversionChannel === 'lead_form' ? 'lead_forms' : conversionChannel;
     const capiQuery = supabase
@@ -482,7 +482,11 @@ export async function workflowCreateAdSetInDirection(
       }, 'Conversions direction missing conversion_channel, falling back to whatsapp');
     }
 
-    const pixelId = direction.pixel_id || defaultSettings?.pixel_id || capiPixelId;
+    // WhatsApp: pixel_id только из capi_settings (messaging dataset)
+    // Остальные каналы: direction → defaultSettings → capi_settings
+    const pixelId = conversionChannel === 'whatsapp'
+      ? capiPixelId
+      : (direction.pixel_id || defaultSettings?.pixel_id || capiPixelId);
     // lead_form (QUALITY_LEAD) не требует pixel_id — только page_id
     if (!pixelId && conversionChannel !== 'lead_form') {
       log.error({

@@ -195,9 +195,9 @@ export async function workflowStartCreativeTest(
   // ===================================================
   const defaultSettings = await getDirectionSettings(creative.direction_id);
 
-  // Fallback: pixel_id из capi_settings
+  // pixel_id из capi_settings для conversions
   let capiPixelId: string | null = null;
-  if (!defaultSettings?.pixel_id && direction.objective === 'conversions') {
+  if (direction.objective === 'conversions') {
     const conversionChannel = direction.conversion_channel || 'whatsapp';
     const capiChannel = conversionChannel === 'lead_form' ? 'lead_forms' : conversionChannel;
     const capiQuery = supabase
@@ -322,7 +322,11 @@ export async function workflowStartCreativeTest(
         };
         log.info({ conversion_channel: conversionChannel, destination_type }, 'Using lead_form QUALITY_LEAD (no pixel needed)');
       } else {
-        const effectivePixelId = defaultSettings?.pixel_id || capiPixelId;
+        // WhatsApp: pixel_id только из capi_settings (messaging dataset)
+        // Остальные каналы: defaultSettings → capi_settings
+        const effectivePixelId = conversionChannel === 'whatsapp'
+          ? capiPixelId
+          : (defaultSettings?.pixel_id || capiPixelId);
         if (!effectivePixelId) {
           log.error({
             directionId: direction.id,
@@ -331,7 +335,7 @@ export async function workflowStartCreativeTest(
           }, 'Conversions requires pixel_id but none configured');
           throw new Error(
             `Cannot create conversions test: pixel_id not configured for direction "${direction.name}". ` +
-            `Please configure Meta Pixel in direction settings.`
+            `Configure ${conversionChannel === 'whatsapp' ? 'capi_settings' : 'Meta Pixel'}.`
           );
         }
 
