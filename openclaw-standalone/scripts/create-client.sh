@@ -2,14 +2,14 @@
 set -euo pipefail
 
 SLUG="${1:-}"
-HOST_PORT="${2:-18789}"
+GW_PORT="${2:-18789}"
 
 if [ -z "$SLUG" ]; then
-  echo "Usage: $0 <slug> [host_port]"
+  echo "Usage: $0 <slug> [gateway_port]"
   echo "Example: $0 aliya 18790"
   echo ""
-  echo "  slug       — client identifier (lowercase, a-z0-9_-)"
-  echo "  host_port  — gateway port on host (default: 18789)"
+  echo "  slug          — client identifier (lowercase, a-z0-9_-)"
+  echo "  gateway_port  — gateway port (default: 18789)"
   exit 1
 fi
 
@@ -60,8 +60,11 @@ fi
 # 4. Generate CLAUDE.md + minimal openclaw.json
 echo "[4/5] Generating workspace files..."
 sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
-cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
-echo "  CLAUDE.md + openclaw.json generated"
+sed "s/18789/${GW_PORT}/g" "$CONFIG_TEMPLATE" > "${OPENCLAW_DIR}/openclaw.json"
+
+# Fix permissions — container runs as openclaw (UID 1000)
+chown -R 1000:1000 "${OPENCLAW_DIR}"
+echo "  CLAUDE.md + openclaw.json generated (gateway port: ${GW_PORT})"
 
 # 5. Start container
 echo "[5/5] Starting container ${CONTAINER_NAME}..."
@@ -74,9 +77,8 @@ fi
 
 docker run -d \
   --name "$CONTAINER_NAME" \
-  --network openclaw-net \
+  --network host \
   --restart unless-stopped \
-  -p "${HOST_PORT}:18789" \
   -v "${OPENCLAW_DIR}:/home/openclaw/.openclaw" \
   openclaw-runtime
 
@@ -87,12 +89,12 @@ echo "=== Client ${SLUG} created ==="
 echo ""
 echo "Database:    ${DB_NAME}"
 echo "Container:   ${CONTAINER_NAME}"
-echo "Gateway:     http://localhost:${HOST_PORT}"
+echo "Gateway:     http://localhost:${GW_PORT}"
 echo "Workspace:   ${WORKSPACE_DIR}"
 echo ""
 echo "Next steps:"
-echo "  1. Open gateway UI: http://<server-ip>:${HOST_PORT}"
-echo "  2. Log in with your Anthropic account (openclaw login inside container)"
+echo "  1. Open gateway UI: http://<server-ip>:${GW_PORT}"
+echo "  2. Log in with your Anthropic account"
 echo "  3. Configure Facebook tokens in DB:"
 echo "     docker exec -i openclaw-postgres psql -U postgres -d ${DB_NAME} <<< \"UPDATE config SET fb_access_token='...', fb_ad_account_id='act_...', fb_page_id='...' WHERE id=1;\""
 echo "  4. Check logs: docker logs -f ${CONTAINER_NAME}"
