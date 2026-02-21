@@ -12,7 +12,8 @@ services:
       - "5435:5432"
     volumes:
       - openclaw-pgdata:/var/lib/postgresql/data
-      - ./db:/docker-entrypoint-initdb.d
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./db/schema.sql:/opt/openclaw/schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready"]
       interval: 5s
@@ -28,10 +29,11 @@ services:
     ports:
       - "9000:3000"
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-openclaw_local}@postgres:5432/openclaw
+      PG_HOST: postgres
+      PG_USER: postgres
+      PG_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
+      PG_PORT: 5432
       FB_WEBHOOK_VERIFY_TOKEN: ${FB_WEBHOOK_VERIFY_TOKEN:-openclaw_leadgen_2026}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
     depends_on:
       postgres:
         condition: service_healthy

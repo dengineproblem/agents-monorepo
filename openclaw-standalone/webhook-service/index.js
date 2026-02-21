@@ -3,10 +3,34 @@ import { URL } from 'node:url';
 import pg from 'pg';
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const VERIFY_TOKEN = process.env.FB_WEBHOOK_VERIFY_TOKEN || 'openclaw_leadgen_2026';
-const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TG_CHAT = process.env.TELEGRAM_CHAT_ID;
+const PG_HOST = process.env.PG_HOST || 'postgres';
+const PG_USER = process.env.PG_USER || 'postgres';
+const PG_PASSWORD = process.env.PG_PASSWORD || 'openclaw_local';
+const PG_PORT = process.env.PG_PORT || 5432;
+
+// Per-tenant connection pool cache
+const pools = new Map();
+
+function getPool(slug) {
+  if (pools.has(slug)) return pools.get(slug);
+  const pool = new Pool({
+    host: PG_HOST,
+    port: PG_PORT,
+    user: PG_USER,
+    password: PG_PASSWORD,
+    database: `openclaw_${slug}`,
+    max: 3,
+  });
+  pools.set(slug, pool);
+  return pool;
+}
+
+// Extract slug from /webhook/{slug}
+function parseSlug(pathname) {
+  const match = pathname.match(/^\/webhook\/([a-z0-9_-]+)$/i);
+  return match ? match[1].toLowerCase() : null;
+}
 
 function extractField(fields, names) {
   for (const n of names) {
@@ -23,27 +47,27 @@ function normalizePhone(phone) {
   return n;
 }
 
-async function notifyTelegram(name, phone) {
-  if (!TG_TOKEN || !TG_CHAT) return;
-  const text = `🔔 Новый лид с Facebook\n👤 ${name || '—'}\n📞 ${phone || '—'}\n⏰ ${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}`;
-  fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: TG_CHAT, text })
-  }).catch(() => {});
+async function notifyTelegram(pool, name, phone) {
+  try {
+    const { rows: [cfg] } = await pool.query('SELECT telegram_bot_token, telegram_chat_id FROM config WHERE id = 1');
+    if (!cfg?.telegram_bot_token || !cfg?.telegram_chat_id) return;
+    const text = `🔔 Новый лид с Facebook\n👤 ${name || '—'}\n📞 ${phone || '—'}\n⏰ ${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}`;
+    fetch(`https://api.telegram.org/bot${cfg.telegram_bot_token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: cfg.telegram_chat_id, text })
+    }).catch(() => {});
+  } catch {}
 }
 
-async function handleLeadgen(leadgenId, adId, formId) {
-  // Get access token from config
+async function handleLeadgen(pool, leadgenId, adId, formId) {
   const { rows: [cfg] } = await pool.query('SELECT fb_page_access_token, fb_access_token FROM config WHERE id = 1');
   const token = cfg?.fb_page_access_token || cfg?.fb_access_token;
   if (!token) return console.error('No FB access token in config');
 
-  // Check duplicate
   const { rows: dup } = await pool.query('SELECT id FROM leads WHERE leadgen_id = $1', [leadgenId]);
   if (dup.length > 0) return;
 
-  // Fetch lead data from Facebook
   const res = await fetch(`https://graph.facebook.com/v23.0/${leadgenId}?fields=id,ad_id,form_id,created_time,field_data&access_token=${token}`);
   const data = await res.json();
   if (!res.ok || data.error) return console.error('FB error:', data.error?.message);
@@ -60,7 +84,7 @@ async function handleLeadgen(leadgenId, adId, formId) {
     [name, phone, email, leadgenId, adId || data.ad_id, formId || data.form_id]
   );
 
-  notifyTelegram(name, phone);
+  notifyTelegram(pool, name, phone);
   console.log(`Lead saved: ${name} ${phone}`);
 }
 
@@ -73,8 +97,25 @@ const server = http.createServer(async (req, res) => {
     return res.end('ok');
   }
 
-  // GET /webhook — Facebook verification
-  if (req.method === 'GET' && url.pathname === '/webhook') {
+  const slug = parseSlug(url.pathname);
+  if (!slug) {
+    res.writeHead(404);
+    return res.end('Not found. Use /webhook/{slug}');
+  }
+
+  let pool;
+  try {
+    pool = getPool(slug);
+    // Quick check: can we connect?
+    await pool.query('SELECT 1');
+  } catch (e) {
+    console.error(`DB not found for slug "${slug}":`, e.message);
+    res.writeHead(404);
+    return res.end(`Tenant "${slug}" not found`);
+  }
+
+  // GET /webhook/{slug} — Facebook verification
+  if (req.method === 'GET') {
     const mode = url.searchParams.get('hub.mode');
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
@@ -86,8 +127,8 @@ const server = http.createServer(async (req, res) => {
     return res.end('Forbidden');
   }
 
-  // POST /webhook — Leadgen handler
-  if (req.method === 'POST' && url.pathname === '/webhook') {
+  // POST /webhook/{slug} — Leadgen handler
+  if (req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
     req.on('end', async () => {
@@ -100,7 +141,7 @@ const server = http.createServer(async (req, res) => {
           for (const change of entry.changes || []) {
             if (change.field !== 'leadgen') continue;
             const { leadgen_id, ad_id, form_id } = change.value;
-            handleLeadgen(leadgen_id, ad_id, form_id).catch(e => console.error('Leadgen error:', e.message));
+            handleLeadgen(pool, leadgen_id, ad_id, form_id).catch(e => console.error('Leadgen error:', e.message));
           }
         }
       } catch (e) { console.error('Parse error:', e.message); }
@@ -108,9 +149,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  res.writeHead(404);
-  res.end('Not found');
+  res.writeHead(405);
+  res.end('Method not allowed');
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Webhook service listening on :${PORT}`));
+server.listen(PORT, () => console.log(`Webhook service (multi-tenant) listening on :${PORT}`));

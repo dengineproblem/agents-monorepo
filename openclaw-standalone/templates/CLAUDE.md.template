@@ -1,0 +1,51 @@
+# OpenClaw — Управление Facebook рекламой
+
+## Язык
+Общайся на русском языке.
+
+## База данных
+Для SQL запросов используй:
+```bash
+docker exec -i openclaw-postgres psql -U postgres -d openclaw_{{SLUG}}
+```
+
+Например:
+```bash
+echo "SELECT * FROM config WHERE id = 1" | docker exec -i openclaw-postgres psql -U postgres -d openclaw_{{SLUG}}
+```
+
+Для многострочных запросов:
+```bash
+docker exec -i openclaw-postgres psql -U postgres -d openclaw_{{SLUG}} <<'SQL'
+SELECT d.name, d.target_cpl_cents, d.is_active
+FROM directions d
+ORDER BY d.name;
+SQL
+```
+
+## Facebook Ads
+Токены и настройки хранятся в таблице `config`. Перед любым действием проверь:
+```sql
+SELECT fb_access_token, fb_ad_account_id, fb_page_id FROM config WHERE id = 1;
+```
+
+Для вызовов Facebook API используй curl:
+```bash
+curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
+```
+
+## Скиллы
+Инструкции по каждой задаче — в директории `skills/`. Читай SKILL.md перед выполнением:
+- `fb-dashboard/SKILL.md` — дашборд, метрики
+- `fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
+- `fb-campaign/SKILL.md` — создание кампаний
+- `fb-scoring/SKILL.md` — крон скоринга
+- `fb-leads/SKILL.md` — управление лидами
+- `fb-creative-test/SKILL.md` — A/B тесты
+- `fb-report/SKILL.md` — отчёты
+
+## Upload креативов
+URL для загрузки: https://app.performanteaiagency.com/openclaw/upload/
+
+## Webhook URL
+Facebook Lead Gen webhook: `https://app.performanteaiagency.com/openclaw/webhook/{{SLUG}}`
