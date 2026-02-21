@@ -4,12 +4,11 @@ set -e
 # OpenClaw gateway binds to 127.0.0.1:18789 (hardcoded, no config to change).
 # socat exposes it on 0.0.0.0:18790 so Docker port mapping works.
 
-# Ensure all required directories exist with correct permissions
+# Ensure all required directories exist (created as openclaw user)
 OPENCLAW_HOME="$HOME/.openclaw"
 for dir in devices cron canvas workspace; do
   mkdir -p "${OPENCLAW_HOME}/${dir}"
 done
-chown -R "$(id -u):$(id -g)" "$OPENCLAW_HOME"
 
 # Start gateway in background (with token auth if OPENCLAW_GATEWAY_TOKEN is set)
 if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
