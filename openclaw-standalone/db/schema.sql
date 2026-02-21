@@ -5,7 +5,7 @@
 -- ============================================
 -- 1. config — настройки (одна строка)
 -- ============================================
-CREATE TABLE config (
+CREATE TABLE IF NOT EXISTS config (
   id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
 
   -- Facebook
@@ -33,12 +33,12 @@ CREATE TABLE config (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO config (id) VALUES (1);
+INSERT INTO config (id) VALUES (1) ON CONFLICT DO NOTHING;
 
 -- ============================================
 -- 2. directions — направления кампаний
 -- ============================================
-CREATE TABLE directions (
+CREATE TABLE IF NOT EXISTS directions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   objective TEXT NOT NULL DEFAULT 'whatsapp'
@@ -57,7 +57,7 @@ CREATE TABLE directions (
 -- ============================================
 -- 3. direction_adsets — адсеты в направлениях
 -- ============================================
-CREATE TABLE direction_adsets (
+CREATE TABLE IF NOT EXISTS direction_adsets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   direction_id UUID NOT NULL REFERENCES directions(id) ON DELETE CASCADE,
   fb_adset_id TEXT NOT NULL,
@@ -73,12 +73,12 @@ CREATE TABLE direction_adsets (
   UNIQUE (direction_id, fb_adset_id)
 );
 
-CREATE INDEX idx_direction_adsets_active ON direction_adsets(direction_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_direction_adsets_active ON direction_adsets(direction_id) WHERE is_active = true;
 
 -- ============================================
 -- 4. creatives — загруженные креативы
 -- ============================================
-CREATE TABLE creatives (
+CREATE TABLE IF NOT EXISTS creatives (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT,
   media_type TEXT NOT NULL DEFAULT 'video'
@@ -112,13 +112,13 @@ CREATE TABLE creatives (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_creatives_status ON creatives(status);
-CREATE INDEX idx_creatives_direction ON creatives(direction_id);
+CREATE INDEX IF NOT EXISTS idx_creatives_status ON creatives(status);
+CREATE INDEX IF NOT EXISTS idx_creatives_direction ON creatives(direction_id);
 
 -- ============================================
 -- 5. metrics_history — ежедневные метрики
 -- ============================================
-CREATE TABLE metrics_history (
+CREATE TABLE IF NOT EXISTS metrics_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE NOT NULL,
 
@@ -154,14 +154,14 @@ CREATE TABLE metrics_history (
   UNIQUE (adset_id, date)
 );
 
-CREATE INDEX idx_metrics_date ON metrics_history(date DESC);
-CREATE INDEX idx_metrics_adset_date ON metrics_history(adset_id, date DESC);
-CREATE INDEX idx_metrics_campaign ON metrics_history(campaign_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_date ON metrics_history(date DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_adset_date ON metrics_history(adset_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_metrics_campaign ON metrics_history(campaign_id, date DESC);
 
 -- ============================================
 -- 6. ad_creative_mapping — связь ad → creative
 -- ============================================
-CREATE TABLE ad_creative_mapping (
+CREATE TABLE IF NOT EXISTS ad_creative_mapping (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ad_id TEXT NOT NULL UNIQUE,
   creative_id UUID NOT NULL REFERENCES creatives(id) ON DELETE CASCADE,
@@ -173,12 +173,12 @@ CREATE TABLE ad_creative_mapping (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_mapping_creative ON ad_creative_mapping(creative_id);
+CREATE INDEX IF NOT EXISTS idx_mapping_creative ON ad_creative_mapping(creative_id);
 
 -- ============================================
 -- 7. creative_tests — A/B тесты
 -- ============================================
-CREATE TABLE creative_tests (
+CREATE TABLE IF NOT EXISTS creative_tests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   creative_id UUID NOT NULL REFERENCES creatives(id) ON DELETE CASCADE UNIQUE,
 
@@ -218,7 +218,7 @@ CREATE TABLE creative_tests (
 -- ============================================
 -- 8. scoring_history — Health Score
 -- ============================================
-CREATE TABLE scoring_history (
+CREATE TABLE IF NOT EXISTS scoring_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   date DATE NOT NULL,
   adset_id TEXT NOT NULL,
@@ -249,13 +249,13 @@ CREATE TABLE scoring_history (
   UNIQUE (adset_id, date)
 );
 
-CREATE INDEX idx_scoring_date ON scoring_history(date DESC);
-CREATE INDEX idx_scoring_class ON scoring_history(health_class, date DESC);
+CREATE INDEX IF NOT EXISTS idx_scoring_date ON scoring_history(date DESC);
+CREATE INDEX IF NOT EXISTS idx_scoring_class ON scoring_history(health_class, date DESC);
 
 -- ============================================
 -- 9. leads — входящие лиды
 -- ============================================
-CREATE TABLE leads (
+CREATE TABLE IF NOT EXISTS leads (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
   name TEXT,
@@ -282,14 +282,14 @@ CREATE TABLE leads (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_leads_date ON leads(created_at DESC);
-CREATE INDEX idx_leads_direction ON leads(direction_id);
-CREATE INDEX idx_leads_stage ON leads(stage);
+CREATE INDEX IF NOT EXISTS idx_leads_date ON leads(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_direction ON leads(direction_id);
+CREATE INDEX IF NOT EXISTS idx_leads_stage ON leads(stage);
 
 -- ============================================
 -- 10. currency_rates — курс валют
 -- ============================================
-CREATE TABLE currency_rates (
+CREATE TABLE IF NOT EXISTS currency_rates (
   from_currency VARCHAR(3) NOT NULL,
   to_currency VARCHAR(3) NOT NULL,
   rate DECIMAL(12,4) NOT NULL,
@@ -299,12 +299,12 @@ CREATE TABLE currency_rates (
 );
 
 INSERT INTO currency_rates (from_currency, to_currency, rate)
-VALUES ('USD', 'KZT', 530.0);
+VALUES ('USD', 'KZT', 530.0) ON CONFLICT DO NOTHING;
 
 -- ============================================
 -- 11. scoring_executions — лог запусков скоринга
 -- ============================================
-CREATE TABLE scoring_executions (
+CREATE TABLE IF NOT EXISTS scoring_executions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   started_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ,
@@ -317,4 +317,4 @@ CREATE TABLE scoring_executions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_scoring_exec_date ON scoring_executions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scoring_exec_date ON scoring_executions(created_at DESC);
