@@ -1,8 +1,9 @@
 FROM node:22-slim
 
-# Install system deps: git (npm deps), psql (DB access), curl (Facebook API)
+# Install system deps: git (npm deps), psql (DB access), curl (Facebook API),
+# socat (forward 0.0.0.0 → 127.0.0.1 because openclaw binds localhost only)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git postgresql-client curl ca-certificates \
+    git postgresql-client curl ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Skip node-llama-cpp native build — we use Anthropic API, not local LLMs
@@ -16,12 +17,18 @@ RUN cd /usr/local/lib/node_modules/openclaw && npm rebuild --ignore-scripts 2>/d
 
 # Create non-root user
 RUN useradd -m -d /home/openclaw openclaw
+
+# Copy entrypoint
+COPY --chown=openclaw:openclaw entrypoint.sh /home/openclaw/entrypoint.sh
+RUN chmod +x /home/openclaw/entrypoint.sh
+
 USER openclaw
 WORKDIR /home/openclaw
 
 # Pre-create config directory
 RUN mkdir -p .openclaw/workspace
 
-EXPOSE 18789
+# socat exposes gateway on 0.0.0.0:18790 → 127.0.0.1:18789
+EXPOSE 18790
 
-CMD ["openclaw", "gateway"]
+ENTRYPOINT ["/home/openclaw/entrypoint.sh"]

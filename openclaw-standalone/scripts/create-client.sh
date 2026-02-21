@@ -9,7 +9,7 @@ if [ -z "$SLUG" ]; then
   echo "Example: $0 aliya 18790"
   echo ""
   echo "  slug          — client identifier (lowercase, a-z0-9_-)"
-  echo "  gateway_port  — gateway port (default: 18789)"
+  echo "  gateway_port  — external port for gateway UI (default: 18789)"
   exit 1
 fi
 
@@ -57,14 +57,14 @@ if [ -d "${BASE_DIR}/skills" ]; then
   echo "  Skills symlinked"
 fi
 
-# 4. Generate CLAUDE.md + minimal openclaw.json
+# 4. Generate CLAUDE.md + openclaw.json (port inside container is always 18789)
 echo "[4/5] Generating workspace files..."
 sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
-sed "s/18789/${GW_PORT}/g" "$CONFIG_TEMPLATE" > "${OPENCLAW_DIR}/openclaw.json"
+cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
 
 # Fix permissions — container runs as openclaw (UID 1000)
 chown -R 1000:1000 "${OPENCLAW_DIR}"
-echo "  CLAUDE.md + openclaw.json generated (gateway port: ${GW_PORT})"
+echo "  CLAUDE.md + openclaw.json generated"
 
 # 5. Start container
 echo "[5/5] Starting container ${CONTAINER_NAME}..."
@@ -75,14 +75,18 @@ if docker ps -a --format '{{.Names}}' | grep -qw "$CONTAINER_NAME"; then
   docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
 fi
 
+# OpenClaw gateway binds to 127.0.0.1:18789 (hardcoded).
+# entrypoint.sh runs socat on 0.0.0.0:18790 to forward external connections.
+# We map host GW_PORT → container 18790 (socat) → 127.0.0.1:18789 (gateway).
 docker run -d \
   --name "$CONTAINER_NAME" \
-  --network host \
+  --network openclaw-net \
   --restart unless-stopped \
+  -p "${GW_PORT}:18790" \
   -v "${OPENCLAW_DIR}:/home/openclaw/.openclaw" \
   openclaw-runtime
 
-echo "  Container ${CONTAINER_NAME} started"
+echo "  Container ${CONTAINER_NAME} started (port ${GW_PORT} → gateway)"
 
 echo ""
 echo "=== Client ${SLUG} created ==="
