@@ -1,10 +1,10 @@
 FROM node:22-alpine
 
+# Install system deps (git needed by openclaw npm deps, psql for DB, curl for Facebook API)
+RUN apk add --no-cache git postgresql16-client curl
+
 # Install OpenClaw globally
 RUN npm install -g openclaw@2026.2.17
-
-# Install psql (for direct DB access) and curl (for Facebook API)
-RUN apk add --no-cache postgresql16-client curl
 
 # Create non-root user
 RUN adduser -D -h /home/openclaw openclaw
