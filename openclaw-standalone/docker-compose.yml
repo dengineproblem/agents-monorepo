@@ -55,6 +55,14 @@ services:
     networks:
       - openclaw-net
 
+  # OpenClaw runtime image — только для сборки.
+  # Контейнеры клиентов запускаются через scripts/create-client.sh
+  openclaw-runtime:
+    build: ./openclaw-runtime
+    image: openclaw-runtime
+    profiles:
+      - build-only
+
 volumes:
   openclaw-pgdata:
   openclaw-uploads:
