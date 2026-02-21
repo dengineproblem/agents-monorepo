@@ -19,6 +19,9 @@ if ! echo "$SLUG" | grep -qE '^[a-z0-9_-]+$'; then
   exit 1
 fi
 
+# Generate auth token for gateway
+GW_TOKEN=$(openssl rand -hex 16)
+
 DB_NAME="openclaw_${SLUG}"
 CONTAINER_NAME="openclaw-${SLUG}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -83,6 +86,7 @@ docker run -d \
   --network openclaw-net \
   --restart unless-stopped \
   -p "${GW_PORT}:18790" \
+  -e "OPENCLAW_GATEWAY_TOKEN=${GW_TOKEN}" \
   -v "${OPENCLAW_DIR}:/home/openclaw/.openclaw" \
   openclaw-runtime
 
@@ -93,12 +97,13 @@ echo "=== Client ${SLUG} created ==="
 echo ""
 echo "Database:    ${DB_NAME}"
 echo "Container:   ${CONTAINER_NAME}"
-echo "Gateway:     http://localhost:${GW_PORT}"
+echo "Gateway:     https://${SLUG}.openclaw.performanteaiagency.com"
+echo "Auth token:  ${GW_TOKEN}"
 echo "Workspace:   ${WORKSPACE_DIR}"
 echo ""
 echo "Next steps:"
-echo "  1. Open gateway UI: http://<server-ip>:${GW_PORT}"
-echo "  2. Log in with your Anthropic account"
+echo "  1. Open gateway UI: https://${SLUG}.openclaw.performanteaiagency.com"
+echo "  2. Enter auth token: ${GW_TOKEN}"
 echo "  3. Configure Facebook tokens in DB:"
 echo "     docker exec -i openclaw-postgres psql -U postgres -d ${DB_NAME} <<< \"UPDATE config SET fb_access_token='...', fb_ad_account_id='act_...', fb_page_id='...' WHERE id=1;\""
 echo "  4. Check logs: docker logs -f ${CONTAINER_NAME}"

@@ -4,8 +4,14 @@ set -e
 # OpenClaw gateway binds to 127.0.0.1:18789 (hardcoded, no config to change).
 # socat exposes it on 0.0.0.0:18790 so Docker port mapping works.
 
-# Start gateway in background
-openclaw gateway &
+# Start gateway in background (with token auth if OPENCLAW_GATEWAY_TOKEN is set)
+if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+  echo "Starting gateway with token auth..."
+  openclaw gateway --auth token --token "$OPENCLAW_GATEWAY_TOKEN" &
+else
+  echo "Starting gateway in local mode (no auth)..."
+  openclaw gateway &
+fi
 GATEWAY_PID=$!
 
 # Wait for gateway to start listening
