@@ -19,7 +19,7 @@ RUN cd /usr/local/lib/node_modules/openclaw && npm rebuild --ignore-scripts 2>/d
 RUN useradd -m -d /home/openclaw -u 1001 openclaw
 
 # Copy entrypoint
-COPY --chown=openclaw:openclaw entrypoint.sh /home/openclaw/entrypoint.sh
+COPY --chown=openclaw:openclaw openclaw-runtime/entrypoint.sh /home/openclaw/entrypoint.sh
 RUN chmod +x /home/openclaw/entrypoint.sh
 
 # Copy WhatsApp hook and CAPI scripts

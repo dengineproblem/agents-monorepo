@@ -62,7 +62,9 @@ services:
   # OpenClaw runtime image — только для сборки.
   # Контейнеры клиентов запускаются через scripts/create-client.sh
   openclaw-runtime:
-    build: ./openclaw-runtime
+    build:
+      context: .
+      dockerfile: openclaw-runtime/Dockerfile
     image: openclaw-runtime
     profiles:
       - build-only
