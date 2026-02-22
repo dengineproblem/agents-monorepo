@@ -42,9 +42,9 @@ openclaw-standalone/
 │
 ├── db/
 │   ├── init.sql                   # Инициализация PostgreSQL (pgcrypto)
-│   └── schema.sql                 # Схема БД (14 таблиц, идемпотентная)
+│   └── schema.sql                 # Схема БД (15 таблиц, идемпотентная)
 │
-└── skills/                         # 10 skills: Facebook Ads + WhatsApp
+└── skills/                         # 11 skills: Facebook Ads + WhatsApp
     ├── fb-onboarding/SKILL.md      # Первичная настройка клиента (8 шагов)
     ├── fb-dashboard/SKILL.md       # Дашборд, метрики
     ├── fb-optimize/SKILL.md        # Health Score, оптимизация бюджетов
@@ -54,6 +54,7 @@ openclaw-standalone/
     ├── fb-creative-test/SKILL.md   # A/B тесты креативов
     ├── fb-report/SKILL.md          # Утренние/недельные отчёты
     ├── wa-onboarding/SKILL.md      # Подключение WhatsApp через Baileys QR
+    ├── wa-waba-setup/SKILL.md      # Подключение WABA (WhatsApp Business API)
     └── wa-capi-setup/SKILL.md      # Настройка CAPI (pixel, events, threshold)
 ```
 
@@ -64,7 +65,7 @@ openclaw-standalone/
 | Сервис | Контейнер | Порт (хост → контейнер) | Назначение |
 |--------|-----------|-------------------------|------------|
 | postgres | openclaw-postgres | 5435 → 5432 | Общая PostgreSQL для всех клиентов |
-| webhook | openclaw-webhook | 9000 → 3000 | Приём Facebook Lead Gen вебхуков |
+| webhook | openclaw-webhook | 9000 → 3000 | Lead Gen + WABA webhooks + Claude chatbot |
 | upload | openclaw-upload | 9001 → 3001 | Загрузка креативов (до 500 МБ) |
 | openclaw-runtime | — | — | Только сборка image (profile: build-only) |
 
@@ -160,11 +161,13 @@ OpenClaw создаёт и читает свои файлы при каждой 
 
 ## База данных
 
-### Схема (14 таблиц на каждого клиента)
+### Схема (15 таблиц на каждого клиента + 1 shared)
+
+**Per-tenant DB (`openclaw_{slug}`):**
 
 | # | Таблица | Назначение |
 |---|---------|------------|
-| 1 | config | Настройки (1 строка): FB токены, Telegram, timezone, target CPL |
+| 1 | config | Настройки: FB токены, Telegram, WABA credentials, timezone, target CPL |
 | 2 | directions | Направления кампаний (whatsapp, lead_forms, instagram_traffic...) |
 | 3 | direction_adsets | Адсеты в направлениях |
 | 4 | creatives | Загруженные креативы (video, image, carousel) + кеш метрик |
@@ -172,12 +175,19 @@ OpenClaw создаёт и читает свои файлы при каждой 
 | 6 | ad_creative_mapping | Связь ad_id → creative_id + direction_id (для source_id resolution) |
 | 7 | creative_tests | A/B тесты ($20 бюджет, 1000 показов, LLM-анализ) |
 | 8 | scoring_history | Health Score по адсетам (формула 45 + тренды + диагностика) |
-| 9 | leads | Входящие лиды (Lead Gen + WhatsApp) + ctwa_clid, ad_id, conversion_source |
+| 9 | leads | Входящие лиды (Lead Gen + WhatsApp + WABA) + ctwa_clid, ad_id, conversion_source |
 | 10 | currency_rates | Курс валют (USD/KZT = 530) |
 | 11 | scoring_executions | Лог запусков скоринга |
-| 12 | wa_dialogs | Трекинг WhatsApp диалогов: счётчики, ad attribution, CAPI флаги |
+| 12 | wa_dialogs | Трекинг WhatsApp диалогов: счётчики, ad attribution, CAPI, 24h window |
 | 13 | capi_settings | Настройки CAPI: pixel_id, access_token, event names, threshold |
 | 14 | capi_events_log | Аудит отправленных CAPI событий (L1/L2/L3) |
+| 15 | wa_messages | История WhatsApp сообщений (Baileys + WABA), контекст для чатбота |
+
+**Shared DB (`openclaw`):**
+
+| Таблица | Назначение |
+|---------|------------|
+| waba_phone_mapping | Маршрутизация WABA webhooks: phone_number_id → slug + credentials |
 
 Все CREATE TABLE с `IF NOT EXISTS`, INSERT с `ON CONFLICT DO NOTHING` — безопасно перезапускать.
 
@@ -194,7 +204,7 @@ OpenClaw создаёт и читает свои файлы при каждой 
 
 Скрипт автоматически:
 1. Создаёт БД `openclaw_<slug>` (если не существует)
-2. Применяет schema.sql (14 таблиц)
+2. Применяет schema.sql (15 таблиц)
 3. Создаёт workspace + **копирует** skills (не симлинка!)
 4. Генерирует CLAUDE.md, TOOLS.md (подставляет slug) и openclaw.json
 5. Генерирует gateway auth token
@@ -352,6 +362,35 @@ send-capi.sh → Meta Graph API POST /{pixel_id}/events
 **Модель на WhatsApp:** Haiku 4.5 через `modelByChannel` в openclaw.json — дешевле в ~60x и быстрее чем Opus.
 
 **Ad Attribution:** WhatsApp сообщение с рекламы содержит `source_id` (= ad_id Facebook). Hook резолвит его через `ad_creative_mapping` для привязки к конкретному креативу и направлению.
+
+### WABA (WhatsApp Business API) архитектура
+
+Опциональный enterprise канал — официальный Meta Cloud API. Обрабатывается webhook-service централизованно (не через контейнер клиента).
+
+```
+Meta WABA Platform
+     │ POST /webhooks/waba (X-Hub-Signature-256)
+     ▼
+Nginx → webhook-service (порт 9000)
+  ├── waba_phone_mapping (shared DB) → slug lookup
+  ├── HMAC-SHA256 signature verification
+  ├── Dedup (in-memory Map, 10min TTL)
+  ├── UPSERT wa_dialogs + INSERT wa_messages
+  ├── Ad attribution (source_id → ad_creative_mapping)
+  │
+  ├── Claude API (Haiku 4.5) → автоответ
+  ├── Meta Cloud API → отправка ответа
+  │
+  └── CAPI L1 threshold check → автоотправка
+```
+
+**Baileys vs WABA:**
+- Baileys: бесплатно, QR-код, через контейнер клиента (hook `message:received`)
+- WABA: платно, Meta верификация, через webhook-service (централизованно)
+- Оба используют одни таблицы: `wa_dialogs`, `wa_messages`, `leads`, `capi_settings`
+
+**WABA Webhook URL:** `https://app.performanteaiagency.com/openclaw/webhooks/waba`
+Один URL на все tenant — маршрутизация через `phone_number_id` → `waba_phone_mapping`.
 
 ### 1. Telegram интеграция
 

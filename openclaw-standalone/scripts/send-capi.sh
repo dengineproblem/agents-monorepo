@@ -13,6 +13,10 @@ LEVEL="${1:-}"
 PHONE="${2:-}"
 DB_URL="${OPENCLAW_DB_URL:-}"
 
+log() {
+  echo "[$(date -Iseconds)] [send-capi] $*"
+}
+
 if [ -z "$LEVEL" ] || [ -z "$PHONE" ]; then
   echo "Usage: send-capi.sh <level> <phone>"
   echo "  level: 1, 2, 3"
@@ -21,9 +25,16 @@ if [ -z "$LEVEL" ] || [ -z "$PHONE" ]; then
 fi
 
 if [ -z "$DB_URL" ]; then
-  echo "Error: OPENCLAW_DB_URL not set"
+  log "ERROR: OPENCLAW_DB_URL not set"
   exit 1
 fi
+
+# Sanitize PHONE — digits and + only (prevent SQL injection)
+PHONE=$(echo "$PHONE" | tr -cd '0-9+')
+# SQL-safe version with escaped single quotes
+SAFE_PHONE=$(echo "$PHONE" | sed "s/'/''/g")
+
+log "Starting L${LEVEL} for phone=${PHONE}"
 
 # --- Read CAPI settings ---
 
@@ -32,11 +43,13 @@ CAPI_ROW=$(psql "$DB_URL" -t -A -F'|' -c \
    FROM capi_settings WHERE is_active = true LIMIT 1;" 2>/dev/null)
 
 if [ -z "$CAPI_ROW" ]; then
-  echo "Error: No active capi_settings found. Run wa-capi-setup skill first."
+  log "ERROR: No active capi_settings found. Run wa-capi-setup skill first."
   exit 1
 fi
 
 IFS='|' read -r PIXEL_ID ACCESS_TOKEN L1_EVENT L2_EVENT L3_EVENT L1_THRESHOLD <<< "$CAPI_ROW"
+
+log "CAPI settings loaded: pixel=${PIXEL_ID}, threshold=${L1_THRESHOLD}"
 
 # --- Determine event name ---
 
@@ -44,34 +57,42 @@ case "$LEVEL" in
   1) EVENT_NAME="$L1_EVENT"; LEVEL_FLAG="l1" ;;
   2) EVENT_NAME="$L2_EVENT"; LEVEL_FLAG="l2" ;;
   3) EVENT_NAME="$L3_EVENT"; LEVEL_FLAG="l3" ;;
-  *) echo "Error: level must be 1, 2, or 3"; exit 1 ;;
+  *) log "ERROR: level must be 1, 2, or 3"; exit 1 ;;
 esac
+
+log "Event: ${EVENT_NAME} (L${LEVEL})"
 
 # --- Check deduplication ---
 
 ALREADY_SENT=$(psql "$DB_URL" -t -A -c \
-  "SELECT ${LEVEL_FLAG}_sent FROM wa_dialogs WHERE phone = '$PHONE';" 2>/dev/null)
+  "SELECT ${LEVEL_FLAG}_sent FROM wa_dialogs WHERE phone = '${SAFE_PHONE}';" 2>/dev/null)
 
 if [ "$ALREADY_SENT" = "t" ]; then
-  echo "Skipped: L${LEVEL} already sent for $PHONE"
+  log "SKIP: L${LEVEL} already sent for ${PHONE}"
   exit 0
 fi
+
+log "Dedup check passed: not yet sent"
 
 # --- Read wa_dialogs for ctwa_clid ---
 
 CTWA_CLID=$(psql "$DB_URL" -t -A -c \
-  "SELECT COALESCE(ctwa_clid, '') FROM wa_dialogs WHERE phone = '$PHONE';" 2>/dev/null)
+  "SELECT COALESCE(ctwa_clid, '') FROM wa_dialogs WHERE phone = '${SAFE_PHONE}';" 2>/dev/null)
 
 SOURCE_ID=$(psql "$DB_URL" -t -A -c \
-  "SELECT COALESCE(source_id, '') FROM wa_dialogs WHERE phone = '$PHONE';" 2>/dev/null)
+  "SELECT COALESCE(source_id, '') FROM wa_dialogs WHERE phone = '${SAFE_PHONE}';" 2>/dev/null)
+
+log "Dialog data: ctwa_clid=${CTWA_CLID:-none}, source_id=${SOURCE_ID:-none}"
 
 # --- Hash phone (SHA256) ---
 
 HASHED_PHONE=$(echo -n "$PHONE" | sha256sum | cut -d' ' -f1)
+log "Phone hashed: ${HASHED_PHONE:0:16}..."
 
 # --- Generate event_id (UUID v4) ---
-
-EVENT_ID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || echo "evt-$(date +%s)-$$")
+# Prefer uuidgen (works in Debian slim), fallback to /proc, then timestamp
+EVENT_ID=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "evt-$(date +%s)-$$")
+log "Event ID: ${EVENT_ID}"
 
 # --- Build CAPI payload ---
 
@@ -108,7 +129,7 @@ EOJSON
 
 # --- Send to Meta Graph API ---
 
-echo "Sending L${LEVEL} ($EVENT_NAME) for $PHONE to pixel $PIXEL_ID..."
+log "Sending to pixel ${PIXEL_ID}..."
 
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
   "https://graph.facebook.com/v23.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}" \
@@ -123,22 +144,26 @@ BODY=$(echo "$RESPONSE" | sed '$d')
 if [ "$HTTP_CODE" = "200" ]; then
   STATUS="success"
   ERROR_TEXT=""
-  echo "Success: L${LEVEL} event sent. Response: $BODY"
+  log "SUCCESS: L${LEVEL} event sent. HTTP=${HTTP_CODE}. Response: ${BODY}"
 else
   STATUS="error"
   ERROR_TEXT="HTTP $HTTP_CODE: $BODY"
-  echo "Error: HTTP $HTTP_CODE. Response: $BODY"
+  log "ERROR: L${LEVEL} failed. HTTP=${HTTP_CODE}. Response: ${BODY}"
 fi
 
 # --- Log to capi_events_log ---
 
 ESCAPED_BODY=$(echo "$BODY" | sed "s/'/''/g")
 ESCAPED_ERROR=$(echo "$ERROR_TEXT" | sed "s/'/''/g")
+SAFE_SOURCE_ID=$(echo "$SOURCE_ID" | sed "s/'/''/g")
+SAFE_CTWA_CLID=$(echo "$CTWA_CLID" | sed "s/'/''/g")
 
 psql "$DB_URL" -c "
   INSERT INTO capi_events_log (phone, event_name, event_level, ctwa_clid, source_id, pixel_id, event_id, fb_response, status, error_text)
-  VALUES ('$PHONE', '$EVENT_NAME', $LEVEL, NULLIF('$CTWA_CLID',''), NULLIF('$SOURCE_ID',''), '$PIXEL_ID', '$EVENT_ID', '${ESCAPED_BODY}'::jsonb, '$STATUS', NULLIF('$ESCAPED_ERROR',''))
-" 2>/dev/null || echo "Warning: Failed to log CAPI event"
+  VALUES ('${SAFE_PHONE}', '${EVENT_NAME}', ${LEVEL}, NULLIF('${SAFE_CTWA_CLID}',''), NULLIF('${SAFE_SOURCE_ID}',''), '${PIXEL_ID}', '${EVENT_ID}', '${ESCAPED_BODY}'::jsonb, '${STATUS}', NULLIF('${ESCAPED_ERROR}',''))
+" 2>/dev/null || log "WARN: Failed to log CAPI event to DB"
+
+log "CAPI event logged to capi_events_log"
 
 # --- Update wa_dialogs flags ---
 
@@ -147,10 +172,12 @@ if [ "$STATUS" = "success" ]; then
     UPDATE wa_dialogs SET
       ${LEVEL_FLAG}_sent = true,
       ${LEVEL_FLAG}_sent_at = NOW(),
-      ${LEVEL_FLAG}_event_id = '$EVENT_ID',
+      ${LEVEL_FLAG}_event_id = '${EVENT_ID}',
       updated_at = NOW()
-    WHERE phone = '$PHONE'
-  " 2>/dev/null || echo "Warning: Failed to update wa_dialogs"
+    WHERE phone = '${SAFE_PHONE}'
+  " 2>/dev/null || log "WARN: Failed to update wa_dialogs"
+  log "wa_dialogs updated: ${LEVEL_FLAG}_sent=true"
 fi
 
+log "Done"
 exit 0

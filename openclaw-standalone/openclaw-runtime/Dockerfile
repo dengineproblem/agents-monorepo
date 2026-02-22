@@ -25,7 +25,8 @@ RUN chmod +x /home/openclaw/entrypoint.sh
 # Copy WhatsApp hook and CAPI scripts
 COPY --chown=openclaw:openclaw scripts/wa-message-hook.js /home/openclaw/scripts/wa-message-hook.js
 COPY --chown=openclaw:openclaw scripts/send-capi.sh /home/openclaw/scripts/send-capi.sh
-RUN chmod +x /home/openclaw/scripts/send-capi.sh
+COPY --chown=openclaw:openclaw scripts/send-waba.sh /home/openclaw/scripts/send-waba.sh
+RUN chmod +x /home/openclaw/scripts/send-capi.sh /home/openclaw/scripts/send-waba.sh
 
 USER openclaw
 WORKDIR /home/openclaw

@@ -49,6 +49,7 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 
 ### WhatsApp
 - `skills/wa-onboarding/SKILL.md` — подключение WhatsApp через QR (Baileys)
+- `skills/wa-waba-setup/SKILL.md` — подключение WABA (WhatsApp Business API)
 - `skills/wa-capi-setup/SKILL.md` — настройка CAPI (pixel, events, threshold)
 
 ## Автозапуск онбординга
@@ -120,3 +121,51 @@ SELECT pixel_id, l1_event_name, l2_event_name, l3_event_name, l1_threshold
 FROM capi_settings WHERE is_active = true;
 ```
 Если нет записей — CAPI не настроен, пропусти отправку.
+
+## WABA (WhatsApp Business API)
+
+WABA сообщения обрабатываются централизованно webhook-service (автоответ через Claude Haiku 4.5).
+Агент НЕ получает WABA сообщения через hook — они обрабатываются автоматически.
+CAPI L1 отправляется автоматически при достижении порога.
+
+### Проверка WABA статуса
+```sql
+SELECT waba_enabled, waba_phone_id FROM config WHERE id = 1;
+```
+
+### Просмотр WABA диалогов
+```sql
+SELECT phone, name, incoming_count, outgoing_count, capi_msg_count,
+       qualification, summary, waba_window_expires_at
+FROM wa_dialogs
+WHERE incoming_count > 0
+ORDER BY last_message DESC LIMIT 20;
+```
+
+### Просмотр переписки
+```sql
+SELECT direction, channel, message_text, created_at
+FROM wa_messages WHERE phone = '{phone}'
+ORDER BY created_at DESC LIMIT 30;
+```
+
+### Ручная отправка через WABA
+```bash
+send-waba.sh {phone} "Текст сообщения"
+```
+
+### Настройка промпта чатбота
+```sql
+UPDATE config SET waba_bot_system_prompt = 'Ваш системный промпт...' WHERE id = 1;
+```
+
+### Квалификация WABA лидов для CAPI L2/L3
+Анализируй переписку в `wa_messages`, обновляй `qualification` в `wa_dialogs`:
+```sql
+UPDATE wa_dialogs SET
+  qualification = '{interested|scheduled}',
+  summary = '{описание}',
+  updated_at = NOW()
+WHERE phone = '{phone}';
+```
+Затем вызови `send-capi.sh 2 {phone}` или `send-capi.sh 3 {phone}`.

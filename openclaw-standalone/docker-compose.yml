@@ -34,6 +34,12 @@ services:
       PG_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
       PG_PORT: 5432
       FB_WEBHOOK_VERIFY_TOKEN: ${FB_WEBHOOK_VERIFY_TOKEN:-openclaw_leadgen_2026}
+      # WABA (WhatsApp Business API)
+      WABA_VERIFY_TOKEN: ${WABA_VERIFY_TOKEN:-openclaw_waba_2026}
+      WABA_APP_SECRET: ${WABA_APP_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-4-5-20250315}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
     depends_on:
       postgres:
         condition: service_healthy

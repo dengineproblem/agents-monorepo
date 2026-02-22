@@ -14,21 +14,34 @@ const { execSync } = require('child_process');
 
 const DB_URL = process.env.OPENCLAW_DB_URL;
 
+// Structured logging — stderr to avoid interfering with OpenClaw hook protocol on stdout
+function log(level, msg, data = {}) {
+  const entry = JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    src: 'wa-hook',
+    msg,
+    ...data
+  });
+  console.error(entry);
+}
+
 if (!DB_URL) {
-  console.error('[wa-hook] OPENCLAW_DB_URL not set, skipping');
+  log('warn', 'OPENCLAW_DB_URL not set, skipping');
   process.exit(0);
 }
 
 // --- Helpers ---
 
 function psql(query, params = []) {
-  // Escape single quotes in params for psql
-  let sql = query;
-  params.forEach((val, i) => {
-    const escaped = val === null || val === undefined
+  // Single-pass regex replacement — safe against $N patterns inside substituted values
+  const sql = query.replace(/\$(\d+)/g, (match, num) => {
+    const idx = parseInt(num, 10) - 1;
+    if (idx < 0 || idx >= params.length) return match;
+    const val = params[idx];
+    return val === null || val === undefined
       ? 'NULL'
       : `'${String(val).replace(/'/g, "''")}'`;
-    sql = sql.replace(`$${i + 1}`, escaped);
   });
 
   try {
@@ -38,7 +51,7 @@ function psql(query, params = []) {
     );
     return result.trim();
   } catch (err) {
-    console.error('[wa-hook] psql error:', err.message);
+    log('error', 'psql error', { error: err.message, sql: sql.slice(0, 200) });
     return null;
   }
 }
@@ -46,8 +59,7 @@ function psql(query, params = []) {
 function psqlRow(query, params = []) {
   const result = psql(query, params);
   if (!result) return null;
-  const cols = result.split('|');
-  return cols;
+  return result.split('|');
 }
 
 // --- Extract metadata from Baileys message ---
@@ -156,6 +168,7 @@ async function main() {
 
   const phone = extractPhone(msg);
   if (!phone || phone.length < 5) {
+    log('warn', 'Invalid phone', { raw: msg?.key?.remoteJid });
     process.exit(0);
   }
 
@@ -163,8 +176,12 @@ async function main() {
   const sourceId = extractSourceId(msg);
   const ctwaClid = extractCtwaClid(msg);
 
+  log('info', 'Processing message', {
+    phone, name, sourceId: sourceId || null, hasCtwaClid: !!ctwaClid
+  });
+
   // 1. UPSERT wa_dialogs
-  psql(`
+  const upsertResult = psql(`
     INSERT INTO wa_dialogs (phone, name, incoming_count, capi_msg_count, last_message, ctwa_clid, source_id)
     VALUES ($1, $2, 1, 1, NOW(), $3, $4)
     ON CONFLICT (phone) DO UPDATE SET
@@ -176,6 +193,8 @@ async function main() {
       name = COALESCE(EXCLUDED.name, wa_dialogs.name),
       updated_at = NOW()
   `, [phone, name, ctwaClid, sourceId]);
+
+  log('info', 'Dialog upserted', { phone, success: upsertResult !== null });
 
   // 2. Resolve ad_creative_mapping if source_id present
   let creativeId = null;
@@ -197,23 +216,40 @@ async function main() {
         SET creative_id = $1, direction_id = $2, updated_at = NOW()
         WHERE phone = $3 AND creative_id IS NULL
       `, [creativeId, directionId, phone]);
+
+      log('info', 'Ad mapping resolved', { phone, sourceId, creativeId, directionId });
+    } else {
+      log('warn', 'No ad_creative_mapping found', { phone, sourceId });
     }
   }
 
-  // 3. Create lead if ad attribution data present
+  // 3. Create/update lead if ad attribution data present
   if (sourceId || ctwaClid) {
     psql(`
       INSERT INTO leads (phone, name, ad_id, ctwa_clid, chat_id, source_type, creative_id, direction_id, conversion_source)
       VALUES ($1, $2, $3, $4, $5, 'whatsapp', $6, $7, 'whatsapp_baileys')
-      ON CONFLICT DO NOTHING
+      ON CONFLICT (chat_id) WHERE source_type = 'whatsapp' AND chat_id IS NOT NULL
+      DO UPDATE SET
+        name = COALESCE(EXCLUDED.name, leads.name),
+        ad_id = COALESCE(EXCLUDED.ad_id, leads.ad_id),
+        ctwa_clid = COALESCE(EXCLUDED.ctwa_clid, leads.ctwa_clid),
+        creative_id = COALESCE(EXCLUDED.creative_id, leads.creative_id),
+        direction_id = COALESCE(EXCLUDED.direction_id, leads.direction_id),
+        updated_at = NOW()
     `, [phone, name, sourceId, ctwaClid, phone, creativeId, directionId]);
+
+    log('info', 'Lead upserted', { phone, sourceId, hasCtwaClid: !!ctwaClid });
   }
 
-  console.error(`[wa-hook] phone=${phone} source_id=${sourceId || '-'} ctwa_clid=${ctwaClid ? 'yes' : '-'} creative=${creativeId || '-'}`);
+  log('info', 'Hook completed', {
+    phone, sourceId: sourceId || '-',
+    ctwaClid: ctwaClid ? 'yes' : '-',
+    creative: creativeId || '-'
+  });
   process.exit(0);
 }
 
 main().catch(err => {
-  console.error('[wa-hook] Error:', err.message);
+  log('error', 'Hook fatal error', { error: err.message });
   process.exit(0); // Don't block agent on hook errors
 });

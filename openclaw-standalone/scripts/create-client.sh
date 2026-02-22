@@ -48,7 +48,7 @@ fi
 # 2. Apply schema
 echo "[2/5] Applying schema..."
 docker exec -i openclaw-postgres psql -U postgres -d "$DB_NAME" < "$SCHEMA_FILE"
-echo "  Schema applied (14 tables)"
+echo "  Schema applied (15 tables)"
 
 # 3. Create workspace directories
 echo "[3/5] Creating workspace at ${CLIENT_DIR}..."

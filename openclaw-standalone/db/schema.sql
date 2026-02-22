@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS config (
   telegram_bot_token TEXT,
   telegram_chat_id TEXT,
 
+  -- WABA (WhatsApp Business API)
+  waba_enabled BOOLEAN DEFAULT false,
+  waba_phone_id TEXT,                    -- Meta Phone Number ID
+  waba_access_token TEXT,                -- System User Access Token
+  waba_app_secret TEXT,                  -- Meta App Secret для HMAC
+  waba_verify_token TEXT,                -- Verify Token для webhook setup
+  waba_bot_system_prompt TEXT,           -- Системный промпт для WABA чатбота
+
   -- Settings
   timezone TEXT DEFAULT 'Asia/Almaty',
   default_target_cpl_cents INTEGER DEFAULT 300,
@@ -294,6 +302,9 @@ CREATE INDEX IF NOT EXISTS idx_leads_ad_id ON leads(ad_id) WHERE ad_id IS NOT NU
 CREATE INDEX IF NOT EXISTS idx_leads_ctwa_clid ON leads(ctwa_clid) WHERE ctwa_clid IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_leads_chat_id ON leads(chat_id) WHERE chat_id IS NOT NULL;
 
+-- WhatsApp lead deduplication: один лид на телефон для source_type='whatsapp'
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_wa_chat_id ON leads(chat_id) WHERE source_type = 'whatsapp' AND chat_id IS NOT NULL;
+
 -- ============================================
 -- 10. currency_rates — курс валют
 -- ============================================
@@ -367,6 +378,9 @@ CREATE TABLE IF NOT EXISTS wa_dialogs (
   qualification TEXT,                  -- interested / not_interested / scheduled
   summary TEXT,                        -- AI-краткое описание диалога
 
+  -- WABA 24h window
+  waba_window_expires_at TIMESTAMPTZ,  -- last_inbound + 24h (NULL = Baileys, без ограничений)
+
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -423,3 +437,25 @@ CREATE TABLE IF NOT EXISTS capi_events_log (
 CREATE INDEX IF NOT EXISTS idx_capi_log_phone ON capi_events_log(phone);
 CREATE INDEX IF NOT EXISTS idx_capi_log_sent ON capi_events_log(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_capi_log_level ON capi_events_log(event_level);
+
+-- ============================================
+-- 15. wa_messages — история WhatsApp сообщений
+-- Хранит полную переписку для контекста чатбота
+-- ============================================
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL,                -- номер клиента (key для wa_dialogs)
+  direction TEXT NOT NULL             -- 'inbound' или 'outbound'
+    CHECK (direction IN ('inbound', 'outbound')),
+  channel TEXT NOT NULL DEFAULT 'baileys'  -- 'baileys' или 'waba'
+    CHECK (channel IN ('baileys', 'waba')),
+  message_text TEXT,
+  message_type TEXT DEFAULT 'text'
+    CHECK (message_type IN ('text', 'image', 'audio', 'document', 'button', 'interactive', 'sticker', 'video')),
+  waba_message_id TEXT,               -- Meta message ID (для дедупликации)
+  metadata JSONB,                     -- доп. данные (referral, media URL и т.д.)
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON wa_messages(phone, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_waba_id ON wa_messages(waba_message_id) WHERE waba_message_id IS NOT NULL;
