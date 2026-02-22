@@ -12,8 +12,7 @@ services:
       - "5435:5432"
     volumes:
       - openclaw-pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./db/init-evolution.sh:/docker-entrypoint-initdb.d/02-init-evolution.sh:ro
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./db/schema.sql:/opt/openclaw/schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready"]
@@ -52,55 +51,6 @@ services:
     environment:
       PORT: 3001
       MAX_FILE_SIZE_MB: 500
-    restart: unless-stopped
-    networks:
-      - openclaw-net
-
-  # Evolution API (WhatsApp)
-  evolution-api:
-    image: atendai/evolution-api:v2.2.3
-    container_name: openclaw-evolution
-    environment:
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-openclaw_evo_secret}
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://postgres:${POSTGRES_PASSWORD:-openclaw_local}@postgres:5432/evolution
-      WEBHOOK_GLOBAL_URL: http://chatbot-router:3002/evolution-webhook
-      WEBHOOK_GLOBAL_ENABLED: "true"
-      WEBHOOK_EVENTS: MESSAGES_UPSERT,CONNECTION_UPDATE,QRCODE_UPDATED
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - openclaw-net
-
-  # Chatbot Router — маршрутизация Evolution webhook'ов → SaaS chatbot-service
-  chatbot-router:
-    build: ./chatbot-router
-    container_name: openclaw-chatbot-router
-    ports:
-      - "9002:3002"
-    environment:
-      PG_HOST: postgres
-      PG_USER: postgres
-      PG_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
-      SUPABASE_DB_URL: ${SUPABASE_DB_URL}
-      CHATBOT_SERVICE_URL: ${CHATBOT_SERVICE_URL}
-      EVOLUTION_API_URL: http://evolution-api:8080
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-openclaw_evo_secret}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - openclaw-net
-
-  # Redis (для Evolution API и кеширования)
-  redis:
-    image: redis:7-alpine
-    container_name: openclaw-redis
     restart: unless-stopped
     networks:
       - openclaw-net
