@@ -89,26 +89,24 @@ export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' |
 }
 
 /**
- * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
+ * Маппинг optimization_level в custom_event_type для FB API
  *
- * Для Messaging dataset (WhatsApp): OTHER + custom_event_str='LeadSubmitted' (кастомное messaging событие)
- * Для Website/legacy: level_1=COMPLETE_REGISTRATION, level_2=ADD_TO_CART/SUBSCRIBE, level_3=PURCHASE
+ * WhatsApp CTWA: всегда PURCHASE (единственное событие поддерживаемое для оптимизации
+ * с destination_type=WHATSAPP). Разные уровни различаются через value в CAPI.
  *
  * @param level - уровень оптимизации из направления (level_1, level_2, level_3)
  * @param conversionChannel - канал конверсии (whatsapp, lead_form, site)
  * @returns custom_event_type для FB API promoted_object
  */
 export function getCustomEventType(level: string | undefined, conversionChannel?: string | null): string {
-  // Messaging dataset (WhatsApp) — LeadSubmitted это кастомное событие, нет в стандартном enum FB API
-  // Caller должен добавить custom_event_str: 'LeadSubmitted' в promoted_object
+  // WhatsApp CTWA: только PURCHASE работает в promoted_object с destination_type=WHATSAPP
   if (conversionChannel === 'whatsapp') {
     log.debug({
       input_level: level,
       conversionChannel,
-      custom_event_type: 'OTHER',
-      custom_event_str: 'LeadSubmitted',
-    }, 'getCustomEventType: Messaging dataset → OTHER + LeadSubmitted');
-    return 'OTHER';
+      custom_event_type: 'PURCHASE',
+    }, 'getCustomEventType: WhatsApp CTWA → PURCHASE');
+    return 'PURCHASE';
   }
 
   // CRM dataset (lead_form) — все уровни отправляют событие Lead через CAPI

@@ -358,14 +358,13 @@ export async function workflowCreateCampaignWithCreative(
       throw new Error(`Conversions (${channel}) requires pixel_id — configure ${isWhatsApp ? 'capi_settings' : 'default_ad_settings'}`);
     }
 
-    const eventType = isWhatsApp ? 'OTHER' : 'LEAD';
+    const eventType = isWhatsApp ? 'PURCHASE' : 'LEAD';
 
     if (isWhatsApp && page_id) {
       adsetBody.destination_type = 'WHATSAPP';
       adsetBody.promoted_object = {
         pixel_id: String(pixelId),
         custom_event_type: eventType,
-        custom_event_str: 'LeadSubmitted',
         page_id: String(page_id),
         ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
       };
@@ -388,8 +387,7 @@ export async function workflowCreateCampaignWithCreative(
         adsetBody.destination_type = 'WHATSAPP';
         adsetBody.promoted_object = {
           pixel_id: String(pixelId),
-          custom_event_type: 'OTHER',
-          custom_event_str: 'LeadSubmitted',
+          custom_event_type: 'PURCHASE',
           page_id: String(page_id),
           ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
         };

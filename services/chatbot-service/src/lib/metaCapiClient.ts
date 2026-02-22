@@ -3,10 +3,13 @@
  *
  * Отправляет события конверсий в Facebook для оптимизации рекламы.
  *
- * Три уровня событий (Pixel/CAPI без WABA):
- * 1. CompleteRegistration (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
- * 2. AddToCart/Subscribe (QUALIFIED) - клиент прошёл квалификацию
- * 3. Purchase (BOOKED) - клиент записался/купил (event_name = Purchase)
+ * WhatsApp CTWA (business_messaging): все уровни = Purchase с разным value
+ *   L1 (интерес): Purchase, value=1
+ *   L2 (квалифицирован): Purchase, value=10
+ *   L3 (записался/купил): Purchase, value=100
+ *
+ * Meta разрешает только Purchase и LeadSubmitted для action_source=business_messaging.
+ * Только Purchase можно использовать в promoted_object адсета с destination_type=WHATSAPP.
  */
 
 import crypto from 'crypto';
@@ -64,17 +67,12 @@ class MetaCircuitBreaker {
 
 const circuitBreaker = new MetaCircuitBreaker();
 
-const level2EventRaw = (process.env.META_CAPI_LEVEL2_EVENT || 'ADD_TO_CART')
-  .trim()
-  .toUpperCase();
-if (level2EventRaw !== 'ADD_TO_CART' && level2EventRaw !== 'SUBSCRIBE') {
-  log.warn({
-    level2EventRaw,
-    fallback: 'ADD_TO_CART'
-  }, 'Invalid META_CAPI_LEVEL2_EVENT config, falling back to ADD_TO_CART');
-}
-const level2Event: 'AddToCart' | 'Subscribe' =
-  level2EventRaw === 'SUBSCRIBE' ? 'Subscribe' : 'AddToCart';
+// WhatsApp CTWA: value по уровням для оптимизации (все как Purchase)
+const WHATSAPP_LEVEL_VALUES: Record<number, number> = {
+  1: 1,    // L1: интерес
+  2: 10,   // L2: квалифицирован
+  3: 100,  // L3: записался/купил
+};
 
 const ALLOWED_ACTION_SOURCES = new Set([
   'email',
@@ -90,12 +88,16 @@ const ALLOWED_ACTION_SOURCES = new Set([
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  LEAD_SUBMITTED: 'LeadSubmitted',  // Messaging dataset: lead event (with messaging_channel, page_id, phone)
-  LEAD: 'Lead',                      // Website/CRM dataset: lead event (with event_transaction_time)
-  // Legacy (kept for backward compatibility with logs/DB)
-  INTEREST: 'CompleteRegistration',  // Level 1: 3+ inbound messages
-  QUALIFIED: level2Event,           // Level 2: Passed qualification
-  SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
+  // WhatsApp CTWA: все уровни = Purchase (единственное событие поддерживаемое для оптимизации)
+  PURCHASE: 'Purchase',
+  // Messaging dataset: для отчётности (не для оптимизации)
+  LEAD_SUBMITTED: 'LeadSubmitted',
+  // Website/CRM dataset
+  LEAD: 'Lead',
+  // Legacy aliases
+  INTEREST: 'Purchase',             // L1: was CompleteRegistration
+  QUALIFIED: 'Purchase',            // L2: was AddToCart/Subscribe
+  SCHEDULED: 'Purchase',            // L3: Purchase
 } as const;
 
 export type CapiEventName = 'LeadSubmitted' | 'Lead' | typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS] | string;
@@ -115,7 +117,7 @@ export function getCrmEventByLevel(level: CapiEventLevel): string {
 // Site dataset: события для site conversion_channel (должны совпадать с promoted_object.custom_event_type)
 export const SITE_LEVEL_EVENTS: Record<number, string> = {
   1: 'CompleteRegistration',  // matches promoted_object COMPLETE_REGISTRATION
-  2: level2Event,             // matches promoted_object ADD_TO_CART/SUBSCRIBE
+  2: 'AddToCart',             // matches promoted_object ADD_TO_CART
   3: 'Purchase',              // matches promoted_object PURCHASE
 };
 
@@ -386,10 +388,15 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     actionSource = safeFallbackActionSource;
   }
 
+  // WhatsApp CTWA: Meta разрешает только Purchase и LeadSubmitted для business_messaging,
+  // но только Purchase работает в promoted_object адсета. Поэтому все уровни = Purchase.
+  const effectiveEventName = useBusinessMessaging ? 'Purchase' : eventName;
+
   log.info({
     correlationId,
     pixelId,
     eventName,
+    effectiveEventName,
     eventLevel,
     hasPhone: !!phone,
     hasEmail: !!email,
@@ -400,7 +407,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     actionSource,
     configuredFallbackActionSource,
     normalizedFallbackActionSource,
-    configuredLevel2Event: level2Event,
+    whatsappLevelValue: useBusinessMessaging ? WHATSAPP_LEVEL_VALUES[eventLevel] : null,
     dialogAnalysisId,
     circuitBreakerState: circuitBreaker.getState(),
     action: 'capi_send_start',
@@ -508,18 +515,21 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       ...customData,
     };
 
-    if (eventName === CAPI_EVENTS.SCHEDULED) {
+    // Purchase events: добавляем currency и value
+    if (effectiveEventName === 'Purchase') {
       if (mergedCustomData.currency == null) {
         mergedCustomData.currency = PURCHASE_CURRENCY;
       }
       if (mergedCustomData.value == null) {
-        mergedCustomData.value = PURCHASE_DEFAULT_VALUE;
+        mergedCustomData.value = useBusinessMessaging
+          ? (WHATSAPP_LEVEL_VALUES[eventLevel] ?? PURCHASE_DEFAULT_VALUE)
+          : PURCHASE_DEFAULT_VALUE;
       }
     }
 
     // Build event payload
     const eventPayload: Record<string, unknown> = {
-      event_name: eventName,
+      event_name: effectiveEventName,
       event_time: eventTime,
       event_id: eventId,
       action_source: actionSource,
