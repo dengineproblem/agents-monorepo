@@ -30,9 +30,6 @@ openclaw-standalone/
 │   ├── Dockerfile                  # Image для клиентских контейнеров
 │   └── entrypoint.sh              # Запуск gateway + socat forwarder
 │
-├── nginx/
-│   └── openclaw-locations.conf    # Nginx location blocks (webhook, WABA, upload)
-│
 ├── scripts/
 │   ├── create-client.sh           # Провизионирование нового клиента
 │   ├── wa-message-hook.js         # Hook: парсинг Baileys JSON → wa_dialogs + leads
@@ -471,26 +468,16 @@ SQL
 
 ### Шаг 6: Nginx
 
-Добавить WABA webhook route. Можно include целиком:
+WABA webhook route уже добавлен в `nginx-production.conf` (основной nginx Docker-контейнера `agents-monorepo-nginx-1`).
+
+Все OpenClaw routes находятся в `nginx-production.conf`:
+- `/openclaw/webhook` — Lead Gen webhooks → `172.17.0.1:9000`
+- `/openclaw/webhooks/waba` — WABA webhooks → `172.17.0.1:9000` (новый)
+- `/openclaw/upload/` — загрузка креативов → `172.17.0.1:9001`
 
 ```bash
-# Скопировать конфиг
-cp nginx/openclaw-locations.conf /etc/nginx/snippets/openclaw-locations.conf
-
-# Или вручную добавить в server block:
-cat <<'NGINX'
-location /openclaw/webhooks/waba {
-    proxy_pass http://127.0.0.1:9000/webhooks/waba;
-    proxy_set_header Host $host;
-    proxy_set_header X-Hub-Signature-256 $http_x_hub_signature_256;
-}
-NGINX
-```
-
-```bash
-# Проверить и перезагрузить
-nginx -t && nginx -s reload
-# или: docker exec nginx nginx -t && docker exec nginx nginx -s reload
+# Перезагрузить nginx после обновления конфига
+docker exec agents-monorepo-nginx-1 nginx -t && docker exec agents-monorepo-nginx-1 nginx -s reload
 ```
 
 ### Шаг 7: Перезапуск сервисов
