@@ -70,6 +70,10 @@ curl -s -X POST "https://graph.facebook.com/v23.0/{campaign_id}?status=ACTIVE&ac
 ```sql
 INSERT INTO creative_tests (creative_id, campaign_id, adset_id, ad_id, rule_id, test_budget_cents, objective, status, started_at)
 VALUES ($1, $2, $3, $4, $5, 2000, $6, 'running', NOW());
+
+-- Маппинг для привязки лидов к креативу (source_id resolution)
+INSERT INTO ad_creative_mapping (ad_id, creative_id, direction_id, adset_id, campaign_id, source)
+VALUES ($4, $1, $7, $3, $2, 'creative_test');
 ```
 
 ---

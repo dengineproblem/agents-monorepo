@@ -36,6 +36,8 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 
 ## Скиллы
 Инструкции по задачам — в директории `skills/`. Читай SKILL.md перед выполнением:
+
+### Facebook Ads
 - `skills/fb-onboarding/SKILL.md` — **первичная настройка** (запусти если config пустой)
 - `skills/fb-dashboard/SKILL.md` — дашборд, метрики
 - `skills/fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
@@ -44,6 +46,10 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 - `skills/fb-leads/SKILL.md` — управление лидами
 - `skills/fb-creative-test/SKILL.md` — A/B тесты
 - `skills/fb-report/SKILL.md` — отчёты
+
+### WhatsApp
+- `skills/wa-onboarding/SKILL.md` — подключение WhatsApp через QR (Baileys)
+- `skills/wa-capi-setup/SKILL.md` — настройка CAPI (pixel, events, threshold)
 
 ## Автозапуск онбординга
 При первом обращении проверь config:
@@ -57,3 +63,60 @@ URL для загрузки: https://app.performanteaiagency.com/openclaw/upload
 
 ## Webhook URL
 Facebook Lead Gen webhook: `https://app.performanteaiagency.com/openclaw/webhook/{{SLUG}}`
+
+## WhatsApp Dialog Tracking
+
+Hook `wa-message-hook.js` автоматически записывает входящие WhatsApp сообщения в `wa_dialogs`.
+Он же извлекает `source_id` (ad_id) и `ctwa_clid` из Baileys metadata и резолвит
+креатив/направление через `ad_creative_mapping`.
+
+### После каждого ответа на WhatsApp
+Обнови счётчик исходящих:
+```sql
+UPDATE wa_dialogs SET outgoing_count = outgoing_count + 1, updated_at = NOW()
+WHERE phone = '{phone}';
+```
+
+### Квалификация лида
+По ходу диалога обновляй поля `qualification` и `summary`:
+```sql
+UPDATE wa_dialogs SET
+  qualification = '{interested|not_interested|scheduled}',
+  summary = '{краткое описание диалога}',
+  updated_at = NOW()
+WHERE phone = '{phone}';
+```
+
+### Проверка контекста диалога
+Для понимания откуда пришёл лид:
+```sql
+SELECT phone, name, source_id, ctwa_clid, creative_id, direction_id,
+       incoming_count, capi_msg_count, qualification,
+       l1_sent, l2_sent, l3_sent
+FROM wa_dialogs WHERE phone = '{phone}';
+```
+
+## CAPI (Conversions API)
+
+### Автоматическая отправка CAPI событий
+После каждого ответа на WhatsApp проверь пороги:
+
+```sql
+SELECT w.capi_msg_count, w.l1_sent, w.l2_sent, w.l3_sent, w.qualification,
+       COALESCE(c.l1_threshold, 3) AS threshold
+FROM wa_dialogs w
+LEFT JOIN capi_settings c ON c.is_active = true
+WHERE w.phone = '{phone}';
+```
+
+Правила отправки:
+- **L1 (LeadSubmitted):** `capi_msg_count >= threshold AND NOT l1_sent` → `send-capi.sh 1 {phone}`
+- **L2 (CompleteRegistration):** `qualification = 'interested' AND NOT l2_sent` → `send-capi.sh 2 {phone}`
+- **L3 (Purchase):** `qualification = 'scheduled' AND NOT l3_sent` → `send-capi.sh 3 {phone}`
+
+### Проверка что CAPI настроен
+```sql
+SELECT pixel_id, l1_event_name, l2_event_name, l3_event_name, l1_threshold
+FROM capi_settings WHERE is_active = true;
+```
+Если нет записей — CAPI не настроен, пропусти отправку.

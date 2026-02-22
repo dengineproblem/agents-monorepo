@@ -3,5 +3,17 @@
     "port": 18789,
     "mode": "local",
     "trustedProxies": ["127.0.0.1", "::1"]
+  },
+  "channels": {
+    "modelByChannel": {
+      "whatsapp": {
+        "default": "anthropic/claude-haiku-4-5"
+      }
+    }
+  },
+  "hooks": {
+    "message:received": {
+      "command": "node /home/openclaw/scripts/wa-message-hook.js"
+    }
   }
 }

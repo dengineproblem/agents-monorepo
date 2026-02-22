@@ -271,6 +271,11 @@ CREATE TABLE IF NOT EXISTS leads (
   creative_id UUID REFERENCES creatives(id) ON DELETE SET NULL,
   direction_id UUID REFERENCES directions(id) ON DELETE SET NULL,
 
+  -- WhatsApp Attribution
+  ctwa_clid TEXT,              -- Click-to-WhatsApp Click ID (для CAPI)
+  chat_id TEXT,                -- нормализованный телефон
+  conversion_source TEXT,      -- 'whatsapp_baileys', 'lead_form'
+
   utm_source TEXT,
   utm_campaign TEXT,
   utm_medium TEXT,
@@ -285,6 +290,9 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_date ON leads(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_leads_direction ON leads(direction_id);
 CREATE INDEX IF NOT EXISTS idx_leads_stage ON leads(stage);
+CREATE INDEX IF NOT EXISTS idx_leads_ad_id ON leads(ad_id) WHERE ad_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_ctwa_clid ON leads(ctwa_clid) WHERE ctwa_clid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_chat_id ON leads(chat_id) WHERE chat_id IS NOT NULL;
 
 -- ============================================
 -- 10. currency_rates — курс валют
@@ -318,3 +326,100 @@ CREATE TABLE IF NOT EXISTS scoring_executions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scoring_exec_date ON scoring_executions(created_at DESC);
+
+-- ============================================
+-- 12. wa_dialogs — трекинг WhatsApp диалогов
+-- ============================================
+CREATE TABLE IF NOT EXISTS wa_dialogs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL UNIQUE,
+  name TEXT,
+
+  -- Счётчики сообщений
+  incoming_count INT DEFAULT 0,
+  outgoing_count INT DEFAULT 0,
+  capi_msg_count INT DEFAULT 0,       -- отдельный счётчик для CAPI threshold
+
+  -- Временные метки
+  first_message TIMESTAMPTZ DEFAULT NOW(),
+  last_message TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Ad Attribution (из первого сообщения по рекламе)
+  ctwa_clid TEXT,                      -- Click-to-WhatsApp Click ID
+  source_id TEXT,                      -- = ad_id из referral metadata
+
+  -- Resolved через ad_creative_mapping
+  direction_id UUID REFERENCES directions(id) ON DELETE SET NULL,
+  creative_id UUID REFERENCES creatives(id) ON DELETE SET NULL,
+
+  -- CAPI Event Tracking (дедупликация)
+  l1_sent BOOLEAN DEFAULT false,
+  l2_sent BOOLEAN DEFAULT false,
+  l3_sent BOOLEAN DEFAULT false,
+  l1_sent_at TIMESTAMPTZ,
+  l2_sent_at TIMESTAMPTZ,
+  l3_sent_at TIMESTAMPTZ,
+  l1_event_id TEXT,
+  l2_event_id TEXT,
+  l3_event_id TEXT,
+
+  -- AI Qualification
+  qualification TEXT,                  -- interested / not_interested / scheduled
+  summary TEXT,                        -- AI-краткое описание диалога
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_phone ON wa_dialogs(phone);
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_source_id ON wa_dialogs(source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_direction ON wa_dialogs(direction_id) WHERE direction_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_capi_l1 ON wa_dialogs(capi_msg_count) WHERE NOT l1_sent;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_last_message ON wa_dialogs(last_message DESC);
+
+-- ============================================
+-- 13. capi_settings — настройки Conversions API
+-- ============================================
+CREATE TABLE IF NOT EXISTS capi_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel TEXT NOT NULL DEFAULT 'whatsapp',
+  pixel_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+
+  -- Настраиваемые event names
+  l1_event_name TEXT DEFAULT 'LeadSubmitted',
+  l2_event_name TEXT DEFAULT 'CompleteRegistration',
+  l3_event_name TEXT DEFAULT 'Purchase',
+
+  -- Threshold: мин. сообщений для L1
+  l1_threshold INT DEFAULT 3,
+
+  -- AI квалификация: описания для агента
+  ai_l2_description TEXT,              -- кого считать квалифицированным
+  ai_l3_description TEXT,              -- как понять что записался
+
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- 14. capi_events_log — аудит CAPI событий
+-- ============================================
+CREATE TABLE IF NOT EXISTS capi_events_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  event_level INT NOT NULL CHECK (event_level IN (1, 2, 3)),
+  ctwa_clid TEXT,
+  source_id TEXT,
+  pixel_id TEXT NOT NULL,
+  event_id TEXT,                       -- для дедупликации на стороне Meta
+  fb_response JSONB,
+  status TEXT DEFAULT 'success' CHECK (status IN ('success', 'error', 'skipped')),
+  error_text TEXT,
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_capi_log_phone ON capi_events_log(phone);
+CREATE INDEX IF NOT EXISTS idx_capi_log_sent ON capi_events_log(sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_capi_log_level ON capi_events_log(event_level);

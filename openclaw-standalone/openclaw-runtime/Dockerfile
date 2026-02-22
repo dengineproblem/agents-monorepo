@@ -22,6 +22,11 @@ RUN useradd -m -d /home/openclaw -u 1001 openclaw
 COPY --chown=openclaw:openclaw entrypoint.sh /home/openclaw/entrypoint.sh
 RUN chmod +x /home/openclaw/entrypoint.sh
 
+# Copy WhatsApp hook and CAPI scripts
+COPY --chown=openclaw:openclaw scripts/wa-message-hook.js /home/openclaw/scripts/wa-message-hook.js
+COPY --chown=openclaw:openclaw scripts/send-capi.sh /home/openclaw/scripts/send-capi.sh
+RUN chmod +x /home/openclaw/scripts/send-capi.sh
+
 USER openclaw
 WORKDIR /home/openclaw
 

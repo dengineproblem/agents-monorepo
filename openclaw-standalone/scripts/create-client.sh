@@ -48,7 +48,7 @@ fi
 # 2. Apply schema
 echo "[2/5] Applying schema..."
 docker exec -i openclaw-postgres psql -U postgres -d "$DB_NAME" < "$SCHEMA_FILE"
-echo "  Schema applied (11 tables)"
+echo "  Schema applied (14 tables)"
 
 # 3. Create workspace directories
 echo "[3/5] Creating workspace at ${CLIENT_DIR}..."
@@ -89,6 +89,7 @@ docker run -d \
   --restart unless-stopped \
   -p "${GW_PORT}:18790" \
   -e "OPENCLAW_GATEWAY_TOKEN=${GW_TOKEN}" \
+  -e "OPENCLAW_DB_URL=postgresql://postgres:openclaw_local@postgres:5432/${DB_NAME}" \
   -v "${OPENCLAW_DIR}:/home/openclaw/.openclaw" \
   openclaw-runtime
 

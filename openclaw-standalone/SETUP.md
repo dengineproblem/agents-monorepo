@@ -2,10 +2,12 @@
 
 ## Что это
 
-Мультитенантная система управления Facebook рекламой. Каждый клиент получает:
-- Изолированный Docker контейнер с AI-агентом (Claude Opus)
+Мультитенантная система управления Facebook рекламой + WhatsApp чатбот. Каждый клиент получает:
+- Изолированный Docker контейнер с AI-агентом (Claude Opus / Haiku для WhatsApp)
 - Свою базу данных PostgreSQL
 - Свой gateway UI для взаимодействия с агентом
+- Встроенный WhatsApp канал (Baileys) с автоматическим трекингом лидов
+- CAPI (Conversions API) для отправки событий в Meta
 - Набор skills для управления рекламой
 
 ## Текущее состояние
@@ -29,18 +31,20 @@ openclaw-standalone/
 │   └── entrypoint.sh              # Запуск gateway + socat forwarder
 │
 ├── scripts/
-│   └── create-client.sh           # Провизионирование нового клиента
+│   ├── create-client.sh           # Провизионирование нового клиента
+│   ├── wa-message-hook.js         # Hook: парсинг Baileys JSON → wa_dialogs + leads
+│   └── send-capi.sh              # Отправка CAPI событий (L1/L2/L3) в Meta
 │
 ├── templates/
-│   ├── openclaw.json.template     # Конфиг gateway (port + mode + trustedProxies)
+│   ├── openclaw.json.template     # Конфиг gateway (port + modelByChannel + hooks)
 │   ├── CLAUDE.md.template         # Project instructions (DB, skills, API)
-│   └── TOOLS.md.template          # Environment config для агента (DB, skills, onboarding)
+│   └── TOOLS.md.template          # Environment config для агента (DB, skills, WA, CAPI)
 │
 ├── db/
 │   ├── init.sql                   # Инициализация PostgreSQL (pgcrypto)
-│   └── schema.sql                 # Схема БД (11 таблиц, идемпотентная)
+│   └── schema.sql                 # Схема БД (14 таблиц, идемпотентная)
 │
-└── skills/                         # 8 skills для Facebook Ads
+└── skills/                         # 10 skills: Facebook Ads + WhatsApp
     ├── fb-onboarding/SKILL.md      # Первичная настройка клиента (8 шагов)
     ├── fb-dashboard/SKILL.md       # Дашборд, метрики
     ├── fb-optimize/SKILL.md        # Health Score, оптимизация бюджетов
@@ -48,7 +52,9 @@ openclaw-standalone/
     ├── fb-scoring/SKILL.md         # Крон скоринга
     ├── fb-leads/SKILL.md           # Управление лидами
     ├── fb-creative-test/SKILL.md   # A/B тесты креативов
-    └── fb-report/SKILL.md          # Утренние/недельные отчёты
+    ├── fb-report/SKILL.md          # Утренние/недельные отчёты
+    ├── wa-onboarding/SKILL.md      # Подключение WhatsApp через Baileys QR
+    └── wa-capi-setup/SKILL.md      # Настройка CAPI (pixel, events, threshold)
 ```
 
 ## Архитектура
@@ -154,7 +160,7 @@ OpenClaw создаёт и читает свои файлы при каждой 
 
 ## База данных
 
-### Схема (11 таблиц на каждого клиента)
+### Схема (14 таблиц на каждого клиента)
 
 | # | Таблица | Назначение |
 |---|---------|------------|
@@ -163,12 +169,15 @@ OpenClaw создаёт и читает свои файлы при каждой 
 | 3 | direction_adsets | Адсеты в направлениях |
 | 4 | creatives | Загруженные креативы (video, image, carousel) + кеш метрик |
 | 5 | metrics_history | Ежедневные метрики (impressions, leads, spend, CTR, CPL, CPM) |
-| 6 | ad_creative_mapping | Связь ad_id → creative_id |
+| 6 | ad_creative_mapping | Связь ad_id → creative_id + direction_id (для source_id resolution) |
 | 7 | creative_tests | A/B тесты ($20 бюджет, 1000 показов, LLM-анализ) |
 | 8 | scoring_history | Health Score по адсетам (формула 45 + тренды + диагностика) |
-| 9 | leads | Входящие лиды (из webhook Facebook Lead Gen) |
+| 9 | leads | Входящие лиды (Lead Gen + WhatsApp) + ctwa_clid, ad_id, conversion_source |
 | 10 | currency_rates | Курс валют (USD/KZT = 530) |
 | 11 | scoring_executions | Лог запусков скоринга |
+| 12 | wa_dialogs | Трекинг WhatsApp диалогов: счётчики, ad attribution, CAPI флаги |
+| 13 | capi_settings | Настройки CAPI: pixel_id, access_token, event names, threshold |
+| 14 | capi_events_log | Аудит отправленных CAPI событий (L1/L2/L3) |
 
 Все CREATE TABLE с `IF NOT EXISTS`, INSERT с `ON CONFLICT DO NOTHING` — безопасно перезапускать.
 
@@ -185,7 +194,7 @@ OpenClaw создаёт и читает свои файлы при каждой 
 
 Скрипт автоматически:
 1. Создаёт БД `openclaw_<slug>` (если не существует)
-2. Применяет schema.sql (11 таблиц)
+2. Применяет schema.sql (14 таблиц)
 3. Создаёт workspace + **копирует** skills (не симлинка!)
 4. Генерирует CLAUDE.md, TOOLS.md (подставляет slug) и openclaw.json
 5. Генерирует gateway auth token
@@ -313,6 +322,36 @@ Gateway не доверял соединениям через socat proxy → т
 OpenClaw имеет свою систему файлов (AGENTS.md, SOUL.md, USER.md). Агент читает `TOOLS.md` для environment-специфичных настроек. Первоначально конфиг был только в `CLAUDE.md`, но агент не видел его. Решение: дублировать конфигурацию в `TOOLS.md.template`.
 
 ## Следующие шаги
+
+### WhatsApp + CAPI архитектура
+
+```
+Baileys (WhatsApp WebSocket)
+     │ message:received
+     ▼
+Hook: wa-message-hook.js
+  ├── Парсит Baileys JSON
+  ├── Извлекает source_id (ad_id), ctwa_clid
+  ├── UPSERT wa_dialogs
+  ├── Resolve: ad_creative_mapping → creative_id + direction_id
+  └── INSERT leads (если с рекламы)
+     │
+     ▼
+Claude агент (Haiku 4.5 для WhatsApp)
+  ├── Отвечает клиенту по промпту
+  ├── Обновляет qualification / summary
+  └── Вызывает send-capi.sh при достижении порога
+     │
+     ▼
+send-capi.sh → Meta Graph API POST /{pixel_id}/events
+  ├── L1 (LeadSubmitted): capi_msg_count >= threshold
+  ├── L2 (CompleteRegistration): qualification = 'interested'
+  └── L3 (Purchase): qualification = 'scheduled'
+```
+
+**Модель на WhatsApp:** Haiku 4.5 через `modelByChannel` в openclaw.json — дешевле в ~60x и быстрее чем Opus.
+
+**Ad Attribution:** WhatsApp сообщение с рекламы содержит `source_id` (= ad_id Facebook). Hook резолвит его через `ad_creative_mapping` для привязки к конкретному креативу и направлению.
 
 ### 1. Telegram интеграция
 
