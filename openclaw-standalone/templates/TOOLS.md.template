@@ -3,7 +3,7 @@
 ## Язык
 Общайся на русском языке.
 
-## PostgreSQL
+## PostgreSQL (локальная БД — реклама, метрики, скоринг)
 Строка подключения:
 ```
 postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}
@@ -23,6 +23,114 @@ ORDER BY d.name;
 SQL
 ```
 
+## SaaS Database (WhatsApp, Chatbot, CAPI)
+Данные WhatsApp, AI чатботов и CAPI хранятся в SaaS (Supabase). Подключение:
+```bash
+# Получить строку подключения
+SAAS_DB=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_db_url FROM config WHERE id = 1")
+
+# Получить ID аккаунта в SaaS
+SAAS_ID=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_account_id FROM config WHERE id = 1")
+
+# Пример запроса к SaaS
+psql "$SAAS_DB" -c "SELECT instance_name, status, phone_number FROM whatsapp_instances WHERE user_account_id = '$SAAS_ID'"
+```
+
+### Ключевые таблицы в SaaS
+- `whatsapp_instances` — инстансы WhatsApp (статус, QR-код, телефон)
+- `ai_bot_configurations` — настройки AI ботов (промпт, расписание, оператор)
+- `dialog_analysis` — анализ диалогов (CAPI счётчики, квалификация)
+- `capi_settings` — настройки CAPI per channel
+- `capi_events_log` — лог событий CAPI
+- `leads` — лиды WhatsApp (отдельные от рекламных лидов в локальной БД)
+
+### Helper: выполнить запрос к SaaS
+```bash
+# Одной командой — запрос с автоматическим получением credentials
+SAAS_DB=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_db_url FROM config WHERE id = 1") && \
+SAAS_ID=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_account_id FROM config WHERE id = 1") && \
+psql "$SAAS_DB" -c "YOUR_QUERY WHERE user_account_id = '$SAAS_ID'"
+```
+
+## Evolution API (WhatsApp)
+Evolution API для управления WhatsApp инстансами доступен через chatbot-router:
+```bash
+# Создать инстанс
+curl -s -X POST http://openclaw-chatbot-router:3002/api/evolution/instance/create \
+  -H "Content-Type: application/json" \
+  -d '{"instanceName": "{{SLUG}}_bot", "integration": "WHATSAPP-BAILEYS"}'
+
+# Получить QR-код
+curl -s http://openclaw-chatbot-router:3002/api/evolution/instance/connect/{{SLUG}}_bot
+
+# Статус инстанса
+curl -s http://openclaw-chatbot-router:3002/api/evolution/instance/connectionState/{{SLUG}}_bot
+```
+
+## Таблицы локальной БД (38 таблиц)
+
+### Основные настройки
+- `config` — настройки (1 строка): FB, TikTok, AmoCRM, Bitrix24, WhatsApp, Telegram, AI keys, autopilot, onboarding, SaaS pairing
+- `currency_rates` — курсы валют (USD/KZT)
+
+### Кампании и направления
+- `directions` — направления кампаний (Facebook + TikTok), бюджеты, CAPI, audience controls
+- `direction_adsets` — адсеты в направлениях (Facebook)
+- `direction_tiktok_adgroups` — ad groups в направлениях (TikTok)
+
+### Креативы
+- `creatives` — загруженные креативы (видео, изображения, карусели) с кешем метрик
+- `generated_creatives` — AI-сгенерированные креативы (Gemini)
+- `direction_creative_gallery` — галерея креативов по направлению
+- `creative_gallery_drafts` — черновики галереи
+- `ad_creative_mapping` — связь ad_id → creative
+
+### Метрики и скоринг
+- `metrics_history` — ежедневные метрики по адсетам
+- `creative_metrics_history` — детальные метрики по креативам (rankings, video metrics)
+- `creative_scores` — risk scores и predictions (0-100, Low/Medium/High)
+- `scoring_history` — Health Score по адсетам
+- `scoring_executions` — лог запусков скоринга
+- `creative_tests` — A/B тесты с LLM-оценкой
+
+### Лиды и продажи
+- `leads` — входящие лиды (UTM, CAPI tracking, CRM integration)
+- `sales` — продажи (привязка к лидам, CRM)
+- `purchases` — покупки / подписки
+
+### WhatsApp и чатботы (локальные копии)
+- `whatsapp_phone_numbers` — номера телефонов
+- `whatsapp_instances` — подключения Evolution API
+- `messages` — сообщения WhatsApp/чат
+- `ai_bot_configurations` — настройки AI чатбота (prompt, schedule, operator pause, media)
+- `ai_bot_functions` — функции бота (callable tools)
+
+### CAPI (Conversion API)
+- `capi_settings` — настройки CAPI per channel (whatsapp, lead_forms, site)
+- `capi_events_log` — лог событий CAPI (Lead, CompleteRegistration, Schedule)
+
+### CRM интеграции
+- `amocrm_sync_log` — лог синхронизации AmoCRM
+- `bitrix24_pipeline_stages` — стадии воронки Bitrix24
+- `bitrix24_status_history` — история смены статусов Bitrix24
+- `bitrix24_sync_log` — лог синхронизации Bitrix24
+
+### Автопилот
+- `brain_executions` — лог выполнений автопилота (plan → actions → report)
+- `pending_brain_proposals` — предложения semi-auto режима
+
+### Уведомления
+- `user_notifications` — уведомления пользователю
+- `notification_settings` — настройки уведомлений (лимиты, cooldowns)
+- `notification_history` — лог доставки (telegram, in_app)
+
+### Онбординг и память
+- `onboarding_history` — история стадий онбординга
+- `business_memory` — бизнес-контекст (key-value JSONB)
+
+### Вебинары
+- `webinar_attendees` — участники вебинаров (Bizon365)
+
 ## Facebook Ads API
 Токены и настройки хранятся в таблице `config`. Перед любым действием:
 ```bash
@@ -34,8 +142,41 @@ psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "
 curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 ```
 
+## TikTok Ads API
+Токены TikTok хранятся в `config`:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT tiktok_access_token, tiktok_account_id, tiktok_business_id FROM config WHERE id = 1;"
+```
+
+Для вызовов TikTok API:
+```bash
+curl -s -H "Access-Token: {token}" "https://business-api.tiktok.com/open_api/v1.3/{endpoint}"
+```
+
+## CRM интеграции
+
+### AmoCRM
+Токены в `config`:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT amocrm_subdomain, amocrm_access_token FROM config WHERE id = 1;"
+```
+
+### Bitrix24
+Токены в `config`:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT bitrix24_domain, bitrix24_access_token FROM config WHERE id = 1;"
+```
+
+## CAPI (Conversion API)
+Настройки CAPI per channel:
+```bash
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT channel, pixel_id, capi_source, is_active FROM capi_settings;"
+```
+
 ## Скиллы
 Инструкции по задачам — в директории `skills/`. Читай SKILL.md перед выполнением:
+
+### Facebook Ads
 - `skills/fb-onboarding/SKILL.md` — **первичная настройка** (запусти если config пустой)
 - `skills/fb-dashboard/SKILL.md` — дашборд, метрики
 - `skills/fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
@@ -45,10 +186,19 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 - `skills/fb-creative-test/SKILL.md` — A/B тесты
 - `skills/fb-report/SKILL.md` — отчёты
 
+### WhatsApp и Chatbot
+- `skills/wa-onboarding/SKILL.md` — подключение WhatsApp (Evolution API)
+- `skills/wa-bot-config/SKILL.md` — настройка AI чатбота
+- `skills/wa-capi-setup/SKILL.md` — настройка Conversion API (CAPI)
+- `skills/wa-leads-sync/SKILL.md` — синхронизация WhatsApp лидов
+
+### CRM
+- `skills/crm-connect/SKILL.md` — подключение AmoCRM / Bitrix24
+
 ## Автозапуск онбординга
 При первом обращении проверь config:
 ```bash
-psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT fb_access_token FROM config WHERE id = 1;"
+psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -c "SELECT fb_access_token, onboarding_stage FROM config WHERE id = 1;"
 ```
 Если `fb_access_token` IS NULL — автоматически прочитай и выполни `skills/fb-onboarding/SKILL.md`.
 

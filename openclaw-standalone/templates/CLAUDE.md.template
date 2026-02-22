@@ -1,4 +1,4 @@
-# OpenClaw — Управление Facebook рекламой
+# OpenClaw — Управление рекламой и лидами
 
 ## Язык
 Общайся на русском языке.
@@ -23,19 +23,57 @@ ORDER BY d.name;
 SQL
 ```
 
-## Facebook Ads
-Токены и настройки хранятся в таблице `config`. Перед любым действием проверь:
+## SaaS Database (WhatsApp, Chatbot, CAPI)
+WhatsApp, AI чатботы и CAPI работают через SaaS. Подключение:
+```bash
+SAAS_DB=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_db_url FROM config WHERE id = 1")
+SAAS_ID=$(psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw_{{SLUG}}" -t -A -c "SELECT saas_account_id FROM config WHERE id = 1")
+psql "$SAAS_DB" -c "SELECT * FROM whatsapp_instances WHERE user_account_id = '$SAAS_ID'"
+```
+
+## Платформы
+Поддерживаются Facebook Ads и TikTok Ads. Платформа указана в `directions.platform`.
+
+### Facebook Ads
+Токены в `config`:
 ```sql
 SELECT fb_access_token, fb_ad_account_id, fb_page_id FROM config WHERE id = 1;
 ```
 
-Для вызовов Facebook API используй curl:
+API вызовы:
 ```bash
 curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 ```
 
+### TikTok Ads
+Токены в `config`:
+```sql
+SELECT tiktok_access_token, tiktok_account_id, tiktok_business_id FROM config WHERE id = 1;
+```
+
+API вызовы:
+```bash
+curl -s -H "Access-Token: {token}" "https://business-api.tiktok.com/open_api/v1.3/{endpoint}"
+```
+
+## WhatsApp / AI Чатбот
+- Инстансы: `whatsapp_instances` в SaaS (Evolution API)
+- Настройки бота: `ai_bot_configurations` в SaaS (prompt, schedule, operator pause)
+- Сообщения: `messages` (с привязкой к лидам и креативам)
+- Evolution API доступен через chatbot-router: `http://openclaw-chatbot-router:3002/api/evolution/`
+
+## CRM интеграции
+- **AmoCRM**: токены в `config` (amocrm_*), лог синхронизации в `amocrm_sync_log`
+- **Bitrix24**: токены в `config` (bitrix24_*), воронки в `bitrix24_pipeline_stages`, лог в `bitrix24_sync_log`
+
+## CAPI (Conversion API)
+Настройки per channel в `capi_settings` (SaaS). Лог событий в `capi_events_log` (SaaS).
+Поддержка 3 уровней: Lead (L1), CompleteRegistration (L2), Schedule (L3).
+
 ## Скиллы
 Инструкции по каждой задаче — в директории `skills/`. Читай SKILL.md перед выполнением:
+
+### Facebook Ads
 - `fb-onboarding/SKILL.md` — **первичная настройка** (запусти если config пустой)
 - `fb-dashboard/SKILL.md` — дашборд, метрики
 - `fb-optimize/SKILL.md` — оптимизация бюджетов, Health Score
@@ -45,10 +83,19 @@ curl -s "https://graph.facebook.com/v23.0/{endpoint}?access_token={token}"
 - `fb-creative-test/SKILL.md` — A/B тесты
 - `fb-report/SKILL.md` — отчёты
 
+### WhatsApp и Chatbot
+- `wa-onboarding/SKILL.md` — подключение WhatsApp (Evolution API)
+- `wa-bot-config/SKILL.md` — настройка AI чатбота
+- `wa-capi-setup/SKILL.md` — настройка Conversion API
+- `wa-leads-sync/SKILL.md` — синхронизация WhatsApp лидов
+
+### CRM
+- `crm-connect/SKILL.md` — подключение AmoCRM / Bitrix24
+
 ## Автозапуск онбординга
 При первом обращении проверь config:
 ```sql
-SELECT fb_access_token FROM config WHERE id = 1;
+SELECT fb_access_token, onboarding_stage FROM config WHERE id = 1;
 ```
 Если `fb_access_token` IS NULL — автоматически запусти `fb-onboarding/SKILL.md`.
 

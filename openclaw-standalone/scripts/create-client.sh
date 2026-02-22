@@ -4,6 +4,8 @@ set -euo pipefail
 SLUG="${1:-}"
 GW_PORT="${2:-18789}"
 
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+
 if [ -z "$SLUG" ]; then
   echo "Usage: $0 <slug> [gateway_port]"
   echo "Example: $0 aliya 18790"
@@ -13,9 +15,9 @@ if [ -z "$SLUG" ]; then
   exit 1
 fi
 
-# Validate slug
-if ! echo "$SLUG" | grep -qE '^[a-z0-9_-]+$'; then
-  echo "Error: slug must contain only lowercase letters, numbers, underscores, hyphens"
+# Validate slug (strict: only lowercase a-z, digits, underscore, hyphen; max 30 chars)
+if ! echo "$SLUG" | grep -qE '^[a-z0-9_-]{1,30}$'; then
+  echo "$(ts) Error: slug must contain only lowercase letters, numbers, underscores, hyphens (max 30 chars)"
   exit 1
 fi
 
@@ -34,10 +36,22 @@ CLIENT_DIR="/home/openclaw/clients/${SLUG}"
 OPENCLAW_DIR="${CLIENT_DIR}/.openclaw"
 WORKSPACE_DIR="${OPENCLAW_DIR}/workspace"
 
-echo "=== Creating client: ${SLUG} ==="
+# Load .env if exists
+ENV_FILE="${BASE_DIR}/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
+SUPABASE_DB_URL="${SUPABASE_DB_URL:-}"
+TOTAL_STEPS=6
+[ -n "$SUPABASE_DB_URL" ] && TOTAL_STEPS=7
+
+echo "$(ts) === Creating client: ${SLUG} ==="
 
 # 1. Create database
-echo "[1/5] Creating database ${DB_NAME}..."
+echo "[1/${TOTAL_STEPS}] Creating database ${DB_NAME}..."
 if docker exec openclaw-postgres psql -U postgres -lqt | grep -qw "$DB_NAME"; then
   echo "  Database ${DB_NAME} already exists, skipping"
 else
@@ -46,12 +60,53 @@ else
 fi
 
 # 2. Apply schema
-echo "[2/5] Applying schema..."
+echo "[2/${TOTAL_STEPS}] Applying schema..."
 docker exec -i openclaw-postgres psql -U postgres -d "$DB_NAME" < "$SCHEMA_FILE"
-echo "  Schema applied (11 tables)"
+echo "  Schema applied (38 tables)"
 
-# 3. Create workspace directories
-echo "[3/5] Creating workspace at ${CLIENT_DIR}..."
+# 3. SaaS pairing (if SUPABASE_DB_URL is set)
+if [ -n "$SUPABASE_DB_URL" ]; then
+  echo "[3/${TOTAL_STEPS}] Creating SaaS account (pairing)..."
+
+  # Generate password for SaaS account
+  SAAS_PASSWORD=$(openssl rand -hex 16)
+
+  # Create user_account in SaaS (dollar-quoting for password safety)
+  SAAS_ACCOUNT_ID=$(psql "$SUPABASE_DB_URL" -t -A -c "
+    INSERT INTO user_accounts (username, password, is_openclaw, openclaw_slug, onboarding_stage, is_active, multi_account_enabled)
+    VALUES ('openclaw_${SLUG}', \$q\$${SAAS_PASSWORD}\$q\$, true, '${SLUG}', 'registered', true, true)
+    ON CONFLICT (username) DO UPDATE SET openclaw_slug = '${SLUG}', is_openclaw = true
+    RETURNING id;
+  " 2>/dev/null || echo "")
+
+  if [ -z "$SAAS_ACCOUNT_ID" ]; then
+    echo "  WARNING: Failed to create SaaS account. Skipping pairing."
+    echo "  You can pair manually later via: UPDATE config SET saas_account_id = '...' WHERE id = 1;"
+  else
+    # Create ad_account in SaaS
+    SAAS_AD_ACCOUNT_ID=$(psql "$SUPABASE_DB_URL" -t -A -c "
+      INSERT INTO ad_accounts (user_account_id, name, is_default, is_active, tarif)
+      VALUES ('${SAAS_ACCOUNT_ID}', 'OpenClaw ${SLUG}', true, true, 'ai_target')
+      ON CONFLICT DO NOTHING
+      RETURNING id;
+    " 2>/dev/null || echo "")
+
+    # Save pairing info in local config (dollar-quoting for DB URL safety)
+    docker exec -i openclaw-postgres psql -U postgres -d "$DB_NAME" -c "
+      UPDATE config SET
+        saas_account_id = '${SAAS_ACCOUNT_ID}',
+        saas_ad_account_id = '${SAAS_AD_ACCOUNT_ID}',
+        saas_db_url = \$q\$${SUPABASE_DB_URL}\$q\$
+      WHERE id = 1;
+    "
+    echo "  SaaS account: ${SAAS_ACCOUNT_ID}"
+    echo "  SaaS ad_account: ${SAAS_AD_ACCOUNT_ID}"
+  fi
+fi
+
+# 4. Create workspace directories
+STEP_WS=$((3 + (TOTAL_STEPS > 6 ? 1 : 0)))
+echo "[${STEP_WS}/${TOTAL_STEPS}] Creating workspace at ${CLIENT_DIR}..."
 mkdir -p "${WORKSPACE_DIR}"
 
 # Copy skills into workspace (symlinks don't work — only .openclaw is mounted into container)
@@ -61,8 +116,9 @@ if [ -d "${BASE_DIR}/skills" ]; then
   echo "  Skills copied ($(ls "${WORKSPACE_DIR}/skills" | wc -l) skills)"
 fi
 
-# 4. Generate CLAUDE.md + openclaw.json (port inside container is always 18789)
-echo "[4/5] Generating workspace files..."
+# 5. Generate CLAUDE.md + openclaw.json (port inside container is always 18789)
+STEP_GEN=$((STEP_WS + 1))
+echo "[${STEP_GEN}/${TOTAL_STEPS}] Generating workspace files..."
 sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
 sed "s/{{SLUG}}/${SLUG}/g" "$TOOLS_TEMPLATE" > "${WORKSPACE_DIR}/TOOLS.md"
 cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
@@ -71,8 +127,9 @@ cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
 chown -R 1001:1001 "${OPENCLAW_DIR}"
 echo "  CLAUDE.md + TOOLS.md + openclaw.json generated"
 
-# 5. Start container
-echo "[5/5] Starting container ${CONTAINER_NAME}..."
+# 6. Start container
+STEP_START=$((STEP_GEN + 1))
+echo "[${STEP_START}/${TOTAL_STEPS}] Starting container ${CONTAINER_NAME}..."
 
 # Stop existing container if running
 if docker ps -a --format '{{.Names}}' | grep -qw "$CONTAINER_NAME"; then
@@ -95,13 +152,16 @@ docker run -d \
 echo "  Container ${CONTAINER_NAME} started (port ${GW_PORT} → gateway)"
 
 echo ""
-echo "=== Client ${SLUG} created ==="
+echo "$(ts) === Client ${SLUG} created ==="
 echo ""
 echo "Database:    ${DB_NAME}"
 echo "Container:   ${CONTAINER_NAME}"
 echo "Gateway:     https://${SLUG}.openclaw.performanteaiagency.com"
 echo "Auth token:  ${GW_TOKEN}"
 echo "Workspace:   ${WORKSPACE_DIR}"
+if [ -n "${SAAS_ACCOUNT_ID:-}" ]; then
+  echo "SaaS ID:     ${SAAS_ACCOUNT_ID}"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Open gateway UI: https://${SLUG}.openclaw.performanteaiagency.com"
