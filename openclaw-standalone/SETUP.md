@@ -30,10 +30,14 @@ openclaw-standalone/
 │   ├── Dockerfile                  # Image для клиентских контейнеров
 │   └── entrypoint.sh              # Запуск gateway + socat forwarder
 │
+├── nginx/
+│   └── openclaw-locations.conf    # Nginx location blocks (webhook, WABA, upload)
+│
 ├── scripts/
 │   ├── create-client.sh           # Провизионирование нового клиента
 │   ├── wa-message-hook.js         # Hook: парсинг Baileys JSON → wa_dialogs + leads
-│   └── send-capi.sh              # Отправка CAPI событий (L1/L2/L3) в Meta
+│   ├── send-capi.sh              # Отправка CAPI событий (L1/L2/L3) в Meta
+│   └── send-waba.sh              # Ручная отправка WABA сообщений из контейнера
 │
 ├── templates/
 │   ├── openclaw.json.template     # Конфиг gateway (port + modelByChannel + hooks)
@@ -292,6 +296,274 @@ docker run -d \
   -e "OPENCLAW_GATEWAY_TOKEN=<token>" \
   -v /home/openclaw/clients/test/.openclaw:/home/openclaw/.openclaw \
   openclaw-runtime
+```
+
+## Деплой (WhatsApp + WABA + CAPI + Logging)
+
+Инструкция для первого деплоя WhatsApp-стека (Baileys + WABA + CAPI + структурированное логирование).
+
+### Предварительные требования
+
+На сервере уже должны работать:
+- `docker compose up -d` (postgres, webhook, upload)
+- Хотя бы один клиент создан через `create-client.sh`
+
+### Шаг 1: Обновить код
+
+```bash
+cd /home/openclaw/agents-monorepo
+git pull
+cd openclaw-standalone
+```
+
+### Шаг 2: Env vars (.env)
+
+Добавить в `.env` (рядом с docker-compose.yml):
+
+```bash
+# WABA Chatbot (Claude Haiku для автоответов)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# WABA App Secret (опционально — можно задать per-tenant в waba_phone_mapping)
+# WABA_APP_SECRET=...
+```
+
+### Шаг 3: Пересобрать Docker images
+
+```bash
+# webhook-service: новый @anthropic-ai/sdk + WABA handler + structured logging
+docker compose build webhook
+
+# openclaw-runtime: новые scripts (wa-message-hook.js, send-capi.sh, send-waba.sh)
+docker compose build openclaw-runtime
+```
+
+### Шаг 4: Миграция shared DB
+
+```bash
+docker exec -i openclaw-postgres psql -U postgres -d openclaw <<'SQL'
+-- waba_phone_mapping: маршрутизация WABA webhooks → tenant
+CREATE TABLE IF NOT EXISTS waba_phone_mapping (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  waba_phone_id TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL,
+  phone_number TEXT,
+  waba_app_secret TEXT,
+  waba_access_token TEXT,
+  waba_business_account_id TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+SQL
+```
+
+### Шаг 5: Миграция per-tenant DB
+
+Для **каждого** существующего клиента (`test`, и т.д.):
+
+```bash
+SLUG=test  # ← менять для каждого клиента
+
+docker exec -i openclaw-postgres psql -U postgres -d "openclaw_${SLUG}" <<'SQL'
+-- WABA fields в config
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_enabled BOOLEAN DEFAULT false;
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_phone_id TEXT;
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_access_token TEXT;
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_app_secret TEXT;
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_verify_token TEXT;
+ALTER TABLE config ADD COLUMN IF NOT EXISTS waba_bot_system_prompt TEXT;
+
+-- wa_dialogs: WhatsApp трекинг
+CREATE TABLE IF NOT EXISTS wa_dialogs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL UNIQUE,
+  name TEXT,
+  incoming_count INT DEFAULT 0,
+  outgoing_count INT DEFAULT 0,
+  capi_msg_count INT DEFAULT 0,
+  first_message TIMESTAMPTZ DEFAULT NOW(),
+  last_message TIMESTAMPTZ DEFAULT NOW(),
+  ctwa_clid TEXT,
+  source_id TEXT,
+  direction_id UUID REFERENCES directions(id) ON DELETE SET NULL,
+  creative_id UUID REFERENCES creatives(id) ON DELETE SET NULL,
+  l1_sent BOOLEAN DEFAULT false,
+  l2_sent BOOLEAN DEFAULT false,
+  l3_sent BOOLEAN DEFAULT false,
+  l1_sent_at TIMESTAMPTZ,
+  l2_sent_at TIMESTAMPTZ,
+  l3_sent_at TIMESTAMPTZ,
+  l1_event_id TEXT,
+  l2_event_id TEXT,
+  l3_event_id TEXT,
+  qualification TEXT,
+  summary TEXT,
+  waba_window_expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_phone ON wa_dialogs(phone);
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_source_id ON wa_dialogs(source_id) WHERE source_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_direction ON wa_dialogs(direction_id) WHERE direction_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_capi_l1 ON wa_dialogs(capi_msg_count) WHERE NOT l1_sent;
+CREATE INDEX IF NOT EXISTS idx_wa_dialogs_last_message ON wa_dialogs(last_message DESC);
+
+-- capi_settings
+CREATE TABLE IF NOT EXISTS capi_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel TEXT NOT NULL DEFAULT 'whatsapp',
+  pixel_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  l1_event_name TEXT DEFAULT 'LeadSubmitted',
+  l2_event_name TEXT DEFAULT 'CompleteRegistration',
+  l3_event_name TEXT DEFAULT 'Purchase',
+  l1_threshold INT DEFAULT 3,
+  ai_l2_description TEXT,
+  ai_l3_description TEXT,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- capi_events_log
+CREATE TABLE IF NOT EXISTS capi_events_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL,
+  event_name TEXT NOT NULL,
+  event_level INT NOT NULL CHECK (event_level IN (1, 2, 3)),
+  ctwa_clid TEXT,
+  source_id TEXT,
+  pixel_id TEXT NOT NULL,
+  event_id TEXT,
+  fb_response JSONB,
+  status TEXT DEFAULT 'success' CHECK (status IN ('success', 'error', 'skipped')),
+  error_text TEXT,
+  sent_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_capi_log_phone ON capi_events_log(phone);
+CREATE INDEX IF NOT EXISTS idx_capi_log_sent ON capi_events_log(sent_at DESC);
+
+-- wa_messages: история сообщений (для WABA chatbot контекста)
+CREATE TABLE IF NOT EXISTS wa_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone TEXT NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+  channel TEXT NOT NULL DEFAULT 'baileys' CHECK (channel IN ('baileys', 'waba')),
+  message_text TEXT,
+  message_type TEXT DEFAULT 'text'
+    CHECK (message_type IN ('text', 'image', 'audio', 'document', 'button', 'interactive', 'sticker', 'video')),
+  waba_message_id TEXT,
+  metadata JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON wa_messages(phone, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_waba_id ON wa_messages(waba_message_id) WHERE waba_message_id IS NOT NULL;
+
+-- leads: WhatsApp поля (если ещё не добавлены)
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS ctwa_clid TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS chat_id TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS conversion_source TEXT;
+CREATE INDEX IF NOT EXISTS idx_leads_ctwa_clid ON leads(ctwa_clid) WHERE ctwa_clid IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_chat_id ON leads(chat_id) WHERE chat_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_wa_chat_id ON leads(chat_id) WHERE source_type = 'whatsapp' AND chat_id IS NOT NULL;
+SQL
+```
+
+### Шаг 6: Nginx
+
+Добавить WABA webhook route. Можно include целиком:
+
+```bash
+# Скопировать конфиг
+cp nginx/openclaw-locations.conf /etc/nginx/snippets/openclaw-locations.conf
+
+# Или вручную добавить в server block:
+cat <<'NGINX'
+location /openclaw/webhooks/waba {
+    proxy_pass http://127.0.0.1:9000/webhooks/waba;
+    proxy_set_header Host $host;
+    proxy_set_header X-Hub-Signature-256 $http_x_hub_signature_256;
+}
+NGINX
+```
+
+```bash
+# Проверить и перезагрузить
+nginx -t && nginx -s reload
+# или: docker exec nginx nginx -t && docker exec nginx nginx -s reload
+```
+
+### Шаг 7: Перезапуск сервисов
+
+```bash
+# Перезапустить webhook-service с новыми env vars
+docker compose up -d webhook
+```
+
+### Шаг 8: Обновить файлы клиентов
+
+Для **каждого** клиента:
+
+```bash
+SLUG=test  # ← менять
+
+# Skills (новые: wa-onboarding, wa-waba-setup, wa-capi-setup)
+rm -rf /home/openclaw/clients/${SLUG}/.openclaw/workspace/skills
+cp -r skills /home/openclaw/clients/${SLUG}/.openclaw/workspace/skills
+chown -R 1001:1001 /home/openclaw/clients/${SLUG}/.openclaw/workspace/skills
+
+# TOOLS.md + CLAUDE.md (новые секции WhatsApp + CAPI + WABA)
+sed "s/{{SLUG}}/${SLUG}/g" templates/TOOLS.md.template > /home/openclaw/clients/${SLUG}/.openclaw/workspace/TOOLS.md
+sed "s/{{SLUG}}/${SLUG}/g" templates/CLAUDE.md.template > /home/openclaw/clients/${SLUG}/.openclaw/workspace/CLAUDE.md
+chown 1001:1001 /home/openclaw/clients/${SLUG}/.openclaw/workspace/TOOLS.md
+chown 1001:1001 /home/openclaw/clients/${SLUG}/.openclaw/workspace/CLAUDE.md
+```
+
+### Шаг 9: Пересоздать контейнеры клиентов
+
+Нужно для получения новых скриптов (wa-message-hook.js, send-capi.sh, send-waba.sh):
+
+```bash
+SLUG=test
+PORT=18789
+TOKEN=$(cat /home/openclaw/clients/${SLUG}/.openclaw/gateway_token 2>/dev/null || echo "")
+
+docker stop openclaw-${SLUG} && docker rm openclaw-${SLUG}
+
+docker run -d \
+  --name openclaw-${SLUG} \
+  --network openclaw-net \
+  --restart unless-stopped \
+  -p ${PORT}:18790 \
+  -e "OPENCLAW_GATEWAY_TOKEN=${TOKEN}" \
+  -v /home/openclaw/clients/${SLUG}/.openclaw:/home/openclaw/.openclaw \
+  openclaw-runtime
+```
+
+### Шаг 10: Проверка
+
+```bash
+# 1. webhook-service работает
+curl -s http://localhost:9000/health
+# → ok
+
+# 2. WABA webhook verification
+curl -s "http://localhost:9000/webhooks/waba?hub.mode=subscribe&hub.verify_token=openclaw_waba_2026&hub.challenge=test123"
+# → test123
+
+# 3. Lead Gen по-прежнему работает
+curl -s "http://localhost:9000/webhook/test?hub.mode=subscribe&hub.verify_token=openclaw_leadgen_2026&hub.challenge=ok"
+# → ok
+
+# 4. Логи webhook-service (теперь JSON)
+docker logs --tail 20 openclaw-webhook
+
+# 5. Клиент работает
+docker logs --tail 5 openclaw-test
+
+# 6. БД миграции прошли
+docker exec openclaw-postgres psql -U postgres -d openclaw -c "\dt"
+docker exec openclaw-postgres psql -U postgres -d openclaw_test -c "\dt"
 ```
 
 ## Решённые проблемы
