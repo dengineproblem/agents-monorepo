@@ -313,29 +313,17 @@ git pull
 cd openclaw-standalone
 ```
 
-### Шаг 2: Env vars (.env)
-
-Добавить в `.env` (рядом с docker-compose.yml):
+### Шаг 2: Пересобрать Docker images
 
 ```bash
-# WABA Chatbot (Claude Haiku для автоответов)
-ANTHROPIC_API_KEY=sk-ant-...
-
-# WABA App Secret (опционально — можно задать per-tenant в waba_phone_mapping)
-# WABA_APP_SECRET=...
-```
-
-### Шаг 3: Пересобрать Docker images
-
-```bash
-# webhook-service: новый @anthropic-ai/sdk + WABA handler + structured logging
+# webhook-service: WABA handler + structured logging (без Anthropic SDK)
 docker compose build webhook
 
 # openclaw-runtime: новые scripts (wa-message-hook.js, send-capi.sh, send-waba.sh)
 docker compose build openclaw-runtime
 ```
 
-### Шаг 4: Миграция shared DB
+### Шаг 3: Миграция shared DB
 
 ```bash
 docker exec -i openclaw-postgres psql -U postgres -d openclaw <<'SQL'
@@ -348,14 +336,17 @@ CREATE TABLE IF NOT EXISTS waba_phone_mapping (
   waba_app_secret TEXT,
   waba_access_token TEXT,
   waba_business_account_id TEXT,
+  gateway_token TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+-- Если таблица уже существует:
+ALTER TABLE waba_phone_mapping ADD COLUMN IF NOT EXISTS gateway_token TEXT;
 SQL
 ```
 
-### Шаг 5: Миграция per-tenant DB
+### Шаг 4: Миграция per-tenant DB
 
 Для **каждого** существующего клиента (`test`, и т.д.):
 
@@ -466,7 +457,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_wa_chat_id ON leads(chat_id) WHERE s
 SQL
 ```
 
-### Шаг 6: Nginx
+### Шаг 5: Nginx
 
 WABA webhook route уже добавлен в `nginx-production.conf` (основной nginx Docker-контейнера `agents-monorepo-nginx-1`).
 
@@ -480,14 +471,14 @@ WABA webhook route уже добавлен в `nginx-production.conf` (осно�
 docker exec agents-monorepo-nginx-1 nginx -t && docker exec agents-monorepo-nginx-1 nginx -s reload
 ```
 
-### Шаг 7: Перезапуск сервисов
+### Шаг 6: Перезапуск сервисов
 
 ```bash
 # Перезапустить webhook-service с новыми env vars
 docker compose up -d webhook
 ```
 
-### Шаг 8: Обновить файлы клиентов
+### Шаг 7: Обновить файлы клиентов
 
 Для **каждого** клиента:
 
@@ -506,7 +497,7 @@ chown 1001:1001 /home/openclaw/clients/${SLUG}/.openclaw/workspace/TOOLS.md
 chown 1001:1001 /home/openclaw/clients/${SLUG}/.openclaw/workspace/CLAUDE.md
 ```
 
-### Шаг 9: Пересоздать контейнеры клиентов
+### Шаг 8: Пересоздать контейнеры клиентов
 
 Нужно для получения новых скриптов (wa-message-hook.js, send-capi.sh, send-waba.sh):
 
@@ -527,7 +518,7 @@ docker run -d \
   openclaw-runtime
 ```
 
-### Шаг 10: Проверка
+### Шаг 9: Проверка
 
 ```bash
 # 1. webhook-service работает

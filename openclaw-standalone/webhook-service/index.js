@@ -2,8 +2,6 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import pg from 'pg';
-import Anthropic from '@anthropic-ai/sdk';
-
 const { Pool } = pg;
 
 // ============================================
@@ -35,18 +33,10 @@ const PG_PORT = process.env.PG_PORT || 5432;
 // WABA
 const WABA_VERIFY_TOKEN = process.env.WABA_VERIFY_TOKEN || 'openclaw_waba_2026';
 const WABA_APP_SECRET = process.env.WABA_APP_SECRET || '';
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20250315';
 const META_GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v23.0';
 
 const MAX_BODY_SIZE = 1024 * 1024;        // 1 MB request body limit
-const CLAUDE_TIMEOUT_MS = 30_000;          // 30s timeout for Claude API
-const WHATSAPP_MAX_TEXT_LENGTH = 4096;     // WhatsApp text message limit
-
-const DEFAULT_BOT_PROMPT = `Ты — вежливый ассистент компании. Отвечай кратко и по делу на русском языке.
-Если клиент спрашивает о услугах, ценах или записи — помоги ему.
-Не придумывай информацию, которой у тебя нет.
-Максимальная длина ответа — 3-4 предложения.`;
+const GATEWAY_TIMEOUT_MS = 5_000;         // 5s timeout for POST /hooks/agent (async 202)
 
 // ============================================
 // Connection Pools
@@ -89,11 +79,6 @@ const sharedPool = new Pool({
 sharedPool.on('error', (err) => {
   log('error', 'shared-pool', 'Unexpected shared pool error', { error: err.message });
 });
-
-// Claude API client
-const anthropic = ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: ANTHROPIC_API_KEY })
-  : null;
 
 // ============================================
 // WABA Deduplication
@@ -247,7 +232,7 @@ async function handleLeadgen(pool, slug, leadgenId, adId, formId) {
 // WABA Message Processing
 // ============================================
 
-async function processWabaMessage(pool, slug, wabaPhoneId, accessToken, message, contactName) {
+async function processWabaMessage(pool, slug, wabaPhoneId, accessToken, gatewayToken, message, contactName) {
   const messageId = message.id;
   if (!messageId || isDuplicateWabaMessage(messageId)) {
     log('info', 'waba', 'Duplicate or no-id message, skipping', { slug, messageId });
@@ -357,143 +342,86 @@ async function processWabaMessage(pool, slug, wabaPhoneId, accessToken, message,
     return;
   }
 
-  // 5. Call Claude API for auto-response
-  if (!anthropic) {
-    log('warn', 'waba', 'ANTHROPIC_API_KEY not set, skipping auto-response', { slug });
-    return;
+  // 5. Forward to OpenClaw gateway agent (instead of calling Claude API directly)
+  if (!gatewayToken) {
+    log('warn', 'waba', 'No gateway_token in waba_phone_mapping, skipping auto-response', { slug });
+  } else {
+    await forwardToGateway(slug, gatewayToken, clientPhone, contactName, messageText, pool);
   }
 
-  try {
-    // Build conversation context from wa_messages
-    const { rows: history } = await pool.query(`
-      SELECT direction, message_text FROM wa_messages
-      WHERE phone = $1 AND message_text IS NOT NULL
-      ORDER BY created_at DESC LIMIT 20
-    `, [clientPhone]);
-
-    const messages = history.reverse().map(r => ({
-      role: r.direction === 'inbound' ? 'user' : 'assistant',
-      content: r.message_text
-    }));
-
-    // Get system prompt from config
-    const { rows: [cfg] } = await pool.query(
-      'SELECT waba_bot_system_prompt FROM config WHERE id = 1'
-    );
-    const systemPrompt = cfg?.waba_bot_system_prompt || DEFAULT_BOT_PROMPT;
-
-    log('info', 'waba-bot', 'Calling Claude API', {
-      slug, phone: clientPhone, model: ANTHROPIC_MODEL, historyLen: messages.length
-    });
-
-    // Call Claude with timeout
-    const claudePromise = anthropic.messages.create({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 500,
-      system: systemPrompt,
-      messages
-    });
-
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Claude API timeout after ${CLAUDE_TIMEOUT_MS}ms`)), CLAUDE_TIMEOUT_MS)
-    );
-
-    const response = await Promise.race([claudePromise, timeoutPromise]);
-
-    const replyText = response.content?.[0]?.text;
-    if (!replyText) {
-      log('warn', 'waba-bot', 'Empty Claude response', { slug, phone: clientPhone });
-      return;
-    }
-
-    // Truncate to WhatsApp limit
-    const truncatedReply = replyText.length > WHATSAPP_MAX_TEXT_LENGTH
-      ? replyText.slice(0, WHATSAPP_MAX_TEXT_LENGTH - 3) + '...'
-      : replyText;
-
-    if (replyText.length > WHATSAPP_MAX_TEXT_LENGTH) {
-      log('warn', 'waba-bot', 'Reply truncated to WhatsApp limit', {
-        slug, phone: clientPhone, originalLen: replyText.length, truncatedLen: truncatedReply.length
-      });
-    }
-
-    log('info', 'waba-bot', 'Claude response received', {
-      slug, phone: clientPhone, replyLen: truncatedReply.length,
-      inputTokens: response.usage?.input_tokens, outputTokens: response.usage?.output_tokens
-    });
-
-    // 6. Send reply via Meta Cloud API
-    const sent = await sendWabaMessage(slug, wabaPhoneId, accessToken, clientPhone, truncatedReply);
-    if (!sent) return;
-
-    // 7. INSERT wa_messages (outbound)
-    await pool.query(`
-      INSERT INTO wa_messages (phone, direction, channel, message_text, message_type, waba_message_id)
-      VALUES ($1, 'outbound', 'waba', $2, 'text', $3)
-    `, [clientPhone, truncatedReply, sent.messageId || null]);
-
-    // 8. Update wa_dialogs outgoing_count
-    await pool.query(`
-      UPDATE wa_dialogs SET outgoing_count = outgoing_count + 1, updated_at = NOW()
-      WHERE phone = $1
-    `, [clientPhone]);
-
-    log('info', 'waba', 'Reply sent and logged', {
-      slug, phone: clientPhone, wabaMessageId: sent.messageId, replyLen: truncatedReply.length
-    });
-
-  } catch (err) {
-    log('error', 'waba-bot', 'Bot error', { slug, phone: clientPhone, error: err.message });
-  }
-
-  // 9. CAPI L1 threshold check
+  // 6. CAPI L1 threshold check
   await checkCapiThreshold(pool, slug, clientPhone);
 }
 
 // ============================================
-// Meta Cloud API: Send Message
+// Forward to OpenClaw Gateway Agent
 // ============================================
 
-async function sendWabaMessage(slug, wabaPhoneId, accessToken, to, text) {
-  // Strip + prefix — WABA API expects digits only
-  const toDigits = to.replace(/^\+/, '');
+async function forwardToGateway(slug, gatewayToken, phone, name, text, pool) {
+  const url = `http://openclaw-${slug}:18790/hooks/agent`;
 
-  log('info', 'waba-send', 'Sending message', { slug, to, textLen: text.length });
+  // Build conversation history from wa_messages
+  const { rows: history } = await pool.query(`
+    SELECT direction, message_text FROM wa_messages
+    WHERE phone = $1 AND message_text IS NOT NULL
+    ORDER BY created_at DESC LIMIT 20
+  `, [phone]);
+
+  // Get custom system prompt from config
+  const { rows: [cfg] } = await pool.query(
+    'SELECT waba_bot_system_prompt FROM config WHERE id = 1'
+  );
+  const customPrompt = cfg?.waba_bot_system_prompt || '';
+
+  // Format history
+  const historyLines = history.reverse()
+    .map(r => `${r.direction === 'inbound' ? 'Клиент' : 'Ассистент'}: ${r.message_text}`)
+    .join('\n');
+
+  // Build message for agent
+  const message = [
+    `[WABA] Входящее сообщение от ${phone}${name ? ` (${name})` : ''}`,
+    customPrompt ? `\nИнструкции: ${customPrompt}\n` : '',
+    `Сообщение: "${text}"`,
+    historyLines ? `\nИстория:\n${historyLines}\n` : '',
+    `Ответь клиенту. Для отправки: send-waba.sh "${phone}" "твой ответ"`,
+  ].filter(Boolean).join('\n');
+
+  log('info', 'waba-gw', 'Forwarding to gateway', {
+    slug, phone, url, messageLen: message.length, historyLen: history.length
+  });
 
   try {
-    const res = await fetch(
-      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${wabaPhoneId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: toDigits,
-          type: 'text',
-          text: { body: text }
-        })
-      }
-    );
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), GATEWAY_TIMEOUT_MS);
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      log('error', 'waba-send', 'Meta API error', {
-        slug, to, status: res.status, response: errorText.slice(0, 500)
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${gatewayToken}`,
+      },
+      body: JSON.stringify({ message, deliver: false }),
+      signal: ctrl.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (res.status === 202 || res.ok) {
+      log('info', 'waba-gw', 'Message forwarded (async)', { slug, phone, status: res.status });
+    } else {
+      const errText = await res.text().catch(() => '');
+      log('error', 'waba-gw', 'Gateway returned error', {
+        slug, phone, status: res.status, response: errText.slice(0, 300)
       });
-      return null;
     }
-
-    const data = await res.json();
-    const messageId = data.messages?.[0]?.id || null;
-    log('info', 'waba-send', 'Message delivered', { slug, to, wabaMessageId: messageId });
-    return { messageId };
   } catch (err) {
-    log('error', 'waba-send', 'Send error', { slug, to, error: err.message });
-    return null;
+    if (err.name === 'AbortError') {
+      log('warn', 'waba-gw', 'Gateway timeout', { slug, phone });
+    } else {
+      log('warn', 'waba-gw', 'Gateway unavailable', { slug, phone, error: err.message });
+    }
+    // Не крашим — сообщение уже записано в wa_messages
   }
 }
 
@@ -625,7 +553,7 @@ async function handleWabaWebhook(body, rawBody, signature) {
 
       // 1. Lookup tenant by phone_number_id
       const { rows: [mapping] } = await sharedPool.query(
-        'SELECT slug, waba_app_secret, waba_access_token FROM waba_phone_mapping WHERE waba_phone_id = $1 AND is_active = true',
+        'SELECT slug, waba_app_secret, waba_access_token, gateway_token FROM waba_phone_mapping WHERE waba_phone_id = $1 AND is_active = true',
         [phoneNumberId]
       );
 
@@ -634,7 +562,7 @@ async function handleWabaWebhook(body, rawBody, signature) {
         continue;
       }
 
-      const { slug, waba_app_secret, waba_access_token } = mapping;
+      const { slug, waba_app_secret, waba_access_token, gateway_token } = mapping;
 
       log('info', 'waba', 'Tenant resolved', {
         phoneNumberId, slug, messagesCount: value.messages.length, contactName
@@ -670,7 +598,7 @@ async function handleWabaWebhook(body, rawBody, signature) {
       // 4. Process each message
       for (const message of value.messages) {
         try {
-          await processWabaMessage(pool, slug, phoneNumberId, waba_access_token, message, contactName);
+          await processWabaMessage(pool, slug, phoneNumberId, waba_access_token, gateway_token, message, contactName);
         } catch (err) {
           log('error', 'waba', 'Message processing error', {
             slug, messageId: message.id, error: err.message,
@@ -846,8 +774,7 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   log('info', 'server', 'Webhook service started', {
     port: PORT,
-    wabaEnabled: !!ANTHROPIC_API_KEY,
-    model: ANTHROPIC_MODEL
+    mode: 'gateway-forwarding'
   });
 });
 

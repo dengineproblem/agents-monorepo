@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS waba_phone_mapping (
   waba_app_secret TEXT,                       -- App Secret для HMAC верификации (per-number)
   waba_access_token TEXT,                     -- Access Token для Cloud API
   waba_business_account_id TEXT,
+  gateway_token TEXT,                        -- OpenClaw gateway auth token для POST /hooks/agent
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()

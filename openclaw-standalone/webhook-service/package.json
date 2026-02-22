@@ -6,7 +6,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "pg": "^8.13.0",
-    "@anthropic-ai/sdk": "^0.34.0"
+    "pg": "^8.13.0"
   }
 }

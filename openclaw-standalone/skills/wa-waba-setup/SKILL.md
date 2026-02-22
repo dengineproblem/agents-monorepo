@@ -22,7 +22,7 @@
 | Стоимость | Бесплатно | Платно (per-conversation) |
 | Надёжность | Может отключиться | Enterprise SLA |
 | Функции | Базовые | Templates, read receipts, verified badge |
-| Обработка | Hook внутри контейнера | webhook-service (внешний) |
+| Обработка | Hook внутри контейнера | webhook-service → /hooks/agent |
 
 ---
 
@@ -59,17 +59,24 @@ WHERE id = 1;
 
 ### Шаг 4: Зарегистрировать маппинг (shared DB)
 
-Это нужно выполнить в ОБЩЕЙ БД openclaw (не в tenant DB):
+Это нужно выполнить в ОБЩЕЙ БД openclaw (не в tenant DB).
 
+Сначала получи gateway token:
+```bash
+echo "$OPENCLAW_GATEWAY_TOKEN"
+```
+
+Затем сохрани маппинг:
 ```bash
 psql "postgresql://postgres:openclaw_local@postgres:5432/openclaw" -c "
-  INSERT INTO waba_phone_mapping (waba_phone_id, slug, phone_number, waba_app_secret, waba_access_token)
-  VALUES ('{phone_number_id}', '{{SLUG}}', '{phone_number}', '{app_secret}', '{access_token}')
+  INSERT INTO waba_phone_mapping (waba_phone_id, slug, phone_number, waba_app_secret, waba_access_token, gateway_token)
+  VALUES ('{phone_number_id}', '{{SLUG}}', '{phone_number}', '{app_secret}', '{access_token}', '${OPENCLAW_GATEWAY_TOKEN}')
   ON CONFLICT (waba_phone_id) DO UPDATE SET
     slug = EXCLUDED.slug,
     phone_number = EXCLUDED.phone_number,
     waba_app_secret = EXCLUDED.waba_app_secret,
     waba_access_token = EXCLUDED.waba_access_token,
+    gateway_token = EXCLUDED.gateway_token,
     is_active = true,
     updated_at = NOW();
 "
@@ -131,17 +138,18 @@ send-waba.sh +77001234567 "Текст сообщения"
 ## Формат ответа
 
 ```
-📱 *WABA подключён*
+WABA подключён
 
-✅ Phone Number ID: {phone_number_id}
-✅ Номер: {phone_number}
-✅ Webhook: https://app.performanteaiagency.com/openclaw/webhooks/waba
-✅ Чатбот: Claude Haiku 4.5 (автоответ)
+Phone Number ID: {phone_number_id}
+Номер: {phone_number}
+Webhook: https://app.performanteaiagency.com/openclaw/webhooks/waba
+Ответы: через агента (send-waba.sh)
 
-Теперь все входящие WABA сообщения обрабатываются автоматически.
+Входящие WABA сообщения пересылаются мне через /hooks/agent.
+Я отвечаю клиентам используя send-waba.sh.
 Лиды с рекламы (Click-to-WhatsApp) привязываются к креативам через ad_creative_mapping.
 
-💡 Для настройки CAPI: `skills/wa-capi-setup/SKILL.md`
-💡 Для настройки промпта чатбота:
+Для настройки CAPI: skills/wa-capi-setup/SKILL.md
+Для настройки промпта:
    UPDATE config SET waba_bot_system_prompt = '...' WHERE id = 1;
 ```
