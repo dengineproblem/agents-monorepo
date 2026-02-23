@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS directions (
   target_cpl_cents INTEGER NOT NULL DEFAULT 300,
   is_active BOOLEAN DEFAULT true,
   targeting JSONB,
+  -- Creative creation settings
+  description TEXT DEFAULT 'Напишите нам, чтобы узнать подробности',
+  site_url TEXT,
+  lead_form_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -91,18 +95,18 @@ CREATE TABLE IF NOT EXISTS creatives (
   title TEXT,
   media_type TEXT NOT NULL DEFAULT 'video'
     CHECK (media_type IN ('video', 'image', 'carousel')),
-  file_path TEXT,
 
   -- Facebook IDs
   fb_video_id TEXT,
   fb_image_hash TEXT,
+  fb_creative_id TEXT,                -- Unified creative ID
   fb_creative_id_whatsapp TEXT,
   fb_creative_id_instagram TEXT,
   fb_creative_id_site_leads TEXT,
   fb_creative_id_lead_forms TEXT,
 
-  status TEXT DEFAULT 'uploaded'
-    CHECK (status IN ('uploaded', 'processing', 'ready', 'failed')),
+  status TEXT DEFAULT 'processing'
+    CHECK (status IN ('processing', 'ready', 'failed')),
   direction_id UUID REFERENCES directions(id) ON DELETE SET NULL,
   transcription TEXT,
   thumbnail_url TEXT,

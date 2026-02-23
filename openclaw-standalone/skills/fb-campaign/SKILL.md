@@ -1,6 +1,6 @@
 # Создание Facebook кампаний
 
-Создание Campaign → AdSet → Ad, загрузка креативов (видео/изображения) в Facebook. Отвечает на "Запусти кампанию", "Загрузи видео", "Создай адсет".
+Создание Campaign → AdSet → Ad из уже загруженных креативов. Отвечает на "Запусти кампанию", "Создай адсет".
 
 ---
 
@@ -8,6 +8,26 @@
 
 ```sql
 SELECT fb_access_token, fb_ad_account_id, fb_page_id, fb_instagram_id FROM config WHERE id = 1;
+```
+
+---
+
+## Загрузка креативов
+
+Креативы загружаются пользователем через upload page. При загрузке пользователь выбирает направление, сервис автоматически:
+1. Загружает видео/изображение в Facebook
+2. Создаёт FB creative
+3. Сохраняет все ID в таблицу `creatives`
+
+**Для создания кампании используй готовые креативы:**
+
+```sql
+SELECT c.id, c.title, c.media_type, c.fb_video_id, c.fb_creative_id,
+       d.name AS direction_name, d.objective
+FROM creatives c
+JOIN directions d ON d.id = c.direction_id
+WHERE c.status = 'ready'
+ORDER BY c.created_at DESC;
 ```
 
 ---
@@ -26,83 +46,7 @@ SELECT fb_access_token, fb_ad_account_id, fb_page_id, fb_instagram_id FROM confi
 
 ## WRITE инструменты
 
-### 1. Загрузка видео в Facebook
-
-**Для видео < 50 МБ:**
-
-```bash
-curl -s -X POST "https://graph-video.facebook.com/v23.0/{ad_account_id}/advideos" \
-  -F "source=@{file_path}" \
-  -F "title={title}" \
-  -F "access_token={token}"
-```
-
-Возвращает: `{ "id": "video_id" }`
-
-**Для видео > 50 МБ (chunked upload):**
-
-```bash
-# Шаг 1: Start
-curl -s -X POST "https://graph-video.facebook.com/v23.0/{ad_account_id}/advideos" \
-  -F "upload_phase=start" \
-  -F "file_size={bytes}" \
-  -F "access_token={token}"
-# → { upload_session_id, video_id, start_offset, end_offset }
-
-# Шаг 2: Transfer (повторять для каждого чанка)
-curl -s -X POST "https://graph-video.facebook.com/v23.0/{ad_account_id}/advideos" \
-  -F "upload_phase=transfer" \
-  -F "upload_session_id={session_id}" \
-  -F "start_offset={offset}" \
-  -F "video_file_chunk=@{chunk_path}" \
-  -F "access_token={token}"
-
-# Шаг 3: Finish
-curl -s -X POST "https://graph-video.facebook.com/v23.0/{ad_account_id}/advideos" \
-  -F "upload_phase=finish" \
-  -F "upload_session_id={session_id}" \
-  -F "access_token={token}"
-```
-
-### 2. Загрузка изображения
-
-```bash
-curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/adimages" \
-  -F "filename=@{file_path}" \
-  -F "access_token={token}"
-```
-
-Возвращает: `{ "images": { "filename": { "hash": "abc123", "url": "..." } } }`
-
-### 3. Создание креатива (WhatsApp видео)
-
-```bash
-curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/adcreatives" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "{creative_name}",
-    "object_story_spec": {
-      "page_id": "{page_id}",
-      "video_data": {
-        "video_id": "{fb_video_id}",
-        "message": "{ad_text}",
-        "call_to_action": {
-          "type": "WHATSAPP_MESSAGE",
-          "value": { "app_destination": "WHATSAPP" }
-        }
-      }
-    }
-  }' \
-  "?access_token={token}"
-```
-
-Для других objective меняй `call_to_action.type`:
-- WhatsApp: `WHATSAPP_MESSAGE`
-- Lead Forms: `SIGN_UP` + `lead_gen_form_id`
-- Instagram Traffic: `LEARN_MORE` + `link`
-- Site Leads: `LEARN_MORE` + `link`
-
-### 4. Создание кампании
+### 1. Создание кампании
 
 ```bash
 curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/campaigns" \
@@ -116,7 +60,7 @@ curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/campaigns" \
   "?access_token={token}"
 ```
 
-### 5. Создание адсета
+### 2. Создание адсета
 
 ```bash
 curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/adsets" \
@@ -145,7 +89,7 @@ curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/adsets" \
   "?access_token={token}"
 ```
 
-### 6. Создание объявления
+### 3. Создание объявления
 
 ```bash
 curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/ads" \
@@ -158,6 +102,8 @@ curl -s -X POST "https://graph.facebook.com/v23.0/{ad_account_id}/ads" \
   }' \
   "?access_token={token}"
 ```
+
+**ВАЖНО:** `fb_creative_id` бери из таблицы `creatives` — поле `fb_creative_id`.
 
 ---
 
@@ -198,28 +144,22 @@ VALUES ($1, $2, $3, $4, $5, $6);
 INSERT INTO direction_adsets (direction_id, fb_adset_id, adset_name, daily_budget_cents)
 VALUES ($1, $2, $3, $4);
 
--- Креатив
-INSERT INTO creatives (title, media_type, file_path, fb_video_id, fb_image_hash, status, direction_id)
-VALUES ($1, $2, $3, $4, $5, 'ready', $6) RETURNING id;
-
--- Маппинг
-INSERT INTO ad_creative_mapping (ad_id, creative_id, direction_id, adset_id, campaign_id, source)
-VALUES ($1, $2, $3, $4, $5, 'campaign_builder');
+-- Маппинг ad → creative
+INSERT INTO ad_creative_mapping (ad_id, creative_id, direction_id, adset_id, campaign_id, fb_creative_id, source)
+VALUES ($1, $2, $3, $4, $5, $6, 'campaign_builder');
 ```
 
 ---
 
 ## Workflow
 
-1. Пользователь: "Запусти кампанию на Алмату с видео /uploads/video.mp4"
+1. Пользователь: "Запусти кампанию на направление X"
 2. Прочитай config (токены, page_id)
-3. Загрузи видео в Facebook → получи video_id
-4. Создай креатив (adcreatives) → получи creative_id
+3. Найди готовые креативы: `SELECT * FROM creatives WHERE status = 'ready' AND direction_id = ...`
+4. Если креативов нет — предложи загрузить через upload page
 5. Создай кампанию → campaign_id
 6. Создай адсет(ы) с таргетингом → adset_id
-7. Создай объявление → ad_id
-8. Сохрани всё в БД
+7. Создай объявление(я) с fb_creative_id из creatives → ad_id
+8. Сохрани маппинг в ad_creative_mapping
 9. Активируй кампанию: `POST {campaign_id}?status=ACTIVE`
 10. Сообщи результат
-
-⚠️ Спроси подтверждение перед запуском (бюджет, таргетинг, текст).

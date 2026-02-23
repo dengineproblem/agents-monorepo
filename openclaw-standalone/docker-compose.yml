@@ -50,11 +50,17 @@ services:
     container_name: openclaw-upload
     ports:
       - "9001:3001"
-    volumes:
-      - openclaw-uploads:/app/uploads
     environment:
       PORT: 3001
       MAX_FILE_SIZE_MB: 500
+      PG_HOST: postgres
+      PG_USER: postgres
+      PG_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
+      PG_PORT: 5432
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - openclaw-net
@@ -71,7 +77,6 @@ services:
 
 volumes:
   openclaw-pgdata:
-  openclaw-uploads:
 
 networks:
   openclaw-net:

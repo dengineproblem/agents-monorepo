@@ -53,7 +53,10 @@ SELECT fb_access_token FROM config WHERE id = 1;
 Если `fb_access_token` IS NULL — автоматически запусти `fb-onboarding/SKILL.md`.
 
 ## Upload креативов
-URL для загрузки: https://app.performanteaiagency.com/openclaw/upload/
+URL для загрузки: https://app.performanteaiagency.com/openclaw/upload/{{SLUG}}/
+Пользователь выбирает направление и загружает видео/изображение.
+Сервис автоматически загружает в Facebook и создаёт креатив (fb_creative_id).
+Готовые креативы: `SELECT id, title, fb_creative_id, direction_id FROM creatives WHERE status = 'ready';`
 
 ## Webhook URL
 Facebook Lead Gen webhook: `https://app.performanteaiagency.com/openclaw/webhook/{{SLUG}}`
