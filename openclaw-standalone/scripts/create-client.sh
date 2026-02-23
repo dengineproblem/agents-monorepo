@@ -19,7 +19,7 @@ if ! echo "$SLUG" | grep -qE '^[a-z0-9_-]+$'; then
   exit 1
 fi
 
-# Generate auth token for gateway
+# Generate auth token for gateway (saved to file for container recreation)
 GW_TOKEN=$(openssl rand -hex 16)
 
 DB_NAME="openclaw_${SLUG}"
@@ -67,9 +67,12 @@ sed "s/{{SLUG}}/${SLUG}/g" "$CLAUDE_TEMPLATE" > "${WORKSPACE_DIR}/CLAUDE.md"
 sed "s/{{SLUG}}/${SLUG}/g" "$TOOLS_TEMPLATE" > "${WORKSPACE_DIR}/TOOLS.md"
 cp "$CONFIG_TEMPLATE" "${OPENCLAW_DIR}/openclaw.json"
 
+# Save gateway token to file (for container recreation without losing the token)
+echo "$GW_TOKEN" > "${OPENCLAW_DIR}/gateway_token"
+
 # Fix permissions — container runs as openclaw (UID 1001, node:22-slim has 'node' at 1000)
 chown -R 1001:1001 "${OPENCLAW_DIR}"
-echo "  CLAUDE.md + TOOLS.md + openclaw.json generated"
+echo "  CLAUDE.md + TOOLS.md + openclaw.json + gateway_token generated"
 
 # 5. Start container
 echo "[5/5] Starting container ${CONTAINER_NAME}..."
