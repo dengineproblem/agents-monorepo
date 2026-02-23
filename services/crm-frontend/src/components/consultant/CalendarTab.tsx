@@ -13,8 +13,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare, ShoppingBag } from 'lucide-react';
+import { Calendar, Clock, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee, DollarSign, CheckSquare, ShoppingBag, Mic } from 'lucide-react';
 import { ChatSection } from './ChatSection';
+import { CallRecorder } from './CallRecorder';
 
 // Типы консультаций и их отображение
 const CONSULTATION_TYPE_CONFIG: Record<string, {
@@ -85,6 +86,9 @@ export function CalendarTab() {
   });
   const [draggedConsultation, setDraggedConsultation] = useState<Consultation | null>(null);
   const [dropTargetSlot, setDropTargetSlot] = useState<string | null>(null);
+  const [showCallRecorder, setShowCallRecorder] = useState(false);
+  const [recordingLeadId, setRecordingLeadId] = useState<string | undefined>();
+  const [recordingLeadName, setRecordingLeadName] = useState<string | undefined>();
 
   // Продажи
   const [clientSales, setClientSales] = useState<Sale[]>([]);
@@ -646,6 +650,27 @@ export function CalendarTab() {
 
   return (
     <div className="space-y-6">
+      {/* Запись звонка (появляется при нажатии из детали консультации) */}
+      {showCallRecorder && (
+        <CallRecorder
+          leads={[]}
+          consultantId={consultantId}
+          defaultLeadId={recordingLeadId}
+          defaultLeadName={recordingLeadName}
+          onClose={() => {
+            setShowCallRecorder(false);
+            setRecordingLeadId(undefined);
+            setRecordingLeadName(undefined);
+          }}
+          onRecordingComplete={() => {
+            setShowCallRecorder(false);
+            setRecordingLeadId(undefined);
+            setRecordingLeadName(undefined);
+            loadData();
+          }}
+        />
+      )}
+
       {/* Навигация по датам и кнопки */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -1028,14 +1053,28 @@ export function CalendarTab() {
                   )}
                 </div>
 
-                {selectedConsultation.notes && (
-                  <div>
-                    <Label className="text-muted-foreground">Примечания</Label>
-                    <div className="text-sm bg-muted p-3 rounded-md whitespace-pre-wrap">
-                      {selectedConsultation.notes}
-                    </div>
-                  </div>
-                )}
+                <div>
+                  <Label className="text-muted-foreground">Примечания</Label>
+                  <Textarea
+                    className="mt-1"
+                    rows={3}
+                    placeholder="Добавить примечание..."
+                    defaultValue={selectedConsultation.notes || ''}
+                    key={selectedConsultation.id}
+                    onBlur={async (e) => {
+                      const newNotes = e.target.value.trim();
+                      if (newNotes !== (selectedConsultation.notes || '').trim()) {
+                        try {
+                          await consultationService.updateConsultation(selectedConsultation.id, { notes: newNotes });
+                          selectedConsultation.notes = newNotes;
+                          toast({ title: 'Примечание сохранено' });
+                        } catch {
+                          toast({ title: 'Ошибка', description: 'Не удалось сохранить примечание', variant: 'destructive' });
+                        }
+                      }
+                    }}
+                  />
+                </div>
 
                 <div>
                   <Label className="text-muted-foreground">Источник</Label>
@@ -1102,6 +1141,19 @@ export function CalendarTab() {
                     onClick={() => handleDelete(selectedConsultation.id)}
                   >
                     Удалить
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      setRecordingLeadId(selectedConsultation.dialog_analysis_id || undefined);
+                      setRecordingLeadName(selectedConsultation.client_name || selectedConsultation.client_phone || undefined);
+                      setIsDetailModalOpen(false);
+                      setShowCallRecorder(true);
+                    }}
+                  >
+                    <Mic className="w-3 h-3 mr-1" />
+                    Запись разговора
                   </Button>
                 </div>
               </div>

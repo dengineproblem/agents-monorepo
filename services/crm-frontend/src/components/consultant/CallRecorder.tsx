@@ -27,14 +27,17 @@ type RecordingMode = 'tab' | 'mic_only';
 interface CallRecorderProps {
   leads: Lead[];
   consultantId?: string;
+  defaultLeadId?: string;
+  defaultLeadName?: string;
+  onClose?: () => void;
   onRecordingComplete?: () => void;
 }
 
-export function CallRecorder({ leads, consultantId, onRecordingComplete }: CallRecorderProps) {
+export function CallRecorder({ leads, consultantId, defaultLeadId, defaultLeadName, onClose, onRecordingComplete }: CallRecorderProps) {
   const { toast } = useToast();
-  const [state, setState] = useState<RecordingState>('idle');
-  const [selectedLeadId, setSelectedLeadId] = useState<string>('');
-  const [recordingMode, setRecordingMode] = useState<RecordingMode>('mic_only');
+  const [state, setState] = useState<RecordingState>(defaultLeadId ? 'waiting_for_tab' : 'idle');
+  const [selectedLeadId, setSelectedLeadId] = useState<string>(defaultLeadId || '');
+  const [recordingMode, setRecordingMode] = useState<RecordingMode>(defaultLeadId ? 'tab' : 'mic_only');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
@@ -119,7 +122,7 @@ export function CallRecorder({ leads, consultantId, onRecordingComplete }: CallR
           description: 'Вы не выбрали вкладку для записи',
           variant: 'destructive',
         });
-        setState('idle');
+        onClose ? onClose() : setState('idle');
         return;
       }
 
@@ -303,13 +306,22 @@ export function CallRecorder({ leads, consultantId, onRecordingComplete }: CallR
               <div>
                 <h3 className="font-medium">Запись звонка</h3>
                 <p className="text-sm text-muted-foreground">
-                  Запишите созвон с клиентом для транскрипции и анализа
+                  {selectedLeadId
+                    ? `Лид: ${defaultLeadName || leads.find(l => l.id === selectedLeadId)?.contact_name || 'Выбран'}`
+                    : 'Запишите созвон с клиентом для транскрипции и анализа'}
                 </p>
               </div>
-              <Button onClick={handleStartClick} variant="destructive" size="lg">
-                <Mic className="h-5 w-5 mr-2" />
-                Записать звонок
-              </Button>
+              <div className="flex gap-2">
+                {onClose && (
+                  <Button onClick={onClose} variant="ghost" size="icon">
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+                <Button onClick={handleStartClick} variant="destructive" size="lg">
+                  <Mic className="h-5 w-5 mr-2" />
+                  Записать звонок
+                </Button>
+              </div>
             </div>
           )}
 
@@ -318,11 +330,14 @@ export function CallRecorder({ leads, consultantId, onRecordingComplete }: CallR
               <div>
                 <h3 className="font-medium">Выберите вкладку с Zoom / Meet</h3>
                 <p className="text-sm text-muted-foreground">
+                  {selectedLeadId
+                    ? `Лид: ${defaultLeadName || leads.find(l => l.id === selectedLeadId)?.contact_name || 'Выбран'} — `
+                    : ''}
                   Нажмите кнопку — Chrome покажет список вкладок для захвата аудио
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button onClick={() => setState('idle')} variant="ghost" size="icon">
+                <Button onClick={() => { onClose ? onClose() : setState('idle'); }} variant="ghost" size="icon">
                   <X className="h-4 w-4" />
                 </Button>
                 <Button onClick={handleTabCaptureClick} variant="destructive" size="lg">
