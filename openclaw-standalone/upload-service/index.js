@@ -203,99 +203,231 @@ async function uploadImageToFB(adAccountId, token, filePath) {
 }
 
 // ============================================
-// Facebook API: create creative
+// Facebook API: post to adcreatives endpoint
 // ============================================
-async function createFBCreative(adAccountId, token, params) {
-  const { objective, videoId, imageHash, pageId, instagramId, message } = params;
-
-  const objectStorySpec = { page_id: pageId };
-
-  if (videoId) {
-    // Video creative
-    const videoData = {
-      video_id: videoId,
-      message: message || '',
-    };
-
-    if (objective === 'whatsapp') {
-      videoData.call_to_action = { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } };
-    } else if (objective === 'lead_forms') {
-      videoData.call_to_action = { type: 'SIGN_UP' };
-      if (params.leadFormId) {
-        videoData.call_to_action.value = { lead_gen_form_id: params.leadFormId };
-      }
-    } else if (objective === 'site_leads') {
-      videoData.call_to_action = {
-        type: params.ctaType || 'LEARN_MORE',
-        value: { link: params.siteUrl || '' }
-      };
-    } else if (objective === 'instagram_traffic') {
-      videoData.call_to_action = {
-        type: 'LEARN_MORE',
-        value: { link: `https://instagram.com/` }
-      };
-    } else if (objective === 'app_installs') {
-      videoData.call_to_action = {
-        type: 'INSTALL_MOBILE_APP',
-        value: { link: params.appStoreUrl || '' }
-      };
-    }
-
-    if (instagramId) {
-      objectStorySpec.instagram_user_id = instagramId;
-    }
-
-    objectStorySpec.video_data = videoData;
-  } else if (imageHash) {
-    // Image creative
-    const linkData = {
-      image_hash: imageHash,
-      message: message || '',
-    };
-
-    if (objective === 'whatsapp') {
-      linkData.call_to_action = { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } };
-    } else if (objective === 'lead_forms') {
-      linkData.call_to_action = { type: 'SIGN_UP' };
-      if (params.leadFormId) {
-        linkData.call_to_action.value = { lead_gen_form_id: params.leadFormId };
-      }
-    } else if (objective === 'site_leads' || objective === 'instagram_traffic') {
-      linkData.link = params.siteUrl || '';
-      linkData.call_to_action = {
-        type: params.ctaType || 'LEARN_MORE',
-        value: { link: params.siteUrl || '' }
-      };
-    }
-
-    if (instagramId) {
-      objectStorySpec.instagram_user_id = instagramId;
-    }
-
-    objectStorySpec.link_data = linkData;
-  }
-
-  const body = {
-    name: params.title || 'Creative',
-    object_story_spec: objectStorySpec,
-  };
-
-  console.log(`[FB] Creating creative (objective: ${objective})`);
-
+async function postCreative(adAccountId, token, payload) {
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adcreatives?access_token=${token}`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
-
   const data = await res.json();
   if (!res.ok || data.error) {
-    throw new Error(`FB creative creation failed: ${data.error?.message || JSON.stringify(data)}`);
+    const err = new Error(`FB creative failed: ${data.error?.message || JSON.stringify(data)}`);
+    err.fbError = data.error;
+    throw err;
+  }
+  return data;
+}
+
+// ============================================
+// Facebook API: create creative (1:1 with main project)
+// ============================================
+async function createFBCreative(adAccountId, token, params) {
+  const { objective, videoId, imageHash, pageId, instagramId, message } = params;
+
+  console.log(`[FB] Creating creative (objective: ${objective})`);
+
+  if (objective === 'whatsapp') {
+    return createWhatsAppCreative(adAccountId, token, params);
+  } else if (objective === 'instagram_traffic') {
+    return createInstagramCreative(adAccountId, token, params);
+  } else if (objective === 'site_leads') {
+    return createWebsiteLeadsCreative(adAccountId, token, params);
+  } else if (objective === 'lead_forms') {
+    return createLeadFormCreative(adAccountId, token, params);
+  } else if (objective === 'app_installs') {
+    return createAppInstallsCreative(adAccountId, token, params);
   }
 
-  console.log(`[FB] Creative created: ${data.id}`);
-  return { id: data.id };
+  throw new Error(`Unsupported objective: ${objective}`);
+}
+
+// --- WhatsApp creative (with page_welcome_message + fallbacks) ---
+async function createWhatsAppCreative(adAccountId, token, params) {
+  const { videoId, imageHash, pageId, instagramId, message, clientQuestion } = params;
+
+  const pageWelcomeMessage = JSON.stringify({
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: clientQuestion || 'Здравствуйте! Хочу узнать об этом подробнее.' },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  });
+
+  const callToAction = { type: "WHATSAPP_MESSAGE" };
+
+  const buildVideoData = (withWelcome) => {
+    const vd = {
+      video_id: videoId,
+      message: message || '',
+      call_to_action: callToAction,
+    };
+    if (withWelcome) vd.page_welcome_message = pageWelcomeMessage;
+    return vd;
+  };
+
+  const buildSpec = (videoData, withInstagram) => {
+    const spec = { page_id: pageId, video_data: videoData };
+    if (withInstagram && instagramId) spec.instagram_user_id = instagramId;
+    return spec;
+  };
+
+  // Try 1: with page_welcome_message + instagram
+  try {
+    const result = await postCreative(adAccountId, token, {
+      name: "Video CTWA – WhatsApp",
+      object_story_spec: buildSpec(buildVideoData(true), true),
+    });
+    console.log(`[FB] WhatsApp creative created: ${result.id}`);
+    return { id: result.id };
+  } catch (err) {
+    const sub = err.fbError?.error_subcode;
+    const code = err.fbError?.code;
+
+    // Fallback: page_welcome_message not supported (1815166 / 1487194)
+    if (sub === 1815166 || sub === 1487194) {
+      console.log('[FB] page_welcome_message not supported, retrying without it');
+      const result = await postCreative(adAccountId, token, {
+        name: "Video CTWA – WhatsApp",
+        object_story_spec: buildSpec(buildVideoData(false), true),
+      });
+      console.log(`[FB] WhatsApp creative created (no welcome): ${result.id}`);
+      return { id: result.id };
+    }
+
+    // Fallback: invalid instagram_user_id (code 100)
+    if (code === 100 && err.message?.includes('instagram_user_id') && instagramId) {
+      console.log('[FB] invalid instagram_user_id, retrying without it');
+      try {
+        const result = await postCreative(adAccountId, token, {
+          name: "Video CTWA – WhatsApp",
+          object_story_spec: buildSpec(buildVideoData(true), false),
+        });
+        console.log(`[FB] WhatsApp creative created (no IG): ${result.id}`);
+        return { id: result.id };
+      } catch (retryErr) {
+        const retrySub = retryErr.fbError?.error_subcode;
+        if (retrySub === 1815166 || retrySub === 1487194) {
+          const result = await postCreative(adAccountId, token, {
+            name: "Video CTWA – WhatsApp",
+            object_story_spec: buildSpec(buildVideoData(false), false),
+          });
+          return { id: result.id };
+        }
+        throw retryErr;
+      }
+    }
+
+    throw err;
+  }
+}
+
+// --- Instagram Traffic creative ---
+async function createInstagramCreative(adAccountId, token, params) {
+  const { videoId, pageId, instagramId, instagramUrl, message } = params;
+
+  const videoData = {
+    video_id: videoId,
+    message: message || '',
+    call_to_action: {
+      type: "LEARN_MORE",
+      value: { link: instagramUrl || `https://www.instagram.com/` }
+    }
+  };
+
+  const spec = {
+    page_id: pageId,
+    video_data: videoData,
+  };
+  if (instagramId) spec.instagram_user_id = instagramId;
+
+  const result = await postCreative(adAccountId, token, {
+    name: "Instagram Profile Creative",
+    object_story_spec: spec,
+  });
+  console.log(`[FB] Instagram creative created: ${result.id}`);
+  return { id: result.id };
+}
+
+// --- Website Leads creative (with url_tags for UTM) ---
+async function createWebsiteLeadsCreative(adAccountId, token, params) {
+  const { videoId, pageId, instagramId, message, siteUrl, utm, ctaType } = params;
+
+  const videoData = {
+    video_id: videoId,
+    message: message || '',
+    call_to_action: {
+      type: ctaType || "SIGN_UP",
+      value: { link: siteUrl }
+    }
+  };
+
+  const spec = { page_id: pageId, video_data: videoData };
+  if (instagramId) spec.instagram_user_id = instagramId;
+
+  const result = await postCreative(adAccountId, token, {
+    name: "Website Leads Creative",
+    url_tags: utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
+    object_story_spec: spec,
+  });
+  console.log(`[FB] Website Leads creative created: ${result.id}`);
+  return { id: result.id };
+}
+
+// --- Lead Form creative ---
+async function createLeadFormCreative(adAccountId, token, params) {
+  const { videoId, pageId, instagramId, message, leadFormId, ctaType } = params;
+
+  const videoData = {
+    video_id: videoId,
+    message: message || '',
+    call_to_action: {
+      type: ctaType || "LEARN_MORE",
+      value: { lead_gen_form_id: leadFormId }
+    }
+  };
+
+  const spec = { page_id: pageId, video_data: videoData };
+  if (instagramId) spec.instagram_user_id = instagramId;
+
+  const result = await postCreative(adAccountId, token, {
+    name: "Lead Form Video Creative",
+    object_story_spec: spec,
+  });
+  console.log(`[FB] Lead Form creative created: ${result.id}`);
+  return { id: result.id };
+}
+
+// --- App Installs creative ---
+async function createAppInstallsCreative(adAccountId, token, params) {
+  const { videoId, pageId, instagramId, message, appStoreUrl } = params;
+
+  const videoData = {
+    video_id: videoId,
+    message: message || '',
+    call_to_action: {
+      type: "INSTALL_MOBILE_APP",
+      value: { link: appStoreUrl }
+    }
+  };
+
+  const spec = { page_id: pageId, video_data: videoData };
+  if (instagramId) spec.instagram_user_id = instagramId;
+
+  const result = await postCreative(adAccountId, token, {
+    name: "App Installs Video Creative",
+    object_story_spec: spec,
+  });
+  console.log(`[FB] App Installs creative created: ${result.id}`);
+  return { id: result.id };
 }
 
 // ============================================
@@ -380,7 +512,7 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
 
     // 3. Read default_ad_settings for this direction
     const { rows: settingsRows } = await pool.query(
-      `SELECT description, client_question, site_url, utm_tag, lead_form_id, app_store_url
+      `SELECT description, client_question, site_url, utm_tag, lead_form_id, app_store_url, instagram_url
        FROM default_ad_settings WHERE direction_id = $1`,
       [directionId]
     );
@@ -411,7 +543,7 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
       fbImageHash = result.hash;
     }
 
-    // 6. Create FB creative
+    // 6. Create FB creative (1:1 with main project)
     const creative = await createFBCreative(adAccountId, config.fb_access_token, {
       objective,
       videoId: fbVideoId,
@@ -419,10 +551,14 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
       pageId: config.fb_page_id,
       instagramId: config.fb_instagram_id || null,
       message,
+      clientQuestion: settings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.',
       title,
       siteUrl: settings.site_url,
+      utm: settings.utm_tag,
+      instagramUrl: settings.instagram_url,
       leadFormId: settings.lead_form_id,
       appStoreUrl: settings.app_store_url,
+      ctaType: settings.cta_type,
     });
 
     // 7. Update creative record in DB
