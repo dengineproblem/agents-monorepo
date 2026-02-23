@@ -790,7 +790,7 @@ const Profile: React.FC = () => {
     try {
       if (multiAccountEnabled && currentAdAccountId) {
         // Мультиаккаунт режим: обновляем ad_accounts через API
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/ad-accounts/${currentAdAccountId}`, {
+        const response = await fetch(`${API_BASE_URL}/ad-accounts/${currentAdAccountId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
           body: JSON.stringify({

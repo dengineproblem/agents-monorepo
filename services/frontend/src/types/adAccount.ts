@@ -97,6 +97,12 @@ export interface AdAccountSummary {
   page_id: string | null;         // из fb_page_id (для Lead Forms)
   fb_page_id: string | null;      // из fb_page_id (для аватара)
   fb_instagram_id: string | null; // из fb_instagram_id (опционален, для Instagram Traffic)
+  // TikTok
+  tiktok_access_token?: string | null;
+  tiktok_business_id?: string | null;
+  tiktok_account_id?: string | null;
+  // Tilda
+  tilda_utm_field?: string | null;
 }
 
 export interface CreateAdAccountPayload {
