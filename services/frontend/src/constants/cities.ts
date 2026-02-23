@@ -62,10 +62,13 @@ export const CITIES_AND_COUNTRIES = [
   { id: 'DE', name: 'Германия' },
   { id: 'KR', name: 'Южная Корея' },
   { id: 'UA', name: 'Украина' },
+  { id: 'DZ', name: 'Алжир' },
+  { id: 'MA', name: 'Марокко' },
+  { id: 'PG', name: 'Папуа-Новая Гвинея' },
 ];
 
 // ID стран для проверок
-export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE', 'KR', 'CY', 'UA'];
+export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE', 'KR', 'CY', 'UA', 'DZ', 'MA', 'PG'];
 
 // Кипрские регионы/города (без CY-страны) — для взаимоисключения с "Весь Кипр"
 export const CYPRUS_GEO_IDS = ['792', '794', '795', '514564', '515017'];
