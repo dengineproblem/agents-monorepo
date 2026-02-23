@@ -58,10 +58,22 @@ CREATE TABLE IF NOT EXISTS directions (
   target_cpl_cents INTEGER NOT NULL DEFAULT 300,
   is_active BOOLEAN DEFAULT true,
   targeting JSONB,
-  -- Creative creation settings
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- 2b. default_ad_settings — настройки креативов по направлению
+-- ============================================
+CREATE TABLE IF NOT EXISTS default_ad_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  direction_id UUID NOT NULL REFERENCES directions(id) ON DELETE CASCADE UNIQUE,
   description TEXT DEFAULT 'Напишите нам, чтобы узнать подробности',
+  client_question TEXT DEFAULT 'Здравствуйте! Хочу узнать об этом подробнее.',
   site_url TEXT,
+  utm_tag TEXT,
   lead_form_id TEXT,
+  app_store_url TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

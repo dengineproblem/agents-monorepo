@@ -366,9 +366,9 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
 
     const adAccountId = normalizeAdAccountId(config.fb_ad_account_id);
 
-    // 2. Read direction (objective + settings)
+    // 2. Read direction (objective)
     const { rows: dirRows } = await pool.query(
-      `SELECT id, name, objective, description, site_url, lead_form_id FROM directions WHERE id = $1`,
+      `SELECT id, name, objective FROM directions WHERE id = $1`,
       [directionId]
     );
     const direction = dirRows[0];
@@ -377,9 +377,17 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
     }
 
     const objective = direction.objective || 'whatsapp';
-    const message = direction.description || 'Напишите нам, чтобы узнать подробности';
 
-    // 3. Create creative record (status=processing)
+    // 3. Read default_ad_settings for this direction
+    const { rows: settingsRows } = await pool.query(
+      `SELECT description, client_question, site_url, utm_tag, lead_form_id, app_store_url
+       FROM default_ad_settings WHERE direction_id = $1`,
+      [directionId]
+    );
+    const settings = settingsRows[0] || {};
+    const message = settings.description || 'Напишите нам, чтобы узнать подробности';
+
+    // 4. Create creative record (status=processing)
     const { rows: creativeRows } = await pool.query(
       `INSERT INTO creatives (title, media_type, status, direction_id)
        VALUES ($1, $2, 'processing', $3) RETURNING id`,
@@ -389,7 +397,7 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
 
     console.log(`[upload] Creative record created: ${creativeId}`);
 
-    // 4. Upload media to Facebook
+    // 5. Upload media to Facebook
     let fbVideoId = null;
     let fbImageHash = null;
 
@@ -403,7 +411,7 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
       fbImageHash = result.hash;
     }
 
-    // 5. Create FB creative
+    // 6. Create FB creative
     const creative = await createFBCreative(adAccountId, config.fb_access_token, {
       objective,
       videoId: fbVideoId,
@@ -412,11 +420,12 @@ app.post('/:slug/upload', upload.single('file'), async (req, res) => {
       instagramId: config.fb_instagram_id || null,
       message,
       title,
-      siteUrl: direction.site_url,
-      leadFormId: direction.lead_form_id,
+      siteUrl: settings.site_url,
+      leadFormId: settings.lead_form_id,
+      appStoreUrl: settings.app_store_url,
     });
 
-    // 6. Update creative record in DB
+    // 7. Update creative record in DB
     const objectiveFieldMap = {
       whatsapp: 'fb_creative_id_whatsapp',
       instagram_traffic: 'fb_creative_id_instagram',
