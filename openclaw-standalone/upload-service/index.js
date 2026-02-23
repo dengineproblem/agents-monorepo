@@ -706,7 +706,7 @@ const slug = '${slug}';
 let selectedFile = null;
 
 // Load directions
-fetch('/${slug}/directions')
+fetch('directions')
   .then(r => r.json())
   .then(dirs => {
     const sel = document.getElementById('direction');
@@ -769,7 +769,7 @@ function doUpload() {
   result.style.display = 'none';
 
   const xhr = new XMLHttpRequest();
-  xhr.open('POST', '/${slug}/upload');
+  xhr.open('POST', 'upload');
 
   xhr.upload.onprogress = e => {
     if (e.lengthComputable) {
