@@ -134,8 +134,6 @@ export async function resolveCapiSettingsForDirection(
 
   if (direction.account_id) {
     settingsQuery = settingsQuery.eq('account_id', direction.account_id);
-  } else {
-    settingsQuery = settingsQuery.is('account_id', null);
   }
 
   const { data: capiSettings, error: settingsError } = await settingsQuery.maybeSingle();
@@ -228,8 +226,6 @@ export async function hasCapiSettingsForChannel(
 
   if (accountId) {
     query = query.eq('account_id', accountId);
-  } else {
-    query = query.is('account_id', null);
   }
 
   const { data } = await query.maybeSingle();
@@ -253,8 +249,6 @@ export async function getCapiSettingsByChannel(
 
   if (accountId) {
     query = query.eq('account_id', accountId);
-  } else {
-    query = query.is('account_id', null);
   }
 
   const { data } = await query.maybeSingle();

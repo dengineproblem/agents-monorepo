@@ -89,7 +89,7 @@ export async function workflowCreateAdSetInDirection(
 
   const { data: userAccountProfile } = await supabase
     .from('user_accounts')
-    .select('username')
+    .select('username, multi_account_enabled')
     .eq('id', user_account_id)
     .single();
 
@@ -291,13 +291,14 @@ export async function workflowCreateAdSetInDirection(
   if (direction.objective === 'conversions') {
     const conversionChannel = direction.conversion_channel || 'whatsapp';
     const capiChannel = conversionChannel === 'lead_form' ? 'lead_forms' : conversionChannel;
+    const isMultiAccount = userAccountProfile?.multi_account_enabled && context_account_id;
     const capiQuery = supabase
       .from('capi_settings')
       .select('pixel_id')
       .eq('user_account_id', user_account_id)
       .eq('channel', capiChannel)
       .eq('is_active', true);
-    if (context_account_id) {
+    if (isMultiAccount) {
       capiQuery.eq('account_id', context_account_id);
     }
     const { data: capiSettings } = await capiQuery.maybeSingle();

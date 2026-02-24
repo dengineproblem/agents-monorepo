@@ -491,8 +491,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 .eq('user_account_id', user_account_id)
                 .eq('channel', 'whatsapp')
                 .eq('is_active', true);
-              if (direction.account_id) {
-                capiQuery.eq('account_id', direction.account_id);
+              if (credentials.isMultiAccountMode && account_id) {
+                capiQuery.eq('account_id', account_id);
               }
               const { data: capiSettings } = await capiQuery.maybeSingle();
               const pixelId = capiSettings?.pixel_id;
@@ -966,7 +966,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .eq('user_account_id', user_account_id)
             .eq('channel', 'whatsapp')
             .eq('is_active', true);
-          if (account_id) {
+          if (credentials.isMultiAccountMode && account_id) {
             capiQuery.eq('account_id', account_id);
           }
           const { data: capiSettings } = await capiQuery.maybeSingle();

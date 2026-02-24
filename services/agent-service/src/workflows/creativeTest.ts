@@ -58,9 +58,10 @@ export async function workflowStartCreativeTest(
 
   const { data: userAccountProfile } = await supabase
     .from('user_accounts')
-    .select('username')
+    .select('username, multi_account_enabled')
     .eq('id', user_id)
     .single();
+  const isMultiAccount = userAccountProfile?.multi_account_enabled && db_ad_account_id;
 
   log.info({
     user_creative_id,
@@ -206,7 +207,7 @@ export async function workflowStartCreativeTest(
       .eq('user_account_id', user_id)
       .eq('channel', capiChannel)
       .eq('is_active', true);
-    if (db_ad_account_id) {
+    if (isMultiAccount) {
       capiQuery.eq('account_id', db_ad_account_id);
     }
     const { data: capiSettings } = await capiQuery.maybeSingle();

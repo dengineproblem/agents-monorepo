@@ -76,6 +76,14 @@ export async function workflowCreateCampaignWithCreative(
 
   const { user_account_id, ad_account_id } = context;
 
+  // Определяем multi-account режим
+  const { data: userAccountInfo } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled')
+    .eq('id', user_account_id)
+    .single();
+  const isMultiAccount = userAccountInfo?.multi_account_enabled && context.account_id;
+
   console.log('[CreateCampaignWithCreative] Starting workflow:', {
     user_creative_ids_count: user_creative_ids.length,
     user_creative_ids,
@@ -343,7 +351,7 @@ export async function workflowCreateCampaignWithCreative(
         .eq('user_account_id', user_account_id)
         .eq('channel', 'whatsapp')
         .eq('is_active', true);
-      if (context.account_id) {
+      if (isMultiAccount) {
         capiQuery.eq('account_id', context.account_id);
       }
       const { data: capiSettings } = await capiQuery.maybeSingle();
