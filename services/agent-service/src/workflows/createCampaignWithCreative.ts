@@ -345,8 +345,6 @@ export async function workflowCreateCampaignWithCreative(
         .eq('is_active', true);
       if (context.account_id) {
         capiQuery.eq('account_id', context.account_id);
-      } else {
-        capiQuery.is('account_id', null);
       }
       const { data: capiSettings } = await capiQuery.maybeSingle();
       pixelId = capiSettings?.pixel_id || null;

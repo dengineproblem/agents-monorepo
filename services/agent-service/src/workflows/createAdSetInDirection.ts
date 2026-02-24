@@ -299,8 +299,6 @@ export async function workflowCreateAdSetInDirection(
       .eq('is_active', true);
     if (context_account_id) {
       capiQuery.eq('account_id', context_account_id);
-    } else {
-      capiQuery.is('account_id', null);
     }
     const { data: capiSettings } = await capiQuery.maybeSingle();
     if (capiSettings?.pixel_id) {

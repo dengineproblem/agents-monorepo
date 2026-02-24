@@ -208,8 +208,6 @@ export async function workflowStartCreativeTest(
       .eq('is_active', true);
     if (db_ad_account_id) {
       capiQuery.eq('account_id', db_ad_account_id);
-    } else {
-      capiQuery.is('account_id', null);
     }
     const { data: capiSettings } = await capiQuery.maybeSingle();
     if (capiSettings?.pixel_id) {

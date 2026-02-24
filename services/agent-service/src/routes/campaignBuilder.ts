@@ -493,8 +493,6 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 .eq('is_active', true);
               if (direction.account_id) {
                 capiQuery.eq('account_id', direction.account_id);
-              } else {
-                capiQuery.is('account_id', null);
               }
               const { data: capiSettings } = await capiQuery.maybeSingle();
               const pixelId = capiSettings?.pixel_id;
@@ -970,8 +968,6 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .eq('is_active', true);
           if (account_id) {
             capiQuery.eq('account_id', account_id);
-          } else {
-            capiQuery.is('account_id', null);
           }
           const { data: capiSettings } = await capiQuery.maybeSingle();
           const pixelId = capiSettings?.pixel_id;
