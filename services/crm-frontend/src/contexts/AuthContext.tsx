@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 
 export type UserRole = 'admin' | 'consultant' | 'manager';
 
@@ -51,91 +50,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // 1. СНАЧАЛА проверяем consultant_accounts (для консультантов)
-      const { data: consultantAccount } = await supabase
-        .from('consultant_accounts')
-        .select('id, consultant_id, username, role')
-        .eq('username', username)
-        .eq('password', password)
-        .maybeSingle();
+      const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
-      if (consultantAccount) {
-        // Получить данные консультанта
-        const { data: consultant, error: consultantError } = await supabase
-          .from('consultants')
-          .select('id, name, is_active')
-          .eq('id', consultantAccount.consultant_id)
-          .single();
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
 
-        if (consultantError || !consultant || !consultant.is_active) {
-          return {
-            success: false,
-            error: 'Профиль консультанта не найден или неактивен'
-          };
-        }
+      const result = await response.json();
 
-        // Сохраняем в session
-        const sessionUser: User = {
-          id: consultantAccount.id,  // ID из consultant_accounts
-          username: consultantAccount.username,
-          role: 'consultant',
-          is_tech_admin: false,
-          consultantId: consultant.id,
-          consultantName: consultant.name,
+      if (!response.ok) {
+        return {
+          success: false,
+          error: result.error || 'Неверный логин или пароль',
         };
-
-        localStorage.setItem('user', JSON.stringify(sessionUser));
-        setUser(sessionUser);
-        return { success: true };
-      }
-
-      // 2. Если не найдено в consultant_accounts - проверяем user_accounts (админы/менеджеры)
-      const { data: userAccount, error: userError } = await supabase
-        .from('user_accounts')
-        .select('id, username, role, is_tech_admin')
-        .eq('username', username)
-        .eq('password', password)
-        .maybeSingle();
-
-      if (userError || !userAccount) {
-        return { success: false, error: 'Неверный логин или пароль' };
-      }
-
-      // Определяем роль (is_tech_admin как fallback)
-      const role: UserRole = userAccount.is_tech_admin
-        ? 'admin'
-        : (userAccount.role || 'admin');
-
-      let consultantId: string | undefined;
-      let consultantName: string | undefined;
-
-      // Если роль consultant в user_accounts - получаем consultantId (legacy)
-      if (role === 'consultant') {
-        const { data: consultant, error: consultantError } = await supabase
-          .from('consultants')
-          .select('id, name')
-          .eq('parent_user_account_id', userAccount.id)
-          .eq('is_active', true)
-          .maybeSingle();
-
-        if (consultantError || !consultant) {
-          return {
-            success: false,
-            error: 'Профиль консультанта не найден или неактивен'
-          };
-        }
-
-        consultantId = consultant.id;
-        consultantName = consultant.name;
       }
 
       const sessionUser: User = {
-        id: userAccount.id,
-        username: userAccount.username,
-        role,
-        is_tech_admin: userAccount.is_tech_admin || false,
-        consultantId,
-        consultantName
+        id: result.id,
+        username: result.username,
+        role: result.role || 'admin',
+        is_tech_admin: result.is_tech_admin || false,
+        consultantId: result.consultantId,
+        consultantName: result.consultantName,
       };
 
       localStorage.setItem('user', JSON.stringify(sessionUser));
