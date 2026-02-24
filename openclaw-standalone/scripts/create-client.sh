@@ -86,6 +86,15 @@ fi
 # OpenClaw gateway binds to 127.0.0.1:18789 (hardcoded).
 # entrypoint.sh runs socat on 0.0.0.0:18790 to forward external connections.
 # We map host GW_PORT → container 18790 (socat) → 127.0.0.1:18789 (gateway).
+#
+# Docker socket is mounted so the agent can manage host containers (rebuild, exec, logs).
+# --group-add ensures the openclaw user (UID 1001) can access /var/run/docker.sock.
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo "")
+DOCKER_ARGS=""
+if [ -n "$DOCKER_GID" ]; then
+  DOCKER_ARGS="-v /var/run/docker.sock:/var/run/docker.sock --group-add $DOCKER_GID"
+fi
+
 docker run -d \
   --name "$CONTAINER_NAME" \
   --network openclaw-net \
@@ -94,6 +103,7 @@ docker run -d \
   -e "OPENCLAW_GATEWAY_TOKEN=${GW_TOKEN}" \
   -e "OPENCLAW_DB_URL=postgresql://postgres:openclaw_local@postgres:5432/${DB_NAME}" \
   -v "${OPENCLAW_DIR}:/home/openclaw/.openclaw" \
+  $DOCKER_ARGS \
   openclaw-runtime
 
 echo "  Container ${CONTAINER_NAME} started (port ${GW_PORT} → gateway)"

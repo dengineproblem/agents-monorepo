@@ -1,3 +1,5 @@
+FROM docker:cli AS docker-cli
+
 FROM node:22-slim
 
 # Install system deps: git (npm deps), psql (DB access), curl (Facebook API),
@@ -5,6 +7,9 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git postgresql-client curl ca-certificates socat \
     && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI (for managing host containers from inside)
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Skip node-llama-cpp native build — we use Anthropic API, not local LLMs
 ENV NODE_LLAMA_CPP_SKIP_DOWNLOAD=true
