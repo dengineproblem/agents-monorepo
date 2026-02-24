@@ -37,7 +37,7 @@ services:
       # WABA (WhatsApp Business API)
       WABA_VERIFY_TOKEN: ${WABA_VERIFY_TOKEN:-openclaw_waba_2026}
       WABA_APP_SECRET: ${WABA_APP_SECRET:-}
-      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v21.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,7 +57,7 @@ services:
       PG_USER: postgres
       PG_PASSWORD: ${POSTGRES_PASSWORD:-openclaw_local}
       PG_PORT: 5432
-      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v23.0}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v21.0}
     depends_on:
       postgres:
         condition: service_healthy

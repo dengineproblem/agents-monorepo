@@ -8,7 +8,7 @@ import { join } from 'node:path';
 const app = express();
 const PORT = process.env.PORT || 3001;
 const MAX_SIZE = (process.env.MAX_FILE_SIZE_MB || 500) * 1024 * 1024;
-const FB_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v23.0';
+const FB_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
 const PG_CONFIG = {
   host: process.env.PG_HOST || 'postgres',
@@ -502,6 +502,8 @@ app.post('/:slug/upload', (req, res, next) => {
     }
 
     const adAccountId = normalizeAdAccountId(config.fb_ad_account_id);
+    const tokenPreview = config.fb_access_token ? `${config.fb_access_token.slice(0, 10)}...${config.fb_access_token.slice(-5)}` : 'EMPTY';
+    console.log(`[upload] Config: ad_account=${adAccountId}, page=${config.fb_page_id}, token=${tokenPreview}, ig=${config.fb_instagram_id || 'none'}`);
 
     // 2. Read direction (objective)
     const { rows: dirRows } = await pool.query(
