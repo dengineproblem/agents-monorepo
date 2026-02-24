@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import axios from 'axios';
 import FormData from 'form-data';
 import pg from 'pg';
 import { createReadStream, promises as fs } from 'node:fs';
@@ -8,7 +9,7 @@ import { join } from 'node:path';
 const app = express();
 const PORT = process.env.PORT || 3001;
 const MAX_SIZE = (process.env.MAX_FILE_SIZE_MB || 500) * 1024 * 1024;
-const FB_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
+const FB_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v20.0';
 
 const PG_CONFIG = {
   host: process.env.PG_HOST || 'postgres',
@@ -71,22 +72,21 @@ async function uploadVideoToFB(adAccountId, token, filePath) {
     filename: 'video.mp4',
     contentType: 'video/mp4'
   });
-  form.append('access_token', token);
 
-  const url = `https://graph-video.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos`;
-  const res = await fetch(url, {
-    method: 'POST',
-    body: form,
+  const url = `https://graph-video.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
+  const res = await axios.post(url, form, {
     headers: form.getHeaders(),
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    timeout: 600000,
   });
 
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`FB video upload failed: ${data.error?.message || JSON.stringify(data)}`);
+  if (res.data.error) {
+    throw new Error(`FB video upload failed: ${res.data.error?.message || JSON.stringify(res.data)}`);
   }
 
-  console.log(`[FB] Video uploaded: ${data.id}`);
-  return { id: data.id };
+  console.log(`[FB] Video uploaded: ${res.data.id}`);
+  return { id: res.data.id };
 }
 
 // ============================================
@@ -103,17 +103,15 @@ async function uploadVideoChunked(adAccountId, token, filePath, fileSize) {
   startForm.append('upload_phase', 'start');
   startForm.append('file_size', String(fileSize));
 
-  const startRes = await fetch(url, {
-    method: 'POST',
-    body: startForm,
+  const startRes = await axios.post(url, startForm, {
     headers: startForm.getHeaders(),
+    timeout: 120000,
   });
-  const startData = await startRes.json();
-  if (!startRes.ok || startData.error) {
-    throw new Error(`FB chunked start failed: ${startData.error?.message || JSON.stringify(startData)}`);
+  if (startRes.data.error) {
+    throw new Error(`FB chunked start failed: ${startRes.data.error?.message || JSON.stringify(startRes.data)}`);
   }
 
-  let { upload_session_id, start_offset, end_offset, video_id } = startData;
+  let { upload_session_id, start_offset, end_offset, video_id } = startRes.data;
 
   // Phase 2: TRANSFER (loop)
   let chunkNum = 0;
@@ -135,18 +133,18 @@ async function uploadVideoChunked(adAccountId, token, filePath, fileSize) {
       knownLength: chunkSize
     });
 
-    const transferRes = await fetch(url, {
-      method: 'POST',
-      body: transferForm,
+    const transferRes = await axios.post(url, transferForm, {
       headers: transferForm.getHeaders(),
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+      timeout: 600000,
     });
-    const transferData = await transferRes.json();
-    if (!transferRes.ok || transferData.error) {
-      throw new Error(`FB chunk ${chunkNum} failed: ${transferData.error?.message || JSON.stringify(transferData)}`);
+    if (transferRes.data.error) {
+      throw new Error(`FB chunk ${chunkNum} failed: ${transferRes.data.error?.message || JSON.stringify(transferRes.data)}`);
     }
 
-    start_offset = transferData.start_offset;
-    end_offset = transferData.end_offset;
+    start_offset = transferRes.data.start_offset;
+    end_offset = transferRes.data.end_offset;
 
     const progress = Math.round((start / fileSize) * 100);
     console.log(`[FB] Chunk ${chunkNum}: ${progress}%`);
@@ -158,14 +156,12 @@ async function uploadVideoChunked(adAccountId, token, filePath, fileSize) {
   finishForm.append('upload_phase', 'finish');
   finishForm.append('upload_session_id', upload_session_id);
 
-  const finishRes = await fetch(url, {
-    method: 'POST',
-    body: finishForm,
+  const finishRes = await axios.post(url, finishForm, {
     headers: finishForm.getHeaders(),
+    timeout: 120000,
   });
-  const finishData = await finishRes.json();
 
-  const finalVideoId = finishData.video_id || video_id;
+  const finalVideoId = finishRes.data.video_id || video_id;
   console.log(`[FB] Chunked upload complete: ${finalVideoId}`);
   return { id: finalVideoId };
 }
@@ -178,22 +174,21 @@ async function uploadImageToFB(adAccountId, token, filePath) {
 
   const form = new FormData();
   form.append('filename', createReadStream(filePath));
-  form.append('access_token', token);
 
-  const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adimages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    body: form,
+  const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adimages?access_token=${token}`;
+  const res = await axios.post(url, form, {
     headers: form.getHeaders(),
+    maxBodyLength: Infinity,
+    maxContentLength: Infinity,
+    timeout: 300000,
   });
 
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    throw new Error(`FB image upload failed: ${data.error?.message || JSON.stringify(data)}`);
+  if (res.data.error) {
+    throw new Error(`FB image upload failed: ${res.data.error?.message || JSON.stringify(res.data)}`);
   }
 
   // Response: { images: { filename: { hash, url } } }
-  const imageData = Object.values(data.images || {})[0];
+  const imageData = Object.values(res.data.images || {})[0];
   if (!imageData) {
     throw new Error('FB image upload: no image data in response');
   }
@@ -207,18 +202,18 @@ async function uploadImageToFB(adAccountId, token, filePath) {
 // ============================================
 async function postCreative(adAccountId, token, payload) {
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adcreatives?access_token=${token}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok || data.error) {
-    const err = new Error(`FB creative failed: ${data.error?.message || JSON.stringify(data)}`);
+  try {
+    const res = await axios.post(url, payload, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 60000,
+    });
+    return res.data;
+  } catch (error) {
+    const data = error.response?.data || {};
+    const err = new Error(`FB creative failed: ${data.error?.message || error.message}`);
     err.fbError = data.error;
     throw err;
   }
-  return data;
 }
 
 // ============================================
