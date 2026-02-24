@@ -201,10 +201,18 @@ async function uploadImageToFB(adAccountId, token, filePath) {
 // Facebook API: post to adcreatives endpoint
 // ============================================
 async function postCreative(adAccountId, token, payload) {
-  const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adcreatives?access_token=${token}`;
+  const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adcreatives`;
+  // Facebook API expects x-www-form-urlencoded with JSON.stringify for objects
+  const params = new URLSearchParams();
+  params.set('access_token', token);
+  for (const [k, v] of Object.entries(payload)) {
+    if (v !== undefined && v !== null) {
+      params.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+  }
   try {
-    const res = await axios.post(url, payload, {
-      headers: { 'Content-Type': 'application/json' },
+    const res = await axios.post(url, params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       timeout: 60000,
     });
     return res.data;
