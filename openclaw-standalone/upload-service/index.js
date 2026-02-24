@@ -463,7 +463,12 @@ app.get('/:slug/directions', async (req, res) => {
 // ============================================
 // POST /:slug/upload — Full processing pipeline
 // ============================================
-app.post('/:slug/upload', upload.single('file'), async (req, res) => {
+app.post('/:slug/upload', (req, res, next) => {
+  // Disable socket timeout for large uploads (nginx handles overall timeout)
+  req.socket.setTimeout(0);
+  res.setTimeout(0);
+  next();
+}, upload.single('file'), async (req, res) => {
   const { slug } = req.params;
   const filePath = req.file?.path;
 
@@ -827,4 +832,8 @@ function doUpload() {
 // ============================================
 await fs.mkdir('/tmp/openclaw-uploads', { recursive: true });
 
-app.listen(PORT, () => console.log(`Upload service v2 listening on :${PORT}`));
+const server = app.listen(PORT, () => console.log(`Upload service v2 listening on :${PORT}`));
+server.timeout = 600000;        // 10 min inactivity
+server.requestTimeout = 0;      // disable — nginx handles timeouts
+server.headersTimeout = 0;      // disable
+server.keepAliveTimeout = 600000;
