@@ -64,7 +64,6 @@ import tusUploadRoutes from './routes/tusUpload.js';
 import creativeAnalysisRoutes from './routes/creativeAnalysis.js';
 import { fbProxyRoutes } from './routes/fbProxy.js';
 import { tiktokProxyRoutes } from './routes/tiktokProxy.js';
-import authRoutes from './routes/auth.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
@@ -217,7 +216,6 @@ app.register(telegramWebhook);
 app.register(supportBotWebhook);
 app.register(budgetForecastRoutes);
 app.register(creativeAnalysisRoutes);
-app.register(authRoutes);
 
 // SECURITY: Admin routes с обязательной проверкой is_tech_admin
 app.register(async (adminApp) => {

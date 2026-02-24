@@ -2,7 +2,7 @@ import { toastT } from '@/utils/toastUtils';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { API_BASE_URL } from '@/config/api';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -75,35 +75,47 @@ const Login = () => {
         return;
       }
 
-      // Авторизация через бэкенд API (bcrypt)
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: data.username.trim(), password: data.password }),
+      // Запрашиваем пользователя из Supabase
+      const { data: user, error } = await supabase
+        .from('user_accounts')
+        .select('*')
+        .eq('username', data.username)
+        .eq('password', data.password)
+        .maybeSingle();
+        
+      console.log('Результат запроса к Supabase:', { 
+        userFound: !!user,
+        error: error 
       });
-
-      const result = await response.json();
-
-      console.log('Результат авторизации:', {
-        ok: response.ok,
-        status: response.status,
-        userFound: !!result.id,
-      });
-
-      if (!response.ok) {
-        console.error('Ошибка авторизации:', result.error);
-        toastT.error(response.status === 401 ? 'invalidCredentials' : 'loginError');
+      
+      if (error) {
+        console.error('Ошибка запроса к базе данных:', error);
+        toastT.error('loginError');
         setIsLoading(false);
         return;
       }
-
+      
+      if (!user) {
+        console.error('Неверные учетные данные');
+        toastT.error('invalidCredentials');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Facebook данные теперь опциональны - подключаются в Profile
+      console.log('Аутентификация пользователя успешна!', {
+        username: user.username,
+        hasFacebookData: !!(user.access_token && user.ad_account_id && user.page_id)
+      });
+      
+      // Создаем данные сессии (SECURITY: access_token НЕ сохраняем — на бэкенде)
       const sessionUser = {
-        id: result.id,
-        username: result.username,
-        ad_account_id: result.ad_account_id || '',
-        page_id: result.page_id || '',
-        prompt1: result.prompt1 || null,
-        is_tech_admin: result.is_tech_admin || false
+        id: user.id,
+        username: user.username,
+        ad_account_id: user.ad_account_id || '',
+        page_id: user.page_id || '',
+        prompt1: user.prompt1 || null,
+        is_tech_admin: user.is_tech_admin || false
       };
 
       console.log('Сохраняем данные пользователя в localStorage:', {
