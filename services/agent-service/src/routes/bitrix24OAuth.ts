@@ -955,9 +955,11 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
               <ol>
                 <li>Войдите в ваш Bitrix24 портал</li>
                 <li>Перейдите в <strong>Приложения → Разработчикам → Добавить локальное приложение</strong></li>
-                <li>Выберите тип <strong>"Серверное приложение"</strong></li>
+                <li>Тип: <strong>Серверное</strong> (выбран по умолчанию)</li>
                 <li>В поле "Путь вашего обработчика" укажите:<br><code>${redirectUri}</code></li>
-                <li>Выберите права доступа: <strong>CRM</strong> и <strong>Пользователи</strong></li>
+                <li>В поле "Путь для первоначальной установки" укажите:<br><code>${redirectUri}</code></li>
+                <li>Поставьте галочку <strong>"Использует только API"</strong></li>
+                <li>В разделе "Права доступа" выберите: <strong>CRM</strong> и <strong>Пользователи</strong></li>
                 <li>Сохраните приложение и скопируйте <strong>Client ID</strong> и <strong>Client Secret</strong></li>
               </ol>
             </div>
