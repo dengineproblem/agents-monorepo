@@ -884,14 +884,25 @@ export async function sendCapiEventAtomic(params: CapiEventParams): Promise<Capi
     .eq('id', dialogAnalysisId)
     .eq(flagColumn, false)
     .select('id')
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    log.warn({
+      dialogAnalysisId,
+      eventLevel,
+      error: error.message,
+      code: error.code,
+      reason: 'db_error',
+    }, 'Skipping CAPI event - DB error during atomic claim');
+    return { success: false, error: 'DB error during atomic claim' };
+  }
+
+  if (!data) {
     log.info({
       dialogAnalysisId,
       eventLevel,
-      reason: error ? 'db_error' : 'already_sent',
-    }, 'Skipping CAPI event - already sent or not found');
+      reason: 'already_sent',
+    }, 'Skipping CAPI event - already sent');
 
     return {
       success: false,
