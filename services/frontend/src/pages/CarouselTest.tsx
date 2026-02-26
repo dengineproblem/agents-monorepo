@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { CarouselTab } from '@/components/creatives/CarouselTab';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import { useDirections } from '@/hooks/useDirections';
 import { useAppContext } from '@/context/AppContext';
 
@@ -16,18 +16,18 @@ const CarouselTest = () => {
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUserId(user.id);
+      const storedUser = localStorage.getItem('user');
+      const localUser = storedUser ? JSON.parse(storedUser) : null;
+      if (localUser?.id) {
+        setUserId(localUser.id);
 
-        const { data } = await supabase
-          .from('user_accounts')
-          .select('creative_generations_available')
-          .eq('id', user.id)
-          .single();
-
-        if (data) {
-          setCreativeGenerationsAvailable(data.creative_generations_available || 0);
+        try {
+          const data = await userProfileApi.fetchProfile(localUser.id);
+          if (data) {
+            setCreativeGenerationsAvailable(data.creative_generations_available || 0);
+          }
+        } catch (err) {
+          console.error('Ошибка загрузки профиля:', err);
         }
       }
     };

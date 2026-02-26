@@ -3,7 +3,8 @@ import { Campaign, CampaignStat, DateRange, facebookApi } from '../services/face
 import { tiktokApi } from '@/services/tiktokApi';
 import { format, subDays } from 'date-fns';
 import { toast } from 'sonner';
-import { supabase } from '../integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
+import { API_BASE_URL } from '@/config/api';
 import { adAccountsApi } from '@/services/adAccountsApi';
 import type { AdAccount, AdAccountSummary } from '@/types/adAccount';
 
@@ -211,17 +212,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         const userData = JSON.parse(storedUser);
         if (!userData.id) return;
         
-        const { data, error } = await supabase
-          .from('user_accounts')
-          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_account_id, tiktok_business_id, prompt1, ad_account_id, page_id, instagram_id')
-          .eq('id', userData.id)
-          .single();
-          
-        if (error) {
-          console.error('Ошибка при загрузке состояния AI автопилота:', error);
+        const profileResponse = await userProfileApi.fetchProfile(userData.id);
+        const data = profileResponse;
+
+        if (!data) {
+          console.error('Ошибка при загрузке состояния AI автопилота: пустой ответ');
           return;
         }
-        
+
         if (data) {
           if (data.autopilot !== undefined) {
             setAiAutopilot(!!data.autopilot);
@@ -310,22 +308,32 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       try {
         if (multiAccountEnabled && currentAdAccountId) {
-          // Мультиаккаунтный режим — берём из ad_accounts
-          const { data, error } = await (supabase as any)
-            .from('ad_accounts')
-            .select('autopilot, autopilot_tiktok')
-            .eq('id', currentAdAccountId)
-            .single();
+          // Мультиаккаунтный режим — берём из ad_accounts через API
+          const storedUser = localStorage.getItem('user');
+          const userDataForMulti = storedUser ? JSON.parse(storedUser) : null;
+          const userIdForMulti = userDataForMulti?.id;
 
-          if (error) {
+          if (!userIdForMulti) {
+            setAiAutopilot(false);
+            setAiAutopilotTiktok(false);
+            return;
+          }
+
+          const adAccountResponse = await fetch(`${API_BASE_URL}/ad-accounts/${userIdForMulti}/${currentAdAccountId}`, {
+            headers: { 'x-user-id': userIdForMulti },
+          });
+
+          if (!adAccountResponse.ok) {
             console.error('[AppContext] Ошибка загрузки autopilot из ad_accounts:', {
               accountId: currentAdAccountId,
-              error: error.message
+              status: adAccountResponse.status,
             });
             setAiAutopilot(false);
             setAiAutopilotTiktok(false);
             return;
           }
+
+          const data = await adAccountResponse.json();
 
           const autopilotStatus = data?.autopilot ?? false;
           const autopilotTiktokStatus = data?.autopilot_tiktok ?? false;
@@ -338,28 +346,23 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             source: 'ad_accounts'
           });
         } else if (!multiAccountEnabled) {
-          // Legacy режим — берём из user_accounts
+          // Legacy режим — берём из user_accounts через API
           const storedUser = localStorage.getItem('user');
           if (storedUser) {
             const userData = JSON.parse(storedUser);
-            const { data, error } = await supabase
-              .from('user_accounts')
-              .select('autopilot, autopilot_tiktok')
-              .eq('id', userData.id)
-              .single();
+            const profileData = await userProfileApi.fetchProfile(userData.id);
 
-            if (error) {
+            if (!profileData) {
               console.error('[AppContext] Ошибка загрузки autopilot из user_accounts:', {
                 userId: userData.id,
-                error: error.message
               });
               setAiAutopilot(false);
               setAiAutopilotTiktok(false);
               return;
             }
 
-            const autopilotStatus = data?.autopilot ?? false;
-            const autopilotTiktokStatus = (data as any)?.autopilot_tiktok ?? false;
+            const autopilotStatus = profileData?.autopilot ?? false;
+            const autopilotTiktokStatus = profileData?.autopilot_tiktok ?? false;
             setAiAutopilot(autopilotStatus);
             setAiAutopilotTiktok(autopilotTiktokStatus);
             console.log('[AppContext] Загружен статус autopilot (legacy):', {
@@ -396,28 +399,22 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return;
       }
 
-      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot
+      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot через API
       if (multiAccountEnabled && currentAdAccountId) {
-        const { error } = await (supabase as any)
-          .from('ad_accounts')
-          .update({ autopilot: enabled })
-          .eq('id', currentAdAccountId);
+        const result = await adAccountsApi.update(currentAdAccountId, { autopilot: enabled } as any, userData.id);
 
-        if (error) {
-          console.error('Ошибка при обновлении autopilot в ad_accounts:', error);
+        if (!result.success) {
+          console.error('Ошибка при обновлении autopilot в ad_accounts:', result.error);
           toast.error('Не удалось обновить состояние AI автопилота');
           return;
         }
         console.log('Обновлено состояние AI автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
       } else {
-        // Legacy режим - обновляем user_accounts.autopilot
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({ autopilot: enabled })
-          .eq('id', userData.id);
-
-        if (error) {
-          console.error('Ошибка при обновлении состояния AI автопилота:', error);
+        // Legacy режим - обновляем user_accounts.autopilot через API
+        try {
+          await userProfileApi.updateProfile(userData.id, { autopilot: enabled });
+        } catch (updateError: any) {
+          console.error('Ошибка при обновлении состояния AI автопилота:', updateError);
           toast.error('Не удалось обновить состояние AI автопилота');
           return;
         }
@@ -450,28 +447,22 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return;
       }
 
-      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot_tiktok
+      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot_tiktok через API
       if (multiAccountEnabled && currentAdAccountId) {
-        const { error } = await (supabase as any)
-          .from('ad_accounts')
-          .update({ autopilot_tiktok: enabled })
-          .eq('id', currentAdAccountId);
+        const result = await adAccountsApi.update(currentAdAccountId, { autopilot_tiktok: enabled } as any, userData.id);
 
-        if (error) {
-          console.error('Ошибка при обновлении autopilot_tiktok в ad_accounts:', error);
+        if (!result.success) {
+          console.error('Ошибка при обновлении autopilot_tiktok в ad_accounts:', result.error);
           toast.error('Не удалось обновить состояние TikTok автопилота');
           return;
         }
         console.log('Обновлено состояние TikTok автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
       } else {
-        // Legacy режим - обновляем user_accounts.autopilot_tiktok
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({ autopilot_tiktok: enabled } as any)
-          .eq('id', userData.id);
-
-        if (error) {
-          console.error('Ошибка при обновлении состояния TikTok автопилота:', error);
+        // Legacy режим - обновляем user_accounts.autopilot_tiktok через API
+        try {
+          await userProfileApi.updateProfile(userData.id, { autopilot_tiktok: enabled });
+        } catch (updateError: any) {
+          console.error('Ошибка при обновлении состояния TikTok автопилота:', updateError);
           toast.error('Не удалось обновить состояние TikTok автопилота');
           return;
         }
@@ -846,20 +837,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return false;
       }
       
-      // Используем прямой SQL запрос для получения business_id
-      const { data, error } = await supabase
-        .from('user_accounts')
-        .select('*')
-        .eq('id', userData.id)
-        .single();
-        
-      if (error) {
-        console.error('Ошибка при проверке business_id:', error);
+      // Используем backend API для получения business_id
+      const data = await userProfileApi.fetchProfile(userData.id);
+
+      if (!data) {
+        console.error('Ошибка при проверке business_id: пустой ответ');
         return false;
       }
-      
-      const businessIdValue = (data as any)?.business_id || null;
-      const tiktokBizId = (data as any)?.tiktok_business_id || null;
+
+      const businessIdValue = data?.business_id || null;
+      const tiktokBizId = data?.tiktok_business_id || null;
       const hasBusinessId = !!(businessIdValue);
       setBusinessId(businessIdValue);
       setTiktokConnected(!!tiktokBizId);
@@ -876,13 +863,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       if (!storedUser) return false;
       const userData = JSON.parse(storedUser);
       if (!userData.id) return false;
-      const { data, error } = await supabase
-        .from('user_accounts')
-        .select('tiktok_business_id')
-        .eq('id', userData.id)
-        .single();
-      if (error) return false;
-      const isConnected = !!(data as any)?.tiktok_business_id;
+      const data = await userProfileApi.fetchProfile(userData.id);
+      if (!data) return false;
+      const isConnected = !!data?.tiktok_business_id;
       setTiktokConnected(isConnected);
       return isConnected;
     } catch {
@@ -1080,13 +1063,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return;
       }
       
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ optimization: optimizationType })
-        .eq('id', userData.id);
-        
-      if (error) {
-        console.error('Ошибка при обновлении параметров оптимизации:', error);
+      try {
+        await userProfileApi.updateProfile(userData.id, { optimization: optimizationType });
+      } catch (updateError: any) {
+        console.error('Ошибка при обновлении параметров оптимизации:', updateError);
         toast.error('Не удалось обновить параметры оптимизации');
         return;
       }

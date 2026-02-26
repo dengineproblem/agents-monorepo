@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Instagram, AlertCircle, Calendar } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { FEATURES } from '../config/appReview';
@@ -121,16 +121,7 @@ const Dashboard: React.FC = () => {
             setUserName(user.username);
           }
 
-          const { data, error } = await supabase
-            .from('user_accounts')
-            .select('tarif, username, page_name')
-            .eq('id', user.id)
-            .single();
-
-          if (error) {
-            console.error('Ошибка загрузки тарифа:', error);
-            return;
-          }
+          const data = await userProfileApi.fetchProfile(user.id);
 
           setUserTarif(data?.tarif || null);
           if (data?.page_name) {

@@ -21,7 +21,7 @@ import { facebookApi } from '../services/facebookApi';
 import { addDays, format } from 'date-fns';
 import { useTranslation } from '../i18n/LanguageContext';
 import { FEATURES } from '../config/appReview';
-import { supabase } from '../integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import { appReviewText } from '@/utils/appReviewText';
 import { AdAccountSwitcher } from './ad-accounts/AdAccountSwitcher';
 import NotificationBell from './NotificationBell';
@@ -166,18 +166,15 @@ const Header: React.FC<HeaderProps> = ({
         return;
       }
 
-      // Запрашиваем актуальные данные из user_accounts (без токенов)
-      const { data: userAccount, error: dbError } = await supabase
-        .from('user_accounts')
-        .select('ad_account_id, page_id, instagram_id')
-        .eq('id', userData.id)
-        .single();
-
-      if (dbError || !userAccount) {
+      // Запрашиваем актуальные данные через backend API (без токенов)
+      let userAccount: any;
+      try {
+        userAccount = await userProfileApi.fetchProfile(userData.id);
+      } catch (profileError: any) {
         setValidationResult({
           success: false,
           error: appReviewText('Failed to load data', 'Ошибка загрузки данных'),
-          details: dbError?.message || appReviewText('Unable to load account data', 'Не удалось загрузить данные учетной записи')
+          details: profileError?.message || appReviewText('Unable to load account data', 'Не удалось загрузить данные учетной записи')
         });
         setIsValidating(false);
         return;

@@ -13,7 +13,7 @@ import { MessageCircle, Instagram, Globe, ChevronDown, Save, Loader2 } from 'luc
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 
 // Список городов и стран (как в VideoUpload)
 const CITIES = [
@@ -114,14 +114,10 @@ const AdSettings: React.FC = () => {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('default_ad_settings')
-        .select('*')
-        .eq('user_id', user.id);
+      // API без campaignGoal возвращает массив всех настроек
+      const data = await userProfileApi.fetchDefaultSettings(user.id);
 
-      if (error) throw error;
-
-      if (data && data.length > 0) {
+      if (data && Array.isArray(data) && data.length > 0) {
         const loadedSettings: Record<string, DefaultSettings> = { ...settings };
         
         data.forEach((row: any) => {
@@ -160,7 +156,6 @@ const AdSettings: React.FC = () => {
       const currentSettings = settings[activeTab];
       
       const dataToSave = {
-        user_id: user.id,
         campaign_goal: activeTab,
         cities: currentSettings.cities,
         age_min: currentSettings.ageMin,
@@ -174,13 +169,7 @@ const AdSettings: React.FC = () => {
         utm_tag: currentSettings.utmTag,
       };
 
-      const { error } = await supabase
-        .from('default_ad_settings')
-        .upsert(dataToSave, {
-          onConflict: 'user_id,campaign_goal'
-        });
-
-      if (error) throw error;
+      await userProfileApi.saveDefaultSettings(user.id, dataToSave);
 
       toastT.success('settingsSaved');
     } catch (error) {

@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Copy, CheckCircle2, ExternalLink, Globe, AlertCircle, Settings, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppContext } from '@/context/AppContext';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
+import { API_BASE_URL } from '@/config/api';
 
 // Production webhook URL (always use production for external integrations)
 const WEBHOOK_BASE_URL = 'https://app.performanteaiagency.com';
@@ -48,25 +49,20 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
       setLoading(true);
       try {
         if (multiAccountEnabled && currentAdAccountId) {
-          // Multi-account mode: load from ad_accounts
-          const { data, error } = await supabase
-            .from('ad_accounts')
-            .select('tilda_utm_field')
-            .eq('id', currentAdAccountId)
-            .single();
-
-          if (!error && data?.tilda_utm_field) {
-            setSelectedUtmField(data.tilda_utm_field as TildaUtmField);
+          // Multi-account mode: load from ad_accounts via backend API
+          const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${currentAdAccountId}`, {
+            headers: { 'x-user-id': userAccountId || '' },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (data?.tilda_utm_field) {
+              setSelectedUtmField(data.tilda_utm_field as TildaUtmField);
+            }
           }
         } else {
-          // Legacy mode: load from user_accounts
-          const { data, error } = await supabase
-            .from('user_accounts')
-            .select('tilda_utm_field')
-            .eq('id', userAccountId)
-            .single();
-
-          if (!error && data?.tilda_utm_field) {
+          // Legacy mode: load from user profile via backend API
+          const data = await userProfileApi.fetchProfile(userAccountId!);
+          if (data?.tilda_utm_field) {
             setSelectedUtmField(data.tilda_utm_field as TildaUtmField);
           }
         }
@@ -87,21 +83,19 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
     setSaving(true);
     try {
       if (multiAccountEnabled && currentAdAccountId) {
-        // Multi-account mode: save to ad_accounts
-        const { error } = await supabase
-          .from('ad_accounts')
-          .update({ tilda_utm_field: field })
-          .eq('id', currentAdAccountId);
-
-        if (error) throw error;
+        // Multi-account mode: save to ad_accounts via backend API
+        const response = await fetch(`${API_BASE_URL}/ad-accounts/${currentAdAccountId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-id': userAccountId || '',
+          },
+          body: JSON.stringify({ tilda_utm_field: field }),
+        });
+        if (!response.ok) throw new Error('Failed to save tilda_utm_field');
       } else {
-        // Legacy mode: save to user_accounts
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({ tilda_utm_field: field })
-          .eq('id', userAccountId);
-
-        if (error) throw error;
+        // Legacy mode: save to user profile via backend API
+        await userProfileApi.updateProfile(userAccountId!, { tilda_utm_field: field });
       }
 
       setSelectedUtmField(field);

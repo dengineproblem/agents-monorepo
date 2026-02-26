@@ -2,7 +2,7 @@ import { toastT } from '@/utils/toastUtils';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -75,40 +75,31 @@ const Login = () => {
         return;
       }
 
-      // Запрашиваем пользователя из Supabase
-      const { data: user, error } = await supabase
-        .from('user_accounts')
-        .select('*')
-        .eq('username', data.username)
-        .eq('password', data.password)
-        .maybeSingle();
-        
-      console.log('Результат запроса к Supabase:', { 
-        userFound: !!user,
-        error: error 
+      // Авторизация через backend API (bcrypt)
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: data.username, password: data.password }),
       });
-      
-      if (error) {
-        console.error('Ошибка запроса к базе данных:', error);
-        toastT.error('loginError');
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        console.error('Ошибка авторизации:', errData);
+        if (response.status === 401) {
+          toastT.error('invalidCredentials');
+        } else {
+          toastT.error('loginError');
+        }
         setIsLoading(false);
         return;
       }
-      
-      if (!user) {
-        console.error('Неверные учетные данные');
-        toastT.error('invalidCredentials');
-        setIsLoading(false);
-        return;
-      }
-      
-      // Facebook данные теперь опциональны - подключаются в Profile
+
+      const user = await response.json();
+
       console.log('Аутентификация пользователя успешна!', {
         username: user.username,
-        hasFacebookData: !!(user.access_token && user.ad_account_id && user.page_id)
       });
-      
-      // Создаем данные сессии (SECURITY: access_token НЕ сохраняем — на бэкенде)
+
       const sessionUser = {
         id: user.id,
         username: user.username,

@@ -15,7 +15,7 @@ import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import { useDirections } from '@/hooks/useDirections';
 import { creativesApi } from '@/services/creativesApi';
 import { CarouselTab } from '@/components/creatives/CarouselTab';
@@ -239,51 +239,45 @@ const CreativeGeneration = () => {
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         
         if (localUserData.id) {
-          console.log('Запрашиваем данные пользователя из Supabase:', localUserData.id);
-          const { data, error } = await supabase
-            .from('user_accounts')
-            .select('*')
-            .eq('id', localUserData.id)
-            .single();
-            
-          if (error) {
-            console.error('❌ Ошибка загрузки данных пользователя из Supabase:', error);
-            console.error('Детали ошибки:', JSON.stringify(error, null, 2));
-            setUserData(localUserData); // fallback
-            
-            // Устанавливаем данные из localStorage как fallback
-            if (localUserData.id) {
-              setUserId(localUserData.id);
-              console.log('⚠️ Используем user ID из localStorage:', localUserData.id);
-            }
-            if (localUserData.prompt4) {
-              setUserPrompt(localUserData.prompt4);
-              console.log('⚠️ Используем prompt из localStorage');
-            }
-          } else if (data) {
-            console.log('✅ Получены данные пользователя из Supabase');
+          console.log('Запрашиваем данные пользователя из backend API:', localUserData.id);
+          try {
+            const data = await userProfileApi.fetchProfile(localUserData.id);
+            console.log('Получены данные пользователя из backend API');
             console.log('User ID:', data.id);
             console.log('Prompt4:', data.prompt4 ? `Загружен (${data.prompt4.length} символов)` : 'НЕ НАСТРОЕН');
             console.log('Доступных генераций:', data.creative_generations_available);
-            
+
             const combinedData = { ...localUserData, ...data };
             localStorage.setItem('user', JSON.stringify(combinedData));
             setUserData(combinedData);
-            
+
             if (data.prompt4) {
               setUserPrompt(data.prompt4);
-              console.log('✅ Загружен prompt');
+              console.log('Загружен prompt');
             } else {
-              console.warn('⚠️ prompt4 не найден в данных пользователя');
+              console.warn('prompt4 не найден в данных пользователя');
             }
             setUserId(data.id);
-            console.log('✅ Установлен user ID:', data.id);
-            
+            console.log('Установлен user ID:', data.id);
+
             // Загружаем количество доступных генераций (legacy)
             setCreativeGenerationsAvailable(data.creative_generations_available || 0);
 
             // Загружаем месячную статистику генераций
             loadGenerationsStats(data.id);
+          } catch (profileError) {
+            console.error('Ошибка загрузки данных пользователя из backend API:', profileError);
+            setUserData(localUserData); // fallback
+
+            // Устанавливаем данные из localStorage как fallback
+            if (localUserData.id) {
+              setUserId(localUserData.id);
+              console.log('Используем user ID из localStorage:', localUserData.id);
+            }
+            if (localUserData.prompt4) {
+              setUserPrompt(localUserData.prompt4);
+              console.log('Используем prompt из localStorage');
+            }
           }
         } else {
           console.warn('⚠️ User ID не найден в localStorage');
@@ -346,22 +340,22 @@ const CreativeGeneration = () => {
 
       try {
         console.log('[CreativeGeneration] Загрузка prompt4 для ad_account:', currentAdAccountId);
-        const { data: adAccount, error } = await supabase
-          .from('ad_accounts')
-          .select('prompt4')
-          .eq('id', currentAdAccountId)
-          .single();
+        const response = await fetch(`${API_BASE_URL}/ad-accounts/${userId}/${currentAdAccountId}`, {
+          headers: { 'x-user-id': userId || '' },
+        });
 
-        if (error) {
-          console.error('[CreativeGeneration] Ошибка загрузки prompt4 из ad_accounts:', error);
+        if (!response.ok) {
+          console.error('[CreativeGeneration] Ошибка загрузки prompt4 из ad_accounts:', response.status);
           return;
         }
 
+        const adAccount = await response.json();
+
         if (adAccount?.prompt4) {
-          console.log('[CreativeGeneration] ✅ Загружен prompt4 из ad_accounts:', adAccount.prompt4.length, 'символов');
+          console.log('[CreativeGeneration] Загружен prompt4 из ad_accounts:', adAccount.prompt4.length, 'символов');
           setUserPrompt(adAccount.prompt4);
         } else {
-          console.warn('[CreativeGeneration] ⚠️ prompt4 не найден в ad_accounts');
+          console.warn('[CreativeGeneration] prompt4 не найден в ad_accounts');
           // Не сбрасываем userPrompt - оставляем из user_accounts как fallback
         }
       } catch (err) {

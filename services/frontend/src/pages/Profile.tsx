@@ -46,6 +46,7 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
+import { userProfileApi } from '@/services/userProfileApi';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
 import { useAppContext } from '@/context/AppContext';
@@ -316,52 +317,29 @@ const Profile: React.FC = () => {
       if (!user?.id) return;
 
       try {
-        // Загружаем актуальные данные из Supabase
-        const { data, error } = await (supabase
-          .from('user_accounts')
-          .select('tarif, tarif_expires, tarif_renewal_cost, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, page_id, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, gemini_api_key, anthropic_api_key, ig_seed_audience_id, tilda_utm_field')
-          .eq('id', user.id)
-          .single() as any);
+        // Загружаем актуальные данные через API
+        const data = await userProfileApi.fetchProfile(user.id);
 
-        if (error) {
-          console.error('Ошибка загрузки данных пользователя:', error);
-          // Используем данные из localStorage как fallback
-          setTarif((user.tarif as Tarif) ?? null);
-          setTarifExpires(user.tarif_expires ?? null);
-          setTarifRenewalCost((user as any).tarif_renewal_cost ?? null);
-          setTelegramIds([
-            user.telegram_id || null,
-            (user as any).telegram_id_2 || null,
-            (user as any).telegram_id_3 || null,
-            (user as any).telegram_id_4 || null
-          ]);
-          setMaxBudgetCents((user as any).plan_daily_budget_cents ?? null);
-          setPlannedCplCents((user as any).default_cpl_target_cents ?? null);
-          return;
-        }
+        setTarif((data.tarif as Tarif) ?? null);
+        setTarifExpires(data.tarif_expires ?? null);
+        setTarifRenewalCost(data.tarif_renewal_cost ?? null);
+        setTelegramIds([
+          data.telegram_id || null,
+          data.telegram_id_2 || null,
+          data.telegram_id_3 || null,
+          data.telegram_id_4 || null
+        ]);
+        setMaxBudgetCents(data.plan_daily_budget_cents ?? null);
+        setPlannedCplCents(data.default_cpl_target_cents ?? null);
+        setOpenaiApiKey(data.openai_api_key || '');
+        setGeminiApiKey(data.gemini_api_key || '');
+        setAnthropicApiKey(data.anthropic_api_key || '');
+        setAudienceId(data.ig_seed_audience_id || '');
+        setTildaConnected(Boolean(data.tilda_utm_field));
 
-        if (data) {
-          setTarif((data.tarif as Tarif) ?? null);
-          setTarifExpires(data.tarif_expires ?? null);
-          setTarifRenewalCost(data.tarif_renewal_cost ?? null);
-          setTelegramIds([
-            data.telegram_id || null,
-            data.telegram_id_2 || null,
-            data.telegram_id_3 || null,
-            data.telegram_id_4 || null
-          ]);
-          setMaxBudgetCents(data.plan_daily_budget_cents ?? null);
-          setPlannedCplCents(data.default_cpl_target_cents ?? null);
-          setOpenaiApiKey(data.openai_api_key || '');
-          setGeminiApiKey(data.gemini_api_key || '');
-          setAnthropicApiKey(data.anthropic_api_key || '');
-          setAudienceId(data.ig_seed_audience_id || '');
-          setTildaConnected(Boolean(data.tilda_utm_field));
-
-          // Обновляем localStorage актуальными данными
-          const updatedUser = { ...user, ...data };
-          localStorage.setItem('user', JSON.stringify(updatedUser));
-        }
+        // Обновляем localStorage актуальными данными
+        const updatedUser = { ...user, ...data };
+        localStorage.setItem('user', JSON.stringify(updatedUser));
       } catch (error) {
         console.error('Ошибка при загрузке данных:', error);
         // Используем данные из localStorage как fallback
@@ -574,15 +552,7 @@ const Profile: React.FC = () => {
       setIsSavingTelegramId(true);
 
       try {
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({ [fieldName]: null } as any)
-          .eq('id', user?.id);
-
-        if (error) {
-          toast.error(appReviewText(`Failed to remove Telegram ID: ${error.message}`, 'Ошибка при удалении Telegram ID: ' + error.message));
-          return;
-        }
+        await userProfileApi.updateProfile(user?.id, { [fieldName]: null });
 
         const updatedIds = [...telegramIds];
         updatedIds[editingTelegramIndex] = null;
@@ -590,7 +560,7 @@ const Profile: React.FC = () => {
 
         const updatedUser = { ...user, [fieldName]: null };
         localStorage.setItem('user', JSON.stringify(updatedUser));
-        
+
         toast.success(appReviewText('Telegram ID removed successfully', 'Telegram ID успешно удален'));
         setTelegramIdModal(false);
       } catch (error) {
@@ -615,15 +585,7 @@ const Profile: React.FC = () => {
     setIsSavingTelegramId(true);
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ [fieldName]: newTelegramId } as any)
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to save Telegram ID: ${error.message}`, 'Ошибка при сохранении Telegram ID: ' + error.message));
-        return;
-      }
+      await userProfileApi.updateProfile(user?.id, { [fieldName]: newTelegramId });
 
       const updatedIds = [...telegramIds];
       updatedIds[editingTelegramIndex] = newTelegramId;
@@ -631,7 +593,7 @@ const Profile: React.FC = () => {
 
       const updatedUser = { ...user, [fieldName]: newTelegramId };
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       toast.success(appReviewText('Telegram ID updated successfully', 'Telegram ID успешно обновлен'));
       setTelegramIdModal(false);
     } catch (error) {
@@ -651,15 +613,7 @@ const Profile: React.FC = () => {
     setIsSavingUsername(true);
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ username: newUsername.trim() })
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to save username: ${error.message}`, 'Ошибка при сохранении имени: ' + error.message));
-        return;
-      }
+      await userProfileApi.updateProfile(user?.id, { username: newUsername.trim() });
 
       const updatedUser = { ...user, username: newUsername.trim() };
       localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -681,20 +635,7 @@ const Profile: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ 
-          access_token: '',  // Пустая строка вместо null (поле NOT NULL)
-          page_id: '',
-          ad_account_id: '',
-          instagram_id: ''
-        })
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to disconnect Instagram: ${error.message}`, 'Ошибка при отключении Instagram: ' + error.message));
-        return;
-      }
+      await userProfileApi.disconnectFacebook(user?.id);
 
       // Обновляем localStorage (очищаем Facebook данные)
       const updatedUser = {
@@ -704,7 +645,7 @@ const Profile: React.FC = () => {
         instagram_id: ''
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       toast.success(appReviewText('Instagram disconnected successfully', 'Instagram успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
@@ -806,20 +747,8 @@ const Profile: React.FC = () => {
           return;
         }
       } else {
-        // Legacy режим: обновляем user_accounts напрямую
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({
-            tiktok_access_token: null,
-            tiktok_business_id: null,
-            tiktok_account_id: null
-          })
-          .eq('id', user?.id);
-
-        if (error) {
-          toast.error(appReviewText(`Failed to disconnect TikTok: ${error.message}`, 'Ошибка при отключении TikTok: ' + error.message));
-          return;
-        }
+        // Legacy режим: отключаем TikTok через API
+        await userProfileApi.disconnectTiktok(user?.id);
 
         // Обновляем localStorage только в legacy режиме
         const updatedUser = {
@@ -869,20 +798,12 @@ const Profile: React.FC = () => {
     setIsSavingMaxBudget(true);
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ plan_daily_budget_cents: maxBudgetCentsValue } as any)
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
-        return;
-      }
+      await userProfileApi.updateProfile(user?.id, { plan_daily_budget_cents: maxBudgetCentsValue });
 
       // Обновляем localStorage
       const updatedUser = { ...user, plan_daily_budget_cents: maxBudgetCentsValue };
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       setMaxBudgetCents(maxBudgetCentsValue);
       toast.success(appReviewText('Maximum budget saved successfully', 'Максимальный бюджет успешно сохранен'));
       setMaxBudgetModal(false);
@@ -908,20 +829,12 @@ const Profile: React.FC = () => {
     setIsSavingPlannedCpl(true);
 
     try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ default_cpl_target_cents: plannedCplCentsValue } as any)
-        .eq('id', user?.id);
-
-      if (error) {
-        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
-        return;
-      }
+      await userProfileApi.updateProfile(user?.id, { default_cpl_target_cents: plannedCplCentsValue });
 
       // Обновляем localStorage
       const updatedUser = { ...user, default_cpl_target_cents: plannedCplCentsValue };
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       setPlannedCplCents(plannedCplCentsValue);
       toast.success(appReviewText('Planned cost per lead saved successfully', 'Плановая стоимость заявки успешно сохранена'));
       setPlannedCplModal(false);
@@ -946,17 +859,8 @@ const Profile: React.FC = () => {
         return;
       }
       
-      const { error } = await (supabase
-        .from('user_accounts')
-        .update({ openai_api_key: keyToSave || null } as any)
-        .eq('id', user.id));
-      
-      if (error) {
-        console.error('Ошибка при сохранении:', error);
-        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
-        return;
-      }
-      
+      await userProfileApi.updateProfile(user.id, { openai_api_key: keyToSave || null });
+
       // Обновляем localStorage
       const updatedUser = { ...user, openai_api_key: keyToSave || null };
       localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -980,15 +884,7 @@ const Profile: React.FC = () => {
     try {
       const keyToSave = newApiKeyValue.trim();
 
-      const { error } = await (supabase
-        .from('user_accounts')
-        .update({ [editingApiKeyField]: keyToSave || null } as any)
-        .eq('id', user.id));
-
-      if (error) {
-        toast.error('Ошибка при сохранении: ' + error.message);
-        return;
-      }
+      await userProfileApi.updateProfile(user.id, { [editingApiKeyField]: keyToSave || null });
 
       const updatedUser = { ...user, [editingApiKeyField]: keyToSave || null };
       localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -1016,17 +912,8 @@ const Profile: React.FC = () => {
     try {
       const idToSave = newAudienceId.trim();
       
-      const { error } = await (supabase
-        .from('user_accounts')
-        .update({ ig_seed_audience_id: idToSave || null } as any)
-        .eq('id', user.id));
-      
-      if (error) {
-        console.error('Ошибка при сохранении:', error);
-        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
-        return;
-      }
-      
+      await userProfileApi.updateProfile(user.id, { ig_seed_audience_id: idToSave || null });
+
       // Обновляем localStorage
       const updatedUser = { ...user, ig_seed_audience_id: idToSave || null };
       localStorage.setItem('user', JSON.stringify(updatedUser));

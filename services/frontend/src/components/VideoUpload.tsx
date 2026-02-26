@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Upload, Video, ChevronDown, DollarSign, Rocket, Loader2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import { salesApi } from '@/services/salesApi';
 import { facebookApi } from '@/services/facebookApi';
 import { type MultiAdSetLaunchResponse } from '@/services/manualLaunchApi';
@@ -262,24 +263,17 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         const storedUser = localStorage.getItem('user');
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         if (localUserData.id) {
-          // ВСЕГДА делаем запрос к Supabase по id
-          console.log('Запрашиваем данные пользователя из Supabase:', localUserData.id);
-          const { data, error } = await supabase
-            .from('user_accounts')
-            .select('*')
-            .eq('id', localUserData.id)
-            .single();
-          if (error) {
-            console.error('Ошибка загрузки данных пользователя из Supabase:', error);
-            setUserData(localUserData); // fallback
-          } else if (data) {
-            console.log('Получены данные пользователя из Supabase');
+          // ВСЕГДА делаем запрос к backend API по id
+          console.log('Запрашиваем данные пользователя из backend API:', localUserData.id);
+          try {
+            const data = await userProfileApi.fetchProfile(localUserData.id);
+            console.log('Получены данные пользователя из backend API');
             const combinedData = { ...localUserData, ...data };
-            // SECURITY: НЕ сохраняем токены обратно в localStorage
-            const { access_token, tiktok_access_token, openai_api_key, gemini_api_key, anthropic_api_key, ...safeData } = combinedData;
-            localStorage.setItem('user', JSON.stringify(safeData));
-            // Но в state оставляем полные данные (для webhook вызовов)
+            localStorage.setItem('user', JSON.stringify(combinedData));
             setUserData(combinedData);
+          } catch (profileError) {
+            console.error('Ошибка загрузки данных пользователя из backend API:', profileError);
+            setUserData(localUserData); // fallback
           }
         } else {
           setUserData(localUserData);
@@ -321,17 +315,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       if (!userData?.id) return;
       
       try {
-        const { data, error } = await supabase
-          .from('default_ad_settings')
-          .select('*')
-          .eq('user_id', userData.id)
-          .eq('campaign_goal', campaignGoal)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Ошибка загрузки дефолтных настроек:', error);
-          return;
-        }
+        const data = await userProfileApi.fetchDefaultSettings(userData.id, campaignGoal);
 
         if (data) {
           console.log('Загружены дефолтные настройки:', data);
@@ -461,14 +445,10 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         const storedUser = localStorage.getItem('user');
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         if (!localUserData.id) return;
-        const { error } = await supabase
-          .from('user_accounts')
-          .update({ current_campaign_goal: goal, current_campaign_goal_changed_at: new Date().toISOString() })
-          .eq('id', localUserData.id);
-        if (error) {
-          console.error('Не удалось обновить current_campaign_goal:', error);
-          return;
-        }
+        await userProfileApi.updateProfile(localUserData.id, {
+          current_campaign_goal: goal,
+          current_campaign_goal_changed_at: new Date().toISOString(),
+        });
         const updated = { ...localUserData, current_campaign_goal: goal, current_campaign_goal_changed_at: new Date().toISOString() };
         localStorage.setItem('user', JSON.stringify(updated));
       } catch (e) {

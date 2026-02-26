@@ -16,7 +16,7 @@ import {
   DirectionWithPlans 
 } from '@/services/plansApi';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 
 // Используем типы из plansApi вместо локального интерфейса
 
@@ -70,14 +70,14 @@ const MonthlyPlanFact: React.FC = () => {
         }
         const user = JSON.parse(storedUser);
         
-        // Загружаем тариф пользователя
-        const { data: userData } = await supabase
-          .from('user_accounts')
-          .select('tarif')
-          .eq('id', user.id)
-          .single();
-        
-        const userTarif = userData?.tarif || null;
+        // Загружаем тариф пользователя через backend API
+        let userTarif: string | null = null;
+        try {
+          const userData = await userProfileApi.fetchProfile(user.id);
+          userTarif = userData?.tarif || null;
+        } catch (err) {
+          console.error('Ошибка загрузки тарифа:', err);
+        }
         const includeLeadForms = userTarif === 'target';
         
         // Загружаем сначала кампании, потом статистику (передаём campaigns чтобы не дублировать запрос)

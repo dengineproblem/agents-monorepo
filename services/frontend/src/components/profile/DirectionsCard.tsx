@@ -11,7 +11,7 @@ import { CreateDirectionDialog, type CreateDirectionFormData } from './CreateDir
 import { EditDirectionDialog, type EditDirectionCapiSettings } from './EditDirectionDialog';
 import { DeleteDirectionAlert } from './DeleteDirectionAlert';
 import { DirectionAdSets } from '../DirectionAdSets';
-import { supabase } from '@/integrations/supabase/client';
+import { userProfileApi } from '@/services/userProfileApi';
 import type { Direction, CreateDefaultSettingsInput } from '@/types/direction';
 import { getDirectionObjectiveLabel } from '@/types/direction';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
@@ -50,18 +50,17 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
   useEffect(() => {
     const loadAdsetMode = async () => {
       if (!userAccountId) return;
-      
-      const { data, error } = await supabase
-        .from('user_accounts')
-        .select('default_adset_mode')
-        .eq('id', userAccountId)
-        .single();
-      
-      if (data && !error) {
-        setAdsetMode(data.default_adset_mode || 'api_create');
+
+      try {
+        const data = await userProfileApi.fetchProfile(userAccountId);
+        if (data) {
+          setAdsetMode(data.default_adset_mode || 'api_create');
+        }
+      } catch (err) {
+        console.error('Ошибка загрузки default_adset_mode:', err);
       }
     };
-    
+
     loadAdsetMode();
   }, [userAccountId]);
 

@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
+import { userProfileApi } from '@/services/userProfileApi';
 
 export interface ROIData {
   totalRevenue: number;
@@ -471,14 +472,11 @@ class SalesApiService {
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
         // Проверяем что account_id принадлежит userAccountId (security check)
-        const { data: accountOwnership, error: ownershipError } = await supabase
-          .from('ad_accounts')
-          .select('id')
-          .eq('id', accountId)
-          .eq('user_account_id', userAccountId)
-          .single();
+        // Verify account ownership via backend API
+        const ownershipResp = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${accountId}`).catch(() => null);
+        const accountOwnership = ownershipResp?.ok ? await ownershipResp.json() : null;
 
-        if (ownershipError || !accountOwnership) {
+        if (!accountOwnership) {
           console.error('Account ownership check failed in getROIData:', {
             accountId,
             userAccountId,
@@ -787,13 +785,9 @@ class SalesApiService {
 
       // Пытаемся получить реальные названия из Facebook API
       try {
-        const { data: userData, error: userError } = await (supabase as any)
-          .from('user_accounts')
-          .select('ad_account_id')
-          .eq('id', userAccountId)
-          .single();
+        const userData = await userProfileApi.fetchProfile(userAccountId).catch(() => null);
 
-        if (!userError && userData?.ad_account_id) {
+        if (userData?.ad_account_id) {
           console.log('✅ Загружаем реальные названия кампаний из Facebook API...');
           const facebookCampaigns = await this.getFacebookCampaignsData(userAccountId, userData.ad_account_id);
 
@@ -1280,14 +1274,11 @@ class SalesApiService {
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
         // Проверяем что account_id принадлежит userAccountId (security check)
-        const { data: accountOwnership, error: ownershipError } = await supabase
-          .from('ad_accounts')
-          .select('id')
-          .eq('id', accountId)
-          .eq('user_account_id', userAccountId)
-          .single();
+        // Verify account ownership via backend API
+        const ownershipResp = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${accountId}`).catch(() => null);
+        const accountOwnership = ownershipResp?.ok ? await ownershipResp.json() : null;
 
-        if (ownershipError || !accountOwnership) {
+        if (!accountOwnership) {
           console.error('Account ownership check failed:', {
             accountId,
             userAccountId,
