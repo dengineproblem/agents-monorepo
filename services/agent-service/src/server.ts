@@ -65,6 +65,7 @@ import creativeAnalysisRoutes from './routes/creativeAnalysis.js';
 import { fbProxyRoutes } from './routes/fbProxy.js';
 import { tiktokProxyRoutes } from './routes/tiktokProxy.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
+import { requireActiveAccount } from './middleware/requireActiveAccount.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
@@ -167,6 +168,10 @@ app.register(cors, {
 app.register(formbody, { parser: (str: string) => qs.parse(str) });
 // ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
 // См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
+
+// Глобальная проверка активности аккаунта (блокирует всё, кроме вебхуков и оплаты)
+app.addHook('preHandler', requireActiveAccount);
+
 app.register(actionsRoutes);
 app.register(videoRoutes);
 app.register(tusUploadRoutes);

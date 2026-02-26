@@ -41,6 +41,10 @@ interface AppContextType {
   currentAdAccountId: string | null;
   setCurrentAdAccountId: (id: string | null) => void;
   loadAdAccounts: () => Promise<void>;
+  // Subscription status
+  isAccountActive: boolean;
+  userTarifExpires: string | null;
+  userTarifRenewalCost: number | null;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -135,6 +139,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [currentAdAccountId, setCurrentAdAccountIdState] = useState<string | null>(() => {
     return localStorage.getItem('currentAdAccountId');
   });
+
+  // Subscription status
+  const [isAccountActive, setIsAccountActive] = useState<boolean>(true);
+  const [userTarifExpires, setUserTarifExpires] = useState<string | null>(null);
+  const [userTarifRenewalCost, setUserTarifRenewalCost] = useState<number | null>(null);
 
   // Обёртка для setCurrentAdAccountId — сохраняет в localStorage
   const setCurrentAdAccountId = useCallback((id: string | null) => {
@@ -937,6 +946,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setMultiAccountEnabled(response.multi_account_enabled);
       setAdAccounts(mappedAccounts);
 
+      // Обновляем статус активности аккаунта
+      setIsAccountActive(response.user_is_active !== false);
+      if (response.user_tarif) setUserTarif(response.user_tarif);
+      if (response.user_tarif_expires !== undefined) setUserTarifExpires(response.user_tarif_expires ?? null);
+      if (response.user_tarif_renewal_cost !== undefined) setUserTarifRenewalCost(response.user_tarif_renewal_cost ?? null);
+
       // Сохраняем в localStorage ТОЛЬКО для мультиаккаунтного режима
       localStorage.setItem('multiAccountEnabled', String(response.multi_account_enabled));
 
@@ -1120,6 +1135,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       currentAdAccountId,
       setCurrentAdAccountId,
       loadAdAccounts,
+      // Subscription status
+      isAccountActive,
+      userTarifExpires,
+      userTarifRenewalCost,
     }}>
       {children}
     </AppContext.Provider>

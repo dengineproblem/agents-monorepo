@@ -213,6 +213,10 @@ export interface UpdateAdAccountPayload {
 
 export interface AdAccountsResponse {
   multi_account_enabled: boolean;
+  user_is_active?: boolean;
+  user_tarif?: string | null;
+  user_tarif_expires?: string | null;
+  user_tarif_renewal_cost?: number | null;
   ad_accounts: AdAccount[];
 }
 

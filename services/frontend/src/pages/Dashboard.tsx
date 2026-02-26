@@ -10,6 +10,7 @@ import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
 import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
 import { AutopilotSection } from '../components/AutopilotSection';
+import { SubscriptionExpiredBanner } from '../components/SubscriptionExpiredBanner';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
@@ -49,6 +50,9 @@ const Dashboard: React.FC = () => {
     multiAccountEnabled,
     adAccounts: contextAdAccounts,
     currentAdAccountId,
+    isAccountActive,
+    userTarifExpires,
+    userTarifRenewalCost,
   } = useAppContext();
 
   // Optimization hook for Brain Mini
@@ -318,7 +322,14 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
-      <Header 
+      {!isAccountActive && (
+        <SubscriptionExpiredBanner
+          tarif={userTarif}
+          renewalCost={userTarifRenewalCost}
+          expiresAt={userTarifExpires}
+        />
+      )}
+      <Header
         onOpenDatePicker={() => setDatePickerOpen(true)}
       />
       

@@ -225,10 +225,10 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     log.info({ userAccountId }, 'Fetching ad accounts');
 
     try {
-      // Проверяем, включена ли мультиаккаунтность
+      // Проверяем, включена ли мультиаккаунтность + статус аккаунта
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled')
+        .select('multi_account_enabled, is_active')
         .eq('id', userAccountId)
         .single();
 
@@ -240,6 +240,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       if (!user.multi_account_enabled) {
         return reply.send({
           multi_account_enabled: false,
+          user_is_active: user.is_active ?? true,
           ad_accounts: [],
         });
       }
@@ -257,6 +258,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       return reply.send({
         multi_account_enabled: true,
+        user_is_active: user.is_active ?? true,
         ad_accounts: (adAccounts || []).map(mapDbToFrontend),
       });
     } catch (error: any) {
