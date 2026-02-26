@@ -460,33 +460,40 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     // Build user_data object
     const userData: Record<string, string | string[] | number> = {};
 
-    if (phone) {
-      userData.ph = [hashPhone(phone)];
-    }
-
-    if (email) {
-      userData.em = [hashForCapi(email)];
-    }
-
-    if (params.firstName) {
-      userData.fn = [hashForCapi(params.firstName)];
-    }
-
-    if (params.lastName) {
-      userData.ln = [hashForCapi(params.lastName)];
-    }
-
-    if (leadId) {
-      userData.external_id = String(leadId);
-    }
-
-    // Meta's lead form ID (highest priority for CRM dataset matching per Meta docs)
-    // Must be a number per Meta's payload spec
-    if (params.leadgenId) {
-      const numericLeadId = Number(params.leadgenId);
-      if (Number.isFinite(numericLeadId)) {
-        userData.lead_id = numericLeadId;
+    // For business_messaging (CTWA): only ctwa_clid + page_id, no PII fields
+    // Meta matches exclusively via ctwa_clid for WhatsApp events
+    if (!useBusinessMessaging) {
+      if (phone) {
+        userData.ph = [hashPhone(phone)];
       }
+
+      if (email) {
+        userData.em = [hashForCapi(email)];
+      }
+
+      if (params.firstName) {
+        userData.fn = [hashForCapi(params.firstName)];
+      }
+
+      if (params.lastName) {
+        userData.ln = [hashForCapi(params.lastName)];
+      }
+
+      if (leadId) {
+        userData.external_id = String(leadId);
+      }
+
+      // Meta's lead form ID (highest priority for CRM dataset matching per Meta docs)
+      // Must be a number per Meta's payload spec
+      if (params.leadgenId) {
+        const numericLeadId = Number(params.leadgenId);
+        if (Number.isFinite(numericLeadId)) {
+          userData.lead_id = numericLeadId;
+        }
+      }
+
+      // Country hash for better matching (Kazakhstan)
+      userData.country = [hashForCapi('kz')];
     }
 
     // Messaging dataset: ctwa_clid in user_data (NOT top-level)
@@ -507,11 +514,9 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       userData.fbp = params.fbp;
     }
 
-    // Country hash for better matching (Kazakhstan)
-    userData.country = [hashForCapi('kz')];
-
     const mergedCustomData: Record<string, unknown> = {
-      event_level: eventLevel,
+      // event_level only for non-messaging (business_messaging expects clean custom_data)
+      ...(useBusinessMessaging ? {} : { event_level: eventLevel }),
       ...customData,
     };
 
