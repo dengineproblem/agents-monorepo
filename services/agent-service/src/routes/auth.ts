@@ -30,8 +30,11 @@ export default async function authRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
-    // Сравниваем пароль через bcrypt
-    const passwordMatch = await bcrypt.compare(password, user.password);
+    // Сравниваем пароль: bcrypt hash ($2a$/$2b$) или plaintext (legacy)
+    const isBcrypt = user.password?.startsWith('$2a$') || user.password?.startsWith('$2b$');
+    const passwordMatch = isBcrypt
+      ? await bcrypt.compare(password, user.password)
+      : password === user.password;
     if (!passwordMatch) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
