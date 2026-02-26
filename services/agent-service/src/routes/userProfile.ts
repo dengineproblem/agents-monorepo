@@ -13,7 +13,7 @@ const log = createLogger({ module: 'userProfileRoutes' });
 
 const PROFILE_SELECT_COLUMNS = [
   'id', 'username', 'role', 'is_tech_admin', 'is_active',
-  'page_name', 'page_id', 'ad_account_id', 'instagram_id', 'instagram_username', 'business_id',
+  'page_id', 'ad_account_id', 'instagram_id', 'instagram_username', 'business_id',
   'page_picture_url',
   'tarif', 'tarif_expires', 'tarif_renewal_cost',
   'autopilot', 'autopilot_tiktok', 'optimization', 'current_campaign_goal', 'current_campaign_goal_changed_at',

@@ -62,6 +62,7 @@ import adInsightsRoutes from './routes/adInsights.js';
 import budgetForecastRoutes from './routes/budgetForecast.js';
 import tusUploadRoutes from './routes/tusUpload.js';
 import creativeAnalysisRoutes from './routes/creativeAnalysis.js';
+import authRoutes from './routes/auth.js';
 import userProfileRoutes from './routes/userProfile.js';
 import { fbProxyRoutes } from './routes/fbProxy.js';
 import { tiktokProxyRoutes } from './routes/tiktokProxy.js';
@@ -222,6 +223,7 @@ app.register(telegramWebhook);
 app.register(supportBotWebhook);
 app.register(budgetForecastRoutes);
 app.register(creativeAnalysisRoutes);
+app.register(authRoutes);
 app.register(userProfileRoutes);
 
 // SECURITY: Admin routes с обязательной проверкой is_tech_admin

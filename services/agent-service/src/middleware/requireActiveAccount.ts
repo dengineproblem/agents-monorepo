@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient.js';
 
 // Пути, доступные для неактивных аккаунтов (вебхуки + оплата)
 const EXEMPT_PREFIXES = [
+  '/auth',
   '/robokassa',
   '/facebook-webhook',
   '/evolution-webhook',
