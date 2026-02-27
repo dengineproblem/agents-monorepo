@@ -5258,19 +5258,21 @@ async function getActiveUsers() {
         .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id, autopilot, autopilot_tiktok, tiktok_access_token, tiktok_business_id, tiktok_account_id')
         .eq('is_active', true)
         .eq('optimization', 'agent2')
-        .or('multi_account_enabled.eq.false,multi_account_enabled.is.null'),
+        .or('multi_account_enabled.eq.false,multi_account_enabled.is.null')
+        .is('account_timezone', null),  // timezone-aware legacy юзеры → hourly schedule batch
       { where: 'getActiveUsers_legacy' }
     );
 
     // Multi-account пользователи обрабатываются ТОЛЬКО через schedule batch (getAccountsForCurrentHour)
-    // Legacy batch — только для пользователей без multi_account_enabled
+    // Legacy с account_timezone → через hourly schedule batch (getLegacyUsersForCurrentHour)
+    // Legacy batch — только для пользователей без multi_account_enabled и без account_timezone
     const allUsers = legacyUsers || [];
 
     fastify.log.info({
       where: 'getActiveUsers',
       legacyCount: legacyUsers?.length || 0,
       totalCount: allUsers.length,
-      filter: 'legacy only: multi_account_enabled=false/null (multi-account → schedule batch)'
+      filter: 'legacy only: multi_account_enabled=false/null, account_timezone=null (timezone-aware → hourly schedule batch)'
     });
 
     return allUsers;
@@ -5737,6 +5739,93 @@ async function getAccountsForCurrentHour(utcHour) {
       anthropic_api_key: ua?.anthropic_api_key || null,
     };
   });
+}
+
+/**
+ * Получить legacy пользователей с account_timezone для текущего часа.
+ * Аналог getAccountsForCurrentHour, но для legacy (multi_account_enabled=false/null).
+ * Использует account_timezone и preferred_check_hour_local из user_accounts.
+ */
+async function getLegacyUsersForCurrentHour(utcHour) {
+  const startTime = Date.now();
+
+  fastify.log.info({
+    where: 'getLegacyUsersForCurrentHour',
+    utcHour,
+    status: 'started'
+  });
+
+  if (!supabase) {
+    return [];
+  }
+
+  try {
+    const { data: users, error } = await supabase
+      .from('user_accounts')
+      .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, preferred_check_hour_local, multi_account_enabled, ad_account_id, autopilot, autopilot_tiktok, tiktok_access_token, tiktok_business_id, tiktok_account_id, last_brain_batch_run_at')
+      .eq('is_active', true)
+      .eq('optimization', 'agent2')
+      .or('multi_account_enabled.eq.false,multi_account_enabled.is.null')
+      .not('account_timezone', 'is', null);
+
+    if (error) {
+      fastify.log.error({
+        where: 'getLegacyUsersForCurrentHour',
+        error: error?.message || JSON.stringify(error)
+      });
+      return [];
+    }
+
+    if (!users || users.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const fiftyMinutesAgo = new Date(now.getTime() - 50 * 60 * 1000);
+
+    const usersToProcess = users.filter(user => {
+      const timezone = user.account_timezone;
+      const scheduleHour = user.preferred_check_hour_local ?? 8;
+      const localHour = getLocalHour(utcHour, timezone);
+
+      if (localHour !== scheduleHour) {
+        return false;
+      }
+
+      // Дедупликация: не обрабатывать если уже обработан за последние 50 минут
+      if (user.last_brain_batch_run_at) {
+        const lastRun = new Date(user.last_brain_batch_run_at);
+        if (lastRun > fiftyMinutesAgo) {
+          fastify.log.debug({
+            where: 'getLegacyUsersForCurrentHour',
+            userId: user.id,
+            username: user.username,
+            lastRun: user.last_brain_batch_run_at,
+            skip: 'already_processed_recently'
+          });
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const duration = Date.now() - startTime;
+    fastify.log.info({
+      where: 'getLegacyUsersForCurrentHour',
+      utcHour,
+      totalWithTimezone: users.length,
+      toProcess: usersToProcess.length,
+      usernames: usersToProcess.map(u => u.username),
+      duration,
+      status: 'completed'
+    });
+
+    return usersToProcess;
+  } catch (err) {
+    fastify.log.error({ where: 'getLegacyUsersForCurrentHour', err: String(err) });
+    return [];
+  }
 }
 
 /**
@@ -7282,10 +7371,11 @@ async function processDailyBatchBySchedule(utcHour) {
     }
   }
 
-  // Получаем аккаунты для текущего часа
+  // Получаем аккаунты для текущего часа (multi-account + legacy timezone-aware)
   const accountsToProcess = await getAccountsForCurrentHour(utcHour);
+  const legacyTimezoneUsers = await getLegacyUsersForCurrentHour(utcHour);
 
-  if (accountsToProcess.length === 0) {
+  if (accountsToProcess.length === 0 && legacyTimezoneUsers.length === 0) {
     fastify.log.info({
       where: 'processDailyBatchBySchedule',
       utcHour,
@@ -7297,7 +7387,9 @@ async function processDailyBatchBySchedule(utcHour) {
   const results = [];
   const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5');
 
-  // Обрабатываем аккаунты с ограничением concurrency
+  // ========================================
+  // 1. Multi-account аккаунты (processAccountBrain)
+  // ========================================
   for (let i = 0; i < accountsToProcess.length; i += BATCH_CONCURRENCY) {
     const batch = accountsToProcess.slice(i, i + BATCH_CONCURRENCY);
 
@@ -7313,6 +7405,59 @@ async function processDailyBatchBySchedule(utcHour) {
     }
   }
 
+  // ========================================
+  // 2. Legacy timezone-aware юзеры (processUser)
+  // ========================================
+  if (legacyTimezoneUsers.length > 0) {
+    fastify.log.info({
+      where: 'processDailyBatchBySchedule',
+      phase: 'legacy_timezone_users',
+      utcHour,
+      count: legacyTimezoneUsers.length,
+      usernames: legacyTimezoneUsers.map(u => u.username)
+    });
+
+    for (let i = 0; i < legacyTimezoneUsers.length; i += BATCH_CONCURRENCY) {
+      const batch = legacyTimezoneUsers.slice(i, i + BATCH_CONCURRENCY);
+
+      const batchResults = await Promise.all(
+        batch.map(async (user) => {
+          const result = await processUser({
+            ...user,
+            accountId: null,
+            accountName: null
+          });
+
+          // Обновляем timestamp для дедупликации
+          if (supabase) {
+            try {
+              await supabase
+                .from('user_accounts')
+                .update({ last_brain_batch_run_at: new Date().toISOString() })
+                .eq('id', user.id);
+            } catch (updateErr) {
+              fastify.log.warn({
+                where: 'processDailyBatchBySchedule',
+                phase: 'legacy_update_timestamp',
+                userId: user.id,
+                error: String(updateErr)
+              });
+            }
+          }
+
+          return result;
+        })
+      );
+
+      results.push(...batchResults);
+
+      if (i + BATCH_CONCURRENCY < legacyTimezoneUsers.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+  }
+
+  const totalProcessed = accountsToProcess.length + legacyTimezoneUsers.length;
   const successCount = results.filter(r => r.success).length;
   const failureCount = results.filter(r => !r.success).length;
   const batchDuration = Date.now() - batchStartTime;
@@ -7325,7 +7470,7 @@ async function processDailyBatchBySchedule(utcHour) {
         execution_hour: utcHour,
         started_at: new Date(batchStartTime).toISOString(),
         completed_at: new Date().toISOString(),
-        total_users: accountsToProcess.length,
+        total_users: totalProcessed,
         success_count: successCount,
         failure_count: failureCount,
         total_duration_ms: batchDuration,
@@ -7344,7 +7489,9 @@ async function processDailyBatchBySchedule(utcHour) {
   fastify.log.info({
     where: 'processDailyBatchBySchedule',
     utcHour,
-    processed: accountsToProcess.length,
+    processed: totalProcessed,
+    multiAccountProcessed: accountsToProcess.length,
+    legacyTimezoneProcessed: legacyTimezoneUsers.length,
     success: successCount,
     failed: failureCount,
     duration: batchDuration,
@@ -7353,7 +7500,7 @@ async function processDailyBatchBySchedule(utcHour) {
 
   return {
     success: true,
-    processed: accountsToProcess.length,
+    processed: totalProcessed,
     successCount,
     failureCount,
     duration: batchDuration
