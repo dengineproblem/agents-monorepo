@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 
 export interface ChatMessage {
   id: string;
@@ -22,53 +22,39 @@ export interface ChatHistory {
   creative_url?: string;
 }
 
+/**
+ * Получить user ID из localStorage
+ */
+function getUserId(): string | null {
+  try {
+    const user = localStorage.getItem('user');
+    if (!user) return null;
+    return JSON.parse(user).id;
+  } catch {
+    return null;
+  }
+}
+
 // Получить все уникальные чаты (группируем по chat_id)
 export const getChats = async (): Promise<ChatHistory[]> => {
   try {
-    const { data, error } = await supabase
-      .from('n8n_chat_histories')
-      .select('*')
-      .order('id', { ascending: false });
-
-    if (error) {
-      console.error('Ошибка загрузки сообщений:', error);
+    const userId = getUserId();
+    if (!userId) {
+      console.error('User ID не найден');
       return [];
     }
 
-    if (!data || data.length === 0) {
-      console.log('Нет данных в таблице n8n_chat_histories');
+    const response = await fetch(`${API_BASE_URL}/chat-history`, {
+      headers: { 'x-user-id': userId },
+    });
+
+    if (!response.ok) {
+      console.error('Ошибка загрузки чатов:', response.statusText);
       return [];
     }
 
-    // Группируем сообщения по chat_id
-    const chatGroups: Record<string, any[]> = {};
-    data.forEach(message => {
-      if (!chatGroups[message.chat_id]) {
-        chatGroups[message.chat_id] = [];
-      }
-      chatGroups[message.chat_id].push(message);
-    });
-
-    // Создаем чаты из групп
-    const chats: ChatHistory[] = Object.entries(chatGroups).map(([chatId, messages]) => {
-      // Берем последнее сообщение для получения метаданных чата
-      const lastMessage = messages[0]; // уже отсортированы по убыванию id
-      const messageJson = lastMessage.message_data as any;
-
-      return {
-        session_id: chatId,
-        client_name: lastMessage.client_name || `Клиент ${chatId}`,
-        phone: lastMessage.phone || chatId,
-        last_message: messageJson?.content || 'Нет сообщений',
-        last_message_time: lastMessage.created_at || null,
-        funnel_stage: lastMessage.funnel_stage || 'неопределен',
-        source: lastMessage.source || 'неизвестно',
-        unread_count: lastMessage.unread_count || 0,
-        priority: lastMessage.priority || null,
-        conversion_source: undefined, // TODO: добавить позже
-        creative_url: undefined // TODO: добавить позже
-      };
-    });
+    const result = await response.json();
+    const chats: ChatHistory[] = result.chats || [];
 
     console.log(`Загружено ${chats.length} чатов`);
     return chats;
@@ -81,46 +67,29 @@ export const getChats = async (): Promise<ChatHistory[]> => {
 // Получить сообщения для конкретного чата
 export const getChatMessages = async (sessionId: string): Promise<ChatMessage[]> => {
   try {
-    const { data: messagesData, error } = await supabase
-      .from('n8n_chat_histories')
-      .select('*')
-      .eq('chat_id', sessionId)
-      .order('id', { ascending: true });
-
-    if (error) {
-      console.error('Ошибка загрузки сообщений:', error);
+    const userId = getUserId();
+    if (!userId) {
+      console.error('User ID не найден');
       return [];
     }
 
-    if (!messagesData || messagesData.length === 0) {
-      console.log('Сообщения не найдены для chat_id:', sessionId);
-      return [];
-    }
-
-    // Преобразуем данные в нужный формат
-    const messages: ChatMessage[] = messagesData.map((msg) => {
-      const messageJson = msg.message_data as any;
-      
-      // Определяем отправителя на основе типа сообщения
-      let sender: 'client' | 'bot' | 'manager' = 'client';
-      if (messageJson.type === 'ai') {
-        sender = 'bot';
-      } else if (messageJson.type === 'manager') {
-        sender = 'manager';
-      } else if (messageJson.type === 'human') {
-        sender = 'client';
-      }
-
-      return {
-        id: msg.id.toString(),
-        sender,
-        message: messageJson.content || 'Сообщение без содержимого',
-        timestamp: new Date(msg.created_at || Date.now()).toLocaleTimeString('ru-RU', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })
-      };
+    const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/messages`, {
+      headers: { 'x-user-id': userId },
     });
+
+    if (!response.ok) {
+      console.error('Ошибка загрузки сообщений:', response.statusText);
+      return [];
+    }
+
+    const result = await response.json();
+    const messages: ChatMessage[] = (result.messages || []).map((msg: any) => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp || Date.now()).toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    }));
 
     console.log(`Загружено ${messages.length} сообщений для чата ${sessionId}`);
     return messages;
@@ -157,48 +126,24 @@ export const sendMessage = async (sessionId: string, message: string): Promise<b
 // Обновить статус воронки для чата
 export const updateChatFunnelStage = async (sessionId: string, funnelStage: string): Promise<boolean> => {
   try {
-    // Сначала проверяем, есть ли запись в follow_up_simple
-    const { data: existingRecord, error: selectError } = await supabase
-      .from('follow_up_simple')
-      .select('id')
-      .eq('chat_id', sessionId)
-      .single();
-
-    if (selectError && selectError.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Ошибка проверки записи в follow_up_simple:', selectError);
+    const userId = getUserId();
+    if (!userId) {
+      console.error('User ID не найден');
       return false;
     }
 
-    if (existingRecord) {
-      // Обновляем существующую запись
-      const { error: updateError } = await supabase
-        .from('follow_up_simple')
-        .update({ 
-          message: funnelStage,
-          updated_at: new Date().toISOString()
-        })
-        .eq('chat_id', sessionId);
+    const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/follow-up`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({ message: funnelStage }),
+    });
 
-      if (updateError) {
-        console.error('Ошибка обновления статуса в follow_up_simple:', updateError);
-        return false;
-      }
-    } else {
-      // Создаем новую запись
-      const { error: insertError } = await supabase
-        .from('follow_up_simple')
-        .insert({
-          chat_id: sessionId,
-          message: funnelStage,
-          follow_up_date: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-
-      if (insertError) {
-        console.error('Ошибка создания записи в follow_up_simple:', insertError);
-        return false;
-      }
+    if (!response.ok) {
+      console.error('Ошибка обновления статуса воронки:', response.statusText);
+      return false;
     }
 
     console.log(`Статус воронки обновлен для ${sessionId}: ${funnelStage}`);
@@ -211,18 +156,18 @@ export const updateChatFunnelStage = async (sessionId: string, funnelStage: stri
 
 // Фильтрация чатов
 export const filterChats = (
-  chats: ChatHistory[], 
-  searchTerm: string, 
+  chats: ChatHistory[],
+  searchTerm: string,
   statusFilter: string
 ): ChatHistory[] => {
   return chats.filter(chat => {
-    const matchesSearch = 
+    const matchesSearch =
       (chat.client_name?.toLowerCase().includes(searchTerm.toLowerCase()) || false) ||
       (chat.phone?.includes(searchTerm) || false) ||
       (chat.session_id?.includes(searchTerm) || false);
-    
+
     const matchesStatus = statusFilter === 'all' || chat.funnel_stage === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 };
@@ -242,21 +187,24 @@ export const groupChatsByFunnelStage = (chats: ChatHistory[]): Record<string, Ch
 // Получить последнее сообщение для чата
 export const getLastMessage = async (sessionId: string): Promise<string | null> => {
   try {
-    const { data: messagesData, error } = await supabase
-      .from('n8n_chat_histories')
-      .select('message_data')
-      .eq('chat_id', sessionId)
-      .order('id', { ascending: false })
-      .limit(1);
-
-    if (error || !messagesData || messagesData.length === 0) {
+    const userId = getUserId();
+    if (!userId) {
+      console.error('User ID не найден');
       return null;
     }
 
-    const messageJson = messagesData[0].message_data as any;
-    return messageJson.content || null;
+    const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/last-message`, {
+      headers: { 'x-user-id': userId },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = await response.json();
+    return result.content || null;
   } catch (error) {
     console.error('Ошибка получения последнего сообщения:', error);
     return null;
   }
-}; 
+};

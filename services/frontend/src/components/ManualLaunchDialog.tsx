@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { manualLaunchMultiAdSets, type MultiAdSetLaunchResponse } from "@/services/manualLaunchApi";
 import { type UserCreative } from "@/services/creativesApi";
 import { type Direction, getDirectionObjectiveLabel } from "@/types/direction";
-import { supabase } from "@/integrations/supabase/client";
+import { API_BASE_URL } from "@/config/api";
 
 const FACEBOOK_MIN_DAILY_BUDGET = 5;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
@@ -95,21 +95,21 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
     const load = async () => {
       setLoadingCreatives(true);
       try {
-        const { data, error } = await supabase
-          .from('user_creatives')
-          .select('*')
-          .eq('user_id', props.userId)
-          .eq('direction_id', selectedDirectionId)
-          .eq('is_active', true)
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false });
-
+        const params = new URLSearchParams({ userId: props.userId!, status: 'ready' });
+        const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
+          headers: { 'x-user-id': props.userId! }
+        });
         if (!cancelled) {
-          if (error) {
+          if (!res.ok) {
             toast.error('Не удалось загрузить креативы');
             setLoadedCreatives([]);
           } else {
-            setLoadedCreatives((data || []) as UserCreative[]);
+            const allCreatives = (await res.json()) || [];
+            // Filter by direction, is_active on client
+            const filtered = allCreatives.filter((c: any) =>
+              c.direction_id === selectedDirectionId && c.is_active === true
+            );
+            setLoadedCreatives(filtered as UserCreative[]);
           }
         }
       } finally {

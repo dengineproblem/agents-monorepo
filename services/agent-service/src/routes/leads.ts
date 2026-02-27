@@ -394,7 +394,6 @@ export default async function leadsRoutes(app: FastifyInstance) {
           name: leadData.name,
           phone: leadData.phone,
           email: leadData.email || null,
-          message: leadData.message || null,
           source_type: 'website',
 
           // chat_id is NULL for website leads (only used for WhatsApp)
@@ -620,6 +619,104 @@ export default async function leadsRoutes(app: FastifyInstance) {
         stack_trace: error.stack,
         action: 'list_leads',
         endpoint: '/leads',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /leads/:id
+   * External URL: /api/leads/:id (nginx adds /api/ prefix)
+   *
+   * Partially update a lead by ID
+   *
+   * Headers:
+   *   - x-user-id: UUID of user account (alternative to query param)
+   *
+   * Params:
+   *   - id: Lead ID (integer)
+   *
+   * Query:
+   *   - userAccountId: UUID of user account (alternative to header)
+   *
+   * Body (all fields optional):
+   *   - creative_id: string (user_creative_id)
+   *   - sale_amount: number
+   *   - is_qualified: boolean
+   *   - direction_id: string
+   *
+   * Returns: Updated lead object
+   */
+  app.patch('/leads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId } = request.query as { userAccountId?: string };
+      const userId = (request.headers['x-user-id'] as string) || userAccountId;
+
+      if (!userId) {
+        return reply.code(400).send({
+          error: 'missing_user_id',
+          message: 'x-user-id header or userAccountId query parameter is required'
+        });
+      }
+
+      const body = request.body as Record<string, unknown>;
+
+      // Allow only specific fields to be updated
+      const allowedFields = ['creative_id', 'sale_amount', 'is_qualified', 'direction_id'];
+      const updateData: Record<string, unknown> = {};
+      for (const field of allowedFields) {
+        if (body[field] !== undefined) {
+          updateData[field] = body[field];
+        }
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return reply.code(400).send({
+          error: 'no_update_fields',
+          message: 'At least one field to update is required'
+        });
+      }
+
+      updateData.updated_at = new Date().toISOString();
+
+      app.log.info({ leadId: id, userId, updateData }, 'Updating lead');
+
+      const { data: lead, error } = await supabase
+        .from('leads')
+        .update(updateData)
+        .eq('id', parseInt(id))
+        .eq('user_account_id', userId)
+        .select()
+        .single();
+
+      if (error || !lead) {
+        app.log.warn({ leadId: id, userId, error }, 'Lead not found or update failed');
+        return reply.code(404).send({
+          error: 'lead_not_found',
+          message: 'Lead not found'
+        });
+      }
+
+      app.log.info({ leadId: id, userId }, 'Lead updated successfully');
+
+      return reply.send(lead);
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating lead');
+
+      logErrorToAdmin({
+        user_account_id: (request.headers['x-user-id'] as string) || (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'patch_lead',
+        endpoint: '/leads/:id',
         severity: 'warning'
       }).catch(() => {});
 

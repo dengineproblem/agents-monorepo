@@ -1,6 +1,5 @@
-import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
-import { isMultiAccountEnabled, shouldFilterByAccountId } from '@/utils/multiAccountHelper';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
@@ -82,39 +81,30 @@ export const creativesApi = {
     if (!userId) return [];
     const effectivePlatform = platform || 'instagram';
 
-    let query = supabase
-      .from('user_creatives')
-      .select('*')
-      .eq('user_id', userId)
-      // Показываем только успешно загруженные креативы
-      // Исключаем: failed, error, processing (без Facebook ID они не готовы)
-      .in('status', ['ready', 'partial_ready', 'uploaded']);
-
-    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    const params = new URLSearchParams({ userId });
     if (shouldFilterByAccountId(accountId)) {
-      query = query.eq('account_id', accountId);
+      params.set('accountId', accountId!);
     }
+    const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
+      headers: { 'x-user-id': userId }
+    });
 
-    const { data, error } = await query.order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('creativesApi.list error:', error);
+    if (!res.ok) {
+      console.error('creativesApi.list error:', await res.text().catch(() => ''));
       return [];
     }
 
+    const rawCreatives = ((await res.json()) as UserCreative[]) || [];
+
     // Дополнительно фильтруем: видео-креативы должны иметь fb_video_id
-    // Если у креатива нет fb_video_id - значит он не был успешно загружен на Facebook
-    const rawCreatives = (data as unknown as UserCreative[]) || [];
     const creatives = rawCreatives.filter(creative => {
       const isVideo = creative.media_type === 'video'
         || (!creative.media_type && !creative.image_url && !creative.carousel_data);
 
       if (effectivePlatform === 'tiktok') {
-        // TikTok принимает только видео и требует tiktok_video_id
         return isVideo && creative.tiktok_video_id != null;
       }
 
-      // Instagram/Facebook
       if (isVideo) {
         return creative.fb_video_id != null;
       }
@@ -128,10 +118,11 @@ export const creativesApi = {
 
     if (carouselsWithGenId.length > 0) {
       const generatedIds = carouselsWithGenId.map(c => c.generated_creative_id!);
-      const { data: generatedData } = await supabase
-        .from('generated_creatives' as any)
-        .select('id, carousel_data')
-        .in('id', generatedIds);
+      const genParams = new URLSearchParams({ generatedIds: generatedIds.join(',') });
+      const genRes = await fetch(`${API_BASE_URL}/user-creatives/generated-bulk?${genParams}`, {
+        headers: { 'x-user-id': userId }
+      });
+      const generatedData = genRes.ok ? await genRes.json() : null;
 
       if (generatedData) {
         const generatedMap = new Map(generatedData.map((g: any) => [g.id, g.carousel_data]));
@@ -148,18 +139,14 @@ export const creativesApi = {
 
   async getTranscript(userCreativeId: string): Promise<string | null> {
     try {
-      // Источник транскрибации: public.creative_transcripts
-      // Связь: creative_transcripts.creative_id -> user_creatives.id
-      const { data, error } = await supabase
-        .from('creative_transcripts' as any)
-        .select('text, created_at')
-        .eq('creative_id', userCreativeId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) return null;
-      const anyData = data as any;
-      return (anyData && typeof anyData.text === 'string') ? (anyData.text as string) : null;
+      const userId = getUserId();
+      if (!userId) return null;
+      const res = await fetch(`${API_BASE_URL}/user-creatives/${userCreativeId}/transcript`, {
+        headers: { 'x-user-id': userId }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data && typeof data.text === 'string') ? data.text : null;
     } catch {
       return null;
     }
@@ -193,25 +180,17 @@ export const creativesApi = {
 
     // Для image/carousel без данных - получаем из generated_creatives
     try {
-      // Шаг 1: Получаем generated_creative_id из user_creatives
-      const { data: creative, error: creativeError } = await supabase
-        .from('user_creatives')
-        .select('generated_creative_id, carousel_data')
-        .eq('id', userCreativeId)
-        .single();
+      const userId = getUserId();
+      if (!userId) return { text: null };
 
-      if (creativeError || !creative?.generated_creative_id) {
-        return { text: null };
-      }
+      const res = await fetch(`${API_BASE_URL}/user-creatives/${userCreativeId}/generated`, {
+        headers: { 'x-user-id': userId }
+      });
+      if (!res.ok) return { text: null };
 
-      // Шаг 2: Получаем тексты из generated_creatives
-      const { data: generated, error: generatedError } = await supabase
-        .from('generated_creatives' as any)
-        .select('offer, bullets, profits, carousel_data, creative_type')
-        .eq('id', creative.generated_creative_id)
-        .single();
+      const { creative, generated } = await res.json();
 
-      if (generatedError || !generated) {
+      if (!creative?.generated_creative_id || !generated) {
         return { text: null };
       }
 
@@ -244,33 +223,41 @@ export const creativesApi = {
   async createPlaceholder(title: string): Promise<UserCreative | null> {
     const userId = getUserId();
     if (!userId) return null;
-    const { data, error } = await supabase
-      .from('user_creatives')
-      .insert({
-        user_id: userId,
-        title,
-        status: 'uploaded',
-        is_active: true,
-      })
-      .select('*')
-      .single();
-    if (error) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/user-creatives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify({ title, status: 'uploaded', is_active: true }),
+      });
+      if (!res.ok) {
+        console.error('creativesApi.createPlaceholder error:', await res.text().catch(() => ''));
+        return null;
+      }
+      return (await res.json()) as UserCreative;
+    } catch (error) {
       console.error('creativesApi.createPlaceholder error:', error);
       return null;
     }
-    return data as unknown as UserCreative;
   },
 
   async update(id: string, payload: Partial<UserCreative>): Promise<boolean> {
-    const { error } = await supabase
-      .from('user_creatives')
-      .update(payload)
-      .eq('id', id);
-    if (error) {
+    const userId = getUserId();
+    if (!userId) return false;
+    try {
+      const res = await fetch(`${API_BASE_URL}/user-creatives/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        console.error('creativesApi.update error:', await res.text().catch(() => ''));
+        return false;
+      }
+      return true;
+    } catch (error) {
       console.error('creativesApi.update error:', error);
       return false;
     }
-    return true;
   },
 
   async toggleActive(id: string, active: boolean): Promise<boolean> {
@@ -278,34 +265,46 @@ export const creativesApi = {
   },
 
   async delete(id: string): Promise<boolean> {
-    const { error } = await supabase
-      .from('user_creatives')
-      .delete()
-      .eq('id', id);
-    
-    if (error) {
+    const userId = getUserId();
+    if (!userId) return false;
+    try {
+      const res = await fetch(`${API_BASE_URL}/user-creatives/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': userId },
+      });
+      if (!res.ok) {
+        console.error('Ошибка удаления креатива:', await res.text().catch(() => ''));
+        return false;
+      }
+      return true;
+    } catch (error) {
       console.error('Ошибка удаления креатива:', error);
       return false;
     }
-    return true;
   },
 
   async getCreativeTestStatus(creativeId: string): Promise<CreativeTestStatus | null> {
     try {
-      const { data, error } = await supabase
-        .from('creative_tests' as any)
-        .select('status, started_at, completed_at, impressions')
-        .eq('user_creative_id', creativeId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      if (error) {
-        console.error('creativesApi.getCreativeTestStatus error:', error);
+      const userId = getUserId();
+      if (!userId) return null;
+
+      const params = new URLSearchParams({ userId, creativeIds: creativeId });
+      const res = await fetch(`${API_BASE_URL}/user-creatives/tests?${params}`, {
+        headers: { 'x-user-id': userId }
+      });
+      if (!res.ok) {
+        console.error('creativesApi.getCreativeTestStatus error:', await res.text().catch(() => ''));
         return null;
       }
-      
-      return data as CreativeTestStatus | null;
+      const tests = await res.json();
+      if (!tests || tests.length === 0) return null;
+      // Return the most recent test
+      return {
+        status: tests[0].status,
+        started_at: tests[0].started_at,
+        completed_at: tests[0].completed_at,
+        impressions: tests[0].impressions || 0,
+      };
     } catch (e) {
       console.error('creativesApi.getCreativeTestStatus exception:', e);
       return null;
@@ -314,33 +313,35 @@ export const creativesApi = {
 
   async getCreativeTestStatuses(creativeIds: string[]): Promise<Record<string, CreativeTestStatus>> {
     if (!creativeIds || creativeIds.length === 0) return {};
-    
+
     try {
-      const { data, error } = await supabase
-        .from('creative_tests' as any)
-        .select('user_creative_id, status, started_at, completed_at, impressions, created_at')
-        .in('user_creative_id', creativeIds)
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error('creativesApi.getCreativeTestStatuses error:', error);
+      const userId = getUserId();
+      if (!userId) return {};
+
+      const params = new URLSearchParams({ userId, creativeIds: creativeIds.join(',') });
+      const res = await fetch(`${API_BASE_URL}/user-creatives/tests?${params}`, {
+        headers: { 'x-user-id': userId }
+      });
+      if (!res.ok) {
+        console.error('creativesApi.getCreativeTestStatuses error:', await res.text().catch(() => ''));
         return {};
       }
+      const data = await res.json();
 
       // Группируем по user_creative_id и берем последний тест для каждого креатива
       const result: Record<string, CreativeTestStatus> = {};
       for (const test of (data || [])) {
-        const creativeId = (test as any).user_creative_id;
-        if (!result[creativeId]) {
-          result[creativeId] = {
-            status: (test as any).status,
-            started_at: (test as any).started_at,
-            completed_at: (test as any).completed_at,
-            impressions: (test as any).impressions || 0,
+        const cId = test.user_creative_id;
+        if (!result[cId]) {
+          result[cId] = {
+            status: test.status,
+            started_at: test.started_at,
+            completed_at: test.completed_at,
+            impressions: test.impressions || 0,
           };
         }
       }
-      
+
       return result;
     } catch (e) {
       console.error('creativesApi.getCreativeTestStatuses exception:', e);

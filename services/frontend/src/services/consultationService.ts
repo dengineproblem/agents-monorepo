@@ -1,6 +1,6 @@
-// Сервис консультаций с подключением к Supabase
+// Сервис консультаций — проксирование через backend API
 
-import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 import {
   Consultant,
   WorkingSchedule,
@@ -17,65 +17,55 @@ import {
   ConsultationStats
 } from '@/types/consultation';
 
-// Функция генерации UUID для совместимости
-const generateUUID = (): string => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  // Fallback для старых браузеров
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-};
+function getUserId(): string {
+  const raw = localStorage.getItem('user');
+  if (!raw) throw new Error('User not found in localStorage');
+  const user = JSON.parse(raw);
+  return user.id;
+}
 
 // Получение списка консультантов
 export const getConsultants = async (): Promise<Consultant[]> => {
   try {
-    const { data, error } = await supabase
-      .from('consultants')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations/consultants`, {
+      headers: { 'x-user-id': userId },
+    });
 
-    if (error) {
-      console.error('Ошибка получения консультантов:', error);
-      throw error;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка получения консультантов:', err);
+      throw new Error(err.error || 'Failed to fetch consultants');
     }
-    
-    return data || [];
+
+    return await res.json();
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка получения консультантов:', error);
     throw error;
   }
 };
 
 export const getConsultations = async (date?: string): Promise<ConsultationWithDetails[]> => {
   try {
-    let query = supabase
-      .from('consultations')
-      .select(`
-        *,
-        consultant:consultants!inner(*),
-        service:services(*)
-      `)
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true });
+    const userId = getUserId();
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
 
-    if (date) {
-      query = query.eq('date', date);
+    const url = `${API_BASE_URL}/consultations${params.toString() ? '?' + params.toString() : ''}`;
+    const res = await fetch(url, {
+      headers: { 'x-user-id': userId },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка получения консультаций:', err);
+      throw new Error(err.error || 'Failed to fetch consultations');
     }
 
-    const { data, error } = await query;
+    const data = await res.json();
 
-    if (error) {
-      console.error('Ошибка получения консультаций:', error);
-      throw error;
-    }
-    
     // Преобразуем данные в нужный формат
-    const consultations = (data || []).map(item => {
+    const consultations = (data || []).map((item: any) => {
       return {
         ...item,
         status: item.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show',
@@ -94,124 +84,127 @@ export const getConsultations = async (date?: string): Promise<ConsultationWithD
         }
       };
     });
-    
+
     return consultations;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка получения консультаций:', error);
     throw error;
   }
 };
 
 export const getConsultationStats = async (): Promise<ConsultationStats> => {
   try {
-    const { data, error } = await supabase
-      .from('consultations')
-      .select('status');
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations/stats`, {
+      headers: { 'x-user-id': userId },
+    });
 
-    if (error) {
-      console.error('Ошибка получения статистики:', error);
-      throw error;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка получения статистики:', err);
+      throw new Error(err.error || 'Failed to fetch consultation stats');
     }
 
-    const stats = {
-      total: data?.length || 0,
-      scheduled: data?.filter(c => c.status === 'scheduled').length || 0,
-      confirmed: data?.filter(c => c.status === 'confirmed').length || 0,
-      completed: data?.filter(c => c.status === 'completed').length || 0,
-      cancelled: data?.filter(c => c.status === 'cancelled').length || 0,
-      no_show: data?.filter(c => c.status === 'no_show').length || 0
-    };
-
-    return stats;
+    return await res.json();
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка получения статистики:', error);
     throw error;
   }
 };
 
 export const createConsultation = async (consultation: CreateConsultationData): Promise<Consultation> => {
   try {
-    const consultationData: any = {
-      consultant_id: consultation.consultant_id,
-      client_phone: consultation.client_phone,
-      client_name: consultation.client_name,
-      client_chat_id: consultation.client_chat_id || '',
-      date: consultation.date,
-      start_time: consultation.start_time,
-      end_time: consultation.end_time,
-      status: consultation.status || 'scheduled',
-      consultation_type: consultation.consultation_type || 'general',
-      notes: consultation.notes,
-      service_id: consultation.service_id || null,
-      actual_duration_minutes: consultation.actual_duration_minutes || null,
-      is_sale_closed: consultation.is_sale_closed || false
-    };
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({
+        consultant_id: consultation.consultant_id,
+        client_phone: consultation.client_phone,
+        client_name: consultation.client_name,
+        client_chat_id: consultation.client_chat_id || '',
+        date: consultation.date,
+        start_time: consultation.start_time,
+        end_time: consultation.end_time,
+        status: consultation.status || 'scheduled',
+        consultation_type: consultation.consultation_type || 'general',
+        notes: consultation.notes,
+        service_id: consultation.service_id || null,
+        actual_duration_minutes: consultation.actual_duration_minutes || null,
+        is_sale_closed: consultation.is_sale_closed || false,
+        slot_id: consultation.slot_id || undefined,
+      }),
+    });
 
-    // Добавляем slot_id только если он передан и не пустой
-    if (consultation.slot_id) {
-      consultationData.slot_id = consultation.slot_id;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка создания консультации:', err);
+      throw new Error(err.error || 'Failed to create consultation');
     }
 
-    const { data, error } = await supabase
-      .from('consultations')
-      .insert([consultationData])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Ошибка создания консультации:', error);
-      throw error;
-    }
-    
+    const data = await res.json();
     return {
       ...data,
       status: data.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     };
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка создания консультации:', error);
     throw error;
   }
 };
 
 export const updateConsultation = async (id: string, updates: Partial<Consultation>): Promise<Consultation> => {
   try {
-    const { data, error } = await supabase
-      .from('consultations')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify(updates),
+    });
 
-    if (error) {
-      console.error('Ошибка обновления консультации:', error);
-      throw error;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка обновления консультации:', err);
+      throw new Error(err.error || 'Failed to update consultation');
     }
-    
+
+    const data = await res.json();
     return {
       ...data,
       status: data.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     };
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка обновления консультации:', error);
     throw error;
   }
 };
 
 export const cancelConsultation = async (consultationId: string): Promise<boolean> => {
   try {
-    const { error } = await supabase
-      .from('consultations')
-      .update({ status: 'cancelled' })
-      .eq('id', consultationId);
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations/${consultationId}/cancel`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+    });
 
-    if (error) {
-      console.error('Ошибка отмены консультации:', error);
-      throw error;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка отмены консультации:', err);
+      throw new Error(err.error || 'Failed to cancel consultation');
     }
-    
+
     return true;
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка отмены консультации:', error);
     throw error;
   }
 };
@@ -224,20 +217,25 @@ export const getConsultantWithSchedule = async (consultantId: string): Promise<C
 
 export const createConsultant = async (data: CreateConsultantData): Promise<Consultant | null> => {
   try {
-    const { data: result, error } = await supabase
-      .from('consultants')
-      .insert([data])
-      .select()
-      .single();
+    const userId = getUserId();
+    const res = await fetch(`${API_BASE_URL}/consultations/consultants`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify(data),
+    });
 
-    if (error) {
-      console.error('Ошибка создания консультанта:', error);
-      throw error;
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка создания консультанта:', err);
+      throw new Error(err.error || 'Failed to create consultant');
     }
-    
-    return result;
+
+    return await res.json();
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка создания консультанта:', error);
     throw error;
   }
 };
@@ -253,7 +251,7 @@ export const createWorkingSchedule = async (data: CreateWorkingScheduleData): Pr
 };
 
 export const updateWorkingSchedule = async (
-  scheduleId: string, 
+  scheduleId: string,
   data: Partial<CreateWorkingScheduleData>
 ): Promise<boolean> => {
   // TODO: Реализовать когда понадобится
@@ -261,7 +259,7 @@ export const updateWorkingSchedule = async (
 };
 
 export const generateSlotsForDate = async (
-  consultantId: string, 
+  consultantId: string,
   date: string
 ): Promise<ConsultationSlot[]> => {
   // TODO: Реализовать когда понадобится
@@ -284,26 +282,30 @@ export const getConsultationsByDateRange = async (
   endDate: string
 ): Promise<Consultation[]> => {
   try {
-    const { data, error } = await supabase
-      .from('consultations')
-      .select('*')
-      .eq('consultant_id', consultantId)
-      .gte('date', startDate)
-      .lte('date', endDate)
-      .order('date', { ascending: true })
-      .order('start_time', { ascending: true });
+    const userId = getUserId();
+    const params = new URLSearchParams({
+      consultantId,
+      startDate,
+      endDate,
+    });
 
-    if (error) {
-      console.error('Ошибка получения консультаций по диапазону дат:', error);
-      throw error;
+    const res = await fetch(`${API_BASE_URL}/consultations/by-date-range?${params.toString()}`, {
+      headers: { 'x-user-id': userId },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error('Ошибка получения консультаций по диапазону дат:', err);
+      throw new Error(err.error || 'Failed to fetch consultations by date range');
     }
-    
-    return (data || []).map(item => ({
+
+    const data = await res.json();
+    return (data || []).map((item: any) => ({
       ...item,
       status: item.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
     }));
   } catch (error) {
-    console.error('Ошибка подключения к Supabase:', error);
+    console.error('Ошибка получения консультаций по диапазону дат:', error);
     throw error;
   }
-}; 
+};

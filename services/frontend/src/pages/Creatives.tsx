@@ -20,7 +20,6 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { creativesApi as creativesService } from "@/services/creativesApi";
 import { API_BASE_URL } from "@/config/api";
-import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";

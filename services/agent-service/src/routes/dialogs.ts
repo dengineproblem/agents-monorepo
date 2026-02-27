@@ -16,7 +16,7 @@ const AnalyzeDialogsSchema = z.object({
 });
 
 const GetAnalysisSchema = z.object({
-  userAccountId: z.string().uuid(),
+  userAccountId: z.string().uuid().optional(),  // optional: can come from x-user-id header
   accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   instanceName: z.string().optional(),
   interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
@@ -26,7 +26,7 @@ const GetAnalysisSchema = z.object({
 });
 
 const ExportCsvSchema = z.object({
-  userAccountId: z.string().uuid(),
+  userAccountId: z.string().uuid().optional(),  // optional: can come from x-user-id header
   accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   instanceName: z.string().optional(),
   interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
@@ -109,7 +109,12 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/analysis', async (request, reply) => {
     try {
       const query = GetAnalysisSchema.parse(request.query);
-      const { userAccountId, accountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
+      const userAccountId = (request.headers['x-user-id'] as string) || query.userAccountId;
+      const { accountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
+
+      if (!userAccountId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId query param' });
+      }
 
       let dbQuery = supabase
         .from('dialog_analysis')
@@ -188,11 +193,16 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/export-csv', async (request, reply) => {
     try {
       const query = ExportCsvSchema.parse(request.query);
-      const { userAccountId, accountId, instanceName, interestLevel } = query;
+      const userAccountId = (request.headers['x-user-id'] as string) || query.userAccountId;
+      const { accountId, instanceName, interestLevel } = query;
+
+      if (!userAccountId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId query param' });
+      }
 
       let dbQuery = supabase
         .from('dialog_analysis')
-        .select('contact_phone, contact_name, interest_level, score, business_type, funnel_stage, instagram_url, ad_budget, qualification_complete, is_owner, has_sales_dept, uses_ads_now, objection, next_message, incoming_count, outgoing_count, last_message')
+        .select('contact_phone, contact_name, interest_level, score, business_type, funnel_stage, instagram_url, ad_budget, qualification_complete, is_owner, has_sales_dept, uses_ads_now, objection, incoming_count, outgoing_count, last_message')
         .eq('user_account_id', userAccountId)
         .order('score', { ascending: false });
 
@@ -234,7 +244,6 @@ export async function dialogsRoutes(app: FastifyInstance) {
         'has_sales_dept',
         'uses_ads_now',
         'objection',
-        'next_message',
         'incoming_count',
         'outgoing_count',
         'last_message',
@@ -297,14 +306,16 @@ export async function dialogsRoutes(app: FastifyInstance) {
    */
   app.get('/dialogs/stats', async (request, reply) => {
     try {
-      const { userAccountId, accountId, instanceName } = request.query as {
+      const queryParams = request.query as {
         userAccountId?: string;
         accountId?: string;  // UUID для мультиаккаунтности
         instanceName?: string;
       };
+      const userAccountId = (request.headers['x-user-id'] as string) || queryParams.userAccountId;
+      const { accountId, instanceName } = queryParams;
 
       if (!userAccountId) {
-        return reply.status(400).send({ error: 'userAccountId is required' });
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId query param' });
       }
 
       let dbQuery = supabase
@@ -385,20 +396,25 @@ export async function dialogsRoutes(app: FastifyInstance) {
         businessType: z.string().optional(),
         isMedical: z.boolean().optional(),
         funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']),
-        userAccountId: z.string().uuid(),
+        userAccountId: z.string().uuid().optional(),
         accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
         instanceName: z.string().min(1),
         notes: z.string().optional(),
       });
 
       const body = CreateLeadSchema.parse(request.body);
+      const userAccountId = (request.headers['x-user-id'] as string) || body.userAccountId;
+
+      if (!userAccountId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId in body' });
+      }
 
       // Verify that instance belongs to user
       const { data: instance, error: instanceError } = await supabase
         .from('whatsapp_instances')
         .select('id')
         .eq('instance_name', body.instanceName)
-        .eq('user_account_id', body.userAccountId)
+        .eq('user_account_id', userAccountId)
         .maybeSingle();
 
       if (instanceError || !instance) {
@@ -415,15 +431,14 @@ export async function dialogsRoutes(app: FastifyInstance) {
           business_type: body.businessType || null,
           is_medical: body.isMedical || false,
           funnel_stage: body.funnelStage,
-          user_account_id: body.userAccountId,
+          user_account_id: userAccountId,
           account_id: body.accountId || null,  // UUID для мультиаккаунтности
           instance_name: body.instanceName,
           interest_level: 'cold',
           score: 5,
           incoming_count: 0,
           outgoing_count: 0,
-          next_message: '',
-          notes: body.notes || null,
+          manual_notes: body.notes || null,
           analyzed_at: new Date().toISOString(),
         })
         .select()
@@ -472,7 +487,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
       const { id } = request.params as { id: string };
       
       const UpdateLeadSchema = z.object({
-        userAccountId: z.string().uuid(),
+        userAccountId: z.string().uuid().optional(),
         accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
         contactName: z.string().optional(),
         businessType: z.string().optional(),
@@ -493,7 +508,12 @@ export async function dialogsRoutes(app: FastifyInstance) {
       });
 
       const body = UpdateLeadSchema.parse(request.body);
+      const userAccountId = (request.headers['x-user-id'] as string) || body.userAccountId;
       const { accountId } = body;
+
+      if (!userAccountId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId in body' });
+      }
 
       // Build update object
       const updateData: any = {
@@ -513,18 +533,17 @@ export async function dialogsRoutes(app: FastifyInstance) {
       if (body.funnelStage !== undefined) updateData.funnel_stage = body.funnelStage;
       if (body.interestLevel !== undefined) updateData.interest_level = body.interestLevel;
       if (body.objection !== undefined) updateData.objection = body.objection;
-      if (body.nextMessage !== undefined) updateData.next_message = body.nextMessage;
-      if (body.notes !== undefined) updateData.notes = body.notes;
+      if (body.notes !== undefined) updateData.manual_notes = body.notes;
       if (body.score !== undefined) updateData.score = body.score;
 
       let updateQuery = supabase
         .from('dialog_analysis')
         .update(updateData)
         .eq('id', id)
-        .eq('user_account_id', body.userAccountId);
+        .eq('user_account_id', userAccountId);
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
-      if (await shouldFilterByAccountId(supabase, body.userAccountId, accountId)) {
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         updateQuery = updateQuery.eq('account_id', accountId);
       }
 
@@ -577,13 +596,15 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.delete('/dialogs/analysis/:id', async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
-      const { userAccountId, accountId } = request.query as {
+      const queryParams = request.query as {
         userAccountId?: string;
         accountId?: string;  // UUID для мультиаккаунтности
       };
+      const userAccountId = (request.headers['x-user-id'] as string) || queryParams.userAccountId;
+      const { accountId } = queryParams;
 
       if (!userAccountId) {
-        return reply.status(400).send({ error: 'userAccountId is required' });
+        return reply.status(401).send({ error: 'Missing x-user-id header or userAccountId query param' });
       }
 
       let deleteQuery = supabase
@@ -621,6 +642,56 @@ export async function dialogsRoutes(app: FastifyInstance) {
 
       return reply.status(500).send({
         error: 'Delete failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/dialogs/instances
+   * Get WhatsApp instances for user
+   */
+  app.get('/dialogs/instances', async (request, reply) => {
+    try {
+      const userId = request.headers['x-user-id'] as string;
+      const { accountId } = request.query as { accountId?: string };
+
+      if (!userId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header' });
+      }
+
+      let dbQuery = supabase
+        .from('whatsapp_instances')
+        .select('id, instance_name')
+        .eq('user_account_id', userId)
+        .order('instance_name');
+
+      if (await shouldFilterByAccountId(supabase, userId, accountId)) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
+
+      const { data, error } = await dbQuery;
+
+      if (error) {
+        throw error;
+      }
+
+      return reply.send({ success: true, instances: data || [] });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to fetch instances');
+
+      logErrorToAdmin({
+        user_account_id: (request.headers['x-user-id'] as string) || '',
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_get_instances',
+        endpoint: '/dialogs/instances',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Failed to fetch instances',
         message: error.message
       });
     }

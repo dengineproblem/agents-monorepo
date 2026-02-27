@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Clock, User, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 
 interface TargetologAction {
   id: number;
@@ -41,20 +40,18 @@ const TargetologJournal: React.FC = () => {
           return;
         }
 
-        // Загружаем действия таргетолога для этого пользователя
-        const { data, error: fetchError } = await supabase
-          .from('targetolog_actions')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(50); // Последние 50 действий
+        // Загружаем действия таргетолога через backend API
+        const response = await fetch(`${API_BASE_URL}/targetolog-actions?limit=50`, {
+          headers: { 'x-user-id': String(user.id) },
+        });
 
-        if (fetchError) {
-          console.error('Ошибка загрузки действий таргетолога:', fetchError);
+        if (!response.ok) {
+          console.error('Ошибка загрузки действий таргетолога:', response.status);
           setError('Не удалось загрузить журнал действий');
           return;
         }
 
+        const data = await response.json();
         setActions(data || []);
       } catch (err) {
         console.error('Ошибка:', err);

@@ -1,4 +1,3 @@
-import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 import { userProfileApi } from '@/services/userProfileApi';
@@ -69,23 +68,22 @@ class SalesApiService {
   // accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
   async getAllPurchases(userAccountId: string, accountId?: string): Promise<{ data: any[]; error: any }> {
     try {
-      // Загружаем purchases
-      let purchasesQuery = (supabase as any)
-        .from('purchases')
-        .select('*')
-        .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false })
-        .limit(10000);
-
-      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      // Загружаем purchases через backend API
+      const purchaseParams = new URLSearchParams({ userAccountId, limit: '10000' });
       if (shouldFilterByAccountId(accountId)) {
-        purchasesQuery = purchasesQuery.eq('account_id', accountId);
+        purchaseParams.set('accountId', accountId!);
       }
+      const purchasesRes = await fetch(`${API_BASE_URL}/purchases?${purchaseParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!purchasesRes.ok) {
+        const errBody = await purchasesRes.json().catch(() => ({}));
+        return { data: [], error: errBody.error || purchasesRes.statusText };
+      }
+      const { purchases } = await purchasesRes.json();
 
-      const { data: purchases, error } = await purchasesQuery;
-
-      if (error || !purchases || purchases.length === 0) {
-        return { data: purchases || [], error };
+      if (!purchases || purchases.length === 0) {
+        return { data: purchases || [], error: null };
       }
 
       // Получаем уникальные телефоны для поиска связанных лидов
@@ -100,24 +98,30 @@ class SalesApiService {
         phoneCandidates.push(digits, `+${digits}`);
       }
 
-      // Загружаем лиды с creative_id — ищем по обеим колонкам (chat_id и phone)
-      const { data: leads } = await (supabase as any)
-        .from('leads')
-        .select('chat_id, phone, creative_id')
-        .eq('user_account_id', userAccountId)
-        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`)
-        .not('creative_id', 'is', null);
+      // Загружаем лиды с creative_id через backend API
+      const leadsParams = new URLSearchParams({ userAccountId });
+      const leadsRes = await fetch(`${API_BASE_URL}/leads?${leadsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      const leadsBody = leadsRes.ok ? await leadsRes.json() : { leads: [] };
+      // Фильтруем лиды на клиенте — по телефону и наличию creative_id
+      const chatIdSet = new Set(chatIdCandidates);
+      const phoneSet = new Set(phoneCandidates);
+      const leads = (leadsBody.leads || []).filter((l: any) =>
+        l.creative_id && (chatIdSet.has(l.chat_id) || phoneSet.has(l.phone))
+      );
 
       if (!leads || leads.length === 0) {
         return { data: purchases, error: null };
       }
 
-      // Получаем названия креативов
+      // Получаем названия креативов через backend API
       const creativeIds = [...new Set(leads.map((l: any) => l.creative_id))];
-      const { data: creatives } = await (supabase as any)
-        .from('user_creatives')
-        .select('id, title')
-        .in('id', creativeIds);
+      const creativesParams = new URLSearchParams({ userId: userAccountId, ids: creativeIds.join(',') });
+      const creativesRes = await fetch(`${API_BASE_URL}/user-creatives/by-ids?${creativesParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      const creatives = creativesRes.ok ? await creativesRes.json() : [];
 
       // Создаём map: нормализованный телефон -> creative_id
       const phoneToCreativeId = new Map<string, string>();
@@ -178,13 +182,17 @@ class SalesApiService {
   // Обновление продажи
   async updatePurchase(id: string, updateData: Partial<{ client_phone: string; amount: number; campaign_name: string }>): Promise<any> {
     try {
-      const { data, error } = await (supabase as any)
-        .from('purchases')
-        .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
-      return { data, error };
+      const res = await fetch(`${API_BASE_URL}/purchases/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        return { data: null, error: errBody.error || res.statusText };
+      }
+      const data = await res.json();
+      return { data, error: null };
     } catch (error) {
       return { data: null, error };
     }
@@ -348,42 +356,35 @@ class SalesApiService {
       // Курс доллара к тенге
       const usdToKztRate = 530;
 
-      // ШАГ 1: Загружаем user_creatives для пользователя с фильтрами
-      let creativesQuery = (supabase as any)
-        .from('user_creatives')
-        .select('id, title, created_at, media_type, image_url, thumbnail_url, carousel_data, generated_creative_id, fb_video_id, direction_id')
-        .eq('user_id', userAccountId)
-        .eq('status', 'ready')
-        .order('created_at', { ascending: false })
-        .limit(10000);
-
-      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      // ШАГ 1: Загружаем user_creatives через backend API
+      const creativesParams = new URLSearchParams({ userId: userAccountId, status: 'ready' });
       if (shouldFilterByAccountId(accountId)) {
-        creativesQuery = creativesQuery.eq('account_id', accountId);
+        creativesParams.set('accountId', accountId!);
       }
+      const creativesRes = await fetch(`${API_BASE_URL}/user-creatives?${creativesParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!creativesRes.ok) {
+        const errBody = await creativesRes.json().catch(() => ({}));
+        throw new Error(errBody.error || 'Failed to fetch creatives');
+      }
+      let creatives: any[] = await creativesRes.json();
 
-      // Фильтр по платформе
+      // Фильтр по платформе (на клиенте)
       if (effectivePlatform === 'tiktok') {
-        creativesQuery = creativesQuery.not('tiktok_video_id', 'is', null);
+        creatives = creatives.filter((c: any) => c.tiktok_video_id != null);
       } else {
-        creativesQuery = creativesQuery.is('tiktok_video_id', null);
+        creatives = creatives.filter((c: any) => c.tiktok_video_id == null);
       }
 
       // Фильтрация по направлению
       if (directionId) {
-        creativesQuery = creativesQuery.eq('direction_id', directionId);
+        creatives = creatives.filter((c: any) => c.direction_id === directionId);
       }
 
       // Фильтрация по типу медиа
       if (mediaType) {
-        creativesQuery = creativesQuery.eq('media_type', mediaType);
-      }
-
-      const { data: creatives, error: creativesError } = await creativesQuery;
-
-      if (creativesError) {
-        console.error('Ошибка загрузки креативов:', creativesError);
-        throw creativesError;
+        creatives = creatives.filter((c: any) => c.media_type === mediaType);
       }
 
       console.log('📊 Загружено креативов:', creatives?.length || 0);
@@ -407,10 +408,11 @@ class SalesApiService {
 
       if (carouselsWithGenId.length > 0) {
         const generatedIds = carouselsWithGenId.map((c: any) => c.generated_creative_id);
-        const { data: generatedData } = await (supabase as any)
-          .from('generated_creatives')
-          .select('id, carousel_data')
-          .in('id', generatedIds);
+        const genParams = new URLSearchParams({ generatedIds: generatedIds.join(',') });
+        const genRes = await fetch(`${API_BASE_URL}/user-creatives/generated-bulk?${genParams}`, {
+          headers: { 'x-user-id': userAccountId }
+        });
+        const generatedData = genRes.ok ? await genRes.json() : null;
 
         if (generatedData) {
           const generatedMap = new Map(generatedData.map((g: any) => [g.id, g.carousel_data]));
@@ -425,20 +427,21 @@ class SalesApiService {
 
       const creativeIds = creatives.map((c: any) => c.id);
 
-      // ШАГ 2: Загружаем метрики из creative_metrics_history для всех креативов
+      // ШАГ 2: Загружаем метрики из creative_metrics_history через backend API
       const metricsSource = effectivePlatform === 'tiktok' ? 'tiktok_batch' : 'production';
-      let metricsQuery = (supabase as any)
-        .from('creative_metrics_history')
-        .select('user_creative_id, impressions, reach, clicks, leads, spend, date')
-        .in('user_creative_id', creativeIds)
-        .eq('user_account_id', userAccountId)
-        .eq('source', metricsSource);
-
+      const metricsParams = new URLSearchParams({
+        userId: userAccountId,
+        userCreativeIds: creativeIds.join(','),
+        source: metricsSource,
+      });
       if (since) {
-        metricsQuery = metricsQuery.gte('date', since);
+        metricsParams.set('dateFrom', since);
       }
-
-      const { data: metricsHistory, error: metricsError } = await metricsQuery;
+      const metricsRes = await fetch(`${API_BASE_URL}/user-creatives/metrics?${metricsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      const metricsHistory = metricsRes.ok ? await metricsRes.json() : null;
+      const metricsError = metricsRes.ok ? null : 'Failed to fetch metrics';
 
       if (metricsError) {
         console.error('Ошибка загрузки метрик:', metricsError);
@@ -463,45 +466,26 @@ class SalesApiService {
       }
 
       // ШАГ 3: Загружаем лиды для расчёта выручки (связь с purchases)
-      let leadsQuery = (supabase as any)
-        .from('leads')
-        .select('id, chat_id, phone, creative_id, direction_id, is_qualified')
-        .eq('user_account_id', userAccountId)
-        .in('creative_id', creativeIds);
-
-      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      const leadsParams = new URLSearchParams({ userAccountId });
       if (shouldFilterByAccountId(accountId)) {
-        // Проверяем что account_id принадлежит userAccountId (security check)
-        // Verify account ownership via backend API
-        const ownershipResp = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${accountId}`).catch(() => null);
-        const accountOwnership = ownershipResp?.ok ? await ownershipResp.json() : null;
-
-        if (!accountOwnership) {
-          console.error('Account ownership check failed in getROIData:', {
-            accountId,
-            userAccountId,
-            error: ownershipError
-          });
-          // НЕ применяем фильтр по account_id если проверка failed
-          // Возвращаем пустой результат для безопасности
-          return [];
-        }
-
-        leadsQuery = leadsQuery.eq('account_id', accountId);
+        leadsParams.set('accountId', accountId!);
       }
-
-      if (directionId) {
-        leadsQuery = leadsQuery.eq('direction_id', directionId);
-      }
-
-      if (since) {
-        leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
-      }
-
-      const { data: leadsData, error: leadsError } = await leadsQuery;
-
-      if (leadsError) {
-        console.error('Ошибка загрузки лидов:', leadsError);
+      const leadsRes = await fetch(`${API_BASE_URL}/leads?${leadsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      let leadsData: any[] | null = null;
+      if (leadsRes.ok) {
+        const leadsBody = await leadsRes.json();
+        // Фильтруем на клиенте: только лиды с creative_id из наших креативов
+        const creativeIdSet = new Set(creativeIds);
+        leadsData = (leadsBody.leads || []).filter((l: any) => {
+          if (!l.creative_id || !creativeIdSet.has(l.creative_id)) return false;
+          if (directionId && l.direction_id !== directionId) return false;
+          if (since && l.created_at < since + 'T00:00:00.000Z') return false;
+          return true;
+        });
+      } else {
+        console.error('Ошибка загрузки лидов:', leadsRes.statusText);
       }
 
       console.log('📊 Загружено лидов для выручки:', leadsData?.length || 0);
@@ -515,30 +499,26 @@ class SalesApiService {
       }
       const leadPhones = [...leadPhoneDigits];
 
-      let purchasesQuery = (supabase as any)
-        .from('purchases')
-        .select('id, client_phone, amount, created_at')
-        .eq('user_account_id', userAccountId);
-
-      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      const purchasesParams = new URLSearchParams({ userAccountId });
       if (shouldFilterByAccountId(accountId)) {
-        purchasesQuery = purchasesQuery.eq('account_id', accountId);
+        purchasesParams.set('accountId', accountId!);
       }
-
-      if (leadPhones.length > 0) {
-        purchasesQuery = purchasesQuery.in('client_phone', leadPhones);
+      const purchasesRes = await fetch(`${API_BASE_URL}/purchases?${purchasesParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      let purchasesData: any[] | null = null;
+      if (purchasesRes.ok) {
+        const purchasesBody = await purchasesRes.json();
+        const leadPhoneSet = new Set(leadPhones);
+        // Фильтруем на клиенте по телефонам и дате
+        purchasesData = (purchasesBody.purchases || []).filter((p: any) => {
+          if (leadPhones.length > 0 && !leadPhoneSet.has(p.client_phone)) return false;
+          if (leadPhones.length === 0) return false; // нет лидов — нет продаж
+          if (since && p.created_at < since + 'T00:00:00.000Z') return false;
+          return true;
+        });
       } else {
-        purchasesQuery = purchasesQuery.in('client_phone', ['__no_match__']);
-      }
-
-      if (since) {
-        purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
-      }
-
-      const { data: purchasesData, error: purchasesError } = await purchasesQuery;
-
-      if (purchasesError) {
-        console.error('Ошибка загрузки продаж:', purchasesError);
+        console.error('Ошибка загрузки продаж:', purchasesRes.statusText);
       }
 
       console.log('📊 Загружено продаж:', purchasesData?.length || 0);
@@ -570,25 +550,25 @@ class SalesApiService {
         }
       }
 
-      // Загружаем CAPI события
-      let capiQuery = (supabase as any)
-        .from('capi_events_log')
-        .select('lead_id, contact_phone, event_level, capi_status')
-        .eq('user_account_id', userAccountId)
-        .eq('capi_status', 'success'); // Только успешные события
-
-      if (directionId) {
-        capiQuery = capiQuery.eq('direction_id', directionId);
-      }
-
-      if (since) {
-        capiQuery = capiQuery.gte('created_at', since + 'T00:00:00.000Z');
-      }
-
-      const { data: capiEventsData, error: capiError } = await capiQuery;
-
-      if (capiError) {
-        console.error('Ошибка загрузки CAPI событий:', capiError);
+      // Загружаем CAPI события через backend API
+      const leadIds = (leadsData || []).map((l: any) => l.id).filter(Boolean);
+      let capiEventsData: any[] | null = null;
+      if (leadIds.length > 0) {
+        const capiParams = new URLSearchParams({ userAccountId, leadIds: leadIds.join(',') });
+        const capiRes = await fetch(`${API_BASE_URL}/capi-events?${capiParams}`, {
+          headers: { 'x-user-id': userAccountId }
+        });
+        if (capiRes.ok) {
+          const capiBody = await capiRes.json();
+          // Фильтруем на клиенте по direction_id и since
+          capiEventsData = (capiBody.events || []).filter((e: any) => {
+            if (directionId && e.direction_id !== directionId) return false;
+            if (since && e.created_at < since + 'T00:00:00.000Z') return false;
+            return true;
+          });
+        } else {
+          console.error('Ошибка загрузки CAPI событий:', capiRes.statusText);
+        }
       }
 
       console.log('📊 Загружено CAPI событий:', capiEventsData?.length || 0);
@@ -758,17 +738,18 @@ class SalesApiService {
     try {
       console.log('🔄 Загружаем существующие кампании для user_account_id:', userAccountId);
 
-      // Получаем уникальные source_id из таблицы leads
-      const { data: campaignsData, error: campaignsError } = await (supabase as any)
-        .from('leads')
-        .select('source_id, creative_url')
-        .eq('user_account_id', userAccountId)
-        .not('source_id', 'is', null);
-
-      if (campaignsError) {
-        console.error('❌ Ошибка загрузки кампаний:', campaignsError);
-        throw campaignsError;
+      // Получаем уникальные source_id из таблицы leads через backend API
+      const campLeadsParams = new URLSearchParams({ userAccountId });
+      const campLeadsRes = await fetch(`${API_BASE_URL}/leads?${campLeadsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!campLeadsRes.ok) {
+        const errBody = await campLeadsRes.json().catch(() => ({}));
+        throw new Error(errBody.error || campLeadsRes.statusText);
       }
+      const campLeadsBody = await campLeadsRes.json();
+      // Фильтруем: нужны только лиды с source_id
+      const campaignsData = (campLeadsBody.leads || []).filter((l: any) => l.source_id != null);
 
       // Убираем дубликаты и создаем список кампаний
       const uniqueCampaigns = new Map<string, {id: string, name: string, creative_url?: string}>();
@@ -854,47 +835,54 @@ class SalesApiService {
     try {
       console.log('🔄 Обновляем sale_amount в лиде...');
 
-      // Считаем общую сумму всех продаж клиента
-      const { data: totalSales, error: sumError } = await (supabase as any)
-        .from('purchases')
-        .select('amount')
-        .eq('client_phone', clientPhone)
-        .eq('user_account_id', userAccountId);
-
-      if (sumError) {
-        console.error('❌ Ошибка подсчета суммы продаж:', sumError);
+      // Считаем общую сумму всех продаж клиента через backend API
+      const saleSumParams = new URLSearchParams({ userAccountId });
+      const saleSumRes = await fetch(`${API_BASE_URL}/purchases?${saleSumParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!saleSumRes.ok) {
+        console.error('❌ Ошибка подсчета суммы продаж:', saleSumRes.statusText);
         return;
       }
+      const saleSumBody = await saleSumRes.json();
+      const totalSales = (saleSumBody.purchases || []).filter((p: any) => p.client_phone === clientPhone);
 
-      const totalAmount = totalSales?.reduce((sum, sale) => sum + Number(sale.amount), 0) || 0;
+      const totalAmount = totalSales.reduce((sum: number, sale: any) => sum + Number(sale.amount), 0) || 0;
       console.log('💰 Общая сумма продаж клиента:', totalAmount);
 
       // Лиды хранят телефон в chat_id (WhatsApp) или phone (сайт)
       const digits = clientPhone.replace(/\D/g, '');
-      const chatIdCandidates = [
-        digits,
-        `${digits}@s.whatsapp.net`,
-        `${digits}@c.us`,
-      ];
-      const phoneCandidates = [
-        digits,
-        `+${digits}`,
-      ];
 
-      // Обновляем sale_amount в лиде (ищем по обеим колонкам)
-      const { error: updateError } = await (supabase as any)
-        .from('leads')
-        .update({
-          sale_amount: totalAmount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_account_id', userAccountId)
-        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`);
+      // Находим лиды по телефону, чтобы получить их ID для обновления
+      const saleLeadsParams = new URLSearchParams({ userAccountId });
+      const saleLeadsRes = await fetch(`${API_BASE_URL}/leads?${saleLeadsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!saleLeadsRes.ok) {
+        console.error('❌ Ошибка загрузки лидов для обновления sale_amount:', saleLeadsRes.statusText);
+        return;
+      }
+      const saleLeadsBody = await saleLeadsRes.json();
+      const chatIdCandidates = new Set([digits, `${digits}@s.whatsapp.net`, `${digits}@c.us`]);
+      const phoneCandidates = new Set([digits, `+${digits}`]);
+      const matchingLeads = (saleLeadsBody.leads || []).filter((l: any) =>
+        chatIdCandidates.has(l.chat_id) || phoneCandidates.has(l.phone)
+      );
 
-      if (updateError) {
-        console.error('❌ Ошибка обновления sale_amount в лиде:', updateError);
-      } else {
-        console.log('✅ sale_amount обновлен в лиде:', totalAmount);
+      // Обновляем sale_amount в каждом найденном лиде через PATCH
+      for (const lead of matchingLeads) {
+        const updateRes = await fetch(`${API_BASE_URL}/leads/${lead.id}?userAccountId=${userAccountId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+          body: JSON.stringify({ sale_amount: totalAmount })
+        });
+        if (!updateRes.ok) {
+          console.error('❌ Ошибка обновления sale_amount в лиде:', lead.id, updateRes.statusText);
+        }
+      }
+
+      if (matchingLeads.length > 0) {
+        console.log('✅ sale_amount обновлен в лидах:', totalAmount, 'count:', matchingLeads.length);
       }
       
     } catch (error) {
@@ -906,16 +894,17 @@ class SalesApiService {
   // Агрегирует метрики всех ads креатива через ad_creative_mapping
   async getCreativeMetrics(creativeId: string, userAccountId: string, limit: number = 30, platform?: 'instagram' | 'tiktok'): Promise<{ data: any[]; error: any }> {
     try {
-      // Шаг 1: Получить все ad_id для этого креатива через ad_creative_mapping
-      const { data: mappings, error: mappingError } = await (supabase as any)
-        .from('ad_creative_mapping')
-        .select('ad_id')
-        .eq('user_creative_id', creativeId);
-
-      if (mappingError) {
-        console.error('Ошибка загрузки ad_creative_mapping:', mappingError);
-        return { data: [], error: mappingError };
+      // Шаг 1: Получить все ad_id для этого креатива через ad_creative_mapping (backend API)
+      const mappingParams = new URLSearchParams({ userAccountId, userCreativeIds: creativeId });
+      const mappingRes = await fetch(`${API_BASE_URL}/ad-creative-mapping?${mappingParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!mappingRes.ok) {
+        const errBody = await mappingRes.json().catch(() => ({}));
+        console.error('Ошибка загрузки ad_creative_mapping:', errBody);
+        return { data: [], error: errBody.error || mappingRes.statusText };
       }
+      const { mappings } = await mappingRes.json();
 
       if (!mappings || mappings.length === 0) {
         console.log('Нет ad mappings для креатива:', creativeId);
@@ -929,19 +918,23 @@ class SalesApiService {
       dateCutoff.setDate(dateCutoff.getDate() - limit);
 
       const creativeMetricsSource = platform === 'tiktok' ? 'tiktok_batch' : 'production';
-      const { data, error } = await (supabase as any)
-        .from('creative_metrics_history')
-        .select('*')
-        .in('ad_id', adIds)
-        .eq('user_account_id', userAccountId)
-        .eq('source', creativeMetricsSource)
-        .gte('date', dateCutoff.toISOString().split('T')[0])
-        .order('date', { ascending: false });
-
-      if (error) {
-        console.error('Ошибка загрузки метрик из creative_metrics_history:', error);
-        return { data: [], error };
+      const metricsParams = new URLSearchParams({
+        userId: userAccountId,
+        adIds: adIds.join(','),
+        source: creativeMetricsSource,
+        dateFrom: dateCutoff.toISOString().split('T')[0],
+      });
+      const metricsRes = await fetch(`${API_BASE_URL}/user-creatives/metrics?${metricsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!metricsRes.ok) {
+        const errBody = await metricsRes.json().catch(() => ({}));
+        console.error('Ошибка загрузки метрик из creative_metrics_history:', errBody);
+        return { data: [], error: errBody.error || metricsRes.statusText };
       }
+      const data = await metricsRes.json();
+      // Sort by date descending (server returns unsorted)
+      data.sort((a: any, b: any) => b.date?.localeCompare(a.date));
 
       // Шаг 3: Агрегировать метрики по дням
       const aggregated = this.aggregateMetricsByDate(data || []);
@@ -1033,16 +1026,18 @@ class SalesApiService {
   // Получение последнего анализа креатива из creative_analysis
   async getCreativeAnalysis(creativeId: string, userAccountId: string): Promise<{ data: any | null; error: any }> {
     try {
-      const { data, error } = await (supabase as any)
-        .from('creative_analysis')
-        .select('*')
-        .eq('creative_id', creativeId)
-        .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      return { data: data || null, error };
+      const analysisParams = new URLSearchParams({ userAccountId, creativeIds: creativeId });
+      const res = await fetch(`${API_BASE_URL}/creative-analysis-results?${analysisParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        return { data: null, error: errBody.error || res.statusText };
+      }
+      const { results } = await res.json();
+      // Берём последний результат (backend возвращает массив)
+      const data = results && results.length > 0 ? results[0] : null;
+      return { data, error: null };
     } catch (error) {
       console.error('Ошибка загрузки анализа креатива:', error);
       return { data: null, error };
@@ -1082,16 +1077,27 @@ class SalesApiService {
         `+${digits}`,
       ];
 
-      // Ищем по обеим колонкам: chat_id (WhatsApp лиды) и phone (сайтовые лиды)
-      const { data: existingLeads, error: leadCheckError } = await (supabase as any)
-        .from('leads')
-        .select('id, source_id, creative_url, direction_id, user_account_id, creative_id')
-        .eq('user_account_id', saleData.user_account_id)
-        .or(`chat_id.in.(${chatIdCandidates.join(',')}),phone.in.(${phoneCandidates.join(',')})`)
-        .order('updated_at', { ascending: false })
-        .limit(1);
+      // Ищем лида через backend API
+      const addSaleLeadsParams = new URLSearchParams({ userAccountId: saleData.user_account_id });
+      const addSaleLeadsRes = await fetch(`${API_BASE_URL}/leads?${addSaleLeadsParams}`, {
+        headers: { 'x-user-id': saleData.user_account_id }
+      });
 
-      const existingLead = existingLeads?.[0] || null;
+      let existingLead: any = null;
+      let leadCheckError: any = null;
+
+      if (!addSaleLeadsRes.ok) {
+        leadCheckError = await addSaleLeadsRes.json().catch(() => ({ error: addSaleLeadsRes.statusText }));
+      } else {
+        const addSaleLeadsBody = await addSaleLeadsRes.json();
+        const chatIdSet = new Set(chatIdCandidates);
+        const phoneSet = new Set(phoneCandidates);
+        // Фильтруем на клиенте по телефону, берём первый (самый свежий)
+        const matchingLeads = (addSaleLeadsBody.leads || []).filter((l: any) =>
+          chatIdSet.has(l.chat_id) || phoneSet.has(l.phone)
+        );
+        existingLead = matchingLeads[0] || null;
+      }
 
       console.log('🔍 Поиск лида по user_account_id:', saleData.user_account_id);
       console.log('🔍 chat_id candidates:', chatIdCandidates, 'phone candidates:', phoneCandidates);
@@ -1126,21 +1132,23 @@ class SalesApiService {
         
         console.log('🔍 Данные для вставки лида:', leadInsertData);
         
-        const { data: newLead, error: leadError } = await (supabase as any)
-          .from('leads')
-          .insert(leadInsertData)
-          .select()
-          .single();
+        const leadCreateRes = await fetch(`${API_BASE_URL}/leads`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+          body: JSON.stringify(leadInsertData)
+        });
 
-        if (leadError) {
-          console.error('❌ Ошибка создания лида:', leadError);
-          throw leadError;
+        if (!leadCreateRes.ok) {
+          const leadErrBody = await leadCreateRes.json().catch(() => ({}));
+          console.error('❌ Ошибка создания лида:', leadErrBody);
+          throw new Error(leadErrBody.error || leadCreateRes.statusText);
         }
 
+        const newLead = await leadCreateRes.json();
         console.log('✅ Лид создан:', newLead);
       }
 
-      // Добавляем продажу в таблицу purchases
+      // Добавляем продажу в таблицу purchases через backend API
       const purchaseInsertData = {
         user_account_id: saleData.user_account_id,
         account_id: saleData.account_id || null, // UUID для мультиаккаунтности
@@ -1150,17 +1158,19 @@ class SalesApiService {
 
       console.log('🔍 Данные для вставки продажи:', purchaseInsertData);
 
-      const { data: purchaseData, error: purchaseError } = await (supabase as any)
-        .from('purchases')
-        .insert(purchaseInsertData)
-        .select()
-        .single();
+      const purchaseCreateRes = await fetch(`${API_BASE_URL}/purchases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        body: JSON.stringify(purchaseInsertData)
+      });
 
-      if (purchaseError) {
-        console.error('❌ Ошибка добавления продажи:', purchaseError);
-        throw purchaseError;
+      if (!purchaseCreateRes.ok) {
+        const purchaseErrBody = await purchaseCreateRes.json().catch(() => ({}));
+        console.error('❌ Ошибка добавления продажи:', purchaseErrBody);
+        throw new Error(purchaseErrBody.error || purchaseCreateRes.statusText);
       }
 
+      const purchaseData = await purchaseCreateRes.json();
       console.log('✅ Продажа успешно добавлена:', purchaseData);
 
       // Обновляем sale_amount в соответствующем лиде
@@ -1202,20 +1212,22 @@ class SalesApiService {
 
       console.log('📝 Создаём лид:', leadInsertData);
 
-      const { data: newLead, error: leadError } = await (supabase as any)
-        .from('leads')
-        .insert(leadInsertData)
-        .select()
-        .single();
+      const leadCreateRes2 = await fetch(`${API_BASE_URL}/leads`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        body: JSON.stringify(leadInsertData)
+      });
 
-      if (leadError) {
-        console.error('❌ Ошибка создания лида:', leadError);
-        throw leadError;
+      if (!leadCreateRes2.ok) {
+        const leadErrBody = await leadCreateRes2.json().catch(() => ({}));
+        console.error('❌ Ошибка создания лида:', leadErrBody);
+        throw new Error(leadErrBody.error || leadCreateRes2.statusText);
       }
 
+      const newLead = await leadCreateRes2.json();
       console.log('✅ Лид создан:', newLead);
 
-      // Добавляем продажу
+      // Добавляем продажу через backend API
       const purchaseInsertData = {
         user_account_id: saleData.user_account_id,
         account_id: saleData.account_id || null, // UUID для мультиаккаунтности
@@ -1223,17 +1235,19 @@ class SalesApiService {
         amount: saleData.amount
       };
 
-      const { data: purchaseData, error: purchaseError } = await (supabase as any)
-        .from('purchases')
-        .insert(purchaseInsertData)
-        .select()
-        .single();
+      const purchaseCreateRes2 = await fetch(`${API_BASE_URL}/purchases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        body: JSON.stringify(purchaseInsertData)
+      });
 
-      if (purchaseError) {
-        console.error('❌ Ошибка добавления продажи:', purchaseError);
-        throw purchaseError;
+      if (!purchaseCreateRes2.ok) {
+        const purchaseErrBody = await purchaseCreateRes2.json().catch(() => ({}));
+        console.error('❌ Ошибка добавления продажи:', purchaseErrBody);
+        throw new Error(purchaseErrBody.error || purchaseCreateRes2.statusText);
       }
 
+      const purchaseData = await purchaseCreateRes2.json();
       console.log('✅ Продажа добавлена:', purchaseData);
 
       // Обновляем sale_amount в лиде
@@ -1254,53 +1268,24 @@ class SalesApiService {
     accountId?: string
   ): Promise<{ data: any[]; error: any }> {
     try {
-      // Шаг 1: Получаем лиды
-      let query = (supabase as any)
-        .from('leads')
-        .select(`
-          id,
-          chat_id,
-          phone,
-          creative_id,
-          direction_id,
-          needs_manual_match,
-          sale_amount,
-          created_at
-        `)
-        .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false })
-        .limit(10000);
-
-      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      // Шаг 1: Получаем лиды через backend API
+      const roiLeadsParams = new URLSearchParams({ userAccountId, limit: '10000' });
       if (shouldFilterByAccountId(accountId)) {
-        // Проверяем что account_id принадлежит userAccountId (security check)
-        // Verify account ownership via backend API
-        const ownershipResp = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${accountId}`).catch(() => null);
-        const accountOwnership = ownershipResp?.ok ? await ownershipResp.json() : null;
-
-        if (!accountOwnership) {
-          console.error('Account ownership check failed:', {
-            accountId,
-            userAccountId,
-            error: ownershipError
-          });
-          // НЕ применяем фильтр по account_id если проверка failed
-          // Возвращаем пустой результат для безопасности
-          return { data: [], error: null };
-        }
-
-        query = query.eq('account_id', accountId);
+        roiLeadsParams.set('accountId', accountId!);
       }
-
+      const roiLeadsRes = await fetch(`${API_BASE_URL}/leads?${roiLeadsParams}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!roiLeadsRes.ok) {
+        const errBody = await roiLeadsRes.json().catch(() => ({}));
+        console.error('Ошибка загрузки лидов:', errBody);
+        return { data: [], error: errBody.error || roiLeadsRes.statusText };
+      }
+      const roiLeadsBody = await roiLeadsRes.json();
+      // Фильтруем по direction_id на клиенте
+      let leads = roiLeadsBody.leads || [];
       if (directionId) {
-        query = query.eq('direction_id', directionId);
-      }
-
-      const { data: leads, error } = await query;
-
-      if (error) {
-        console.error('Ошибка загрузки лидов:', error);
-        return { data: [], error };
+        leads = leads.filter((l: any) => l.direction_id === directionId);
       }
 
       if (!leads || leads.length === 0) {
@@ -1320,13 +1305,14 @@ class SalesApiService {
         }
       });
 
-      // Шаг 3: Загружаем креативы
+      // Шаг 3: Загружаем креативы через backend API
       const creativesMap: Record<string, string> = {};
       if (creativeIdsArray.length > 0) {
-        const { data: creatives } = await (supabase as any)
-          .from('user_creatives')
-          .select('id, title')
-          .in('id', creativeIdsArray);
+        const crParams = new URLSearchParams({ userId: userAccountId, ids: creativeIdsArray.join(',') });
+        const crRes = await fetch(`${API_BASE_URL}/user-creatives/by-ids?${crParams}`, {
+          headers: { 'x-user-id': userAccountId }
+        });
+        const creatives = crRes.ok ? await crRes.json() : [];
 
         if (creatives) {
           creatives.forEach((c: any) => {
@@ -1382,36 +1368,43 @@ class SalesApiService {
     directionId: string | null
   ): Promise<{ data: any[]; error: any }> {
     try {
-      let query = (supabase as any)
-        .from('user_creatives')
-        .select(`
-          id,
-          title,
-          media_type,
-          direction_id,
-          account_directions!left(name)
-        `)
-        .eq('user_id', userAccountId)
-        .order('created_at', { ascending: false });
+      // Загружаем креативы через backend API
+      const creativesRes = await fetch(`${API_BASE_URL}/user-creatives?${new URLSearchParams({ userId: userAccountId })}`, {
+        headers: { 'x-user-id': userAccountId }
+      });
+      if (!creativesRes.ok) {
+        const errBody = await creativesRes.json().catch(() => ({}));
+        return { data: [], error: errBody.error || creativesRes.statusText };
+      }
+      let creatives: any[] = await creativesRes.json();
 
-      // Если указано направление, фильтруем по нему
+      // Фильтруем по направлению на клиенте
       if (directionId) {
-        query = query.eq('direction_id', directionId);
+        creatives = creatives.filter((c: any) => c.direction_id === directionId);
       }
 
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('Ошибка загрузки креативов:', error);
-        return { data: [], error };
+      // Загружаем направления для маппинга имён
+      let directionsMap: Record<string, string> = {};
+      try {
+        const dirRes = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`, {
+          headers: { 'x-user-id': userAccountId }
+        });
+        if (dirRes.ok) {
+          const dirData = await dirRes.json();
+          if (dirData.success && dirData.directions) {
+            dirData.directions.forEach((d: any) => { directionsMap[d.id] = d.name; });
+          }
+        }
+      } catch (e) {
+        console.error('Ошибка загрузки направлений:', e);
       }
 
       // Трансформируем данные
-      const transformedData = (data || []).map((creative: any) => ({
+      const transformedData = creatives.map((creative: any) => ({
         id: creative.id,
         title: creative.title || `Креатив ${creative.id.substring(0, 8)}`,
         media_type: creative.media_type || 'video',
-        direction_name: creative.account_directions?.name || null
+        direction_name: creative.direction_id ? directionsMap[creative.direction_id] || null : null
       }));
 
       return { data: transformedData, error: null };
@@ -1427,22 +1420,22 @@ class SalesApiService {
     creativeId: string
   ): Promise<{ data: any; error: any }> {
     try {
-      const { data, error } = await (supabase as any)
-        .from('leads')
-        .update({
+      const res = await fetch(`${API_BASE_URL}/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           creative_id: creativeId,
-          needs_manual_match: false,
-          updated_at: new Date().toISOString()
+          needs_manual_match: false
         })
-        .eq('id', leadId)
-        .select()
-        .single();
+      });
 
-      if (error) {
-        console.error('Ошибка привязки креатива:', error);
-        return { data: null, error };
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        console.error('Ошибка привязки креатива:', errBody);
+        return { data: null, error: errBody.error || res.statusText };
       }
 
+      const data = await res.json();
       console.log('✅ Креатив привязан к лиду:', data);
       return { data, error: null };
     } catch (error) {

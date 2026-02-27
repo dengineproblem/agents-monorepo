@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Upload, Video, ChevronDown, DollarSign, Rocket, Loader2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
-import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 import { userProfileApi } from '@/services/userProfileApi';
 import { salesApi } from '@/services/salesApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -1193,17 +1193,16 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       console.log('🔍 Загружаем креативы для user_account_id:', userAccountId);
 
       if (userAccountId) {
-        // Загружаем креативы из user_creatives (колонка называется user_id)
-        const { data: creatives, error } = await (supabase as any)
-          .from('user_creatives')
-          .select('id, title, image_url, direction_id')
-          .eq('user_id', userAccountId)
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false });
+        // Загружаем креативы через backend API
+        const params = new URLSearchParams({ userId: userAccountId, status: 'ready' });
+        const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
+          headers: { 'x-user-id': userAccountId }
+        });
 
-        console.log('🔍 Результат загрузки креативов:', { creatives, error, count: creatives?.length });
+        if (!res.ok) throw new Error('Failed to fetch creatives');
+        const creatives = await res.json();
+        console.log('🔍 Результат загрузки креативов:', { count: creatives?.length });
 
-        if (error) throw error;
         setExistingCreatives(creatives || []);
       } else {
         console.error('❌ user_account_id не найден!');

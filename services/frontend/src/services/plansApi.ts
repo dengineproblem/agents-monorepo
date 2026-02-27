@@ -1,5 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
+import { API_BASE_URL } from '@/config/api';
 
 // Типы для работы с планами
 export interface UserDirection {
@@ -38,43 +37,26 @@ export interface DirectionPlanInput {
  */
 export async function getUserDirectionsWithPlans(userId: string): Promise<DirectionWithPlans[]> {
   try {
-    // Получаем направления пользователя
-    const { data: directions, error: directionsError } = await supabase
-      .from('user_directions')
-      .select('*')
-      .eq('user_id', userId);
+    const params = new URLSearchParams({ userId });
+    const res = await fetch(`${API_BASE_URL}/user-plans/directions?${params}`, {
+      headers: { 'x-user-id': userId },
+    });
 
-    if (directionsError) {
-      console.error('Ошибка при получении направлений:', directionsError);
-      throw new Error(`Не удалось загрузить направления: ${directionsError.message}`);
-    }
+    if (!res.ok) throw new Error('Failed to fetch directions');
+
+    const { directions, metrics } = await res.json();
 
     if (!directions || directions.length === 0) return [];
 
-    // Получаем ID всех направлений
-    const directionIds = directions.map(d => d.id);
-
-    // Получаем метрики для этих направлений
-    const { data: metrics, error: metricsError } = await supabase
-      .from('planned_metrics')
-      .select('*')
-      .in('user_direction_id', directionIds);
-
-    if (metricsError) {
-      console.error('Ошибка при получении метрик:', metricsError);
-      throw new Error(`Не удалось загрузить метрики: ${metricsError.message}`);
-    }
-
-    // Соединяем данные
-    return directions.map(direction => {
-      const directionMetrics = metrics?.filter(m => m.user_direction_id === direction.id) || [];
-      const leadsMetric = directionMetrics.find(m => m.metric_type === 'leads');
-      const spendMetric = directionMetrics.find(m => m.metric_type === 'spend');
+    return directions.map((direction: any) => {
+      const directionMetrics = (metrics || []).filter((m: any) => m.user_direction_id === direction.id);
+      const leadsMetric = directionMetrics.find((m: any) => m.metric_type === 'leads');
+      const spendMetric = directionMetrics.find((m: any) => m.metric_type === 'spend');
 
       return {
         direction,
         leadsPlanned: leadsMetric?.planned_daily_value || 0,
-        spendPlanned: spendMetric?.planned_daily_value || 0
+        spendPlanned: spendMetric?.planned_daily_value || 0,
       };
     });
   } catch (error) {
@@ -87,99 +69,22 @@ export async function getUserDirectionsWithPlans(userId: string): Promise<Direct
  * Создать или обновить направления и их планы для пользователя
  */
 export async function saveUserDirectionPlans(
-  userId: string, 
+  userId: string,
   plans: DirectionPlanInput[]
 ): Promise<void> {
   try {
-    // Сначала получаем существующие направления пользователя
-    const { data: existingDirections, error: getError } = await supabase
-      .from('user_directions')
-      .select('id')
-      .eq('user_id', userId);
+    const res = await fetch(`${API_BASE_URL}/user-plans/save-all`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({ plans }),
+    });
 
-    if (getError) {
-      console.error('Ошибка при получении существующих направлений:', getError);
-      throw new Error(`Не удалось получить существующие направления: ${getError.message}`);
-    }
-
-    // Если есть существующие направления, удаляем их метрики сначала
-    if (existingDirections && existingDirections.length > 0) {
-      const directionIds = existingDirections.map(d => d.id);
-      
-      // Удаляем метрики
-      const { error: deleteMetricsError } = await supabase
-        .from('planned_metrics')
-        .delete()
-        .in('user_direction_id', directionIds);
-
-      if (deleteMetricsError) {
-        console.error('Ошибка при удалении старых метрик:', deleteMetricsError);
-        throw new Error(`Не удалось удалить старые метрики: ${deleteMetricsError.message}`);
-      }
-
-      // Теперь удаляем направления
-      const { error: deleteDirectionsError } = await supabase
-        .from('user_directions')
-        .delete()
-        .eq('user_id', userId);
-
-      if (deleteDirectionsError) {
-        console.error('Ошибка при удалении старых направлений:', deleteDirectionsError);
-        throw new Error(`Не удалось удалить старые направления: ${deleteDirectionsError.message}`);
-      }
-    }
-
-    // Создаем новые направления и их планы
-    for (const plan of plans) {
-      // 1. Создаем направление
-      const { data: direction, error: directionError } = await supabase
-        .from('user_directions')
-        .insert({
-          user_id: userId,
-          main_direction: plan.mainDirection,
-          sub_direction: plan.subDirection || null
-        })
-        .select()
-        .single();
-
-      if (directionError || !direction) {
-        console.error('Ошибка при создании направления:', directionError);
-        throw new Error(`Не удалось создать направление: ${directionError?.message}`);
-      }
-
-      // 2. Создаем метрики для этого направления
-      console.log('Создаем метрики для направления ID:', direction.id);
-      console.log('План лидов:', plan.monthlyLeadsPlan);
-      console.log('План затрат:', plan.monthlySpendPlan);
-      
-      // Создаем метрики по одной для лучшей отладки
-      const { error: leadsError } = await supabase
-        .from('planned_metrics')
-        .insert({
-          user_direction_id: direction.id,
-          metric_type: 'leads',
-          planned_daily_value: plan.monthlyLeadsPlan || 0
-        });
-
-      if (leadsError) {
-        console.error('Ошибка при создании метрики лидов:', leadsError);
-        throw new Error(`Не удалось создать метрику лидов: ${leadsError.message}`);
-      }
-
-      const { error: spendError } = await supabase
-        .from('planned_metrics')
-        .insert({
-          user_direction_id: direction.id,
-          metric_type: 'spend',
-          planned_daily_value: plan.monthlySpendPlan || 0
-        });
-
-      if (spendError) {
-        console.error('Ошибка при создании метрики затрат:', spendError);
-        throw new Error(`Не удалось создать метрику затрат: ${spendError.message}`);
-      }
-
-
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to save direction plans');
     }
 
     console.log(`Успешно сохранено ${plans.length} направлений с планами для пользователя ${userId}`);
@@ -192,23 +97,42 @@ export async function saveUserDirectionPlans(
 /**
  * Обновить отдельную метрику плана
  */
+function getUserId(): string | null {
+  try {
+    const stored = localStorage.getItem('user');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return parsed.id || null;
+    }
+  } catch {}
+  return null;
+}
+
 export async function updatePlannedMetric(
   directionId: number,
   metricType: 'leads' | 'spend',
   value: number
 ): Promise<void> {
+  const userId = getUserId();
+  if (!userId) throw new Error('User not authenticated');
+
   try {
-    const { error } = await supabase
-      .from('planned_metrics')
-      .upsert({
+    const res = await fetch(`${API_BASE_URL}/user-plans/metrics`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({
         user_direction_id: directionId,
         metric_type: metricType,
-        planned_daily_value: value
-      });
+        planned_daily_value: value,
+      }),
+    });
 
-    if (error) {
-      console.error('Ошибка при обновлении метрики:', error);
-      throw new Error(`Не удалось обновить метрику: ${error.message}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update metric');
     }
   } catch (error) {
     console.error('Ошибка в updatePlannedMetric:', error);
@@ -220,15 +144,18 @@ export async function updatePlannedMetric(
  * Удалить направление со всеми его планами
  */
 export async function deleteUserDirection(directionId: number): Promise<void> {
-  try {
-    const { error } = await supabase
-      .from('user_directions')
-      .delete()
-      .eq('id', directionId);
+  const userId = getUserId();
+  if (!userId) throw new Error('User not authenticated');
 
-    if (error) {
-      console.error('Ошибка при удалении направления:', error);
-      throw new Error(`Не удалось удалить направление: ${error.message}`);
+  try {
+    const res = await fetch(`${API_BASE_URL}/user-plans/directions/${directionId}`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': userId },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete direction');
     }
   } catch (error) {
     console.error('Ошибка в deleteUserDirection:', error);

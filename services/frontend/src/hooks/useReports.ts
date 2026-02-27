@@ -1,11 +1,10 @@
 import { toastT } from '@/utils/toastUtils';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { CampaignReport } from '@/types/report';
-import { toast } from 'sonner';
 import { useTelegramWebApp } from './useTelegramWebApp';
 import { useAppContext } from '@/context/AppContext';
+import { API_BASE_URL } from '@/config/api';
 
 export const useReports = () => {
   const [reports, setReports] = useState<CampaignReport[]>([]);
@@ -13,7 +12,7 @@ export const useReports = () => {
   const { user } = useTelegramWebApp();
   const { currentAdAccountId, multiAccountEnabled, platform } = useAppContext();
   const reportPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
-  
+
   const fetchReports = async () => {
     if (!user?.id) {
       console.warn('Нет идентификатора пользователя Telegram для получения отчетов');
@@ -25,32 +24,29 @@ export const useReports = () => {
       setReports([]);
       return;
     }
-    
+
     setLoading(true);
     try {
       console.log('Загрузка отчетов для пользователя с Telegram ID:', user.id);
-      let query = supabase
-        .from('campaign_reports')
-        .select('*')
-        .eq('telegram_id', user.id.toString());
 
-      query = query.eq('platform', reportPlatform);
-
+      const params = new URLSearchParams();
+      params.set('platform', reportPlatform);
       if (multiAccountEnabled && currentAdAccountId) {
-        query = query.eq('account_id', currentAdAccountId);
-      } else {
-        query = query.is('account_id', null);
+        params.set('accountId', currentAdAccountId);
       }
 
-      const { data, error } = await query
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        console.error('Ошибка при загрузке отчетов:', error);
+      const response = await fetch(`${API_BASE_URL}/campaign-reports?${params}`, {
+        headers: { 'x-user-id': user.id.toString() },
+      });
+
+      if (!response.ok) {
+        console.error('Ошибка при загрузке отчетов:', response.status);
         toastT.error('failedToLoadReports');
         return;
       }
-      
+
+      const data = await response.json();
+
       console.log(`Получено ${data.length} отчетов:`, data);
       setReports(data);
     } catch (error) {
@@ -60,13 +56,13 @@ export const useReports = () => {
       setLoading(false);
     }
   };
-  
+
   useEffect(() => {
     if (user?.id) {
       fetchReports();
     }
   }, [user?.id, currentAdAccountId, multiAccountEnabled, platform]);
-  
+
   return {
     reports,
     loading,

@@ -3,7 +3,6 @@
  */
 
 import { format, subDays, addDays } from 'date-fns';
-import { supabase } from '@/integrations/supabase/client';
 import { toastT } from '@/utils/toastUtils';
 import { API_BASE_URL } from '@/config/api';
 
