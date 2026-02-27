@@ -436,6 +436,47 @@ export async function consultantCallRecordingsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /admin/call-recordings/:id/retranscribe
+   * Перезапуск транскрипции (Whisper + диалог GPT)
+   */
+  app.post('/admin/call-recordings/:id/retranscribe', async (request: ConsultantAuthRequest, reply) => {
+    try {
+      if (request.userRole !== 'admin') {
+        return reply.status(403).send({ error: 'Admin access required' });
+      }
+
+      const { id } = request.params as { id: string };
+
+      const { data: existing, error: checkError } = await supabase
+        .from('consultant_call_recordings')
+        .select('id, file_path')
+        .eq('id', id)
+        .single();
+
+      if (checkError || !existing) {
+        return reply.status(404).send({ error: 'Recording not found' });
+      }
+
+      // Сбрасываем статусы
+      await supabase
+        .from('consultant_call_recordings')
+        .update({ transcription_status: 'pending', analysis_status: 'pending', transcription: null, analysis: null })
+        .eq('id', id);
+
+      // Fire-and-forget
+      processCallRecording(id).catch(err => {
+        app.log.error({ recordingId: id, error: err.message }, 'Retranscribe pipeline error');
+      });
+
+      app.log.info({ recordingId: id }, 'Retranscription triggered');
+      return reply.send({ success: true, recordingId: id, message: 'Retranscription started' });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error triggering retranscription');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
    * GET /admin/call-recordings
    * Список записей всех консультантов (только админ)
    */
