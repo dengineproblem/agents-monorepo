@@ -80,12 +80,18 @@ export async function transcribeAudio(
       type: getAudioMimeType(filename)
     });
 
-    const response = await openai.audio.transcriptions.create({
+    const params: any = {
       file: file,
       model: 'whisper-1',
-      language: options?.language ?? 'ru',
       response_format: 'text',
-    });
+      // Подсказка для Whisper: разговоры на русском или казахском языке
+      prompt: 'Консультация менеджера с клиентом. Разговор на русском или казахском языке.',
+    };
+    if (options?.language) {
+      params.language = options.language;
+    }
+
+    const response = await openai.audio.transcriptions.create(params);
 
     log.info({ 
       filename, 
