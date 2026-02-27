@@ -89,7 +89,7 @@ export async function workflowCreateAdSetInDirection(
 
   const { data: userAccountProfile } = await supabase
     .from('user_accounts')
-    .select('username, multi_account_enabled')
+    .select('username, multi_account_enabled, account_timezone')
     .eq('id', user_account_id)
     .single();
 
@@ -418,7 +418,18 @@ export async function workflowCreateAdSetInDirection(
     }
   }
 
-  // Вычисляем ближайшую полночь по Asia/Almaty (UTC+5)
+  // Вычисляем ближайшую полночь по таймзоне аккаунта (fallback: Asia/Almaty UTC+5)
+  function getTimezoneOffsetMinutes(timezone: string | null | undefined): number {
+    if (!timezone) return 5 * 60; // fallback: Asia/Almaty UTC+5
+    try {
+      const now = new Date();
+      const utcStr = now.toLocaleString('en-US', { timeZone: 'UTC' });
+      const tzStr = now.toLocaleString('en-US', { timeZone: timezone });
+      return (new Date(tzStr).getTime() - new Date(utcStr).getTime()) / 60000;
+    } catch {
+      return 5 * 60; // fallback при невалидной таймзоне
+    }
+  }
   function formatWithOffset(date: Date, offsetMin: number) {
     const pad = (n: number) => String(n).padStart(2, '0');
     const y = date.getFullYear();
@@ -433,7 +444,7 @@ export async function workflowCreateAdSetInDirection(
     const om = pad(abs % 60);
     return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
   }
-  const tzOffsetMin = 5 * 60; // Asia/Almaty UTC+5
+  const tzOffsetMin = getTimezoneOffsetMinutes(userAccountProfile?.account_timezone);
   const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
   const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
   let m = new Date(localNow);
@@ -731,7 +742,7 @@ export async function workflowCreateAdSetInDirection(
     } catch (error: any) {
       // Проверяем, является ли это ошибкой 2446885 (WhatsApp Business requirement)
       const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
-      const isWhatsAppError = errorSubcode === 2446885;
+      const isWhatsAppError = errorSubcode === 2446885 || errorSubcode === 2446886;
 
       if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number && effective_page_id) {
         log.warn({
