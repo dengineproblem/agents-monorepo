@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { transcribeAudio } from './whisperTranscription.js';
+import { transcribeAudio, formatTranscriptionAsDialogue } from './whisperTranscription.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger({ module: 'callRecordingPipeline' });
@@ -66,7 +66,9 @@ export async function processCallRecording(recordingId: string): Promise<void> {
 
     let transcription: string;
     try {
-      transcription = await transcribeRecording(recording);
+      const rawTranscription = await transcribeRecording(recording);
+      // Форматируем в диалог: Менеджер: / Клиент:
+      transcription = await formatTranscriptionAsDialogue(rawTranscription);
     } catch (err: any) {
       log.error({ recordingId, error: err.message }, 'Transcription failed');
       await updateStatus(recordingId, 'transcription_status', 'failed');

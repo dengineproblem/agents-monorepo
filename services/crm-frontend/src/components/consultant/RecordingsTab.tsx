@@ -350,8 +350,34 @@ function TranscriptionSection({ recording }: { recording: CallRecording }) {
   if (!recording.transcription) return null;
 
   const text = recording.transcription;
+  const hasDialogue = /^(Менеджер|Клиент):/m.test(text);
   const isLong = text.length > 500;
-  const displayText = isLong && !expanded ? text.substring(0, 500) + '...' : text;
+
+  if (!hasDialogue) {
+    // Старый формат — сплошной текст
+    const displayText = isLong && !expanded ? text.substring(0, 500) + '...' : text;
+    return (
+      <div className="space-y-2">
+        <h4 className="font-medium flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          Транскрипция
+        </h4>
+        <div className="rounded-md bg-muted p-3 text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+          {displayText}
+        </div>
+        {isLong && (
+          <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>
+            {expanded ? <ChevronUp className="h-4 w-4 mr-1" /> : <ChevronDown className="h-4 w-4 mr-1" />}
+            {expanded ? 'Свернуть' : 'Показать полностью'}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  // Парсим диалог: разделяем по "Менеджер:" и "Клиент:"
+  const lines = parseDialogueLines(text);
+  const displayLines = isLong && !expanded ? lines.slice(0, 6) : lines;
 
   return (
     <div className="space-y-2">
@@ -359,17 +385,48 @@ function TranscriptionSection({ recording }: { recording: CallRecording }) {
         <FileText className="h-4 w-4" />
         Транскрипция
       </h4>
-      <div className="rounded-md bg-muted p-3 text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-        {displayText}
+      <div className="rounded-md bg-muted p-3 text-sm max-h-[400px] overflow-y-auto space-y-3">
+        {displayLines.map((line, i) => (
+          <div key={i}>
+            <span className={`text-xs font-semibold inline-block px-1.5 py-0.5 rounded mb-0.5 ${
+              line.speaker === 'manager'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-green-100 text-green-700'
+            }`}>
+              {line.speaker === 'manager' ? 'Менеджер' : 'Клиент'}
+            </span>
+            <p className="mt-0.5 leading-relaxed">{line.text}</p>
+          </div>
+        ))}
       </div>
       {isLong && (
         <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>
           {expanded ? <ChevronUp className="h-4 w-4 mr-1" /> : <ChevronDown className="h-4 w-4 mr-1" />}
-          {expanded ? 'Свернуть' : 'Показать полностью'}
+          {expanded ? 'Свернуть' : `Показать полностью (${lines.length} реплик)`}
         </Button>
       )}
     </div>
   );
+}
+
+function parseDialogueLines(text: string): Array<{ speaker: 'manager' | 'client'; text: string }> {
+  const result: Array<{ speaker: 'manager' | 'client'; text: string }> = [];
+  // Разбиваем по началу реплик "Менеджер:" или "Клиент:"
+  const parts = text.split(/^(Менеджер|Клиент):/m);
+
+  // parts: ["", "Менеджер", " текст...", "Клиент", " текст...", ...]
+  for (let i = 1; i < parts.length; i += 2) {
+    const speakerRaw = parts[i]?.trim();
+    const content = parts[i + 1]?.trim();
+    if (!speakerRaw || !content) continue;
+
+    result.push({
+      speaker: speakerRaw === 'Менеджер' ? 'manager' : 'client',
+      text: content,
+    });
+  }
+
+  return result;
 }
 
 function AnalysisSection({ recording }: { recording: CallRecording }) {
