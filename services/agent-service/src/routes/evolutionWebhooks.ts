@@ -352,7 +352,11 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     // Важно: проверяем @lid и используем remoteJidAlt если это Lead ID
     let clientPhone: string;
     if (remoteJid.endsWith('@lid')) {
-      clientPhone = (remoteJidAlt || remoteJid)
+      if (!remoteJidAlt) {
+        app.log.info({ remoteJid, instance }, 'Skipping @lid non-ad message without remoteJidAlt');
+        return;
+      }
+      clientPhone = remoteJidAlt
         .replace('@s.whatsapp.net', '')
         .replace('@c.us', '')
         .replace('@lid', '');
@@ -457,14 +461,19 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   // ✅ ИСПРАВЛЕНО: Для лидов с рекламы используем remoteJidAlt (настоящий номер)
   // Если remoteJid заканчивается на @lid - это Lead ID, настоящий номер в remoteJidAlt
   let clientPhone: string;
-  
+
   if (remoteJid.endsWith('@lid')) {
+    if (!remoteJidAlt) {
+      // remoteJidAlt пустой — нет настоящего номера, пропускаем (следом придёт нормальный вебхук)
+      app.log.info({ remoteJid, instance }, 'Skipping @lid message without remoteJidAlt — waiting for real phone webhook');
+      return;
+    }
     // Лид из рекламы: используем remoteJidAlt (настоящий номер клиента)
-    clientPhone = (remoteJidAlt || remoteJid)
+    clientPhone = remoteJidAlt
       .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
       .replace('@c.us', '')            // Обычный контакт (старый формат)
       .replace('@lid', '');            // На случай если remoteJidAlt тоже @lid
-    
+
     app.log.info({
       remoteJid,
       remoteJidAlt,
@@ -1234,7 +1243,11 @@ async function handleSmartMatching(
   // Определяем номер телефона клиента
   let clientPhone: string;
   if (remoteJid.endsWith('@lid')) {
-    clientPhone = (remoteJidAlt || remoteJid)
+    if (!remoteJidAlt) {
+      app.log.info({ remoteJid, instance }, 'Skipping @lid smart match without remoteJidAlt');
+      return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
+    }
+    clientPhone = remoteJidAlt
       .replace('@s.whatsapp.net', '')
       .replace('@c.us', '')
       .replace('@lid', '');
@@ -1452,11 +1465,14 @@ async function handleOperatorIntervention(
     return;
   }
 
-  // Извлекаем номер телефона
+  // Извлекаем номер телефона — пропускаем @lid без альтернативы
+  if (remoteJid.endsWith('@lid')) {
+    app.log.debug({ remoteJid, instance }, 'Skipping outgoing @lid message');
+    return;
+  }
   const clientPhone = remoteJid
     .replace('@s.whatsapp.net', '')
-    .replace('@c.us', '')
-    .replace('@lid', '');
+    .replace('@c.us', '');
 
   // Находим dialog_analysis для этого чата
   const { data: lead, error: leadError } = await supabase

@@ -51,7 +51,7 @@ export default async function purchasesRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Failed to fetch purchases' });
       }
 
-      return data || [];
+      return { purchases: data || [] };
 
     } catch (error: any) {
       log.error({ error }, 'Error fetching purchases');
