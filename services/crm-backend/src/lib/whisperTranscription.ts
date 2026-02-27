@@ -43,8 +43,10 @@ export async function formatTranscriptionAsDialogue(rawText: string): Promise<st
     });
 
     const dialogue = response.choices[0]?.message?.content;
-    if (!dialogue) {
-      log.warn('GPT returned empty dialogue, using raw text');
+
+    // Детектим отказ GPT или пустой ответ
+    if (!dialogue || dialogue.length < rawText.length * 0.3 || /извините|не могу помочь|не могу обработать/i.test(dialogue)) {
+      log.warn({ dialogueLength: dialogue?.length, rawLength: rawText.length }, 'GPT refused or returned too short response, using raw text');
       return rawText;
     }
 
@@ -84,18 +86,16 @@ export async function transcribeAudio(
       file: file,
       model: 'whisper-1',
       response_format: 'text',
-      // Подсказка для Whisper: разговоры на русском или казахском языке
-      prompt: 'Консультация менеджера с клиентом. Разговор на русском или казахском языке.',
     };
     if (options?.language) {
       params.language = options.language;
     }
 
-    const response = await openai.audio.transcriptions.create(params);
+    const response = await openai.audio.transcriptions.create(params) as unknown as string;
 
-    log.info({ 
-      filename, 
-      transcriptLength: response.length 
+    log.info({
+      filename,
+      transcriptLength: response.length
     }, 'Audio transcribed successfully');
 
     return response;
