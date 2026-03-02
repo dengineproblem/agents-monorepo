@@ -1697,9 +1697,8 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- В один запуск по одному НАПРАВЛЕНИЮ можно создавать 1–3 новых ad set\'а.',
   '- Требования:',
   '  • ВСЕГДА указывай daily_budget_cents для нового ad set.',
-  '  • Бюджет нового ad set должен быть в диапазоне 1000–2000 центов ($10–$20) — НЕ БОЛЬШЕ $20.',
-  '  • Если нужно перераспределить большой освободившийся бюджет (например, $50),',
-  '    разбивай его НА НЕСКОЛЬКО новых ad set\'ов по $10–20 каждый, а не в один на $50.',
+  '  • Бюджет нового ad set: от 300 до min(2000, оставшийся_бюджет_направления) центов. НЕЛЬЗЯ ставить бюджет нового ad set больше, чем оставшийся свободный бюджет направления (direction_daily_budget_cents минус сумма бюджетов остальных АКТИВНЫХ ad set\'ов этого направления).',
+  '  • Если нужно перераспределить освободившийся бюджет, но он мал — лучше добавить к существующему ad set, чем создавать новый с мизерным бюджетом.',
   '',
   '- Почему такие решения: Facebook допускает колебания фактических трат и задержки атрибуции (особенно в переписках WA). Поэтому мы опираемся на «плановые» дневные бюджеты и анализируем несколько таймфреймов (yesterday/today/3d/7d/30d), где today смягчает «ложно-плохое» вчера.',
   '- Почему нельзя резко поднимать бюджет: резкие апы ломают стадию обучения, расширяют аудиторию слишком быстро и повышают риск роста CPL. Поэтому ап ≤ +30%/шаг; даун до −50% допустим – это безопаснее для стоимости заявки.',
@@ -2038,12 +2037,12 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '  • эту сумму лучше ДОБАВИТЬ к существующим лучшим ad set\'ам (HS≥good или best-of-bad),',
   '    чтобы приблизиться к плану по направлению.',
   '- Если freed_budget_cents ≥ 1000:',
-  '  • цель — создать несколько НОВЫХ ad set\'ов с бюджетом от 1000 до 2000 центов ($10–20) каждый,',
-  '    вместо одного ad set\'а с большим бюджетом.',
+  '  • цель — создать НОВЫЙ ad set с бюджетом НЕ БОЛЕЕ оставшегося свободного бюджета направления.',
+  '  • Формула: max_budget_new_adset = direction_daily_budget_cents - сумма(daily_budget всех остальных АКТИВНЫХ ad set\'ов направления).',
   '- Ограничения:',
   '  • за один запуск по одному НАПРАВЛЕНИЮ создавай 1–3 новых ad set\'а;',
-  '  • daily_budget_cents каждого нового ad set\'а ∈ [1000; 2000] (не более $20);',
-  '  • стремись распределить freed_budget_cents равномерно между новыми ad set\'ами.',
+  '  • daily_budget_cents каждого нового ad set\'а ∈ [300; min(2000, оставшийся_бюджет)] — НЕ ПРЕВЫШАТЬ остаток бюджета направления;',
+  '  • СУММА бюджетов ВСЕХ активных ad set\'ов направления (старые + новые) НЕ ДОЛЖНА превышать direction_daily_budget_cents.',
   '- Примеры:',
   '  • freed_budget_cents = 1500 ($15) → 1 новый ad set ~1500 центов.',
   '  • freed_budget_cents = 2500–3200 ($25–32) → 2 новых ad set\'а по ~1200–1600 центов.',
@@ -2069,7 +2068,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+. ⚠️ ДОСТУПНО ТОЛЬКО если account.has_lal_audience === true! При audience_id="use_lal_from_settings" использует готовую LAL аудиторию из настроек пользователя.',
-  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАЕТ НОВЫЙ AD SET через Facebook API внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах direction_daily_budget_cents направления (см. жёсткий контроль). (4) Бюджет НОВОГО ad set: 1000–2000 центов ($10–20). НЕ ставь выше 2000 центов. (5) За один запуск по одному направлению создавай не более 3 новых ad set\'ов. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1–3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном ad set.',
+  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАЕТ НОВЫЙ AD SET через Facebook API внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах direction_daily_budget_cents направления (см. жёсткий контроль). (4) Бюджет НОВОГО ad set: от 300 до min(2000, оставшийся_свободный_бюджет_направления) центов. Формула: max_budget = direction_daily_budget_cents - сумма(daily_budget всех остальных АКТИВНЫХ ad sets). НЕ ПРЕВЫШАЙ остаток бюджета! (5) За один запуск по одному направлению создавай не более 3 новых ad set\'ов. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1–3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном ad set.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -2417,6 +2416,235 @@ function validateAndNormalizeActions(actions) {
   // В режиме reportOnlyMode пустой массив actions допустим
   // if (!cleaned.length) throw new Error('No valid actions');
   return cleaned;
+}
+
+/**
+ * Enforce direction-level budget caps AFTER LLM/deterministic plan generation.
+ * Groups actions by direction, calculates projected total, and auto-corrects
+ * if any direction exceeds 105% of its daily_budget_cents.
+ *
+ * @param {Array} actions - validated actions from validateAndNormalizeActions()
+ * @param {Array} adsetList - full list of adsets from FB API (with id, campaign_id, daily_budget, status, effective_status)
+ * @param {Array} directions - user's directions (with id, fb_campaign_id, daily_budget_cents)
+ * @returns {Array} corrected actions
+ */
+function enforceDirectionBudgets(actions, adsetList, directions) {
+  if (!actions?.length || !adsetList?.length || !directions?.length) return actions;
+
+  // Map campaign_id → direction
+  const campaignToDirection = new Map();
+  for (const d of directions) {
+    if (d.fb_campaign_id && d.daily_budget_cents) {
+      campaignToDirection.set(String(d.fb_campaign_id), d);
+    }
+  }
+
+  // Map adset_id → { campaign_id, daily_budget (cents), effective_status }
+  const adsetMap = new Map();
+  for (const as of adsetList) {
+    adsetMap.set(String(as.id), {
+      campaign_id: String(as.campaign_id || ''),
+      daily_budget: toInt(as.daily_budget) || 0,
+      effective_status: String(as.effective_status || as.status || '')
+    });
+  }
+
+  // Map direction_id → direction (by id field)
+  const directionById = new Map();
+  for (const d of directions) {
+    if (d.id) directionById.set(String(d.id), d);
+  }
+
+  // Simulate: clone current budgets, then apply actions
+  // Build per-direction budget simulation
+  const dirBudgetSim = new Map(); // direction.fb_campaign_id → { target, adsets: Map<adset_id, budget>, newAdsets: [{actionIdx, budget}] }
+
+  for (const d of directions) {
+    if (!d.fb_campaign_id || !d.daily_budget_cents) continue;
+    const campId = String(d.fb_campaign_id);
+    const currentAdsets = new Map();
+    for (const as of adsetList) {
+      if (String(as.campaign_id) === campId && (as.effective_status === 'ACTIVE' || as.status === 'ACTIVE')) {
+        currentAdsets.set(String(as.id), toInt(as.daily_budget) || 0);
+      }
+    }
+    dirBudgetSim.set(campId, {
+      direction: d,
+      target: d.daily_budget_cents,
+      adsets: currentAdsets,
+      newAdsets: [], // { actionIdx, budget }
+      pausedAdsets: new Set()
+    });
+  }
+
+  // Apply actions to simulation
+  for (let i = 0; i < actions.length; i++) {
+    const a = actions[i];
+    const p = a.params || {};
+
+    if (a.type === 'UpdateAdSetDailyBudget' && p.adset_id) {
+      const asInfo = adsetMap.get(String(p.adset_id));
+      if (asInfo) {
+        const sim = dirBudgetSim.get(asInfo.campaign_id);
+        if (sim && sim.adsets.has(String(p.adset_id))) {
+          sim.adsets.set(String(p.adset_id), toInt(p.daily_budget) || 0);
+        }
+      }
+    }
+
+    if (a.type === 'PauseAdset' && p.adsetId) {
+      const asInfo = adsetMap.get(String(p.adsetId));
+      if (asInfo) {
+        const sim = dirBudgetSim.get(asInfo.campaign_id);
+        if (sim) {
+          sim.pausedAdsets.add(String(p.adsetId));
+        }
+      }
+    }
+
+    if (a.type === 'Direction.CreateAdSetWithCreatives' && p.direction_id) {
+      const dir = directionById.get(String(p.direction_id));
+      if (dir && dir.fb_campaign_id) {
+        const sim = dirBudgetSim.get(String(dir.fb_campaign_id));
+        if (sim) {
+          const budget = toInt(p.daily_budget_cents) || 1000;
+          sim.newAdsets.push({ actionIdx: i, budget });
+        }
+      }
+    }
+  }
+
+  // Check each direction and enforce caps
+  const corrections = [];
+
+  for (const [campId, sim] of dirBudgetSim) {
+    const { direction, target, adsets, newAdsets, pausedAdsets } = sim;
+    if (!target) continue;
+
+    // Calculate projected total
+    let total = 0;
+    for (const [asId, budget] of adsets) {
+      if (!pausedAdsets.has(asId)) {
+        total += budget;
+      }
+    }
+    for (const na of newAdsets) {
+      total += na.budget;
+    }
+
+    const upperLimit = Math.round(target * 1.05);
+
+    if (total <= upperLimit) continue; // within corridor
+
+    const overshoot = total - target;
+    const dirName = direction.name || campId;
+
+    // Strategy: first reduce new adsets, then existing ones
+    let remaining = total - target; // how much to cut
+
+    // 1. Reduce new adset budgets first (they are the most likely cause)
+    for (const na of newAdsets) {
+      if (remaining <= 0) break;
+      const maxAvailable = na.budget - 300; // can't go below $3
+      if (maxAvailable <= 0) continue;
+      const cut = Math.min(remaining, maxAvailable);
+      na.budget -= cut;
+      remaining -= cut;
+
+      // Apply to action
+      actions[na.actionIdx].params.daily_budget_cents = na.budget;
+      corrections.push({
+        direction: dirName,
+        type: 'new_adset_reduced',
+        actionIdx: na.actionIdx,
+        from: na.budget + cut,
+        to: na.budget
+      });
+    }
+
+    // 2. If still over, proportionally reduce existing adset budgets (those touched by UpdateAdSetDailyBudget)
+    if (remaining > 0) {
+      // Find UpdateAdSetDailyBudget actions for this direction's adsets
+      const updatableActions = [];
+      for (let i = 0; i < actions.length; i++) {
+        const a = actions[i];
+        if (a.type === 'UpdateAdSetDailyBudget' && a.params?.adset_id) {
+          const asInfo = adsetMap.get(String(a.params.adset_id));
+          if (asInfo && asInfo.campaign_id === campId && !pausedAdsets.has(String(a.params.adset_id))) {
+            const currentBudget = toInt(a.params.daily_budget) || 0;
+            if (currentBudget > 300) {
+              updatableActions.push({ actionIdx: i, budget: currentBudget });
+            }
+          }
+        }
+      }
+
+      // Also include active adsets NOT touched by any action (their budget stays as-is)
+      const touchedAdsetIds = new Set(updatableActions.map(ua => String(actions[ua.actionIdx].params.adset_id)));
+      const untouchedAdsets = [];
+      for (const [asId, budget] of adsets) {
+        if (!pausedAdsets.has(asId) && !touchedAdsetIds.has(asId) && budget > 300) {
+          untouchedAdsets.push({ adsetId: asId, budget });
+        }
+      }
+
+      // Proportional cut across all active adsets in this direction
+      const allBudgets = [
+        ...updatableActions.map(ua => ({ budget: ua.budget, type: 'action', ref: ua })),
+        ...untouchedAdsets.map(ua => ({ budget: ua.budget, type: 'untouched', ref: ua }))
+      ];
+      const totalCuttable = allBudgets.reduce((s, b) => s + Math.max(0, b.budget - 300), 0);
+
+      if (totalCuttable > 0) {
+        const cutRatio = Math.min(1, remaining / totalCuttable);
+
+        for (const item of allBudgets) {
+          if (remaining <= 0) break;
+          const cuttable = Math.max(0, item.budget - 300);
+          const cut = Math.min(remaining, Math.round(cuttable * cutRatio));
+          if (cut <= 0) continue;
+
+          const newBudget = item.budget - cut;
+          remaining -= cut;
+
+          if (item.type === 'action') {
+            actions[item.ref.actionIdx].params.daily_budget = newBudget;
+            corrections.push({
+              direction: dirName,
+              type: 'existing_adset_reduced',
+              actionIdx: item.ref.actionIdx,
+              from: item.budget,
+              to: newBudget
+            });
+          } else {
+            // Need to add a new UpdateAdSetDailyBudget action for this untouched adset
+            actions.push({
+              type: 'UpdateAdSetDailyBudget',
+              params: { adset_id: item.ref.adsetId, daily_budget: newBudget }
+            });
+            corrections.push({
+              direction: dirName,
+              type: 'untouched_adset_reduced',
+              adsetId: item.ref.adsetId,
+              from: item.budget,
+              to: newBudget
+            });
+          }
+        }
+      }
+    }
+
+    const dirCorrections = corrections.filter(c => c.direction === dirName);
+    if (dirCorrections.length > 0) {
+      console.log(`[BUDGET ENFORCE] Direction "${dirName}": projected ${total} cents > target ${target} cents (upper limit ${upperLimit}). Overshoot: ${overshoot} cents. Applied ${dirCorrections.length} correction(s).`);
+    }
+  }
+
+  if (corrections.length > 0) {
+    console.log(`[BUDGET ENFORCE] Total corrections: ${corrections.length}`, JSON.stringify(corrections));
+  }
+
+  return actions;
 }
 
 function normalizeTikTokBudget(value, bounds) {
@@ -4090,6 +4318,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         
         if (!parsed || !Array.isArray(parsed.actions)) throw new Error(parseError || 'LLM invalid output');
         actions = validateAndNormalizeActions(parsed.actions);
+        actions = enforceDirectionBudgets(actions, adsetList, directions);
         planNote = parsed.planNote || 'llm_plan_v1.2';
         if (typeof parsed.reportText === 'string' && parsed.reportText.trim()) {
           reportTextFromLLM = parsed.reportText.trim();
@@ -4107,6 +4336,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         for (const cid of Array.from(touchedCampaignIds)) limited.unshift({ type:'GetCampaignStatus', params:{ campaign_id: cid } });
         const planFb = { planNote:'deterministic_fallback_v1.2', actions: limited };
         actions = validateAndNormalizeActions(planFb.actions);
+        actions = enforceDirectionBudgets(actions, adsetList, directions);
         planNote = planFb.planNote;
       }
     } else {
@@ -4114,6 +4344,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       for (const cid of Array.from(touchedCampaignIds)) limited.unshift({ type:'GetCampaignStatus', params:{ campaign_id: cid } });
       const planFb = { planNote:'deterministic_plan_v1.2', actions: limited };
       actions = validateAndNormalizeActions(planFb.actions);
+      actions = enforceDirectionBudgets(actions, adsetList, directions);
       planNote = planFb.planNote;
     }
 
