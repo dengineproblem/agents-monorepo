@@ -38,6 +38,8 @@ services:
       WABA_VERIFY_TOKEN: ${WABA_VERIFY_TOKEN:-openclaw_waba_2026}
       WABA_APP_SECRET: ${WABA_APP_SECRET:-}
       META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v21.0}
+    volumes:
+      - /home/openclaw/clients:/clients:ro
     depends_on:
       postgres:
         condition: service_healthy
