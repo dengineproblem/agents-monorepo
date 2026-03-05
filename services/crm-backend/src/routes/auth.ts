@@ -22,7 +22,10 @@ export async function authRoutes(app: FastifyInstance) {
       .maybeSingle();
 
     if (consultantAccount) {
-      const match = await bcrypt.compare(password, consultantAccount.password);
+      const isBcryptConsultant = consultantAccount.password?.startsWith('$2a$') || consultantAccount.password?.startsWith('$2b$');
+      const match = isBcryptConsultant
+        ? await bcrypt.compare(password, consultantAccount.password)
+        : password === consultantAccount.password;
       if (!match) {
         return reply.status(401).send({ error: 'Invalid credentials' });
       }
@@ -64,7 +67,10 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
-    const match = await bcrypt.compare(password, userAccount.password);
+    const isBcrypt = userAccount.password?.startsWith('$2a$') || userAccount.password?.startsWith('$2b$');
+    const match = isBcrypt
+      ? await bcrypt.compare(password, userAccount.password)
+      : password === userAccount.password;
     if (!match) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
