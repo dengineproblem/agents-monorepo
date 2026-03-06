@@ -14,7 +14,6 @@ import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, E
 import { toast } from 'sonner';
 import { toastT } from '@/utils/toastUtils';
 import { format } from 'date-fns';
-import { supabase } from '@/integrations/supabase/client';
 import TariffInfoCard from '@/components/profile/TariffInfoCard';
 import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
@@ -47,6 +46,7 @@ import { TooltipKeys } from '@/content/tooltips';
 import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { userProfileApi } from '@/services/userProfileApi';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
 import { useAppContext } from '@/context/AppContext';
@@ -90,6 +90,7 @@ const Profile: React.FC = () => {
     if (storedUser && user && !user.username) {
       console.error('Некорректные данные пользователя: отсутствует username. Выход...');
       localStorage.removeItem('user');
+      localStorage.removeItem('auth_token');
       toastT.error('loginRequired');
       navigate('/login', { replace: true });
     }
@@ -507,28 +508,7 @@ const Profile: React.FC = () => {
     setIsChangingPassword(true);
     
     try {
-      // Сначала проверяем старый пароль через signInWithPassword
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email || '',
-        password: oldPassword,
-      });
-
-      if (signInError) {
-        toast.error(appReviewText('Incorrect current password', 'Неверный текущий пароль'));
-        setIsChangingPassword(false);
-        return;
-      }
-
-      // Если старый пароль верный, меняем на новый
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword
-      });
-
-      if (updateError) {
-        toast.error(appReviewText(`Failed to change password: ${updateError.message}`, 'Ошибка при смене пароля: ' + updateError.message));
-        setIsChangingPassword(false);
-        return;
-      }
+      await userProfileApi.changePassword(oldPassword, newPassword);
 
       toast.success(appReviewText('Password changed successfully', 'Пароль успешно изменен'));
     setPasswordModal(false);
@@ -733,7 +713,7 @@ const Profile: React.FC = () => {
         // Мультиаккаунт режим: обновляем ad_accounts через API
         const response = await fetch(`${API_BASE_URL}/ad-accounts/${currentAdAccountId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id || '' },
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             tiktok_access_token: null,
             tiktok_business_id: null,

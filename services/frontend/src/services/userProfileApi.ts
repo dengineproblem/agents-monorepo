@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 export const userProfileApi = {
   /**
@@ -6,11 +7,27 @@ export const userProfileApi = {
    */
   async fetchProfile(userId: string) {
     const response = await fetch(`${API_BASE_URL}/user/profile`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       throw new Error(err.error || `Failed to fetch profile: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  /**
+   * POST /user/change-password — смена пароля
+   */
+  async changePassword(oldPassword: string, newPassword: string) {
+    const response = await fetch(`${API_BASE_URL}/user/change-password`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to change password: ${response.status}`);
     }
     return response.json();
   },
@@ -21,10 +38,7 @@ export const userProfileApi = {
   async updateProfile(userId: string, fields: Record<string, unknown>) {
     const response = await fetch(`${API_BASE_URL}/user/profile`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(fields),
     });
     if (!response.ok) {
@@ -40,7 +54,7 @@ export const userProfileApi = {
   async disconnectFacebook(userId: string) {
     const response = await fetch(`${API_BASE_URL}/user/facebook-connection`, {
       method: 'DELETE',
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -55,7 +69,7 @@ export const userProfileApi = {
   async disconnectTiktok(userId: string) {
     const response = await fetch(`${API_BASE_URL}/user/tiktok-connection`, {
       method: 'DELETE',
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -73,7 +87,7 @@ export const userProfileApi = {
     if (directionId) params.set('directionId', directionId);
 
     const response = await fetch(`${API_BASE_URL}/user/default-settings?${params}`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -88,10 +102,7 @@ export const userProfileApi = {
   async saveDefaultSettings(userId: string, data: Record<string, unknown>) {
     const response = await fetch(`${API_BASE_URL}/user/default-settings`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
     if (!response.ok) {

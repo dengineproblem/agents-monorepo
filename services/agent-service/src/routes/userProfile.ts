@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -148,6 +149,54 @@ export default async function userProfileRoutes(app: FastifyInstance) {
     }
 
     return sanitizeProfile(data as unknown as Record<string, unknown>);
+  });
+
+  // ----------------------------------------
+  // POST /user/change-password
+  // ----------------------------------------
+  app.post('/user/change-password', async (req: FastifyRequest, reply: FastifyReply) => {
+    const userId = req.headers['x-user-id'] as string;
+    if (!userId) return reply.status(401).send({ error: 'Missing x-user-id header' });
+
+    const { oldPassword, newPassword } = req.body as { oldPassword?: string; newPassword?: string };
+    if (!oldPassword?.trim() || !newPassword?.trim()) {
+      return reply.status(400).send({ error: 'oldPassword and newPassword are required' });
+    }
+    if (newPassword.length < 6) {
+      return reply.status(400).send({ error: 'New password must be at least 6 characters' });
+    }
+
+    const { data: user, error: fetchError } = await supabase
+      .from('user_accounts')
+      .select('password')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !user) {
+      return reply.status(404).send({ error: 'User not found' });
+    }
+
+    const isBcrypt = user.password?.startsWith('$2a$') || user.password?.startsWith('$2b$');
+    const passwordMatch = isBcrypt
+      ? await bcrypt.compare(oldPassword, user.password)
+      : oldPassword === user.password;
+
+    if (!passwordMatch) {
+      return reply.status(401).send({ error: 'Incorrect current password' });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    const { error: updateError } = await supabase
+      .from('user_accounts')
+      .update({ password: hashed })
+      .eq('id', userId);
+
+    if (updateError) {
+      log.error({ error: updateError, userId }, 'Failed to change password');
+      return reply.status(500).send({ error: 'Failed to change password' });
+    }
+
+    return reply.send({ ok: true });
   });
 
   // ----------------------------------------
