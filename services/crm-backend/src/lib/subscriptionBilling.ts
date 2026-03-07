@@ -5,6 +5,7 @@ const log = createLogger({ module: 'subscriptionBilling' });
 
 const ALMATY_OFFSET_HOURS = 5;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const PAYMENT_BASE_URL = (process.env.APP_FRONTEND_URL || 'https://app.performanteaiagency.com').replace(/\/$/, '');
 const PAYMENT_API_BASE_URL = (process.env.APP_API_BASE_URL || `${PAYMENT_BASE_URL}/api`).replace(/\/$/, '');
 
@@ -591,6 +592,99 @@ async function sendExpiryReminderNotification(
   return dispatch.channel !== 'none';
 }
 
+async function fbGraph(method: 'GET' | 'POST', path: string, token: string, params: Record<string, any> = {}): Promise<any> {
+  const usp = new URLSearchParams();
+  usp.set('access_token', token);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) {
+      usp.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+  }
+
+  const url = method === 'GET'
+    ? `https://graph.facebook.com/${FB_API_VERSION}/${path}?${usp.toString()}`
+    : `https://graph.facebook.com/${FB_API_VERSION}/${path}`;
+
+  const response = await fetch(url, {
+    method,
+    ...(method === 'POST' ? {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: usp.toString()
+    } : {})
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`FB API ${method} ${path} failed: ${response.status} ${text}`);
+  }
+
+  return response.json();
+}
+
+export async function pauseAllActiveCampaigns(userAccountId: string): Promise<{ paused: number; errors: number }> {
+  const result = { paused: 0, errors: 0 };
+
+  // 1. Проверяем multi-account режим
+  const { data: user } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled, access_token, ad_account_id')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!user) return result;
+
+  interface AdAccountInfo { accessToken: string; fbAdAccountId: string; name: string }
+  const accounts: AdAccountInfo[] = [];
+
+  if (user.multi_account_enabled) {
+    const { data: adAccounts } = await supabase
+      .from('ad_accounts')
+      .select('access_token, ad_account_id, name')
+      .eq('user_account_id', userAccountId)
+      .eq('is_active', true);
+
+    for (const acc of adAccounts || []) {
+      if (acc.access_token && acc.ad_account_id) {
+        accounts.push({ accessToken: acc.access_token, fbAdAccountId: acc.ad_account_id, name: acc.name || acc.ad_account_id });
+      }
+    }
+  } else if (user.access_token && user.ad_account_id) {
+    accounts.push({ accessToken: user.access_token, fbAdAccountId: user.ad_account_id, name: user.ad_account_id });
+  }
+
+  for (const acc of accounts) {
+    try {
+      const fbId = acc.fbAdAccountId.startsWith('act_') ? acc.fbAdAccountId : `act_${acc.fbAdAccountId}`;
+      const campaignsResponse = await fbGraph('GET', `${fbId}/campaigns`, acc.accessToken, {
+        fields: 'id,name,status',
+        filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE'] }]),
+        limit: '500'
+      });
+
+      const campaigns = campaignsResponse?.data || [];
+      for (const campaign of campaigns) {
+        try {
+          await fbGraph('POST', campaign.id, acc.accessToken, { status: 'PAUSED' });
+          result.paused += 1;
+          log.info({ campaignId: campaign.id, campaignName: campaign.name, adAccount: acc.name }, 'Paused campaign due to subscription expiry');
+        } catch (err: any) {
+          result.errors += 1;
+          log.warn({ campaignId: campaign.id, error: err.message }, 'Failed to pause campaign');
+        }
+      }
+    } catch (err: any) {
+      result.errors += 1;
+      log.warn({ adAccount: acc.name, error: err.message }, 'Failed to fetch campaigns for pausing');
+    }
+  }
+
+  if (result.paused > 0 || result.errors > 0) {
+    log.info({ userAccountId, ...result }, 'Pause all campaigns completed');
+  }
+
+  return result;
+}
+
 async function deactivateExpiredAccount(user: UserForSubscriptionSweep, todayAlmaty: string): Promise<boolean> {
   if (!user.tarif_expires) {
     return false;
@@ -612,6 +706,13 @@ async function deactivateExpiredAccount(user: UserForSubscriptionSweep, todayAlm
   if (updateError) {
     log.error({ userAccountId: user.id, error: updateError.message }, 'Failed to deactivate expired account');
     return false;
+  }
+
+  // Останавливаем все активные рекламные кампании
+  try {
+    await pauseAllActiveCampaigns(user.id);
+  } catch (err: any) {
+    log.error({ userAccountId: user.id, error: err.message }, 'Failed to pause campaigns on deactivation');
   }
 
   const notificationType = 'subscription_expired';

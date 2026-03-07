@@ -6,6 +6,7 @@ import {
   getAlmatyTodayDateString,
   isTechAdminUser,
   normalizePhone,
+  pauseAllActiveCampaigns,
   processSubscriptionBillingSweep
 } from '../lib/subscriptionBilling.js';
 import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
@@ -568,7 +569,15 @@ export async function subscriptionBillingRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: error.message });
       }
 
-      return reply.send({ success: true });
+      // Останавливаем все активные рекламные кампании
+      let campaignsPaused = { paused: 0, errors: 0 };
+      try {
+        campaignsPaused = await pauseAllActiveCampaigns(userAccountId);
+      } catch (err: any) {
+        // Не блокируем деактивацию из-за ошибок FB API
+      }
+
+      return reply.send({ success: true, campaignsPaused });
     } catch (error: any) {
       return reply.status(500).send({ error: error.message });
     }

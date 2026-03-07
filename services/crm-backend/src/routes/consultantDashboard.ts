@@ -1162,7 +1162,10 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'User not found' });
       }
 
-      const passwordMatch = await bcrypt.compare(current_password, user.password);
+      const isBcrypt = user.password?.startsWith('$2a$') || user.password?.startsWith('$2b$');
+      const passwordMatch = isBcrypt
+        ? await bcrypt.compare(current_password, user.password)
+        : current_password === user.password;
       if (!passwordMatch) {
         return reply.status(400).send({ error: 'Current password incorrect' });
       }
