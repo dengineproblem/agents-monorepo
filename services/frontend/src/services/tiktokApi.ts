@@ -8,6 +8,7 @@
 import { format, addDays } from 'date-fns';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 // Types
 export interface TikTokCampaign {
@@ -102,28 +103,17 @@ export interface TikTokAdStat {
  * Токены НЕ хранятся на фронтенде — всё через /tiktok-proxy.
  */
 const getUserIds = (): { userAccountId: string; adAccountId?: string } | null => {
-  const storedUser = localStorage.getItem('user');
-  if (!storedUser) {
-    console.error('[tiktokApi] Данные пользователя не найдены в localStorage');
+  const userAccountId = getUserId();
+  if (!userAccountId) {
+    console.error('[tiktokApi] Данные пользователя не найдены');
     return null;
   }
 
-  try {
-    const userData = JSON.parse(storedUser);
-    if (!userData?.id) {
-      console.error('[tiktokApi] Нет user.id в localStorage');
-      return null;
-    }
+  // Multi-account: currentAdAccountId из localStorage
+  const multiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
+  const adAccountId = multiAccountEnabled ? localStorage.getItem('currentAdAccountId') || undefined : undefined;
 
-    // Multi-account: currentAdAccountId из localStorage
-    const multiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
-    const adAccountId = multiAccountEnabled ? localStorage.getItem('currentAdAccountId') || undefined : undefined;
-
-    return { userAccountId: userData.id, adAccountId };
-  } catch (error) {
-    console.error('[tiktokApi] Ошибка чтения данных из localStorage:', error);
-    return null;
-  }
+  return { userAccountId, adAccountId };
 };
 
 /**
@@ -146,10 +136,7 @@ const fetchFromTikTokAPI = async (
 
     const response = await fetch(`${API_BASE_URL}/tiktok-proxy`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': ids.userAccountId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         endpoint,
         params,

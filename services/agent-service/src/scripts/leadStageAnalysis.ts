@@ -2,13 +2,21 @@
 /**
  * Lead Stage Analysis Script
  *
- * Берёт телефоны из CSV, ищет лидов в БД, проверяет историю этапов в Bitrix24,
+ * Берёт телефоны из CSV файла (UTF-16 или UTF-8, tab-separated),
+ * ищет лидов в БД, проверяет историю этапов в Bitrix24,
  * выводит статистику: сколько лидов были на этапе "записан" (L2).
+ *
+ * Usage:
+ *   npx tsx src/scripts/leadStageAnalysis.ts <path-to-csv>
+ *
+ * Example:
+ *   npx tsx src/scripts/leadStageAnalysis.ts ~/Downloads/Имплантация-длинная_Leads_2026-02-16_2026-02-17.csv
  */
 
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
+import { readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,42 +27,6 @@ dotenv.config({ path: resolve(serviceDir, '.env') });
 
 // Ad account Bas Dent
 const AD_ACCOUNT_ID = '91454447-2906-4d89-892b-12c817584b0f';
-
-// Phones from CSV "Имплантация-длинная_Leads_2026-02-11_2026-02-15.csv"
-const CSV_PHONES = [
-  '+77029992936', '+77755119885', '+77081148906', '+77759892531',
-  '+77759533800', '87022703912', '+77055638109', '87058122866',
-  '+777058049907', '77005248386', '+77010999893', '87750345288',
-  '+77759073572', '+77001172211', '+77783687791', '+77782884842',
-  '+77753290640', '+77078956980', '+77015999230', '77758882251',
-  '+77054651816', '+77752544704', '+77754595760', '+79265932170',
-  '+77774784781', '+77053296770', '+77778696313', '+77781235695',
-  '+77055244505', '+77011216043', '87475033052', '+77017770198',
-  '+77758307693', '+77772433888', '+77474039695', '+77056511867',
-  '+77756057524', '+77781559387', '+77770681264', '+77719999606',
-  '+77021872407', '+77072700728', '+77785769558', '+77757501544',
-  '+77762991963', '87752062567', '+77785575577', '+77007243570',
-  '+77782847036', '+77075356776', '+77017057804', '+77770384242',
-  '+77012504038',
-];
-
-// CSV names for reference
-const CSV_NAMES = [
-  'Gulzhan', 'Фиалки и глоксинии | Костанай', 'Eshmurodov Husniddin', 'Таттимбет Шкенов',
-  'Aigul Kosibaeva', 'Ұлдыз Қрыназы', 'Ұлжан', 'Аслан',
-  'Atadjanova Bakytjan', 'Алма', 'Қайрат Шиликбаев', 'Мұрай',
-  'Polat Ussenov', 'Elbrus Qahramanov', 'Дина Серибай', 'Оксана Грублевская',
-  'Елена Амарова', 'Сарсекбаева Балжан', 'Всё для праздника', 'Zhazira Baimbetova',
-  'Ди Диана', 'zhibeka', 'Бақыт Сатбаев Қайдарович', 'Ымырзалиев Ёркинбек',
-  'Назира Голымбетова', 'Anuar', 'Бақытжан', 'Қалымжан',
-  'Olga Fedeneva', 'Наріхмахерлоріступ- Султан', 'emoji name', 'Виктор Мук',
-  'Рустем', '| | |', 'Мырзахабыл Ерік', 'Бақытжан Шорманбаева',
-  'Әсекербаев Сальмен', 'Дениc', 'Tatarka', 'Надина Қалмұратызы',
-  'Шахриддин', 'Адилхан', 'Arman Angelov', 'Валиева Адема',
-  'Гулдана', 'Максат', 'Yaroslav Yarysh', 'Нурия Утеулиева',
-  'Амар Ұлелұлы', 'Сауле Садриева', 'Мурат Кадырбек', 'Асемгүль',
-  'Беркіналі Ұрманазиев',
-];
 
 interface StageHistoryEntry {
   ID: string;
@@ -74,6 +46,50 @@ interface CapiFieldConfig {
   entity_type?: string | null;
   pipeline_id?: string | number | null;
   status_id?: string | number | null;
+}
+
+function parseCsvFile(filePath: string): { phones: string[]; names: string[] } {
+  const raw = readFileSync(filePath);
+
+  // Detect encoding: UTF-16LE BOM = 0xFF 0xFE
+  let content: string;
+  if (raw[0] === 0xff && raw[1] === 0xfe) {
+    content = raw.toString('utf16le');
+  } else {
+    content = raw.toString('utf8');
+  }
+
+  // Remove BOM
+  content = content.replace(/^\uFEFF/, '');
+
+  const lines = content.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) {
+    throw new Error('CSV file has no data rows');
+  }
+
+  const headers = lines[0].split('\t').map((h) => h.trim());
+  const phoneIdx = headers.indexOf('phone_number');
+  const nameIdx = headers.indexOf('full_name');
+
+  if (phoneIdx === -1) {
+    throw new Error(`Column "phone_number" not found in CSV. Headers: ${headers.join(', ')}`);
+  }
+
+  const phones: string[] = [];
+  const names: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split('\t');
+    const phone = (cols[phoneIdx] || '').trim().replace(/^p:/, '');
+    const name = nameIdx !== -1 ? (cols[nameIdx] || '').trim().replace(/^"|"$/g, '') : '';
+
+    if (phone) {
+      phones.push(phone);
+      names.push(name);
+    }
+  }
+
+  return { phones, names };
 }
 
 function normalizePhone(rawPhone: string): string {
@@ -119,6 +135,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function main() {
+  // Parse CSV from CLI argument
+  const csvPath = process.argv[2];
+  if (!csvPath) {
+    console.error('Usage: npx tsx src/scripts/leadStageAnalysis.ts <path-to-csv>');
+    process.exit(1);
+  }
+
+  const resolvedPath = resolve(csvPath);
+  console.log(`Reading CSV: ${resolvedPath}\n`);
+
+  const { phones: CSV_PHONES, names: CSV_NAMES } = parseCsvFile(resolvedPath);
+
+  if (CSV_PHONES.length === 0) {
+    console.error('No phone numbers found in CSV');
+    process.exit(1);
+  }
+
   const { supabase } = await import('../lib/supabase.js');
   const { getValidBitrix24Token } = await import('../lib/bitrix24Tokens.js');
   const { bitrix24Request, findByPhone } = await import('../adapters/bitrix24.js');
@@ -164,7 +197,6 @@ async function main() {
   const { accessToken: token, domain } = await getValidBitrix24Token(USER_ACCOUNT_ID, AD_ACCOUNT_ID);
 
   // Step 4: Normalize CSV phones and find leads in DB
-  const normalizedPhones = CSV_PHONES.map(normalizePhone);
   const phoneCandidates = CSV_PHONES.flatMap((p) => {
     const norm = normalizePhone(p);
     return [p, norm, `+${norm}`, `${norm}@s.whatsapp.net`];
@@ -244,8 +276,8 @@ async function main() {
             select: ['ID', 'CATEGORY_ID', 'STAGE_ID'],
             order: { ID: 'DESC' },
           }});
-          if (dealsResp?.result?.length > 0) {
-            m.dealId = Number(dealsResp.result[0].ID);
+          if (dealsResp?.length > 0) {
+            m.dealId = Number(dealsResp[0].ID);
             // Update in DB
             await supabase.from('leads').update({ bitrix24_deal_id: m.dealId }).eq('id', m.leadId);
             console.log(`  Synced lead #${m.leadId} → deal ${m.dealId}`);

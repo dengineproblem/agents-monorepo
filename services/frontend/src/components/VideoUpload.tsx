@@ -10,7 +10,7 @@ import { facebookApi } from '@/services/facebookApi';
 import { type MultiAdSetLaunchResponse } from '@/services/manualLaunchApi';
 import { ManualLaunchDialog } from '@/components/ManualLaunchDialog';
 import CallbackRequest from './CallbackRequest';
-import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Popover,
@@ -1196,7 +1196,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         // Загружаем креативы через backend API
         const params = new URLSearchParams({ userId: userAccountId, status: 'ready' });
         const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
-          headers: { 'x-user-id': userAccountId }
+          headers: getAuthHeaders()
         });
 
         if (!res.ok) throw new Error('Failed to fetch creatives');

@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import bcrypt from 'bcryptjs';
 import { supabase } from '../lib/supabase.js';
 import { consultantAuthMiddleware, ConsultantAuthRequest, adminOnlyMiddleware } from '../middleware/consultantAuth.js';
 
@@ -179,12 +180,13 @@ export async function consultantsManagementRoutes(app: FastifyInstance) {
 
       // Создаём логин консультанта (если createAccount=true)
       if (createAccount && consultant) {
+        const hashedPassword = await bcrypt.hash(password, 10);
         const { error: consultantAccountError } = await supabase
           .from('consultant_accounts')
           .insert({
             consultant_id: consultant.id,
             username,
-            password, // TODO: в будущем добавить хеширование
+            password: hashedPassword,
             role: 'consultant'
           });
 

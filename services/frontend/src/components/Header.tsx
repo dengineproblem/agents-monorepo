@@ -25,6 +25,7 @@ import { userProfileApi } from '@/services/userProfileApi';
 import { appReviewText } from '@/utils/appReviewText';
 import { AdAccountSwitcher } from './ad-accounts/AdAccountSwitcher';
 import NotificationBell from './NotificationBell';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -111,6 +112,7 @@ const Header: React.FC<HeaderProps> = ({
   const handleSignOut = async () => {
     try {
       localStorage.removeItem('user');
+      localStorage.removeItem('auth_token');
       // Очищаем флаг посещения Dashboard для корректного редиректа при следующем логине
       sessionStorage.removeItem('hasVisitedDashboard');
       console.log('User signed out, localStorage and sessionStorage cleared');
@@ -195,10 +197,7 @@ const Header: React.FC<HeaderProps> = ({
         || (import.meta.env.DEV ? 'http://localhost:8082' : 'https://app.performanteaiagency.com/api');
       const response = await fetch(`${apiBaseUrl}/facebook/validate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userData.id,
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           adAccountId: userAccount.ad_account_id,
           pageId: userAccount.page_id,

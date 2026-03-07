@@ -6,6 +6,7 @@
  */
 
 import { randomBytes } from 'crypto';
+import bcrypt from 'bcryptjs';
 import { supabase } from '../supabase.js';
 import { createLogger } from '../logger.js';
 
@@ -146,6 +147,7 @@ export async function createUserFromOnboarding(
     // 2. Генерируем credentials
     const username = await generateUniqueUsername();
     const password = generatePassword();
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // 3. Создаём user_accounts
     const { data: newUser, error: userError } = await supabase
@@ -153,7 +155,7 @@ export async function createUserFromOnboarding(
       .insert({
         telegram_id: telegramId,
         username,
-        password, // plaintext как в текущей системе
+        password: hashedPassword,
         onboarding_stage: 'registered',
         is_active: true,
         // FB поля пустые - будут заполнены после OAuth

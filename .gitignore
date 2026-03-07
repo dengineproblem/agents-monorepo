@@ -74,3 +74,6 @@ moltbot-workspace/
 # Password reset sensitive data
 password_reset_data.json
 password_reset_results.json
+
+# OpenClaw DB credentials
+.db_credentials

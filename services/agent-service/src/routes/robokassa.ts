@@ -372,9 +372,9 @@ export default async function robokassaRoutes(app: FastifyInstance) {
     try {
       const { data: userTg } = await supabase
         .from('user_accounts')
-        .select('telegram_id, username, password, multi_account_enabled')
+        .select('telegram_id, username, multi_account_enabled')
         .eq('id', user.id)
-        .maybeSingle<{ telegram_id: string | null; username: string | null; password: string | null; multi_account_enabled: boolean | null }>();
+        .maybeSingle<{ telegram_id: string | null; username: string | null; multi_account_enabled: boolean | null }>();
 
       if (userTg?.telegram_id) {
         const formattedDate = newTarifExpires.split('-').reverse().join('.');
@@ -385,8 +385,8 @@ export default async function robokassaRoutes(app: FastifyInstance) {
 
           // 1. Уведомление об оплате с логином/паролем
           let paymentMsg = `✅ Оплата получена! Подписка активна до ${formattedDate}.`;
-          if (userTg.username && userTg.password) {
-            paymentMsg += `\n\n🔑 Ваши данные для входа:\nЛогин: <code>${userTg.username}</code>\nПароль: <code>${userTg.password}</code>`;
+          if (userTg.username) {
+            paymentMsg += `\n\n👤 Ваш логин: <code>${userTg.username}</code>`;
           }
           paymentMsg += `\n\n🌐 Личный кабинет: <a href="https://app.performanteaiagency.com">app.performanteaiagency.com</a>\nТакже доступен как мини-приложение — кнопка <b>prfmnt</b> в боте.`;
           await sendCommunityNotification(userTg.telegram_id, paymentMsg);

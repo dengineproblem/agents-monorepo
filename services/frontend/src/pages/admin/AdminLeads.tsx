@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -92,9 +93,8 @@ const AdminLeads: React.FC = () => {
         params.append('userId', userFilter);
       }
 
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const res = await fetch(`${API_BASE_URL}/admin/leads?${params}`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();

@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -65,15 +66,7 @@ const NotificationBell: React.FC = () => {
   // Brain proposals context для открытия модалки
   const brainProposals = useBrainProposalsContextOptional();
 
-  // Get current user ID
-  const getUserId = useCallback(() => {
-    try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      return user.id;
-    } catch {
-      return null;
-    }
-  }, []);
+  // getUserId imported from @/lib/apiAuth
 
   // Fetch unread count
   const fetchUnreadCount = useCallback(async () => {
@@ -82,7 +75,7 @@ const NotificationBell: React.FC = () => {
 
     try {
       const res = await fetch(`${API_BASE_URL}/notifications/unread-count`, {
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -101,7 +94,7 @@ const NotificationBell: React.FC = () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/notifications?limit=20`, {
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -122,7 +115,7 @@ const NotificationBell: React.FC = () => {
     try {
       await fetch(`${API_BASE_URL}/notifications/${id}/read`, {
         method: 'PATCH',
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
 
       setNotifications((prev) =>
@@ -142,7 +135,7 @@ const NotificationBell: React.FC = () => {
     try {
       await fetch(`${API_BASE_URL}/notifications/mark-all-read`, {
         method: 'POST',
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
 
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
@@ -160,7 +153,7 @@ const NotificationBell: React.FC = () => {
     try {
       await fetch(`${API_BASE_URL}/notifications/${id}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
 
       const wasUnread = notifications.find((n) => n.id === id && !n.is_read);

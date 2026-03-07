@@ -24,6 +24,7 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -258,21 +259,8 @@ const DEFAULT_CAMPAIGN_FORM: CampaignFormState = {
   is_active: true,
 };
 
-function getUserIdFromStorage(): string {
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-    return typeof user?.id === 'string' ? user.id : '';
-  } catch {
-    return '';
-  }
-}
-
 function authHeaders(withJson = false): Record<string, string> {
-  const userId = getUserIdFromStorage();
-  return {
-    ...(withJson ? { 'Content-Type': 'application/json' } : {}),
-    'x-user-id': userId,
-  };
+  return getAuthHeaders(withJson ? { 'Content-Type': 'application/json' } : undefined);
 }
 
 function formatDateTime(value?: string | null): string {

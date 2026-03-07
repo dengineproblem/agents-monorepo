@@ -5,23 +5,11 @@
  */
 
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { getCachedData, setCachedData } from '@/utils/apiCache';
 import type { CampaignForecastResponse, AdForecast } from '@/types/budgetForecast';
 
 const CACHE_TTL_MINUTES = 10;
-
-/**
- * Получить user ID из localStorage
- */
-function getUserId(): string | null {
-  try {
-    const user = localStorage.getItem('user');
-    if (!user) return null;
-    return JSON.parse(user).id;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Получить текущий ad_account_id
@@ -53,16 +41,7 @@ function getCurrentAccountId(): string | null {
  * Выполнить fetch с авторизацией
  */
 async function fetchWithAuth(url: string): Promise<Response> {
-  const userId = getUserId();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (userId) {
-    headers['x-user-id'] = userId;
-  }
-
-  return fetch(url, { headers });
+  return fetch(url, { headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
 }
 
 export const budgetForecastApi = {

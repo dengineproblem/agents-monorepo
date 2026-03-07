@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 // Типы для работы с планами
 export interface UserDirection {
@@ -39,7 +40,7 @@ export async function getUserDirectionsWithPlans(userId: string): Promise<Direct
   try {
     const params = new URLSearchParams({ userId });
     const res = await fetch(`${API_BASE_URL}/user-plans/directions?${params}`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) throw new Error('Failed to fetch directions');
@@ -75,10 +76,7 @@ export async function saveUserDirectionPlans(
   try {
     const res = await fetch(`${API_BASE_URL}/user-plans/save-all`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ plans }),
     });
 
@@ -97,17 +95,6 @@ export async function saveUserDirectionPlans(
 /**
  * Обновить отдельную метрику плана
  */
-function getUserId(): string | null {
-  try {
-    const stored = localStorage.getItem('user');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return parsed.id || null;
-    }
-  } catch {}
-  return null;
-}
-
 export async function updatePlannedMetric(
   directionId: number,
   metricType: 'leads' | 'spend',
@@ -119,10 +106,7 @@ export async function updatePlannedMetric(
   try {
     const res = await fetch(`${API_BASE_URL}/user-plans/metrics`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         user_direction_id: directionId,
         metric_type: metricType,
@@ -150,7 +134,7 @@ export async function deleteUserDirection(directionId: number): Promise<void> {
   try {
     const res = await fetch(`${API_BASE_URL}/user-plans/directions/${directionId}`, {
       method: 'DELETE',
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {

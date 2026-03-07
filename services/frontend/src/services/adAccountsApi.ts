@@ -5,6 +5,7 @@ import type {
   UpdateAdAccountPayload,
 } from '@/types/adAccount';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 export const adAccountsApi = {
   /**
@@ -104,17 +105,9 @@ export const adAccountsApi = {
     try {
       console.log('[adAccountsApi.update] Обновление аккаунта:', adAccountId);
 
-      // Resolve userAccountId from parameter or localStorage
-      const userId = userAccountId || (() => {
-        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
-      })();
-
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (userId) headers['x-user-id'] = userId;
-
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'PATCH',
-        headers,
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
 
@@ -144,16 +137,9 @@ export const adAccountsApi = {
     try {
       console.log('[adAccountsApi.delete] Удаление аккаунта:', adAccountId);
 
-      const userId = userAccountId || (() => {
-        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
-      })();
-
-      const headers: Record<string, string> = {};
-      if (userId) headers['x-user-id'] = userId;
-
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}`, {
         method: 'DELETE',
-        headers,
+        headers: getAuthHeaders(),
       });
 
       if (!response.ok) {
@@ -177,16 +163,9 @@ export const adAccountsApi = {
     try {
       console.log('[adAccountsApi.refreshPicture] Обновление аватара:', adAccountId);
 
-      const userId = userAccountId || (() => {
-        try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
-      })();
-
-      const headers: Record<string, string> = {};
-      if (userId) headers['x-user-id'] = userId;
-
       const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}/refresh-picture`, {
         method: 'POST',
-        headers,
+        headers: getAuthHeaders(),
       });
 
       if (!response.ok) {

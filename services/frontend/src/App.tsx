@@ -173,10 +173,12 @@ const AppRoutes = () => {
           // НЕ показываем онбординг при загрузке — ждём multiAccountLoaded
         } else {
           localStorage.removeItem('user');
+          localStorage.removeItem('auth_token');
           setUser(null);
         }
       } catch (error) {
         localStorage.removeItem('user');
+        localStorage.removeItem('auth_token');
         setUser(null);
       }
     } else {

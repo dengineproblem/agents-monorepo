@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { cn } from '@/lib/utils';
 
 interface UserRoiSummary {
@@ -94,8 +95,7 @@ const AdminAds: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const headers = { 'x-user-id': currentUser.id || '' };
+      const headers = getAuthHeaders();
 
       // Fetch users ROI summary
       const usersRes = await fetch(`${API_BASE_URL}/admin/ads/users-summary?period=${period}`, { headers });

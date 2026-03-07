@@ -5,6 +5,7 @@
  */
 
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import type {
   AnomaliesResponse,
   AnomalySeverity,
@@ -28,31 +29,13 @@ import type {
 } from '@/types/adInsights';
 
 /**
- * Получить userId из localStorage
- */
-function getUserId(): string | null {
-  const user = localStorage.getItem('user');
-  if (!user) return null;
-  try {
-    return JSON.parse(user).id;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Базовый fetch с userId header
+ * Базовый fetch с auth headers
  */
 async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-  const userId = getUserId();
-  const headers: Record<string, string> = {
+  const headers = getAuthHeaders({
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
-  };
-
-  if (userId) {
-    headers['x-user-id'] = userId;
-  }
+  });
 
   return fetch(url, { ...options, headers });
 }

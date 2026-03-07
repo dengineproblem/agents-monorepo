@@ -15,6 +15,7 @@ import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { userProfileApi } from '@/services/userProfileApi';
 import { useDirections } from '@/hooks/useDirections';
 import { creativesApi } from '@/services/creativesApi';
@@ -341,7 +342,7 @@ const CreativeGeneration = () => {
       try {
         console.log('[CreativeGeneration] Загрузка prompt4 для ad_account:', currentAdAccountId);
         const response = await fetch(`${API_BASE_URL}/ad-accounts/${userId}/${currentAdAccountId}`, {
-          headers: { 'x-user-id': userId || '' },
+          headers: getAuthHeaders(),
         });
 
         if (!response.ok) {

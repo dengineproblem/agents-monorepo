@@ -13,7 +13,7 @@ import {
   transformAdToCreativeData,
   refreshCreativeMediaUrl,
   type CompetitorCreativeData,
-} from '../lib/searchApi.js';
+} from '../lib/apifyAdLibrary.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
 import { processVideoTranscription } from '../lib/transcription.js';
 import { onCompetitorsAdded } from '../lib/onboardingHelper.js';

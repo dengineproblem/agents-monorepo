@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 export interface ChatMessage {
   id: string;
@@ -22,30 +23,11 @@ export interface ChatHistory {
   creative_url?: string;
 }
 
-/**
- * Получить user ID из localStorage
- */
-function getUserId(): string | null {
-  try {
-    const user = localStorage.getItem('user');
-    if (!user) return null;
-    return JSON.parse(user).id;
-  } catch {
-    return null;
-  }
-}
-
 // Получить все уникальные чаты (группируем по chat_id)
 export const getChats = async (): Promise<ChatHistory[]> => {
   try {
-    const userId = getUserId();
-    if (!userId) {
-      console.error('User ID не найден');
-      return [];
-    }
-
     const response = await fetch(`${API_BASE_URL}/chat-history`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -67,14 +49,8 @@ export const getChats = async (): Promise<ChatHistory[]> => {
 // Получить сообщения для конкретного чата
 export const getChatMessages = async (sessionId: string): Promise<ChatMessage[]> => {
   try {
-    const userId = getUserId();
-    if (!userId) {
-      console.error('User ID не найден');
-      return [];
-    }
-
     const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/messages`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -126,18 +102,9 @@ export const sendMessage = async (sessionId: string, message: string): Promise<b
 // Обновить статус воронки для чата
 export const updateChatFunnelStage = async (sessionId: string, funnelStage: string): Promise<boolean> => {
   try {
-    const userId = getUserId();
-    if (!userId) {
-      console.error('User ID не найден');
-      return false;
-    }
-
     const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/follow-up`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ message: funnelStage }),
     });
 
@@ -187,14 +154,8 @@ export const groupChatsByFunnelStage = (chats: ChatHistory[]): Record<string, Ch
 // Получить последнее сообщение для чата
 export const getLastMessage = async (sessionId: string): Promise<string | null> => {
   try {
-    const userId = getUserId();
-    if (!userId) {
-      console.error('User ID не найден');
-      return null;
-    }
-
     const response = await fetch(`${API_BASE_URL}/chat-history/${encodeURIComponent(sessionId)}/last-message`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {

@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 import * as tus from 'tus-js-client';
 
@@ -53,17 +54,6 @@ export type CreativeTestStatus = {
   impressions: number;
 };
 
-const getUserId = (): string | null => {
-  const stored = localStorage.getItem('user');
-  if (!stored) return null;
-  try {
-    const u = JSON.parse(stored);
-    return u?.id || null;
-  } catch {
-    return null;
-  }
-};
-
 const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? (crypto as any).randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 
 export const creativesApi = {
@@ -86,7 +76,7 @@ export const creativesApi = {
       params.set('accountId', accountId!);
     }
     const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
-      headers: { 'x-user-id': userId }
+      headers: getAuthHeaders()
     });
 
     if (!res.ok) {
@@ -120,7 +110,7 @@ export const creativesApi = {
       const generatedIds = carouselsWithGenId.map(c => c.generated_creative_id!);
       const genParams = new URLSearchParams({ generatedIds: generatedIds.join(',') });
       const genRes = await fetch(`${API_BASE_URL}/user-creatives/generated-bulk?${genParams}`, {
-        headers: { 'x-user-id': userId }
+        headers: getAuthHeaders()
       });
       const generatedData = genRes.ok ? await genRes.json() : null;
 
@@ -142,7 +132,7 @@ export const creativesApi = {
       const userId = getUserId();
       if (!userId) return null;
       const res = await fetch(`${API_BASE_URL}/user-creatives/${userCreativeId}/transcript`, {
-        headers: { 'x-user-id': userId }
+        headers: getAuthHeaders()
       });
       if (!res.ok) return null;
       const data = await res.json();
@@ -184,7 +174,7 @@ export const creativesApi = {
       if (!userId) return { text: null };
 
       const res = await fetch(`${API_BASE_URL}/user-creatives/${userCreativeId}/generated`, {
-        headers: { 'x-user-id': userId }
+        headers: getAuthHeaders()
       });
       if (!res.ok) return { text: null };
 
@@ -226,7 +216,7 @@ export const creativesApi = {
     try {
       const res = await fetch(`${API_BASE_URL}/user-creatives`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ title, status: 'uploaded', is_active: true }),
       });
       if (!res.ok) {
@@ -246,7 +236,7 @@ export const creativesApi = {
     try {
       const res = await fetch(`${API_BASE_URL}/user-creatives/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
@@ -270,7 +260,7 @@ export const creativesApi = {
     try {
       const res = await fetch(`${API_BASE_URL}/user-creatives/${id}`, {
         method: 'DELETE',
-        headers: { 'x-user-id': userId },
+        headers: getAuthHeaders(),
       });
       if (!res.ok) {
         console.error('Ошибка удаления креатива:', await res.text().catch(() => ''));
@@ -290,7 +280,7 @@ export const creativesApi = {
 
       const params = new URLSearchParams({ userId, creativeIds: creativeId });
       const res = await fetch(`${API_BASE_URL}/user-creatives/tests?${params}`, {
-        headers: { 'x-user-id': userId }
+        headers: getAuthHeaders()
       });
       if (!res.ok) {
         console.error('creativesApi.getCreativeTestStatus error:', await res.text().catch(() => ''));
@@ -320,7 +310,7 @@ export const creativesApi = {
 
       const params = new URLSearchParams({ userId, creativeIds: creativeIds.join(',') });
       const res = await fetch(`${API_BASE_URL}/user-creatives/tests?${params}`, {
-        headers: { 'x-user-id': userId }
+        headers: getAuthHeaders()
       });
       if (!res.ok) {
         console.error('creativesApi.getCreativeTestStatuses error:', await res.text().catch(() => ''));

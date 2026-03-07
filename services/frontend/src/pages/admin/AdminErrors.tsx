@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -122,11 +123,8 @@ const AdminErrors: React.FC = () => {
         params.append('resolved', resolvedFilter === 'resolved' ? 'true' : 'false');
       }
 
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const res = await fetch(`${API_BASE_URL}/admin/errors?${params}`, {
-        headers: {
-          'x-user-id': currentUser.id || '',
-        },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -162,12 +160,9 @@ const AdminErrors: React.FC = () => {
   const handleResolve = async (errorId: string) => {
     setResolving(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const res = await fetch(`${API_BASE_URL}/admin/errors/${errorId}/resolve`, {
         method: 'POST',
-        headers: {
-          'x-user-id': currentUser.id || '',
-        },
+        headers: getAuthHeaders(),
       });
 
       if (res.ok) {

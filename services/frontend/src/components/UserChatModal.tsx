@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { Send, RefreshCw, MessageSquare, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -81,7 +82,9 @@ const UserChatModal: React.FC<UserChatModalProps> = ({
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/${userId}`);
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${userId}`, {
+        headers: getAuthHeaders(),
+      });
 
       if (!res.ok) {
         throw new Error('Failed to fetch messages');
@@ -95,6 +98,7 @@ const UserChatModal: React.FC<UserChatModalProps> = ({
       if (data.messages?.some((m: ChatMessage) => m.direction === 'from_user' && !m.read_at)) {
         await fetch(`${API_BASE_URL}/admin/chats/${userId}/mark-read`, {
           method: 'POST',
+          headers: getAuthHeaders(),
         });
         onUnreadChange?.(0);
       }
@@ -113,15 +117,10 @@ const UserChatModal: React.FC<UserChatModalProps> = ({
     setSending(true);
     setError(null);
 
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-
     try {
       const res = await fetch(`${API_BASE_URL}/admin/chats/${userId}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id || '',
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ message: newMessage.trim() }),
       });
 

@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import bcrypt from 'bcryptjs';
 import { supabase } from '../lib/supabase.js';
 import { consultantAuthMiddleware, ConsultantAuthRequest } from '../middleware/consultantAuth.js';
 import { normalizePeriodInput } from '../lib/periodUtils.js';
@@ -1161,14 +1162,16 @@ export async function consultantDashboardRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'User not found' });
       }
 
-      if (user.password !== current_password) {
+      const passwordMatch = await bcrypt.compare(current_password, user.password);
+      if (!passwordMatch) {
         return reply.status(400).send({ error: 'Current password incorrect' });
       }
 
-      // Обновляем пароль
+      // Обновляем пароль (хешируем новый)
+      const hashedNewPassword = await bcrypt.hash(new_password, 10);
       const { error } = await supabase
         .from('user_accounts')
-        .update({ password: new_password })
+        .update({ password: hashedNewPassword })
         .eq('id', userAccountId);
 
       if (error) {

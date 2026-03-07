@@ -32,6 +32,7 @@ import {
 import Header from '../components/Header';
 import UserChatModal from '@/components/UserChatModal';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import {
   Select,
   SelectContent,
@@ -377,7 +378,7 @@ const AdminOnboarding: React.FC = () => {
     try {
       const res = await fetch(`${API_BASE_URL}/onboarding/approve-fb/${userId}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ sendNotification: true }),
       });
 
@@ -404,14 +405,10 @@ const AdminOnboarding: React.FC = () => {
 
   // Start impersonation
   const handleImpersonate = async (userId: string) => {
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-
     try {
       const res = await fetch(`${API_BASE_URL}/impersonate/${userId}`, {
         method: 'POST',
-        headers: {
-          'x-user-id': currentUser.id,
-        },
+        headers: getAuthHeaders(),
       });
 
       if (res.ok) {
@@ -420,7 +417,7 @@ const AdminOnboarding: React.FC = () => {
         // Store impersonation data
         sessionStorage.setItem('impersonation_mode', 'true');
         sessionStorage.setItem('impersonation_token', data.impersonationToken);
-        sessionStorage.setItem('original_user', JSON.stringify(currentUser));
+        sessionStorage.setItem('original_user', localStorage.getItem('user') || '{}');
 
         // Replace user in localStorage
         localStorage.setItem('user', JSON.stringify(data.user));

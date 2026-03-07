@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { PaymentPlanSlug } from '@/utils/paymentLinks';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 const PAYMENT_PLANS: Record<
   PaymentPlanSlug,
@@ -46,16 +47,7 @@ const PaymentPage: React.FC = () => {
 
   const config = plan && plan in PAYMENT_PLANS ? PAYMENT_PLANS[plan as PaymentPlanSlug] : null;
   const userIdFromQuery = (searchParams.get('uid') || '').trim();
-  const userIdFromStorage = (() => {
-    try {
-      const stored = localStorage.getItem('user');
-      if (!stored) return '';
-      const parsed = JSON.parse(stored);
-      return typeof parsed?.id === 'string' ? parsed.id : '';
-    } catch {
-      return '';
-    }
-  })();
+  const userIdFromStorage = getUserId() || '';
   const userId = userIdFromQuery || userIdFromStorage;
   const apiBase = useMemo(() => {
     if (typeof window === 'undefined') return API_BASE_URL;
@@ -89,7 +81,7 @@ const PaymentPage: React.FC = () => {
           user_id: userId,
         });
         const response = await fetch(`${apiBase}/robokassa/form?${params.toString()}`, {
-          headers: userId ? { 'x-user-id': userId } : undefined,
+          headers: userId ? getAuthHeaders() : undefined,
         });
         const data = await response.json();
         if (!response.ok) {

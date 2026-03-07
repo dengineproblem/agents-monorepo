@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 /**
  * Proposal от Brain агента
@@ -73,25 +74,13 @@ export function useBrainProposals(accountId?: string) {
     error: null,
   });
 
-  /**
-   * Получить userAccountId из localStorage
-   */
-  const getUserAccountId = useCallback((): string | null => {
-    const userData = localStorage.getItem('user');
-    if (!userData) return null;
-    try {
-      const user = JSON.parse(userData);
-      return user.id || null;
-    } catch {
-      return null;
-    }
-  }, []);
+  // getUserId imported from @/lib/apiAuth
 
   /**
    * Загрузить pending proposals
    */
   const fetchPending = useCallback(async () => {
-    const userAccountId = getUserAccountId();
+    const userAccountId = getUserId();
     if (!userAccountId) return;
 
     setIsLoading(true);
@@ -105,7 +94,7 @@ export function useBrainProposals(accountId?: string) {
       console.log('[useBrainProposals] Fetching pending:', url);
 
       const response = await fetch(url, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) {
@@ -127,18 +116,18 @@ export function useBrainProposals(accountId?: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [accountId, getUserAccountId]);
+  }, [accountId, getUserId]);
 
   /**
    * Получить количество pending proposals
    */
   const fetchPendingCount = useCallback(async () => {
-    const userAccountId = getUserAccountId();
+    const userAccountId = getUserId();
     if (!userAccountId) return;
 
     try {
       const response = await fetch(`${API_BASE_URL}/brain-proposals/count`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) {
@@ -151,19 +140,19 @@ export function useBrainProposals(accountId?: string) {
     } catch (error) {
       console.error('[useBrainProposals] Count fetch error:', error);
     }
-  }, [getUserAccountId]);
+  }, [getUserId]);
 
   /**
    * Загрузить конкретный proposal
    */
   const fetchProposal = useCallback(async (proposalId: string): Promise<PendingProposal | null> => {
-    const userAccountId = getUserAccountId();
+    const userAccountId = getUserId();
     if (!userAccountId) return null;
 
     console.log('[useBrainProposals] Fetching proposal:', proposalId);
     try {
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) {
@@ -179,7 +168,7 @@ export function useBrainProposals(accountId?: string) {
       console.error('[useBrainProposals] Fetch proposal error:', error);
       return null;
     }
-  }, [getUserAccountId]);
+  }, [getUserId]);
 
   /**
    * Открыть модалку с proposal
@@ -238,7 +227,7 @@ export function useBrainProposals(accountId?: string) {
    * Одобрить выбранные proposals
    */
   const approve = useCallback(async (proposalId: string, stepIndices: number[]) => {
-    const userAccountId = getUserAccountId();
+    const userAccountId = getUserId();
     if (!userAccountId) {
       toast.error('Пользователь не авторизован');
       return false;
@@ -256,10 +245,7 @@ export function useBrainProposals(accountId?: string) {
 
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}/approve`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userAccountId
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ stepIndices })
       });
 
@@ -290,13 +276,13 @@ export function useBrainProposals(accountId?: string) {
     } finally {
       setModalState(prev => ({ ...prev, isExecuting: false }));
     }
-  }, [fetchPending, closeModal, getUserAccountId]);
+  }, [fetchPending, closeModal, getUserId]);
 
   /**
    * Отклонить proposals
    */
   const reject = useCallback(async (proposalId: string) => {
-    const userAccountId = getUserAccountId();
+    const userAccountId = getUserId();
     if (!userAccountId) {
       toast.error('Пользователь не авторизован');
       return false;
@@ -307,10 +293,7 @@ export function useBrainProposals(accountId?: string) {
 
       const response = await fetch(`${API_BASE_URL}/brain-proposals/${proposalId}/reject`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': userAccountId
-        }
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' })
       });
 
       if (!response.ok) {
@@ -330,7 +313,7 @@ export function useBrainProposals(accountId?: string) {
       toast.error('Не удалось отклонить предложения');
       return false;
     }
-  }, [fetchPending, closeModal, getUserAccountId]);
+  }, [fetchPending, closeModal, getUserId]);
 
   /**
    * Отложить (просто закрыть модалку)

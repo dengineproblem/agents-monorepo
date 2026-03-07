@@ -10,7 +10,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import {
   searchPageByInstagram,
   fetchCompetitorCreatives,
-} from '../lib/searchApi.js';
+} from '../lib/apifyAdLibrary.js';
 
 const log = createLogger({ module: 'briefingRoutes' });
 

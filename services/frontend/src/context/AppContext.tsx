@@ -7,6 +7,7 @@ import { userProfileApi } from '@/services/userProfileApi';
 import { API_BASE_URL } from '@/config/api';
 import { adAccountsApi } from '@/services/adAccountsApi';
 import type { AdAccount, AdAccountSummary } from '@/types/adAccount';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 interface AppContextType {
   campaigns: Campaign[];
@@ -309,9 +310,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       try {
         if (multiAccountEnabled && currentAdAccountId) {
           // Мультиаккаунтный режим — берём из ad_accounts через API
-          const storedUser = localStorage.getItem('user');
-          const userDataForMulti = storedUser ? JSON.parse(storedUser) : null;
-          const userIdForMulti = userDataForMulti?.id;
+          const userIdForMulti = getUserId();
 
           if (!userIdForMulti) {
             setAiAutopilot(false);
@@ -320,7 +319,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           }
 
           const adAccountResponse = await fetch(`${API_BASE_URL}/ad-accounts/${userIdForMulti}/${currentAdAccountId}`, {
-            headers: { 'x-user-id': userIdForMulti },
+            headers: getAuthHeaders(),
           });
 
           if (!adAccountResponse.ok) {
@@ -387,21 +386,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const toggleAiAutopilot = async (enabled: boolean) => {
     setAiAutopilotLoading(true);
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) {
+      const uid = getUserId();
+      if (!uid) {
         toast.error('Пользователь не авторизован');
-        return;
-      }
-
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) {
-        toast.error('ID пользователя не найден');
         return;
       }
 
       // В мультиаккаунтном режиме обновляем ad_accounts.autopilot через API
       if (multiAccountEnabled && currentAdAccountId) {
-        const result = await adAccountsApi.update(currentAdAccountId, { autopilot: enabled } as any, userData.id);
+        const result = await adAccountsApi.update(currentAdAccountId, { autopilot: enabled } as any, uid);
 
         if (!result.success) {
           console.error('Ошибка при обновлении autopilot в ad_accounts:', result.error);
@@ -412,7 +405,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       } else {
         // Legacy режим - обновляем user_accounts.autopilot через API
         try {
-          await userProfileApi.updateProfile(userData.id, { autopilot: enabled });
+          await userProfileApi.updateProfile(uid, { autopilot: enabled });
         } catch (updateError: any) {
           console.error('Ошибка при обновлении состояния AI автопилота:', updateError);
           toast.error('Не удалось обновить состояние AI автопилота');
@@ -435,21 +428,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const toggleAiAutopilotTiktok = async (enabled: boolean) => {
     setAiAutopilotTiktokLoading(true);
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) {
+      const uid = getUserId();
+      if (!uid) {
         toast.error('Пользователь не авторизован');
-        return;
-      }
-
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) {
-        toast.error('ID пользователя не найден');
         return;
       }
 
       // В мультиаккаунтном режиме обновляем ad_accounts.autopilot_tiktok через API
       if (multiAccountEnabled && currentAdAccountId) {
-        const result = await adAccountsApi.update(currentAdAccountId, { autopilot_tiktok: enabled } as any, userData.id);
+        const result = await adAccountsApi.update(currentAdAccountId, { autopilot_tiktok: enabled } as any, uid);
 
         if (!result.success) {
           console.error('Ошибка при обновлении autopilot_tiktok в ad_accounts:', result.error);
@@ -460,7 +447,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       } else {
         // Legacy режим - обновляем user_accounts.autopilot_tiktok через API
         try {
-          await userProfileApi.updateProfile(userData.id, { autopilot_tiktok: enabled });
+          await userProfileApi.updateProfile(uid, { autopilot_tiktok: enabled });
         } catch (updateError: any) {
           console.error('Ошибка при обновлении состояния TikTok автопилота:', updateError);
           toast.error('Не удалось обновить состояние TikTok автопилота');
@@ -827,18 +814,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Функция для проверки наличия business_id
   const checkBusinessId = async (): Promise<boolean> => {
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) {
+      const uid = getUserId();
+      if (!uid) {
         return false;
       }
-      
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) {
-        return false;
-      }
-      
+
       // Используем backend API для получения business_id
-      const data = await userProfileApi.fetchProfile(userData.id);
+      const data = await userProfileApi.fetchProfile(uid);
 
       if (!data) {
         console.error('Ошибка при проверке business_id: пустой ответ');
@@ -859,11 +841,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const checkTikTokConnected = async (): Promise<boolean> => {
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) return false;
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) return false;
-      const data = await userProfileApi.fetchProfile(userData.id);
+      const uid = getUserId();
+      if (!uid) return false;
+      const data = await userProfileApi.fetchProfile(uid);
       if (!data) return false;
       const isConnected = !!data?.tiktok_business_id;
       setTiktokConnected(isConnected);
@@ -876,15 +856,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Функция для загрузки рекламных аккаунтов (мультиаккаунтность)
   const loadAdAccounts = async () => {
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) return;
-
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) return;
+      const uid = getUserId();
+      if (!uid) return;
 
       console.log('[AppContext] Загружаем свежие данные adAccounts...');
 
-      const response = await adAccountsApi.list(userData.id);
+      const response = await adAccountsApi.list(uid);
 
       // DEBUG: что пришло с API (RAW данные)
       console.log('[AppContext] === RAW API RESPONSE ===');
@@ -1051,20 +1028,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
 
     try {
-      const storedUser = localStorage.getItem('user');
-      if (!storedUser) {
+      const uid = getUserId();
+      if (!uid) {
         toast.error('Пользователь не авторизован');
         return;
       }
-      
-      const userData = JSON.parse(storedUser);
-      if (!userData.id) {
-        toast.error('ID пользователя не найден');
-        return;
-      }
-      
+
       try {
-        await userProfileApi.updateProfile(userData.id, { optimization: optimizationType });
+        await userProfileApi.updateProfile(uid, { optimization: optimizationType });
       } catch (updateError: any) {
         console.error('Ошибка при обновлении параметров оптимизации:', updateError);
         toast.error('Не удалось обновить параметры оптимизации');

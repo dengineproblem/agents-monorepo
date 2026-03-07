@@ -14,7 +14,7 @@
 import cron from 'node-cron';
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
-import { fetchCompetitorCreatives, type CompetitorCreativeData } from '../lib/searchApi.js';
+import { fetchCompetitorCreatives, type CompetitorCreativeData } from '../lib/apifyAdLibrary.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
 import { processVideoTranscription } from '../lib/transcription.js';
 import { cacheImageToStorage } from '../lib/imageCache.js';
@@ -404,8 +404,8 @@ async function processCompetitor(
 
 export function startCompetitorCrawlerCron(app: FastifyInstance) {
   // Проверяем наличие API ключа
-  if (!process.env.SEARCHAPI_KEY) {
-    app.log.warn('SEARCHAPI_KEY не настроен, cron для сбора креативов конкурентов отключен');
+  if (!process.env.APIFY_TOKEN) {
+    app.log.warn('APIFY_TOKEN не настроен, cron для сбора креативов конкурентов отключен');
     return;
   }
 

@@ -23,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -79,11 +80,7 @@ const AdminDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const headers: HeadersInit = currentUser.id
-        ? { 'x-user-id': currentUser.id }
-        : {};
-      const res = await fetch(`${API_BASE_URL}/admin/stats/dashboard`, { headers });
+      const res = await fetch(`${API_BASE_URL}/admin/stats/dashboard`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setStats(data.stats);

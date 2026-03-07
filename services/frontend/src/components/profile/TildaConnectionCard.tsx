@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { useAppContext } from '@/context/AppContext';
 import { userProfileApi } from '@/services/userProfileApi';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 // Production webhook URL (always use production for external integrations)
 const WEBHOOK_BASE_URL = 'https://app.performanteaiagency.com';
@@ -51,7 +52,7 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
         if (multiAccountEnabled && currentAdAccountId) {
           // Multi-account mode: load from ad_accounts via backend API
           const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/${currentAdAccountId}`, {
-            headers: { 'x-user-id': userAccountId || '' },
+            headers: getAuthHeaders(),
           });
           if (response.ok) {
             const data = await response.json();
@@ -86,10 +87,7 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
         // Multi-account mode: save to ad_accounts via backend API
         const response = await fetch(`${API_BASE_URL}/ad-accounts/${currentAdAccountId}`, {
           method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': userAccountId || '',
-          },
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ tilda_utm_field: field }),
         });
         if (!response.ok) throw new Error('Failed to save tilda_utm_field');

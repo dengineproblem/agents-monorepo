@@ -54,6 +54,7 @@ import type {
   PatternsSummaryResponse,
 } from '@/types/adInsights';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 interface AdAccount {
   id: string;
@@ -113,10 +114,9 @@ const AdminAdInsights: React.FC = () => {
   // Load ad accounts
   useEffect(() => {
     const loadAccounts = async () => {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       try {
         const res = await fetch(`${API_BASE_URL}/admin/ad-insights/accounts`, {
-          headers: { 'x-user-id': currentUser.id || '' },
+          headers: getAuthHeaders(),
         });
         if (res.ok) {
           const data = await res.json();

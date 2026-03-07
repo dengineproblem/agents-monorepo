@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { ChevronDown, QrCode, Cloud } from 'lucide-react';
+import { ChevronDown, QrCode, Cloud, Search } from 'lucide-react';
 import type {
   DirectionObjective,
   ConversionChannel,
@@ -25,7 +25,7 @@ import type {
   OptimizationLevel,
 } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
-import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
+import { GEO_GROUPS, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
@@ -113,6 +113,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [cityPopoverOpen, setCityPopoverOpen] = useState(false);
+  const [geoSearch, setGeoSearch] = useState('');
   const [ageMin, setAgeMin] = useState<number>(18);
   const [ageMax, setAgeMax] = useState<number>(65);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
@@ -1069,62 +1070,79 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         <ChevronDown className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent 
+                    <PopoverContent
                       container={dialogContentRef.current}
-                      className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                      className="z-50 w-72 max-h-72 overflow-hidden p-0 flex flex-col"
                       side="bottom"
                       align="start"
                       sideOffset={6}
                     >
-                      <div className="font-medium text-sm mb-2">Выберите города или страны</div>
-                      <div className="flex flex-col gap-1">
-                        {CITIES_AND_COUNTRIES.map(city => {
-                          const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
-                          const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
-                          const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
-                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
-                          const isKZSelected = selectedCities.includes('KZ');
-                          const isCYSelected = selectedCities.includes('CY');
-                          const isDisabled = isSubmitting ||
-                            (city.id === 'KZ' && anyCitySelected) ||
-                            (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
-                            (city.id === 'CY' && selectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
-                            (isCyprusGeo && isCYSelected);
-                          
+                      <div className="p-3 pb-2 border-b">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                          <Input
+                            placeholder="Поиск..."
+                            value={geoSearch}
+                            onChange={(e) => setGeoSearch(e.target.value)}
+                            className="h-8 pl-7 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="overflow-y-auto p-2 flex-1">
+                        {GEO_GROUPS.map(group => {
+                          const searchLower = geoSearch.toLowerCase();
+                          const filteredItems = geoSearch
+                            ? group.items.filter(c => c.name.toLowerCase().includes(searchLower))
+                            : group.items;
+                          if (filteredItems.length === 0) return null;
                           return (
-                            <div
-                              key={city.id} 
-                              className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!isDisabled) {
-                                  handleCitySelection(city.id);
-                                }
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedCities.includes(city.id)}
-                                disabled={isDisabled}
-                                onChange={() => {
-                                  if (!isDisabled) {
-                                    handleCitySelection(city.id);
-                                  }
-                                }}
-                              />
-                              <span>{city.name}</span>
+                            <div key={group.label} className="mb-2">
+                              <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">{group.label}</div>
+                              {filteredItems.map(city => {
+                                const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
+                                const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
+                                const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
+                                const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
+                                const isKZSelected = selectedCities.includes('KZ');
+                                const isCYSelected = selectedCities.includes('CY');
+                                const isDisabled = isSubmitting ||
+                                  (city.id === 'KZ' && anyCitySelected) ||
+                                  (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
+                                  (city.id === 'CY' && selectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
+                                  (isCyprusGeo && isCYSelected);
+                                return (
+                                  <div
+                                    key={city.id}
+                                    className={`flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none ${isDisabled ? 'opacity-50' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isDisabled) handleCitySelection(city.id);
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedCities.includes(city.id)}
+                                      disabled={isDisabled}
+                                      onChange={() => { if (!isDisabled) handleCitySelection(city.id); }}
+                                    />
+                                    <span>{city.name}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           );
                         })}
                       </div>
-                      <Button
-                        className="mt-2"
-                        onClick={() => setCityPopoverOpen(false)}
-                        variant="outline"
-                        size="sm"
-                      >
-                        ОК
-                      </Button>
+                      <div className="p-2 border-t">
+                        <Button
+                          className="w-full"
+                          onClick={() => { setCityPopoverOpen(false); setGeoSearch(''); }}
+                          variant="outline"
+                          size="sm"
+                        >
+                          ОК
+                        </Button>
+                      </div>
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -1225,58 +1243,75 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                           <ChevronDown className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent 
+                      <PopoverContent
                         container={dialogContentRef.current}
-                        className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                        className="z-50 w-72 max-h-72 overflow-hidden p-0 flex flex-col"
                         side="bottom"
                         align="start"
                         sideOffset={6}
                       >
-                        <div className="font-medium text-sm mb-2">Выберите города или страны</div>
-                        <div className="flex flex-col gap-1">
-                          {CITIES_AND_COUNTRIES.map(city => {
-                            const isKZ = city.id === 'KZ';
-                            const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                            const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
-                            const isKZSelected = selectedCities.includes('KZ');
-                            const isDisabled = isSubmitting ||
-                              (isKZ && anyCitySelected) ||
-                              (!isKZ && !isOtherCountry && isKZSelected);
-                            
+                        <div className="p-3 pb-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input
+                              placeholder="Поиск..."
+                              value={geoSearch}
+                              onChange={(e) => setGeoSearch(e.target.value)}
+                              className="h-8 pl-7 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="overflow-y-auto p-2 flex-1">
+                          {GEO_GROUPS.map(group => {
+                            const searchLower = geoSearch.toLowerCase();
+                            const filteredItems = geoSearch
+                              ? group.items.filter(c => c.name.toLowerCase().includes(searchLower))
+                              : group.items;
+                            if (filteredItems.length === 0) return null;
                             return (
-                              <div
-                                key={city.id} 
-                                className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!isDisabled) {
-                                    handleCitySelection(city.id);
-                                  }
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedCities.includes(city.id)}
-                                  disabled={isDisabled}
-                                  onChange={() => {
-                                    if (!isDisabled) {
-                                      handleCitySelection(city.id);
-                                    }
-                                  }}
-                                />
-                                <span>{city.name}</span>
+                              <div key={group.label} className="mb-2">
+                                <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">{group.label}</div>
+                                {filteredItems.map(city => {
+                                  const isKZ = city.id === 'KZ';
+                                  const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
+                                  const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
+                                  const isKZSelected = selectedCities.includes('KZ');
+                                  const isDisabled = isSubmitting ||
+                                    (isKZ && anyCitySelected) ||
+                                    (!isKZ && !isOtherCountry && isKZSelected);
+                                  return (
+                                    <div
+                                      key={city.id}
+                                      className={`flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none ${isDisabled ? 'opacity-50' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!isDisabled) handleCitySelection(city.id);
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedCities.includes(city.id)}
+                                        disabled={isDisabled}
+                                        onChange={() => { if (!isDisabled) handleCitySelection(city.id); }}
+                                      />
+                                      <span>{city.name}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             );
                           })}
                         </div>
-                        <Button
-                          className="mt-2"
-                          onClick={() => setCityPopoverOpen(false)}
-                          variant="outline"
-                          size="sm"
-                        >
-                          ОК
-                        </Button>
+                        <div className="p-2 border-t">
+                          <Button
+                            className="w-full"
+                            onClick={() => { setCityPopoverOpen(false); setGeoSearch(''); }}
+                            variant="outline"
+                            size="sm"
+                          >
+                            ОК
+                          </Button>
+                        </div>
                       </PopoverContent>
                     </Popover>
                   </div>
@@ -1374,62 +1409,79 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                           <ChevronDown className="h-4 w-4 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent 
+                      <PopoverContent
                         container={dialogContentRef.current}
-                        className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                        className="z-50 w-72 max-h-72 overflow-hidden p-0 flex flex-col"
                         side="bottom"
                         align="start"
                         sideOffset={6}
                       >
-                        <div className="font-medium text-sm mb-2">Выберите города или страны</div>
-                        <div className="flex flex-col gap-1">
-                          {CITIES_AND_COUNTRIES.map(city => {
-                            const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
-                            const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
-                            const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
-                            const anyCitySelected = tiktokSelectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
-                            const isKZSelected = tiktokSelectedCities.includes('KZ');
-                            const isCYSelected = tiktokSelectedCities.includes('CY');
-                            const isDisabled = isSubmitting ||
-                              (city.id === 'KZ' && anyCitySelected) ||
-                              (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
-                              (city.id === 'CY' && tiktokSelectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
-                              (isCyprusGeo && isCYSelected);
-                            
+                        <div className="p-3 pb-2 border-b">
+                          <div className="relative">
+                            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input
+                              placeholder="Поиск..."
+                              value={geoSearch}
+                              onChange={(e) => setGeoSearch(e.target.value)}
+                              className="h-8 pl-7 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="overflow-y-auto p-2 flex-1">
+                          {GEO_GROUPS.map(group => {
+                            const searchLower = geoSearch.toLowerCase();
+                            const filteredItems = geoSearch
+                              ? group.items.filter(c => c.name.toLowerCase().includes(searchLower))
+                              : group.items;
+                            if (filteredItems.length === 0) return null;
                             return (
-                              <div
-                                key={city.id} 
-                                className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!isDisabled) {
-                                    handleTikTokCitySelection(city.id);
-                                  }
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={tiktokSelectedCities.includes(city.id)}
-                                  disabled={isDisabled}
-                                  onChange={() => {
-                                    if (!isDisabled) {
-                                      handleTikTokCitySelection(city.id);
-                                    }
-                                  }}
-                                />
-                                <span>{city.name}</span>
+                              <div key={group.label} className="mb-2">
+                                <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">{group.label}</div>
+                                {filteredItems.map(city => {
+                                  const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
+                                  const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
+                                  const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
+                                  const anyCitySelected = tiktokSelectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
+                                  const isKZSelected = tiktokSelectedCities.includes('KZ');
+                                  const isCYSelected = tiktokSelectedCities.includes('CY');
+                                  const isDisabled = isSubmitting ||
+                                    (city.id === 'KZ' && anyCitySelected) ||
+                                    (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
+                                    (city.id === 'CY' && tiktokSelectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
+                                    (isCyprusGeo && isCYSelected);
+                                  return (
+                                    <div
+                                      key={city.id}
+                                      className={`flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none ${isDisabled ? 'opacity-50' : ''}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!isDisabled) handleTikTokCitySelection(city.id);
+                                      }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={tiktokSelectedCities.includes(city.id)}
+                                        disabled={isDisabled}
+                                        onChange={() => { if (!isDisabled) handleTikTokCitySelection(city.id); }}
+                                      />
+                                      <span>{city.name}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             );
                           })}
                         </div>
-                        <Button
-                          className="mt-2"
-                          onClick={() => setTikTokCityPopoverOpen(false)}
-                          variant="outline"
-                          size="sm"
-                        >
-                          ОК
-                        </Button>
+                        <div className="p-2 border-t">
+                          <Button
+                            className="w-full"
+                            onClick={() => { setTikTokCityPopoverOpen(false); setGeoSearch(''); }}
+                            variant="outline"
+                            size="sm"
+                          >
+                            ОК
+                          </Button>
+                        </div>
                       </PopoverContent>
                     </Popover>
                   </div>

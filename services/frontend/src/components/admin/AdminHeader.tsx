@@ -68,6 +68,7 @@ const AdminHeader: React.FC<AdminHeaderProps> = ({
 
   const handleSignOut = () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('auth_token');
     navigate('/login');
   };
 

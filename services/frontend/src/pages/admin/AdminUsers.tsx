@@ -47,6 +47,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import UserChatModal from '@/components/UserChatModal';
@@ -123,7 +124,6 @@ const AdminUsers: React.FC = () => {
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const params = new URLSearchParams({
         page: String(page),
         limit: '20',
@@ -137,7 +137,7 @@ const AdminUsers: React.FC = () => {
       }
 
       const res = await fetch(`${API_BASE_URL}/admin/users?${params}`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -169,13 +169,9 @@ const AdminUsers: React.FC = () => {
 
   const handleImpersonate = async (userId: string) => {
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const res = await fetch(`${API_BASE_URL}/admin/impersonate/${userId}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id,
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       });
 
       if (res.ok) {

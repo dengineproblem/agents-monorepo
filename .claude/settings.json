@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:help.sleekflow.io)",
+      "WebFetch(domain:business.whatsapp.com)",
+      "WebFetch(domain:academy.useinsider.com)",
+      "Read(//Users/anatolijstepanov/agents-monorepo/**)",
+      "Bash(CAPI_TOKEN=\"EAAYNZCXReLZAoBO4XqBAkBBCaQTt36IphOKlbZBYFB0nCJOeutwZCaiWKZAbZBnj8tFUx7nXSaOZBy4YGdLxBbH1kqzHiTAZBTeauWOZCZB8FvoOMxmFwNcgoe6GYfjzATmKqDYLyzVjzhvnwTCSWF0FUjOoAQjTL40wc6hiwojsALaz7ZAkbdunVGkHQOt\")",
+      "Bash(SERVICE_KEY=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlreXd1dnRhdnBuamxyanRhbHFpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NTE0NDc1MywiZXhwIjoyMDYwNzIwNzUzfQ.CAJx7J-CCzbU14EFrZhFcv1qzOLr35dT1-Oh33elOYo\")",
+      "Bash(BASE=\"https://ikywuvtavpnjlrjtalqi.supabase.co/rest/v1\")",
+      "Bash(__NEW_LINE_7141ab7135981dbb__ for table in leads purchases user_creatives generated_creatives creative_metrics_history creative_analysis ad_creative_mapping capi_events_log)",
+      "Bash(SB_URL=\"https://ikywuvtavpnjlrjtalqi.supabase.co\")",
+      "Bash(do echo \"=== $TABLE ===\")"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}

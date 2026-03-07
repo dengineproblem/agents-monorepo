@@ -5,6 +5,7 @@ import { Clock, User, FileText } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 interface TargetologAction {
   id: number;
@@ -27,22 +28,16 @@ const TargetologJournal: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        // Получаем текущего пользователя из localStorage
-        const storedUser = localStorage.getItem('user');
-        if (!storedUser) {
+        // Получаем текущего пользователя
+        const currentUserId = getUserId();
+        if (!currentUserId) {
           setError('Пользователь не найден');
-          return;
-        }
-
-        const user = JSON.parse(storedUser);
-        if (!user.id) {
-          setError('ID пользователя не найден');
           return;
         }
 
         // Загружаем действия таргетолога через backend API
         const response = await fetch(`${API_BASE_URL}/targetolog-actions?limit=50`, {
-          headers: { 'x-user-id': String(user.id) },
+          headers: getAuthHeaders(),
         });
 
         if (!response.ok) {

@@ -118,6 +118,9 @@ const Login = () => {
       
       // Сохраняем данные в localStorage
       localStorage.setItem('user', JSON.stringify(sessionUser));
+      if (user.token) {
+        localStorage.setItem('auth_token', user.token);
+      }
       console.log('Данные пользователя сохранены в localStorage');
 
       toastT.success('loggedIn');

@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
@@ -87,7 +88,6 @@ const AdminSubscriptions: React.FC = () => {
   const fetchSubscriptions = useCallback(async () => {
     setLoading(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       const params = new URLSearchParams({
         page: String(page),
         limit: '20',
@@ -99,7 +99,7 @@ const AdminSubscriptions: React.FC = () => {
       }
 
       const res = await fetch(`${API_BASE_URL}/admin/users?${params.toString()}`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
 
       if (!res.ok) return;

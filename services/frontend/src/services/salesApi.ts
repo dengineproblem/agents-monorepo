@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 import { userProfileApi } from '@/services/userProfileApi';
 
@@ -74,7 +75,7 @@ class SalesApiService {
         purchaseParams.set('accountId', accountId!);
       }
       const purchasesRes = await fetch(`${API_BASE_URL}/purchases?${purchaseParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!purchasesRes.ok) {
         const errBody = await purchasesRes.json().catch(() => ({}));
@@ -101,7 +102,7 @@ class SalesApiService {
       // Загружаем лиды с creative_id через backend API
       const leadsParams = new URLSearchParams({ userAccountId });
       const leadsRes = await fetch(`${API_BASE_URL}/leads?${leadsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       const leadsBody = leadsRes.ok ? await leadsRes.json() : { leads: [] };
       // Фильтруем лиды на клиенте — по телефону и наличию creative_id
@@ -119,7 +120,7 @@ class SalesApiService {
       const creativeIds = [...new Set(leads.map((l: any) => l.creative_id))];
       const creativesParams = new URLSearchParams({ userId: userAccountId, ids: creativeIds.join(',') });
       const creativesRes = await fetch(`${API_BASE_URL}/user-creatives/by-ids?${creativesParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       const creatives = creativesRes.ok ? await creativesRes.json() : [];
 
@@ -215,7 +216,7 @@ class SalesApiService {
 
       const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           path: `${adId}/insights`,
           params: {
@@ -250,7 +251,7 @@ class SalesApiService {
 
       const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           path: adId,
           params: { fields: 'campaign_id' },
@@ -280,7 +281,7 @@ class SalesApiService {
 
       const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           path: adAccountId,
           params: {
@@ -362,7 +363,7 @@ class SalesApiService {
         creativesParams.set('accountId', accountId!);
       }
       const creativesRes = await fetch(`${API_BASE_URL}/user-creatives?${creativesParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!creativesRes.ok) {
         const errBody = await creativesRes.json().catch(() => ({}));
@@ -410,7 +411,7 @@ class SalesApiService {
         const generatedIds = carouselsWithGenId.map((c: any) => c.generated_creative_id);
         const genParams = new URLSearchParams({ generatedIds: generatedIds.join(',') });
         const genRes = await fetch(`${API_BASE_URL}/user-creatives/generated-bulk?${genParams}`, {
-          headers: { 'x-user-id': userAccountId }
+          headers: getAuthHeaders()
         });
         const generatedData = genRes.ok ? await genRes.json() : null;
 
@@ -438,7 +439,7 @@ class SalesApiService {
         metricsParams.set('dateFrom', since);
       }
       const metricsRes = await fetch(`${API_BASE_URL}/user-creatives/metrics?${metricsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       const metricsHistory = metricsRes.ok ? await metricsRes.json() : null;
       const metricsError = metricsRes.ok ? null : 'Failed to fetch metrics';
@@ -471,7 +472,7 @@ class SalesApiService {
         leadsParams.set('accountId', accountId!);
       }
       const leadsRes = await fetch(`${API_BASE_URL}/leads?${leadsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       let leadsData: any[] | null = null;
       if (leadsRes.ok) {
@@ -504,7 +505,7 @@ class SalesApiService {
         purchasesParams.set('accountId', accountId!);
       }
       const purchasesRes = await fetch(`${API_BASE_URL}/purchases?${purchasesParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       let purchasesData: any[] | null = null;
       if (purchasesRes.ok) {
@@ -556,7 +557,7 @@ class SalesApiService {
       if (leadIds.length > 0) {
         const capiParams = new URLSearchParams({ userAccountId, leadIds: leadIds.join(',') });
         const capiRes = await fetch(`${API_BASE_URL}/capi-events?${capiParams}`, {
-          headers: { 'x-user-id': userAccountId }
+          headers: getAuthHeaders()
         });
         if (capiRes.ok) {
           const capiBody = await capiRes.json();
@@ -741,7 +742,7 @@ class SalesApiService {
       // Получаем уникальные source_id из таблицы leads через backend API
       const campLeadsParams = new URLSearchParams({ userAccountId });
       const campLeadsRes = await fetch(`${API_BASE_URL}/leads?${campLeadsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!campLeadsRes.ok) {
         const errBody = await campLeadsRes.json().catch(() => ({}));
@@ -838,7 +839,7 @@ class SalesApiService {
       // Считаем общую сумму всех продаж клиента через backend API
       const saleSumParams = new URLSearchParams({ userAccountId });
       const saleSumRes = await fetch(`${API_BASE_URL}/purchases?${saleSumParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!saleSumRes.ok) {
         console.error('❌ Ошибка подсчета суммы продаж:', saleSumRes.statusText);
@@ -856,7 +857,7 @@ class SalesApiService {
       // Находим лиды по телефону, чтобы получить их ID для обновления
       const saleLeadsParams = new URLSearchParams({ userAccountId });
       const saleLeadsRes = await fetch(`${API_BASE_URL}/leads?${saleLeadsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!saleLeadsRes.ok) {
         console.error('❌ Ошибка загрузки лидов для обновления sale_amount:', saleLeadsRes.statusText);
@@ -873,7 +874,7 @@ class SalesApiService {
       for (const lead of matchingLeads) {
         const updateRes = await fetch(`${API_BASE_URL}/leads/${lead.id}?userAccountId=${userAccountId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': userAccountId },
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ sale_amount: totalAmount })
         });
         if (!updateRes.ok) {
@@ -897,7 +898,7 @@ class SalesApiService {
       // Шаг 1: Получить все ad_id для этого креатива через ad_creative_mapping (backend API)
       const mappingParams = new URLSearchParams({ userAccountId, userCreativeIds: creativeId });
       const mappingRes = await fetch(`${API_BASE_URL}/ad-creative-mapping?${mappingParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!mappingRes.ok) {
         const errBody = await mappingRes.json().catch(() => ({}));
@@ -925,7 +926,7 @@ class SalesApiService {
         dateFrom: dateCutoff.toISOString().split('T')[0],
       });
       const metricsRes = await fetch(`${API_BASE_URL}/user-creatives/metrics?${metricsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!metricsRes.ok) {
         const errBody = await metricsRes.json().catch(() => ({}));
@@ -1028,7 +1029,7 @@ class SalesApiService {
     try {
       const analysisParams = new URLSearchParams({ userAccountId, creativeIds: creativeId });
       const res = await fetch(`${API_BASE_URL}/creative-analysis-results?${analysisParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
@@ -1080,7 +1081,7 @@ class SalesApiService {
       // Ищем лида через backend API
       const addSaleLeadsParams = new URLSearchParams({ userAccountId: saleData.user_account_id });
       const addSaleLeadsRes = await fetch(`${API_BASE_URL}/leads?${addSaleLeadsParams}`, {
-        headers: { 'x-user-id': saleData.user_account_id }
+        headers: getAuthHeaders()
       });
 
       let existingLead: any = null;
@@ -1134,7 +1135,7 @@ class SalesApiService {
         
         const leadCreateRes = await fetch(`${API_BASE_URL}/leads`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify(leadInsertData)
         });
 
@@ -1160,7 +1161,7 @@ class SalesApiService {
 
       const purchaseCreateRes = await fetch(`${API_BASE_URL}/purchases`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(purchaseInsertData)
       });
 
@@ -1214,7 +1215,7 @@ class SalesApiService {
 
       const leadCreateRes2 = await fetch(`${API_BASE_URL}/leads`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(leadInsertData)
       });
 
@@ -1237,7 +1238,7 @@ class SalesApiService {
 
       const purchaseCreateRes2 = await fetch(`${API_BASE_URL}/purchases`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': saleData.user_account_id },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(purchaseInsertData)
       });
 
@@ -1274,7 +1275,7 @@ class SalesApiService {
         roiLeadsParams.set('accountId', accountId!);
       }
       const roiLeadsRes = await fetch(`${API_BASE_URL}/leads?${roiLeadsParams}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!roiLeadsRes.ok) {
         const errBody = await roiLeadsRes.json().catch(() => ({}));
@@ -1310,7 +1311,7 @@ class SalesApiService {
       if (creativeIdsArray.length > 0) {
         const crParams = new URLSearchParams({ userId: userAccountId, ids: creativeIdsArray.join(',') });
         const crRes = await fetch(`${API_BASE_URL}/user-creatives/by-ids?${crParams}`, {
-          headers: { 'x-user-id': userAccountId }
+          headers: getAuthHeaders()
         });
         const creatives = crRes.ok ? await crRes.json() : [];
 
@@ -1370,7 +1371,7 @@ class SalesApiService {
     try {
       // Загружаем креативы через backend API
       const creativesRes = await fetch(`${API_BASE_URL}/user-creatives?${new URLSearchParams({ userId: userAccountId })}`, {
-        headers: { 'x-user-id': userAccountId }
+        headers: getAuthHeaders()
       });
       if (!creativesRes.ok) {
         const errBody = await creativesRes.json().catch(() => ({}));
@@ -1387,7 +1388,7 @@ class SalesApiService {
       let directionsMap: Record<string, string> = {};
       try {
         const dirRes = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`, {
-          headers: { 'x-user-id': userAccountId }
+          headers: getAuthHeaders()
         });
         if (dirRes.ok) {
           const dirData = await dirRes.json();

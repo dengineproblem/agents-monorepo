@@ -5,6 +5,7 @@
 import { format, subDays, addDays } from 'date-fns';
 import { toastT } from '@/utils/toastUtils';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 // Types
 export interface Campaign {
@@ -130,10 +131,7 @@ const getCurrentUserConfig = async () => {
   };
 };
 
-// Получить userId для x-user-id header
-const getUserId = (): string | undefined => {
-  try { return JSON.parse(localStorage.getItem('user') || '{}').id; } catch { return undefined; }
-};
+// getUserId imported from @/lib/apiAuth
 
 // Получить текущий internal adAccountId (UUID из нашей БД, не Facebook act_XXX)
 const getCurrentInternalAdAccountId = (): string | undefined => {
@@ -151,16 +149,12 @@ const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, str
 
   console.log(`[fbProxy] Запрос: ${endpoint}`);
 
-  const userId = getUserId();
   const adAccountId = getCurrentInternalAdAccountId();
 
   try {
     const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(userId ? { 'x-user-id': userId } : {}),
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         path: endpoint,
         params,
@@ -443,14 +437,10 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
 
 // Изменить daily_budget adset-а (через бэкенд proxy)
 const updateAdsetBudget = async (adsetId: string, newBudget: number) => {
-  const userId = getUserId();
   const adAccountId = getCurrentInternalAdAccountId();
   const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(userId ? { 'x-user-id': userId } : {}),
-    },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       path: adsetId,
       params: { daily_budget: String(newBudget) },
@@ -467,14 +457,10 @@ const updateAdsetBudget = async (adsetId: string, newBudget: number) => {
 
 // Изменить статус adset-а (ACTIVE/PAUSED) (через бэкенд proxy)
 const updateAdsetStatus = async (adsetId: string, isActive: boolean) => {
-  const userId = getUserId();
   const adAccountId = getCurrentInternalAdAccountId();
   const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(userId ? { 'x-user-id': userId } : {}),
-    },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       path: adsetId,
       params: { status: isActive ? 'ACTIVE' : 'PAUSED' },
@@ -493,14 +479,10 @@ const updateAdsetStatus = async (adsetId: string, isActive: boolean) => {
  * Обновить статус объявления (ACTIVE/PAUSED) (через бэкенд proxy)
  */
 const updateAdStatus = async (adId: string, isActive: boolean) => {
-  const userId = getUserId();
   const adAccountId = getCurrentInternalAdAccountId();
   const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(userId ? { 'x-user-id': userId } : {}),
-    },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       path: adId,
       params: { status: isActive ? 'ACTIVE' : 'PAUSED' },
@@ -643,15 +625,11 @@ export const facebookApi = {
       // (он сам получает Page Access Token через /me/accounts)
       console.log('Запрашиваем лидформы через proxy для страницы:', pageId);
 
-      const userId = getUserId();
       const adAccountId = getCurrentInternalAdAccountId();
 
       const response = await fetch(`${API_BASE_URL}/fb-proxy/lead-forms`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(userId ? { 'x-user-id': userId } : {}),
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ pageId, adAccountId }),
       });
 
@@ -952,14 +930,10 @@ export const facebookApi = {
       const status = isActive ? 'ACTIVE' : 'PAUSED';
       console.log(`Изменяем статус кампании ${campaignId} на ${status}`);
 
-      const userId = getUserId();
       const adAccountId = getCurrentInternalAdAccountId();
       const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(userId ? { 'x-user-id': userId } : {}),
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           path: campaignId,
           params: { status },
@@ -1028,17 +1002,13 @@ export const facebookApi = {
   // adAccountId — Facebook act_XXX, internalId — UUID из нашей БД (для proxy)
   getAdsetBudgetsForAccount: async (adAccountId: string, _accessToken: string, internalId?: string): Promise<{ totalBudget: number; activeAdsetsCount: number }> => {
     try {
-      const userId = getUserId();
       const proxyBody = (path: string) => ({
         path,
         params: {},
         method: 'GET' as const,
         adAccountId: internalId || getCurrentInternalAdAccountId(),
       });
-      const proxyHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(userId ? { 'x-user-id': userId } : {}),
-      };
+      const proxyHeaders = getAuthHeaders({ 'Content-Type': 'application/json' });
 
       // Параллельно получаем кампании и адсеты через proxy
       const [campaignsRes, adsetsRes] = await Promise.all([

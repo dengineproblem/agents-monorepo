@@ -26,6 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -77,10 +78,9 @@ const AdminChats: React.FC = () => {
 
   // Fetch user by ID (for direct URL navigation to users not in list)
   const fetchUserById = useCallback(async (uId: string) => {
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     try {
       const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=1`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -109,7 +109,6 @@ const AdminChats: React.FC = () => {
   // Fetch users with messages (supports server search and pagination)
   const fetchUsers = useCallback(async (search: string = '', isPolling = false) => {
     if (!isPolling) setLoadingUsers(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     try {
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
@@ -117,7 +116,7 @@ const AdminChats: React.FC = () => {
         ...(search && { search }),
       });
       const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages?${params}`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -147,7 +146,6 @@ const AdminChats: React.FC = () => {
   const loadMoreUsers = useCallback(async () => {
     if (loadingMore) return;
     setLoadingMore(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     const newOffset = currentOffset + PAGE_SIZE;
     try {
       const params = new URLSearchParams({
@@ -156,7 +154,7 @@ const AdminChats: React.FC = () => {
         ...(debouncedSearch && { search: debouncedSearch }),
       });
       const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages?${params}`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -174,10 +172,9 @@ const AdminChats: React.FC = () => {
   // Fetch messages for selected user
   const fetchMessages = useCallback(async (uId: string) => {
     setLoadingMessages(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-    const headers = { 'x-user-id': currentUser.id || '' };
+    const hdrs = getAuthHeaders();
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=1000`, { headers });
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=1000`, { headers: hdrs });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -185,7 +182,7 @@ const AdminChats: React.FC = () => {
         // Mark as read
         await fetch(`${API_BASE_URL}/admin/chats/${uId}/mark-read`, {
           method: 'POST',
-          headers,
+          headers: hdrs,
         });
 
         // Update unread count in users list
@@ -235,15 +232,11 @@ const AdminChats: React.FC = () => {
     if (!newMessage.trim() || !selectedUser || sending) return;
 
     setSending(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
     try {
       const res = await fetch(`${API_BASE_URL}/admin/chats/${selectedUser.id}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id || '',
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ message: newMessage.trim() }),
       });
 
@@ -550,10 +543,9 @@ const MoltbotChat: React.FC = () => {
 
   // Fetch users with messages from support bot
   const fetchUsers = useCallback(async () => {
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     try {
       const res = await fetch(`${API_BASE_URL}/admin/moltbot/users-with-messages`, {
-        headers: { 'x-user-id': currentUser.id || '' },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -569,10 +561,9 @@ const MoltbotChat: React.FC = () => {
   // Fetch messages for selected user from support bot
   const fetchMessages = useCallback(async (uId: string) => {
     setLoadingMessages(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-    const headers = { 'x-user-id': currentUser.id || '' };
+    const hdrs = getAuthHeaders();
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}?limit=1000`, { headers });
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}?limit=1000`, { headers: hdrs });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -580,7 +571,7 @@ const MoltbotChat: React.FC = () => {
         // Mark as read
         await fetch(`${API_BASE_URL}/admin/moltbot/chats/${uId}/mark-read`, {
           method: 'POST',
-          headers,
+          headers: hdrs,
         });
 
         // Update unread count in users list
@@ -621,15 +612,11 @@ const MoltbotChat: React.FC = () => {
     if (!newMessage.trim() || !selectedUser || sending) return;
 
     setSending(true);
-    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
     try {
       const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${selectedUser.id}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id || '',
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ message: newMessage.trim() }),
       });
 

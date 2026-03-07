@@ -1,5 +1,6 @@
 import { DialogAnalysis, DialogStats, DialogFilters } from '@/types/dialogAnalysis';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export const dialogAnalysisService = {
@@ -26,7 +27,7 @@ export const dialogAnalysisService = {
     }
 
     const res = await fetch(`${API_BASE_URL}/dialogs/analysis?${params}`, {
-      headers: { 'x-user-id': userAccountId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -53,7 +54,7 @@ export const dialogAnalysisService = {
     }
 
     const res = await fetch(`${API_BASE_URL}/dialogs/stats?${params}`, {
-      headers: { 'x-user-id': userAccountId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -80,7 +81,7 @@ export const dialogAnalysisService = {
     }
 
     const res = await fetch(`${API_BASE_URL}/dialogs/export-csv?${params}`, {
-      headers: { 'x-user-id': userAccountId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -102,7 +103,7 @@ export const dialogAnalysisService = {
   async deleteAnalysis(id: string, userAccountId: string): Promise<void> {
     const res = await fetch(`${API_BASE_URL}/dialogs/analysis/${id}`, {
       method: 'DELETE',
-      headers: { 'x-user-id': userAccountId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -129,10 +130,7 @@ export const dialogAnalysisService = {
   }): Promise<DialogAnalysis> {
     const res = await fetch(`${API_BASE_URL}/dialogs/leads`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': data.userAccountId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         phone: data.phone,
         contactName: data.contactName,
@@ -182,10 +180,7 @@ export const dialogAnalysisService = {
   ): Promise<DialogAnalysis> {
     const res = await fetch(`${API_BASE_URL}/dialogs/leads/${id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userAccountId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
 
@@ -214,7 +209,7 @@ export const dialogAnalysisService = {
     }
 
     const res = await fetch(`${API_BASE_URL}/dialogs/instances?${params}`, {
-      headers: { 'x-user-id': userAccountId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {

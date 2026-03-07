@@ -14,6 +14,7 @@ import AdminHeader from './AdminHeader';
 import AdminCommandPalette from './AdminCommandPalette';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 
 const AdminLayout: React.FC = () => {
@@ -30,27 +31,24 @@ const AdminLayout: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-        const headers: HeadersInit = currentUser.id
-          ? { 'x-user-id': currentUser.id }
-          : {};
+        const hdrs = getAuthHeaders();
 
         // Fetch unread chats count
-        const chatsRes = await fetch(`${API_BASE_URL}/admin/chats/unread-count`, { headers });
+        const chatsRes = await fetch(`${API_BASE_URL}/admin/chats/unread-count`, { headers: hdrs });
         if (chatsRes.ok) {
           const data = await chatsRes.json();
           setUnreadChats(data.count || 0);
         }
 
         // Fetch unresolved errors count
-        const errorsRes = await fetch(`${API_BASE_URL}/admin/errors/unresolved-count`, { headers });
+        const errorsRes = await fetch(`${API_BASE_URL}/admin/errors/unresolved-count`, { headers: hdrs });
         if (errorsRes.ok) {
           const data = await errorsRes.json();
           setUnresolvedErrors(data.count || 0);
         }
 
         // Fetch unread notifications count
-        const notificationsRes = await fetch(`${API_BASE_URL}/admin/notifications/unread-count`, { headers });
+        const notificationsRes = await fetch(`${API_BASE_URL}/admin/notifications/unread-count`, { headers: hdrs });
         if (notificationsRes.ok) {
           const data = await notificationsRes.json();
           setUnreadNotifications(data.count || 0);

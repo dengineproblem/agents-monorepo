@@ -12,6 +12,7 @@ import { manualLaunchMultiAdSets, type MultiAdSetLaunchResponse } from "@/servic
 import { type UserCreative } from "@/services/creativesApi";
 import { type Direction, getDirectionObjectiveLabel } from "@/types/direction";
 import { API_BASE_URL } from "@/config/api";
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 const FACEBOOK_MIN_DAILY_BUDGET = 5;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
@@ -97,7 +98,7 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
       try {
         const params = new URLSearchParams({ userId: props.userId!, status: 'ready' });
         const res = await fetch(`${API_BASE_URL}/user-creatives?${params}`, {
-          headers: { 'x-user-id': props.userId! }
+          headers: getAuthHeaders()
         });
         if (!cancelled) {
           if (!res.ok) {

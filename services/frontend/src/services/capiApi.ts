@@ -6,24 +6,12 @@
  */
 
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
 // Configuration
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
-
-/**
- * Получить userId из localStorage
- */
-function getUserId(): string | null {
-  const user = localStorage.getItem('user');
-  if (!user) return null;
-  try {
-    return JSON.parse(user).id;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Интерфейс ответа со статистикой CAPI
@@ -122,10 +110,7 @@ export async function getCapiStats(since: string, until: string): Promise<CapiSt
         url,
         {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-user-id': userId
-          }
+          headers: getAuthHeaders({ 'Content-Type': 'application/json' })
         },
         REQUEST_TIMEOUT_MS
       );

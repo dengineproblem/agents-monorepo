@@ -8,7 +8,8 @@
 export const translations = {
   en: {
     common: {
-      loading: 'Loading...'
+      loading: 'Loading...',
+      cancel: 'Cancel',
     },
     auth: {
       loginTitle: 'Meta Ads Monitor',
@@ -321,7 +322,8 @@ export const translations = {
   },
   ru: {
     common: {
-      loading: 'Загрузка...'
+      loading: 'Загрузка...',
+      cancel: 'Отмена',
     },
     auth: {
       loginTitle: 'Performante AI',

@@ -1,6 +1,7 @@
 // Сервис консультаций — проксирование через backend API
 
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import {
   Consultant,
   WorkingSchedule,
@@ -17,19 +18,11 @@ import {
   ConsultationStats
 } from '@/types/consultation';
 
-function getUserId(): string {
-  const raw = localStorage.getItem('user');
-  if (!raw) throw new Error('User not found in localStorage');
-  const user = JSON.parse(raw);
-  return user.id;
-}
-
 // Получение списка консультантов
 export const getConsultants = async (): Promise<Consultant[]> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations/consultants`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -47,13 +40,12 @@ export const getConsultants = async (): Promise<Consultant[]> => {
 
 export const getConsultations = async (date?: string): Promise<ConsultationWithDetails[]> => {
   try {
-    const userId = getUserId();
     const params = new URLSearchParams();
     if (date) params.set('date', date);
 
     const url = `${API_BASE_URL}/consultations${params.toString() ? '?' + params.toString() : ''}`;
     const res = await fetch(url, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -94,9 +86,8 @@ export const getConsultations = async (date?: string): Promise<ConsultationWithD
 
 export const getConsultationStats = async (): Promise<ConsultationStats> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations/stats`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
@@ -114,13 +105,9 @@ export const getConsultationStats = async (): Promise<ConsultationStats> => {
 
 export const createConsultation = async (consultation: CreateConsultationData): Promise<Consultation> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         consultant_id: consultation.consultant_id,
         client_phone: consultation.client_phone,
@@ -158,13 +145,9 @@ export const createConsultation = async (consultation: CreateConsultationData): 
 
 export const updateConsultation = async (id: string, updates: Partial<Consultation>): Promise<Consultation> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations/${id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(updates),
     });
 
@@ -187,13 +170,9 @@ export const updateConsultation = async (id: string, updates: Partial<Consultati
 
 export const cancelConsultation = async (consultationId: string): Promise<boolean> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations/${consultationId}/cancel`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     });
 
     if (!res.ok) {
@@ -217,13 +196,9 @@ export const getConsultantWithSchedule = async (consultantId: string): Promise<C
 
 export const createConsultant = async (data: CreateConsultantData): Promise<Consultant | null> => {
   try {
-    const userId = getUserId();
     const res = await fetch(`${API_BASE_URL}/consultations/consultants`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
 
@@ -282,7 +257,6 @@ export const getConsultationsByDateRange = async (
   endDate: string
 ): Promise<Consultation[]> => {
   try {
-    const userId = getUserId();
     const params = new URLSearchParams({
       consultantId,
       startDate,
@@ -290,7 +264,7 @@ export const getConsultationsByDateRange = async (
     });
 
     const res = await fetch(`${API_BASE_URL}/consultations/by-date-range?${params.toString()}`, {
-      headers: { 'x-user-id': userId },
+      headers: getAuthHeaders(),
     });
 
     if (!res.ok) {

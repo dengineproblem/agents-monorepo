@@ -5,6 +5,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { supabase } from '../lib/supabase.js';
+import { signJwt } from '../lib/jwt.js';
 
 export default async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -39,7 +40,10 @@ export default async function authRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Invalid credentials' });
     }
 
-    // Возвращаем данные пользователя БЕЗ пароля
+    // JWT токен — подписан секретом, содержит userId
+    const token = signJwt({ userId: user.id });
+
+    // Возвращаем данные пользователя БЕЗ пароля + токен
     return reply.send({
       id: user.id,
       username: user.username,
@@ -47,6 +51,7 @@ export default async function authRoutes(app: FastifyInstance) {
       page_id: user.page_id || '',
       prompt1: user.prompt1 || null,
       is_tech_admin: user.is_tech_admin || false,
+      token,
     });
   });
 }

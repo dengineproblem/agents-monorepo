@@ -5,6 +5,7 @@ import { CampaignReport } from '@/types/report';
 import { useTelegramWebApp } from './useTelegramWebApp';
 import { useAppContext } from '@/context/AppContext';
 import { API_BASE_URL } from '@/config/api';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 export const useReports = () => {
   const [reports, setReports] = useState<CampaignReport[]>([]);
@@ -36,7 +37,7 @@ export const useReports = () => {
       }
 
       const response = await fetch(`${API_BASE_URL}/campaign-reports?${params}`, {
-        headers: { 'x-user-id': user.id.toString() },
+        headers: getAuthHeaders(),
       });
 
       if (!response.ok) {
