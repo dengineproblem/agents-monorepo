@@ -61,17 +61,33 @@ async function sendTelegramNotification(text: string): Promise<void> {
  */
 async function sendLeadNotificationToTelegram(
   accountId: string,
-  leadData: { name: string | null; phone: string | null; directionName: string | null }
+  leadData: {
+    name: string | null;
+    phone: string | null;
+    formName: string | null;
+    fieldData: Array<{ name: string; values: string[] }> | null;
+  }
 ): Promise<void> {
   const chatId = LEAD_NOTIFICATIONS[accountId];
   if (!chatId || !TELEGRAM_BOT_TOKEN) return;
+
+  // Format form answers (skip standard fields)
+  const skipFields = new Set(['full_name', 'name', 'first_name', 'phone_number', 'phone', 'email', 'email_address']);
+  let answersText = '';
+  if (leadData.fieldData) {
+    const answers = leadData.fieldData
+      .filter(f => !skipFields.has(f.name.toLowerCase()))
+      .map(f => `  ${f.name.replace(/_/g, ' ')}: ${f.values?.[0] || '—'}`)
+      .join('\n');
+    if (answers) answersText = `\n📋 <b>Ответы:</b>\n${answers}\n`;
+  }
 
   const text = `🔔 <b>Новый лид с Facebook</b>
 
 👤 Имя: ${leadData.name || '—'}
 📞 Телефон: ${leadData.phone || '—'}
-📁 Направление: ${leadData.directionName || '—'}
-
+📁 Форма: ${leadData.formName || '—'}
+${answersText}
 ⏰ ${new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}`;
 
   try {
@@ -494,16 +510,19 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
           // Send lead notification to Telegram (per-account)
           if (accountId && LEAD_NOTIFICATIONS[accountId]) {
-            let directionName: string | null = null;
-            if (directionId) {
-              const { data: dir } = await supabase
-                .from('account_directions')
-                .select('name')
-                .eq('id', directionId)
-                .maybeSingle();
-              directionName = dir?.name || null;
+            // Get form name from Facebook
+            let formName: string | null = null;
+            const formIdForName = form_id || leadData.form_id;
+            if (formIdForName && tokenForLeadData) {
+              try {
+                const formRes = await fetch(`https://graph.facebook.com/${FB_API_VERSION}/${formIdForName}?fields=name&access_token=${tokenForLeadData}`);
+                const formData = await formRes.json();
+                formName = formData.name || null;
+              } catch (e) {
+                log.warn({ formId: formIdForName }, 'Failed to fetch form name');
+              }
             }
-            sendLeadNotificationToTelegram(accountId, { name, phone, directionName }).catch(err => {
+            sendLeadNotificationToTelegram(accountId, { name, phone, formName, fieldData }).catch(err => {
               log.error({ err, accountId }, 'Failed to send lead TG notification');
             });
           }
