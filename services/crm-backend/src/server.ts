@@ -26,6 +26,7 @@ import { authRoutes } from './routes/auth.js';
 import { consultantCallRecordingsRoutes } from './routes/consultantCallRecordings.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
+import { apiKeyAuthHook } from './middleware/apiKeyAuth.js';
 
 dotenv.config();
 
@@ -51,6 +52,9 @@ app.register(multipart, {
     fileSize: 100 * 1024 * 1024, // 100 MB (call recordings up to ~2h)
   }
 });
+
+// API key auth: Bearer token → x-user-id injection
+app.addHook('onRequest', apiKeyAuthHook);
 
 // ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
 // См. nginx-production.conf: rewrite ^/api/crm/(.*)$ /$1 break;
