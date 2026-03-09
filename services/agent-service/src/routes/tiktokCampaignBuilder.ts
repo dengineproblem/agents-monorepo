@@ -112,7 +112,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         // Находим активные TikTok направления
         let directionsQuery = supabase
           .from('account_directions')
-          .select('*')
+          .select('*, whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number), default_ad_settings(*)')
           .eq('user_account_id', user_account_id)
           .eq('is_active', true)
           .eq('platform', 'tiktok');  // Только TikTok направления
@@ -266,7 +266,11 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                   daily_budget: direction.tiktok_daily_budget || 2500,
                   auto_activate: true,
                   // Lead Generation: передаём Instant Page ID
-                  ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id })
+                  ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id }),
+                  // WhatsApp: формируем wa.me URL
+                  ...((direction.tiktok_objective === 'whatsapp' && direction.whatsapp_phone_number?.phone_number) && {
+                    landing_page_url: `https://wa.me/${direction.whatsapp_phone_number.phone_number.replace(/[^0-9]/g, '')}${direction.default_ad_settings?.[0]?.client_question ? `?text=${encodeURIComponent(direction.default_ad_settings[0].client_question)}` : ''}`
+                  })
                 },
                 {
                   user_account_id,
@@ -380,7 +384,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             direction_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             daily_budget: { type: 'number', minimum: 2500 },  // TikTok minimum daily budget (KZT)
-            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] }
+            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation', 'whatsapp'] }
           }
         }
       }
@@ -417,7 +421,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         // Получаем направление
         const { data: direction, error: directionError } = await supabase
           .from('account_directions')
-          .select('*')
+          .select('*, whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number), default_ad_settings(*)')
           .eq('id', direction_id)
           .eq('user_account_id', user_account_id)
           .eq('platform', 'tiktok')
@@ -523,6 +527,17 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
           const finalObjective = objective || direction.tiktok_objective || 'traffic';
           const finalBudget = daily_budget || direction.tiktok_daily_budget || 2500;
 
+          // WhatsApp: формируем wa.me URL
+          let manualLandingPageUrl: string | undefined;
+          if (finalObjective === 'whatsapp') {
+            const waPhone = direction.whatsapp_phone_number?.phone_number;
+            const clientQuestion = direction.default_ad_settings?.[0]?.client_question;
+            if (waPhone) {
+              const phone = waPhone.replace(/[^0-9]/g, '');
+              manualLandingPageUrl = `https://wa.me/${phone}${clientQuestion ? `?text=${encodeURIComponent(clientQuestion)}` : ''}`;
+            }
+          }
+
           const result = await workflowCreateTikTokCampaignWithCreative(
             {
               user_creative_ids: creative_ids,
@@ -531,7 +546,9 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               daily_budget: finalBudget,
               auto_activate: true,
               // Lead Generation: передаём Instant Page ID
-              ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id })
+              ...(direction.tiktok_instant_page_id && { page_id: direction.tiktok_instant_page_id }),
+              // WhatsApp: передаём wa.me URL
+              ...(manualLandingPageUrl && { landing_page_url: manualLandingPageUrl })
             },
             {
               user_account_id,
@@ -629,7 +646,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               ]
             },
             direction_id: { type: 'string', format: 'uuid' },
-            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] },
+            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation', 'whatsapp'] },
             adsets: {
               type: 'array',
               minItems: 1,
@@ -890,7 +907,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             account_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             campaign_name: { type: 'string', minLength: 1 },
-            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] },
+            objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation', 'whatsapp'] },
             daily_budget: { type: 'number', minimum: 2500 },
             auto_activate: { type: 'boolean' },
             page_id: { type: 'string' }  // TikTok Instant Page ID for Lead Generation

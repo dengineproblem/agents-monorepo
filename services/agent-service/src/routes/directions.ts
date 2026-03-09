@@ -18,7 +18,7 @@ const log = createLogger({ module: 'directionsRoutes' });
 // ========================================
 
 const DirectionPlatformSchema = z.enum(['facebook', 'tiktok', 'both']);
-const TikTokObjectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation']);
+const TikTokObjectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation', 'whatsapp']);
 const TikTokAdGroupModeSchema = z.enum(['use_existing', 'create_new']);
 const DefaultSettingsSchema = z.object({
   cities: z.array(z.string()).optional(),
@@ -69,6 +69,7 @@ const TIKTOK_OBJECTIVE_TO_DIRECTION_OBJECTIVE: Record<
   traffic: 'instagram_traffic',
   conversions: 'site_leads',
   lead_generation: 'lead_forms',
+  whatsapp: 'whatsapp',
 };
 
 function mapTikTokObjectiveToDirectionObjective(objective: TikTokObjectiveInput): DirectionObjective {
@@ -1002,7 +1003,8 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Если указан WhatsApp номер, создаем или находим запись в whatsapp_phone_numbers
       let whatsapp_phone_number_id: string | null = null;
 
-      if (needsFacebook && input.whatsapp_phone_number && input.whatsapp_phone_number.trim()) {
+      const needsWhatsApp = (needsFacebook && (input.objective === 'whatsapp' || (input.objective === 'conversions' && input.conversion_channel === 'whatsapp'))) || (needsTikTok && input.tiktok_objective === 'whatsapp');
+      if (needsWhatsApp && input.whatsapp_phone_number && input.whatsapp_phone_number.trim()) {
         const phoneNumber = input.whatsapp_phone_number.trim();
 
         // Проверяем, существует ли уже такой номер
@@ -1372,7 +1374,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               target_cpl_cents: DEFAULT_FB_TARGET_CPL_CENTS,
               advantage_audience_enabled: true,
               custom_audience_id: null,
-              whatsapp_phone_number_id: null,
+              whatsapp_phone_number_id: whatsapp_phone_number_id,
               tiktok_campaign_id: tiktokCampaign.campaign_id,
               tiktok_objective: tiktokObjective,
               tiktok_daily_budget: tiktokDailyBudget,

@@ -5,7 +5,7 @@ export type ConversionChannel = 'whatsapp' | 'lead_form' | 'site';
 export type OptimizationLevel = 'level_1' | 'level_2' | 'level_3';
 export type DirectionPlatform = 'facebook' | 'tiktok' | 'both';
 export type DirectionPlatformValue = 'facebook' | 'tiktok' | null;
-export type TikTokObjective = 'traffic' | 'conversions' | 'lead_generation';
+export type TikTokObjective = 'traffic' | 'conversions' | 'lead_generation' | 'whatsapp';
 
 // CAPI settings types
 export type CapiSource = 'whatsapp' | 'crm';
@@ -303,12 +303,14 @@ export const TIKTOK_OBJECTIVE_LABELS: Record<TikTokObjective, string> = {
   traffic: 'Traffic',
   conversions: 'Website Conversions',
   lead_generation: 'Lead Form',
+  whatsapp: 'WhatsApp',
 };
 
 export const TIKTOK_OBJECTIVE_DESCRIPTIONS: Record<TikTokObjective, string> = {
   traffic: 'Traffic (клики)',
   conversions: 'Website Conversions (конверсии сайта)',
   lead_generation: 'Lead Form (лид-форма)',
+  whatsapp: 'WhatsApp (клики на WhatsApp)',
 };
 
 export const getDirectionObjectiveLabel = (direction: {

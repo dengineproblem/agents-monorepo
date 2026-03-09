@@ -161,6 +161,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         return 'lead_forms';
       case 'conversions':
         return 'site_leads';
+      case 'whatsapp':
+        return 'whatsapp';
       case 'traffic':
       default:
         return 'instagram_traffic';
@@ -381,6 +383,18 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         setError('Введите Instant Page ID для лидогенерации TikTok');
         return;
       }
+
+      // Валидация WhatsApp полей для TikTok
+      if (tiktokObjective === 'whatsapp') {
+        if (!clientQuestion.trim()) {
+          setError('Введите вопрос клиента для WhatsApp');
+          return;
+        }
+        if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+          setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+          return;
+        }
+      }
     }
 
     // Валидация настроек рекламы
@@ -513,6 +527,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             age_max: separateTikTokSettings ? tiktokAgeMax : ageMax,
             gender: separateTikTokSettings ? tiktokGender : gender,
             description: (separateTikTokSettings ? tiktokDescription : description).trim(),
+            ...(tiktokObjective === 'whatsapp' && { client_question: clientQuestion.trim() }),
           }
         : undefined;
 
@@ -547,6 +562,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           ...(tiktokTargetCplValue !== null && { tiktok_target_cpl_kzt: tiktokTargetCplValue }),
           ...(tiktokObjective === 'lead_generation' && tiktokInstantPageId && {
             tiktok_instant_page_id: tiktokInstantPageId,
+          }),
+          ...(tiktokObjective === 'whatsapp' && {
+            client_question: clientQuestion.trim(),
+            whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
           }),
         }),
         ...(separateTikTokSettings && needsFacebook && needsTikTok
@@ -878,6 +897,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     <RadioGroupItem value="lead_generation" id="obj-tt-lead-gen" />
                     <Label htmlFor="obj-tt-lead-gen" className="font-normal cursor-pointer">
                       {TIKTOK_OBJECTIVE_DESCRIPTIONS.lead_generation}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="whatsapp" id="obj-tt-whatsapp" />
+                    <Label htmlFor="obj-tt-whatsapp" className="font-normal cursor-pointer">
+                      {TIKTOK_OBJECTIVE_DESCRIPTIONS.whatsapp}
                     </Label>
                   </div>
                 </RadioGroup>
@@ -1668,6 +1693,47 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           <Separator />
 
           {/* СЕКЦИЯ 4: Специфичные настройки в зависимости от цели */}
+          {/* TikTok WhatsApp */}
+          {needsTikTok && tiktokObjective === 'whatsapp' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">💬 WhatsApp (TikTok)</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="tt-whatsapp-number">
+                  WhatsApp номер (опционально)
+                </Label>
+                <Input
+                  id="tt-whatsapp-number"
+                  value={whatsappPhoneNumber}
+                  onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                  placeholder="+77001234567"
+                  disabled={isSubmitting}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Международный формат: +[код страны][номер]. Используется для формирования ссылки wa.me.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tt-client-question">
+                  Вопрос клиента <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="tt-client-question"
+                  placeholder="Здравствуйте! Хочу узнать об этом подробнее."
+                  value={clientQuestion}
+                  onChange={(e) => setClientQuestion(e.target.value)}
+                  disabled={isSubmitting}
+                  rows={2}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Это сообщение будет предзаполнено в WhatsApp при переходе по ссылке
+                </p>
+              </div>
+            </div>
+          )}
+
           {needsFacebook && (objective === 'whatsapp' || (objective === 'conversions' && conversionChannel === 'whatsapp')) && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>

@@ -438,6 +438,7 @@ export async function createAdGroup(
     pixel_id?: string;
     identity_id?: string;
     identity_type?: 'AUTH_CODE' | 'TT_USER' | 'BC_AUTH_TT';
+    identity_authorized_bc_id?: string;
   }
 ): Promise<{ adgroup_id: string }> {
   log.info({
@@ -482,6 +483,7 @@ export async function createAdGroup(
   if (params.pixel_id) body.pixel_id = params.pixel_id;
   if (params.identity_id) body.identity_id = params.identity_id;
   if (params.identity_type) body.identity_type = params.identity_type;
+  if (params.identity_authorized_bc_id) body.identity_authorized_bc_id = params.identity_authorized_bc_id;
 
   const result = await tikTokGraph('POST', 'adgroup/create/', accessToken, body);
 
@@ -618,6 +620,7 @@ export async function createAd(
     avatar_icon_web_uri?: string;
     identity_id?: string;
     identity_type?: 'AUTH_CODE' | 'TT_USER' | 'BC_AUTH_TT';
+    identity_authorized_bc_id?: string;
     operation_status?: 'ENABLE' | 'DISABLE';
     page_id?: string;  // TikTok Instant Page ID for Lead Generation
   }
@@ -657,6 +660,7 @@ export async function createAd(
   if (params.avatar_icon_web_uri) creative.avatar_icon_web_uri = params.avatar_icon_web_uri;
   if (params.identity_id) creative.identity_id = params.identity_id;
   if (params.identity_type) creative.identity_type = params.identity_type;
+  if (params.identity_authorized_bc_id) creative.identity_authorized_bc_id = params.identity_authorized_bc_id;
 
   // Lead Generation: Instant Page
   if (params.page_id) creative.page_id = params.page_id;
@@ -869,7 +873,7 @@ export async function getIdentityInfo(
   advertiserId: string,
   accessToken: string,
   identityId: string
-): Promise<{ identity_id: string; identity_type: string; display_name: string } | null> {
+): Promise<{ identity_id: string; identity_type: string; display_name: string; identity_authorized_bc_id?: string } | null> {
   log.info({ advertiserId, identityId }, '[TikTok:getIdentityInfo] Запрос информации об identity');
 
   const result = await tikTokGraph('GET', 'identity/get/', accessToken, {
@@ -884,7 +888,8 @@ export async function getIdentityInfo(
     return {
       identity_id: found.identity_id,
       identity_type: found.identity_type,
-      display_name: found.display_name || ''
+      display_name: found.display_name || '',
+      ...(found.identity_authorized_bc_id && { identity_authorized_bc_id: found.identity_authorized_bc_id })
     };
   }
 
@@ -895,7 +900,8 @@ export async function getIdentityInfo(
     return {
       identity_id: available.identity_id,
       identity_type: available.identity_type,
-      display_name: available.display_name || ''
+      display_name: available.display_name || '',
+      ...(available.identity_authorized_bc_id && { identity_authorized_bc_id: available.identity_authorized_bc_id })
     };
   }
 

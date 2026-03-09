@@ -391,6 +391,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           ? {
               tiktok_daily_budget: Math.round(tiktokBudgetValue),
               ...(tiktokTargetCplValue !== null && { tiktok_target_cpl_kzt: tiktokTargetCplValue }),
+              ...(direction.tiktok_objective === 'whatsapp' && {
+                whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
+              }),
             }
           : {
               daily_budget_cents: Math.round(budgetValue * 100),
@@ -415,6 +418,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         gender,
         description: description.trim(),
         ...(!isTikTok && direction.objective === 'whatsapp' && {
+          client_question: clientQuestion.trim(),
+        }),
+        ...(isTikTok && direction.tiktok_objective === 'whatsapp' && {
           client_question: clientQuestion.trim(),
         }),
         ...(!isTikTok && direction.objective === 'instagram_traffic' && {
@@ -847,6 +853,46 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               <Separator />
 
               {/* СЕКЦИЯ 4: Специфичные настройки в зависимости от цели */}
+              {isTikTok && direction.tiktok_objective === 'whatsapp' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-sm">💬 WhatsApp (TikTok)</h3>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-tt-whatsapp-number">
+                      WhatsApp номер (опционально)
+                    </Label>
+                    <Input
+                      id="edit-tt-whatsapp-number"
+                      value={whatsappPhoneNumber}
+                      onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                      placeholder="+77001234567"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Международный формат: +[код страны][номер]. Используется для формирования ссылки wa.me.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-tt-client-question">
+                      Вопрос клиента <span className="text-red-500">*</span>
+                    </Label>
+                    <Textarea
+                      id="edit-tt-client-question"
+                      placeholder="Здравствуйте! Хочу узнать об этом подробнее."
+                      value={clientQuestion}
+                      onChange={(e) => setClientQuestion(e.target.value)}
+                      disabled={isSubmitting}
+                      rows={2}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Это сообщение будет предзаполнено в WhatsApp при переходе по ссылке
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {!isTikTok && direction.objective === 'whatsapp' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">💬 WhatsApp</h3>

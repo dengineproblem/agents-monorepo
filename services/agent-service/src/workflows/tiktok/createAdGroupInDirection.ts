@@ -26,11 +26,13 @@ async function resolveIdentityAndPosters(
   identityType: string;
   displayName: string;
   resolvedIdentityId?: string;
+  identityAuthorizedBcId?: string;
   videoPosters: Record<string, string>;
 }> {
   let identityType = 'TT_USER';
   let displayName = '';
   let resolvedIdentityId = identityId;
+  let identityAuthorizedBcId: string | undefined;
 
   // Identity info
   if (identityId) {
@@ -40,6 +42,7 @@ async function resolveIdentityAndPosters(
         resolvedIdentityId = info.identity_id;
         identityType = info.identity_type;
         displayName = info.display_name;
+        identityAuthorizedBcId = info.identity_authorized_bc_id;
       }
     } catch (e: any) {
       logger.warn({ error: e.message }, '[TikTok:resolveIdentity] ⚠️ Не удалось получить identity info');
@@ -89,7 +92,7 @@ async function resolveIdentityAndPosters(
     }
   }
 
-  return { identityType, displayName, resolvedIdentityId, videoPosters };
+  return { identityType, displayName, resolvedIdentityId, identityAuthorizedBcId, videoPosters };
 }
 
 // ============================================================
@@ -546,7 +549,7 @@ export async function workflowCreateAdInDirection(
       thumbnailUrls[creative.tiktok_video_id] = creative.thumbnail_url;
     }
   }
-  const { identityType, displayName, resolvedIdentityId, videoPosters } = await resolveIdentityAndPosters(
+  const { identityType, displayName, resolvedIdentityId, identityAuthorizedBcId, videoPosters } = await resolveIdentityAndPosters(
     advertiserId, accessToken, identityId, videoIds, thumbnailUrls
   );
 
@@ -585,12 +588,14 @@ export async function workflowCreateAdInDirection(
       ad_format: 'SINGLE_VIDEO' as const,
       video_id: creative.tiktok_video_id,
       ad_text: creative.description || creative.title,
-      call_to_action: 'LEARN_MORE',
+      call_to_action: directionSettings.objective === 'whatsapp' ? 'CONTACT_US' : directionSettings.objective === 'lead_generation' ? 'SIGN_UP' : 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       ...(imageId && { image_ids: [imageId] }),
       ...(resolvedIdentityId && { identity_id: resolvedIdentityId, identity_type: identityType as any }),
+      ...(identityAuthorizedBcId && { identity_authorized_bc_id: identityAuthorizedBcId }),
       ...(displayName && { display_name: displayName }),
-      ...(directionSettings.page_id && { page_id: directionSettings.page_id })
+      ...(directionSettings.page_id && { page_id: directionSettings.page_id }),
+      ...(directionSettings.landing_page_url && { landing_page_url: directionSettings.landing_page_url })
     };
 
     logger.info({
@@ -599,6 +604,7 @@ export async function workflowCreateAdInDirection(
       video_id: creative.tiktok_video_id,
       has_poster: !!imageId,
       has_page_id: !!directionSettings.page_id,
+      has_landing_page_url: !!directionSettings.landing_page_url,
       identity_type: identityType,
       ad_index: created_ads.length + 1,
       total_ads: creative_data.length
@@ -787,7 +793,7 @@ export async function workflowCreateAdGroupWithCreatives(
       thumbUrls[creative.tiktok_video_id] = creative.thumbnail_url;
     }
   }
-  const { identityType: idType, displayName: dName, resolvedIdentityId: resolvedId, videoPosters: posters } = await resolveIdentityAndPosters(
+  const { identityType: idType, displayName: dName, resolvedIdentityId: resolvedId, identityAuthorizedBcId: bcId, videoPosters: posters } = await resolveIdentityAndPosters(
     advertiserId, accessToken, identityId, videoIdsForPosters, thumbUrls
   );
 
@@ -850,12 +856,14 @@ export async function workflowCreateAdGroupWithCreatives(
       ad_format: 'SINGLE_VIDEO' as const,
       video_id: creative.tiktok_video_id,
       ad_text: creative.description || creative.title,
-      call_to_action: 'LEARN_MORE',
+      call_to_action: objective === 'whatsapp' ? 'CONTACT_US' : objective === 'lead_generation' ? 'SIGN_UP' : 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       ...(imageId && { image_ids: [imageId] }),
       ...(resolvedId && { identity_id: resolvedId, identity_type: idType as any }),
+      ...(bcId && { identity_authorized_bc_id: bcId }),
       ...(dName && { display_name: dName }),
-      ...(pageId && { page_id: pageId })
+      ...(pageId && { page_id: pageId }),
+      ...(directionSettings.landing_page_url && { landing_page_url: directionSettings.landing_page_url })
     };
 
     logger.info({
@@ -863,6 +871,7 @@ export async function workflowCreateAdGroupWithCreatives(
       video_id: creative.tiktok_video_id,
       has_poster: !!imageId,
       has_page_id: !!pageId,
+      has_landing_page_url: !!directionSettings.landing_page_url,
       ad_index: created_ads.length + 1,
       total_ads: creative_data.length
     }, '[TIKTOK:CreateAdGroupWithCreatives] Creating ad');

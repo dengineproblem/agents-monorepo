@@ -23,7 +23,7 @@ const log = createLogger({ module: 'tiktokCampaignWorkflow' });
 // TYPES
 // ============================================================
 
-export type TikTokObjectiveType = 'traffic' | 'conversions' | 'reach' | 'video_views' | 'lead_generation';
+export type TikTokObjectiveType = 'traffic' | 'conversions' | 'reach' | 'video_views' | 'lead_generation' | 'whatsapp';
 
 export interface CreateTikTokCampaignParams {
   user_creative_ids: string[];  // Массив креативов
@@ -37,6 +37,7 @@ export interface CreateTikTokCampaignParams {
   schedule_start_time?: string;  // ISO datetime
   schedule_end_time?: string;  // ISO datetime
   page_id?: string;  // TikTok Instant Page ID for Lead Generation
+  landing_page_url?: string;  // URL для Traffic/WhatsApp (wa.me)
 }
 
 export interface CreateTikTokCampaignContext {
@@ -135,7 +136,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
     auto_activate = true,
     schedule_start_time,
     schedule_end_time,
-    page_id
+    page_id,
+    landing_page_url
   } = params;
 
   const { user_account_id, ad_account_id } = context;
@@ -172,6 +174,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
   // Получаем identity info (display_name, identity_type)
   let identityType: string = 'TT_USER';
   let displayName: string = '';
+  let identityAuthorizedBcId: string | undefined;
 
   if (identityId) {
     try {
@@ -180,6 +183,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
         identityId = identityInfo.identity_id;
         identityType = identityInfo.identity_type;
         displayName = identityInfo.display_name;
+        identityAuthorizedBcId = identityInfo.identity_authorized_bc_id;
       }
     } catch (e: any) {
       log.warn({ error: e.message }, '[TikTok:Workflow:CreateCampaign] ⚠️ Не удалось получить identity info');
@@ -435,7 +439,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
     // Pixel для конверсий
     ...(context.pixel_id && objective === 'conversions' && { pixel_id: context.pixel_id }),
     // Identity для креативов
-    ...(identityId && { identity_id: identityId, identity_type: identityType as any })
+    ...(identityId && { identity_id: identityId, identity_type: identityType as any }),
+    ...(identityAuthorizedBcId && { identity_authorized_bc_id: identityAuthorizedBcId })
   };
 
   log.info({
@@ -569,16 +574,19 @@ export async function workflowCreateTikTokCampaignWithCreative(
       ad_format: 'SINGLE_VIDEO' as const,
       video_id: creative.tiktok_video_id,
       ad_text: creative.description || creative.title,
-      call_to_action: objective === 'lead_generation' ? 'SIGN_UP' : 'LEARN_MORE',
+      call_to_action: objective === 'lead_generation' ? 'SIGN_UP' : objective === 'whatsapp' ? 'CONTACT_US' : 'LEARN_MORE',
       operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       // Thumbnail/cover image
       ...(imageId && { image_ids: [imageId] }),
       // Identity
       ...(identityId && { identity_id: identityId, identity_type: identityType as any }),
+      ...(identityAuthorizedBcId && { identity_authorized_bc_id: identityAuthorizedBcId }),
       // Display name from identity
       ...(displayName && { display_name: displayName }),
       // Lead Generation: Instant Page
-      ...(objective === 'lead_generation' && page_id && { page_id })
+      ...(objective === 'lead_generation' && page_id && { page_id }),
+      // WhatsApp/Traffic: landing page URL
+      ...(landing_page_url && { landing_page_url })
     };
 
     log.info({

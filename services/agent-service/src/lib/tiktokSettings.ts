@@ -158,6 +158,12 @@ export const OBJECTIVE_MAPPING: Record<string, {
     optimization_goal: 'LEAD_GENERATION',
     billing_event: 'OCPM',
     promotion_type: 'LEAD_GENERATION'
+  },
+  'whatsapp': {
+    objective_type: 'TRAFFIC',
+    optimization_goal: 'CLICK',
+    billing_event: 'CPC',
+    promotion_type: 'WEBSITE'
   }
 };
 
@@ -256,15 +262,17 @@ export async function getTikTokDirectionSettings(
 ): Promise<{
   targeting: TikTokTargeting;
   daily_budget: number;
+  objective: string;
   objective_config: ReturnType<typeof getTikTokObjectiveConfig>;
   pixel_id?: string;
   identity_id?: string;
   page_id?: string;
+  landing_page_url?: string;
 } | null> {
   // Получаем direction
   const { data: direction, error: dirError } = await supabase
     .from('account_directions')
-    .select('*, default_ad_settings(*)')
+    .select('*, default_ad_settings(*), whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number)')
     .eq('id', directionId)
     .eq('user_account_id', userAccountId)
     .single();
@@ -273,8 +281,9 @@ export async function getTikTokDirectionSettings(
     return null;
   }
 
-  // Получаем настройки
-  const settings = direction.default_ad_settings?.[0] || {};
+  // Получаем настройки (Supabase может вернуть объект или массив в зависимости от FK)
+  const rawSettings = direction.default_ad_settings;
+  const settings = Array.isArray(rawSettings) ? rawSettings[0] || {} : rawSettings || {};
 
   // Конвертируем targeting
   const targeting = convertToTikTokTargeting(settings);
@@ -285,13 +294,24 @@ export async function getTikTokDirectionSettings(
 
   const daily_budget = direction.tiktok_daily_budget ?? TIKTOK_MIN_DAILY_BUDGET;
 
+  // WhatsApp: формируем landing_page_url из wa.me
+  let landing_page_url: string | undefined;
+  const waPhoneNumber = direction.whatsapp_phone_number?.phone_number;
+  if (objective === 'whatsapp' && waPhoneNumber) {
+    const phone = waPhoneNumber.replace(/[^0-9]/g, '');
+    const text = settings.client_question;
+    landing_page_url = `https://wa.me/${phone}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+  }
+
   return {
     targeting,
     daily_budget,
+    objective,
     objective_config,
     pixel_id: settings.tiktok_pixel_id,
     identity_id: direction.tiktok_identity_id,
-    page_id: direction.tiktok_instant_page_id
+    page_id: direction.tiktok_instant_page_id,
+    landing_page_url
   };
 }
 
