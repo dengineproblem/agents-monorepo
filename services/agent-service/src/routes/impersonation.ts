@@ -10,6 +10,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { signJwt } from '../lib/jwt.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import crypto from 'crypto';

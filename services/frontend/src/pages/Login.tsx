@@ -10,6 +10,7 @@ import * as z from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from '@/i18n/LanguageContext';
 import { APP_REVIEW_MODE } from '@/config/appReview';
+import { getAuthHeaders } from '@/lib/apiAuth';
 
 const USERNAME_REQUIRED_MESSAGE = APP_REVIEW_MODE ? 'Username is required' : 'Логин обязателен';
 const PASSWORD_REQUIRED_MESSAGE = APP_REVIEW_MODE ? 'Password is required' : 'Пароль обязателен';
@@ -24,8 +25,22 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 const Login = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const [impersonateUsername, setImpersonateUsername] = useState('');
+  const [isImpersonating, setIsImpersonating] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const { t } = useTranslation();
-  
+
+  // Проверяем, есть ли сохранённый админ (для impersonate)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.is_tech_admin) setIsAdmin(true);
+      }
+    } catch {}
+  }, []);
+
   // Проверяем, авторизован ли пользователь уже
   useEffect(() => {
     const checkUser = () => {
@@ -35,12 +50,9 @@ const Login = () => {
           const parsedUser = JSON.parse(storedUser);
           // Логин разрешен даже без Facebook токена
           if (parsedUser && parsedUser.username) {
-            console.log('Пользователь уже авторизован, перенаправляем на главную', {
-              username: parsedUser.username,
-              hasToken: !!parsedUser.access_token,
-              hasAdAccountId: !!parsedUser.ad_account_id,
-              hasPageId: !!parsedUser.page_id
-            });
+            // Если админ — не редиректим, даём использовать impersonate
+            if (parsedUser.is_tech_admin) return;
+            console.log('Пользователь уже авторизован, перенаправляем на главную');
             navigate('/', { replace: true });
           }
         } catch (error) {
@@ -49,9 +61,47 @@ const Login = () => {
         }
       }
     };
-    
+
     checkUser();
   }, [navigate]);
+
+  const handleImpersonate = async () => {
+    if (!impersonateUsername.trim()) return;
+    setIsImpersonating(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/impersonate`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ username: impersonateUsername.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toastT.error(err.error || 'Ошибка impersonate');
+        return;
+      }
+      const user = await res.json();
+      // Сохраняем оригинального админа для возврата
+      localStorage.setItem('originalAdmin', localStorage.getItem('user') || '');
+      localStorage.setItem('originalAdminToken', localStorage.getItem('auth_token') || '');
+      localStorage.setItem('user', JSON.stringify({
+        id: user.id,
+        username: user.username,
+        ad_account_id: user.ad_account_id || '',
+        page_id: user.page_id || '',
+        prompt1: user.prompt1 || null,
+        is_tech_admin: user.is_tech_admin || false,
+        instagram_id: user.instagram_id || null,
+      }));
+      if (user.token) localStorage.setItem('auth_token', user.token);
+      window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
+      navigate('/', { replace: true });
+    } catch (err) {
+      console.error('Impersonate error:', err);
+      toastT.error('Ошибка impersonate');
+    } finally {
+      setIsImpersonating(false);
+    }
+  };
   
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -106,7 +156,8 @@ const Login = () => {
         ad_account_id: user.ad_account_id || '',
         page_id: user.page_id || '',
         prompt1: user.prompt1 || null,
-        is_tech_admin: user.is_tech_admin || false
+        is_tech_admin: user.is_tech_admin || false,
+        instagram_id: user.instagram_id || null
       };
 
       console.log('Сохраняем данные пользователя в localStorage:', {
@@ -183,6 +234,27 @@ const Login = () => {
             </Button>
           </form>
         </Form>
+
+        {isAdmin && (
+          <div className="pt-4 border-t space-y-2">
+            <p className="text-sm text-muted-foreground">Войти как юзер (admin)</p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="username"
+                value={impersonateUsername}
+                onChange={(e) => setImpersonateUsername(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleImpersonate()}
+              />
+              <Button
+                onClick={handleImpersonate}
+                disabled={isImpersonating || !impersonateUsername.trim()}
+                variant="outline"
+              >
+                {isImpersonating ? '...' : 'Войти'}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
