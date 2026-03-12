@@ -508,6 +508,16 @@ export async function searchPageByInstagram(
     }
   }
 
+  // Fallback: если handle содержит точку (e.g. atlas_capital.kz), попробовать без доменной части
+  if (cleanHandle.includes('.')) {
+    const handleWithoutDomain = cleanHandle.split('.')[0];
+    log.info({ igHandle: cleanHandle, fallbackHandle: handleWithoutDomain }, 'Пробуем поиск без доменной части');
+    const fallbackResults = await searchPageByInstagram(handleWithoutDomain, country);
+    if (fallbackResults.length > 0) {
+      return fallbackResults;
+    }
+  }
+
   log.warn({ igHandle: cleanHandle }, 'Страницы не найдены по Instagram handle');
   return [];
 }
