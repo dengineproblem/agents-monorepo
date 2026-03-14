@@ -329,6 +329,7 @@ services:
       - LOG_COLOR=false
       - LOG_BAILEYS=debug
       - WEBSOCKET_ENABLED=true
+      - DATABASE_SAVE_DATA_LABELS=true
     depends_on:
       - evolution-redis
       - evolution-postgres
