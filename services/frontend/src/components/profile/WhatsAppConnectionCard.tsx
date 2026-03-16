@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff, Cloud, QrCode, CheckCircle2 } from 'lucide-react';
+import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff, Cloud, QrCode, CheckCircle2, Tag } from 'lucide-react';
 import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
 import { whatsappApi } from '@/services/whatsappApi';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
+import { WhatsAppLabelsDialog } from './WhatsAppLabelsDialog';
 
 interface WhatsAppConnectionCardProps {
   userAccountId: string | null;
@@ -20,6 +21,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
   const { numbers, loading, error, refresh } = useWhatsAppNumbers(userAccountId, accountId);
 
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [labelsDialogOpen, setLabelsDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<{
     id: string;
     phone_number: string;
@@ -232,6 +234,31 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
               })}
             </div>
           )}
+
+          {/* Кнопка подключения автоматических ярлыков */}
+          {numbers.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-muted">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Tag className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">Авто-ярлыки</p>
+                    <p className="text-xs text-muted-foreground">
+                      Автоматическая простановка ярлыков квалифицированным лидам
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLabelsDialogOpen(true)}
+                >
+                  <Tag className="h-4 w-4 mr-2" />
+                  Настроить
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -245,6 +272,15 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
           phoneNumber={selectedNumber.phone_number}
           accountId={accountId}
           onConnected={handleConnected}
+        />
+      )}
+
+      {/* Диалог настройки ярлыков */}
+      {userAccountId && (
+        <WhatsAppLabelsDialog
+          open={labelsDialogOpen}
+          onOpenChange={setLabelsDialogOpen}
+          userAccountId={userAccountId}
         />
       )}
     </>

@@ -359,6 +359,22 @@ services:
       - evolution-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  # WhatsApp Labels Service (wwebjs)
+  # Проставляет ярлыки квалифицированным лидам в WhatsApp через WhatsApp Web
+  whatsapp-labels-service:
+    build: ./services/whatsapp-labels-service
+    container_name: whatsapp-labels-service
+    ports:
+      - "8089:8089"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - CRON_SCHEDULE=0 3 * * *
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    volumes:
+      - wwebjs-sessions:/app/.wwebjs_auth
+    restart: unless-stopped
+
   # Moltbot - AI Agent Gateway
   # Uses beta channel (moltbot@beta) which has the CLI
   # Using Debian-slim for better native module support (vs Alpine/musl)
@@ -437,3 +453,4 @@ volumes:
   moltbot-config:
   telegram-bot-data:
   telegram-bot-store:
+  wwebjs-sessions:

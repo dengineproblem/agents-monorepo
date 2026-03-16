@@ -307,4 +307,29 @@ export default async function userProfileRoutes(app: FastifyInstance) {
 
     return data;
   });
+
+  // ----------------------------------------
+  // PUT /user-accounts/:id/wwebjs-label
+  // Save WhatsApp label ID for auto-labeling qualified leads
+  // ----------------------------------------
+  app.put<{ Params: { id: string } }>('/user-accounts/:id/wwebjs-label', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const { id } = req.params;
+    const { labelId } = req.body as { labelId: string };
+
+    if (!labelId) {
+      return reply.status(400).send({ error: 'labelId is required' });
+    }
+
+    const { error } = await supabase
+      .from('user_accounts')
+      .update({ wwebjs_label_id: labelId })
+      .eq('id', id);
+
+    if (error) {
+      log.error({ error, userId: id }, 'Failed to save wwebjs_label_id');
+      return reply.status(500).send({ error: 'Failed to save label config' });
+    }
+
+    return { ok: true, labelId };
+  });
 }
