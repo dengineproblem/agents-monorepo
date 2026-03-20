@@ -61,7 +61,7 @@ async function getUnlabeledQualifiedLeads(userAccountId: string): Promise<LeadTo
     .eq('user_account_id', userAccountId)
     .eq('source_type', 'whatsapp')
     .not('chat_id', 'is', null)
-    .or('is_qualified.eq.true,reached_key_stage.eq.true')
+    .eq('is_qualified', true)
     .or('whatsapp_label_synced.is.null,whatsapp_label_synced.eq.false')
     .order('created_at', { ascending: false });
 

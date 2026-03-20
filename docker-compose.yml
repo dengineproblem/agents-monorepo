@@ -370,6 +370,15 @@ services:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - CRON_SCHEDULE=0 3 * * *
+      - MISSED_MSG_CRON_SCHEDULE=0 * * * *
+      - MISSED_MSG_MAX_AGE_HOURS=6
+      - CHATBOT_SERVICE_URL=http://chatbot-service:8083
+      - EVOLUTION_DB_HOST=evolution-postgres
+      - EVOLUTION_DB_PORT=5432
+      - EVOLUTION_DB_USER=evolution
+      - EVOLUTION_DB_PASSWORD=${EVOLUTION_DB_PASSWORD}
+      - EVOLUTION_DB_NAME=evolution
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     volumes:
       - wwebjs-sessions:/app/.wwebjs_auth
