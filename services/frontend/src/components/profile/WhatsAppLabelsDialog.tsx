@@ -9,8 +9,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, QrCode, CheckCircle2, Tag } from 'lucide-react';
-// Dynamic import to avoid Rollup resolve issues in Docker
-const importQRCode = () => import('qrcode').then(m => m.default);
+// @ts-ignore - direct browser entry to bypass Rollup resolve issues in Docker Alpine
+import QRCode from 'qrcode/lib/browser';
 
 interface WhatsAppLabelsDialogProps {
   open: boolean;
@@ -57,7 +57,6 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
       }
 
       if (data.qrCode) {
-        const QRCode = await importQRCode();
         const dataUrl = await QRCode.toDataURL(data.qrCode, { width: 300, margin: 2 });
         setQrDataUrl(dataUrl);
         setStatus('waiting_scan');
@@ -75,7 +74,6 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
             if (pollRef.current) clearInterval(pollRef.current);
             fetchLabels();
           } else if (pollData.qrCode && pollData.qrCode !== data.qrCode) {
-            const QRCode = await importQRCode();
             const newDataUrl = await QRCode.toDataURL(pollData.qrCode, { width: 300, margin: 2 });
             setQrDataUrl(newDataUrl);
           }
