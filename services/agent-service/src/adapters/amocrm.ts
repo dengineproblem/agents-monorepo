@@ -706,3 +706,29 @@ export async function unsubscribeWebhook(
     endpoint: `webhooks/${webhookId}`
   });
 }
+
+/**
+ * Add a note (comment) to a lead
+ *
+ * @param leadId - AmoCRM lead ID
+ * @param text - Note text
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ */
+export async function addNoteToLead(
+  leadId: number,
+  text: string,
+  subdomain: string,
+  accessToken: string
+): Promise<void> {
+  await amocrmRequest({
+    subdomain,
+    accessToken,
+    method: 'POST',
+    endpoint: `leads/${leadId}/notes`,
+    body: [{
+      note_type: 'common',
+      params: { text }
+    }]
+  });
+}

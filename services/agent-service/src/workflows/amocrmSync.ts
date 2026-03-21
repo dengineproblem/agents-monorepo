@@ -16,6 +16,7 @@ import {
   getLead,
   getContact,
   extractPhoneFromContact,
+  addNoteToLead,
   AmoCRMContact,
   AmoCRMLead,
   AmoCRMCustomFieldValue
@@ -1245,6 +1246,7 @@ interface LeadDataForAmoCRM {
   email: string | null;
   utm_source: string | null;
   utm_campaign: string | null;
+  fieldData?: Array<{ name: string; values: string[] }>;
 }
 
 /**
@@ -1356,6 +1358,20 @@ export async function pushLeadToAmoCRMDirect(
       contactId,
       elapsedMs: Date.now() - syncStartTime
     }, '[AmoCRMSync] AmoCRM lead created successfully');
+
+    // 5. Add form answers as a note (fire-and-forget)
+    if (leadData.fieldData && leadData.fieldData.length > 0) {
+      const lines = leadData.fieldData.map(f => {
+        const label = f.name.replace(/_/g, ' ');
+        const value = f.values?.[0] || '—';
+        return `${label}: ${value}`;
+      });
+      const noteText = `📋 Ответы из лид-формы Facebook:\n\n${lines.join('\n')}`;
+
+      addNoteToLead(amocrmLeadId, noteText, subdomain, accessToken).catch(err => {
+        app.log.warn({ err: err.message, amocrmLeadId }, '[AmoCRMSync] Failed to add form answers note');
+      });
+    }
 
     await logSync({
       userAccountId,

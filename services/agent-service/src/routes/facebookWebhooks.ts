@@ -466,7 +466,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
                     phone,
                     email: email || null,
                     utm_source: 'facebook_lead_form',
-                    utm_campaign: form_id || null
+                    utm_campaign: form_id || null,
+                    fieldData
                   },
                   userAccountId,
                   accountId,
