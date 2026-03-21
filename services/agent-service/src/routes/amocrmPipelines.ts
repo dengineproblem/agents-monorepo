@@ -1942,6 +1942,224 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
-}
 
+  /**
+   * GET /amocrm/auto-create-leads
+   * Get current auto-create leads setting
+   */
+  app.get('/amocrm/auto-create-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, accountId } = request.query as { userAccountId: string; accountId?: string };
+
+      if (!userAccountId) {
+        return reply.code(400).send({ error: 'userAccountId is required' });
+      }
+
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, amocrm_auto_create_leads, amocrm_subdomain')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('amocrm_auto_create_leads, amocrm_subdomain')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        return reply.send({
+          enabled: adAccount?.amocrm_auto_create_leads === true,
+          amocrmConnected: !!adAccount?.amocrm_subdomain
+        });
+      }
+
+      return reply.send({
+        enabled: userAccount.amocrm_auto_create_leads === true,
+        amocrmConnected: !!userAccount.amocrm_subdomain
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting AmoCRM auto-create setting');
+      return reply.code(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /amocrm/auto-create-leads
+   * Update auto-create leads setting
+   */
+  app.patch('/amocrm/auto-create-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, accountId, enabled } = request.body as {
+        userAccountId: string;
+        accountId?: string;
+        enabled: boolean;
+      };
+
+      if (!userAccountId || typeof enabled !== 'boolean') {
+        return reply.code(400).send({ error: 'userAccountId and enabled (boolean) are required' });
+      }
+
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, amocrm_subdomain')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('amocrm_subdomain')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (!adAccount?.amocrm_subdomain) {
+          return reply.code(400).send({ error: 'AmoCRM is not connected for this account' });
+        }
+
+        await supabase
+          .from('ad_accounts')
+          .update({ amocrm_auto_create_leads: enabled })
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId);
+
+        return reply.send({ success: true, enabled });
+      }
+
+      if (!userAccount.amocrm_subdomain) {
+        return reply.code(400).send({ error: 'AmoCRM is not connected' });
+      }
+
+      await supabase
+        .from('user_accounts')
+        .update({ amocrm_auto_create_leads: enabled })
+        .eq('id', userAccountId);
+
+      return reply.send({ success: true, enabled });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating AmoCRM auto-create setting');
+      return reply.code(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  /**
+   * GET /amocrm/default-pipeline
+   * Get default pipeline/status for auto-created leads
+   */
+  app.get('/amocrm/default-pipeline', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, accountId } = request.query as { userAccountId: string; accountId?: string };
+
+      if (!userAccountId) {
+        return reply.code(400).send({ error: 'userAccountId is required' });
+      }
+
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled, amocrm_default_pipeline_id, amocrm_default_status_id')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('amocrm_default_pipeline_id, amocrm_default_status_id')
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        return reply.send({
+          pipelineId: adAccount?.amocrm_default_pipeline_id ?? null,
+          statusId: adAccount?.amocrm_default_status_id ?? null
+        });
+      }
+
+      return reply.send({
+        pipelineId: userAccount.amocrm_default_pipeline_id ?? null,
+        statusId: userAccount.amocrm_default_status_id ?? null
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting AmoCRM default pipeline');
+      return reply.code(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /amocrm/default-pipeline
+   * Set default pipeline/status for auto-created leads
+   */
+  app.patch('/amocrm/default-pipeline', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, accountId, pipelineId, statusId } = request.body as {
+        userAccountId: string;
+        accountId?: string;
+        pipelineId: number | null;
+        statusId: number | null;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({ error: 'userAccountId is required' });
+      }
+
+      const updateData = {
+        amocrm_default_pipeline_id: pipelineId ?? null,
+        amocrm_default_status_id: statusId ?? null
+      };
+
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled')
+        .eq('id', userAccountId)
+        .single();
+
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User account not found' });
+      }
+
+      const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+      if (isMultiAccountMode) {
+        await supabase
+          .from('ad_accounts')
+          .update(updateData)
+          .eq('id', accountId)
+          .eq('user_account_id', userAccountId);
+      } else {
+        await supabase
+          .from('user_accounts')
+          .update(updateData)
+          .eq('id', userAccountId);
+      }
+
+      return reply.send({ success: true, pipelineId, statusId });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating AmoCRM default pipeline');
+      return reply.code(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+}
 

@@ -421,6 +421,17 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             log.warn({ err: err.message }, '[Bitrix24] Auto-create check failed');
           }
 
+          // Check AmoCRM auto-create BEFORE parallel operations
+          let amocrmEnabled = false;
+          try {
+            const { checkAmoCRMAutoCreate } = await import('../workflows/amocrmSync.js');
+            const amocrmSettings = await checkAmoCRMAutoCreate(userAccountId, accountId);
+            amocrmEnabled = amocrmSettings.enabled;
+            log.debug({ amocrmEnabled, accountId }, '[AmoCRM] Auto-create check');
+          } catch (err: any) {
+            log.warn({ err: err.message }, '[AmoCRM] Auto-create check failed');
+          }
+
           // Run DB save and Bitrix24 push in parallel
           const dbSavePromise = supabase
             .from('leads')
@@ -446,8 +457,26 @@ export default async function facebookWebhooks(app: FastifyInstance) {
               })()
             : Promise.resolve(null);
 
-          // Wait for both operations - use allSettled so Bitrix24 errors don't block DB save
-          const [dbSettled, bitrix24Settled] = await Promise.allSettled([dbSavePromise, bitrix24Promise]);
+          const amocrmPromise = amocrmEnabled && phone
+            ? (async () => {
+                const { pushLeadToAmoCRMDirect } = await import('../workflows/amocrmSync.js');
+                return pushLeadToAmoCRMDirect(
+                  {
+                    name: name || null,
+                    phone,
+                    email: email || null,
+                    utm_source: 'facebook_lead_form',
+                    utm_campaign: form_id || null
+                  },
+                  userAccountId,
+                  accountId,
+                  app
+                );
+              })()
+            : Promise.resolve(null);
+
+          // Wait for all operations - use allSettled so CRM errors don't block DB save
+          const [dbSettled, bitrix24Settled, amocrmSettled] = await Promise.allSettled([dbSavePromise, bitrix24Promise, amocrmPromise]);
 
           // Check DB result first (critical)
           if (dbSettled.status === 'rejected') {
@@ -505,6 +534,34 @@ export default async function facebookWebhooks(app: FastifyInstance) {
                 bitrix24DealId: bitrix24Result.bitrix24DealId,
                 bitrix24ContactId: bitrix24Result.bitrix24ContactId
               }, '[Bitrix24] Lead updated with Bitrix24 IDs');
+            }
+          }
+
+          // Check AmoCRM result (non-critical - log warning if failed)
+          let amocrmResult = null;
+          if (amocrmSettled.status === 'fulfilled') {
+            amocrmResult = amocrmSettled.value;
+          } else if (amocrmEnabled) {
+            log.warn({ error: amocrmSettled.reason, leadgen_id }, '[AmoCRM] Push failed but lead saved to DB');
+          }
+
+          // Update lead with AmoCRM IDs if push was successful
+          if (amocrmResult) {
+            const updateData: Record<string, any> = {};
+            if (amocrmResult.amocrmLeadId) updateData.amocrm_lead_id = amocrmResult.amocrmLeadId;
+            if (amocrmResult.amocrmContactId) updateData.amocrm_contact_id = amocrmResult.amocrmContactId;
+
+            if (Object.keys(updateData).length > 0) {
+              await supabase
+                .from('leads')
+                .update(updateData)
+                .eq('id', lead.id);
+
+              log.info({
+                leadId: lead.id,
+                amocrmLeadId: amocrmResult.amocrmLeadId,
+                amocrmContactId: amocrmResult.amocrmContactId
+              }, '[AmoCRM] Lead updated with AmoCRM IDs');
             }
           }
 

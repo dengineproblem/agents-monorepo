@@ -458,9 +458,38 @@ export default async function leadsRoutes(app: FastifyInstance) {
         app.log.warn({ err, userId: leadData.userAccountId }, 'Failed to update onboarding stage for Tilda lead');
       });
 
+      // AmoCRM auto-create (fire-and-forget)
+      try {
+        const { checkAmoCRMAutoCreate, pushLeadToAmoCRMDirect } = await import('../workflows/amocrmSync.js');
+        const { enabled } = await checkAmoCRMAutoCreate(leadData.userAccountId, leadData.accountId || null);
+        if (enabled && leadData.phone) {
+          pushLeadToAmoCRMDirect(
+            {
+              name: leadData.name || null,
+              phone: leadData.phone,
+              email: leadData.email || null,
+              utm_source: leadData.utm_source || 'website',
+              utm_campaign: leadData.utm_campaign || null
+            },
+            leadData.userAccountId,
+            leadData.accountId || null,
+            app
+          ).then(result => {
+            if (result) {
+              const updateData: Record<string, any> = {};
+              if (result.amocrmLeadId) updateData.amocrm_lead_id = result.amocrmLeadId;
+              if (result.amocrmContactId) updateData.amocrm_contact_id = result.amocrmContactId;
+              if (Object.keys(updateData).length > 0) {
+                supabase.from('leads').update(updateData).eq('id', leadId);
+              }
+            }
+          }).catch(err => app.log.warn({ err: err.message, leadId }, '[AmoCRM] Auto-create failed for website lead'));
+        }
+      } catch (err: any) {
+        app.log.warn({ err: err.message }, '[AmoCRM] Auto-create check failed for website lead');
+      }
+
       // 7. Respond to webhook
-      // NOTE: AmoCRM sync is DISABLED. Leads are NOT automatically sent to AmoCRM.
-      // AmoCRM is used only for receiving sales data via webhook.
       reply.send({
         success: true,
         leadId,

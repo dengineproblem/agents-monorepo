@@ -39,6 +39,14 @@ import {
   type Bitrix24Status,
   type Bitrix24Pipelines,
 } from '@/services/bitrix24Api';
+import {
+  getAmoCRMAutoCreateSetting,
+  setAmoCRMAutoCreateSetting,
+  getAmoCRMDefaultPipeline,
+  setAmoCRMDefaultPipeline,
+  getPipelines as getAmoCRMPipelines,
+  type Pipeline as AmoCRMPipeline
+} from '@/services/amocrmApi';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
@@ -203,6 +211,14 @@ const Profile: React.FC = () => {
   const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
   const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
+  const [amocrmAutoCreate, setAmocrmAutoCreate] = useState(false);
+  const [loadingAmocrmAutoCreate, setLoadingAmocrmAutoCreate] = useState(false);
+  const [amocrmPipelines, setAmocrmPipelines] = useState<AmoCRMPipeline[] | null>(null);
+  const [loadingAmocrmPipelines, setLoadingAmocrmPipelines] = useState(false);
+  const [amocrmDefaultPipelineId, setAmocrmDefaultPipelineId] = useState<number | null>(null);
+  const [amocrmDefaultStatusId, setAmocrmDefaultStatusId] = useState<number | null>(null);
+  const [amocrmDefaultPipelineDirty, setAmocrmDefaultPipelineDirty] = useState(false);
+  const [savingAmocrmPipeline, setSavingAmocrmPipeline] = useState(false);
   // REMOVED: Qualification now configured at direction level via CAPI settings
   // const [amocrmQualificationModal, setAmocrmQualificationModal] = useState(false);
   // const [amocrmQualificationFieldName, setAmocrmQualificationFieldName] = useState<string | null>(null);
@@ -391,7 +407,18 @@ const Profile: React.FC = () => {
             console.error('Failed to check webhook status:', error);
           }
 
-          // REMOVED: Qualification now configured at direction level via CAPI settings
+          // Load auto-create setting and default pipeline
+          try {
+            const [autoCreateResult, defaultPipeline] = await Promise.all([
+              getAmoCRMAutoCreateSetting(user.id),
+              getAmoCRMDefaultPipeline(user.id)
+            ]);
+            setAmocrmAutoCreate(autoCreateResult.enabled);
+            setAmocrmDefaultPipelineId(defaultPipeline.pipelineId);
+            setAmocrmDefaultStatusId(defaultPipeline.statusId);
+          } catch (error) {
+            console.error('Failed to load AmoCRM settings:', error);
+          }
         }
       } catch (error) {
         console.error('Failed to load AmoCRM status:', error);
@@ -953,6 +980,56 @@ const Profile: React.FC = () => {
     } catch (error) {
       console.error('Error disconnecting AmoCRM:', error);
       toast.error('Ошибка при отключении AmoCRM');
+    }
+  };
+
+  const handleAmocrmAutoCreateChange = async (enabled: boolean) => {
+    if (!user?.id) return;
+
+    setLoadingAmocrmAutoCreate(true);
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      const result = await setAmoCRMAutoCreateSetting(user.id, enabled, accountId || undefined);
+      if (result.success) {
+        setAmocrmAutoCreate(result.enabled);
+        toast.success(enabled ? 'Авто-создание лидов включено' : 'Авто-создание лидов отключено');
+      }
+    } catch (error) {
+      console.error('Error updating AmoCRM auto-create setting:', error);
+      toast.error('Ошибка при изменении настройки');
+    } finally {
+      setLoadingAmocrmAutoCreate(false);
+    }
+  };
+
+  const handleLoadAmocrmPipelines = async () => {
+    if (!user?.id) return;
+    setLoadingAmocrmPipelines(true);
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      const pipelines = await getAmoCRMPipelines(user.id, accountId || undefined);
+      setAmocrmPipelines(pipelines);
+    } catch (error) {
+      console.error('Error loading AmoCRM pipelines:', error);
+      toast.error('Ошибка загрузки воронок');
+    } finally {
+      setLoadingAmocrmPipelines(false);
+    }
+  };
+
+  const handleSaveAmocrmDefaultPipeline = async () => {
+    if (!user?.id) return;
+    setSavingAmocrmPipeline(true);
+    try {
+      const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+      await setAmoCRMDefaultPipeline(user.id, amocrmDefaultPipelineId, amocrmDefaultStatusId, accountId || undefined);
+      setAmocrmDefaultPipelineDirty(false);
+      toast.success('Настройки воронки сохранены');
+    } catch (error) {
+      console.error('Error saving AmoCRM default pipeline:', error);
+      toast.error('Ошибка сохранения');
+    } finally {
+      setSavingAmocrmPipeline(false);
     }
   };
 
@@ -2086,6 +2163,107 @@ const Profile: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">Авто-создание лидов</span>
+                  <span className="text-xs text-muted-foreground">
+                    Создавать лиды в CRM при получении из Facebook Lead Forms
+                  </span>
+                </div>
+                <Switch
+                  checked={amocrmAutoCreate}
+                  onCheckedChange={handleAmocrmAutoCreateChange}
+                  disabled={loadingAmocrmAutoCreate}
+                />
+              </div>
+
+              {/* Pipeline/stage selector - показываем только если авто-создание включено */}
+              {amocrmAutoCreate && (
+                <div className="p-3 bg-muted rounded-lg space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Воронка для новых сделок</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleLoadAmocrmPipelines}
+                      disabled={loadingAmocrmPipelines}
+                    >
+                      {loadingAmocrmPipelines ? 'Загрузка...' : 'Обновить'}
+                    </Button>
+                  </div>
+
+                  {amocrmPipelines && amocrmPipelines.length > 0 && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Воронка</Label>
+                        <Select
+                          value={amocrmDefaultPipelineId?.toString() || ''}
+                          onValueChange={(val) => {
+                            const pipelineId = Number(val);
+                            setAmocrmDefaultPipelineId(pipelineId);
+                            setAmocrmDefaultStatusId(null);
+                            setAmocrmDefaultPipelineDirty(true);
+                          }}
+                          disabled={loadingAmocrmPipelines}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="По умолчанию" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {amocrmPipelines.map((pipeline) => (
+                              <SelectItem key={pipeline.pipeline_id} value={pipeline.pipeline_id.toString()}>
+                                {pipeline.pipeline_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {amocrmDefaultPipelineId && (
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Этап</Label>
+                          <Select
+                            value={amocrmDefaultStatusId?.toString() || ''}
+                            onValueChange={(val) => {
+                              setAmocrmDefaultStatusId(Number(val));
+                              setAmocrmDefaultPipelineDirty(true);
+                            }}
+                            disabled={loadingAmocrmPipelines}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Первый этап" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {amocrmPipelines
+                                .find((p) => p.pipeline_id === amocrmDefaultPipelineId)
+                                ?.stages.map((stage) => (
+                                  <SelectItem key={stage.status_id} value={stage.status_id.toString()}>
+                                    {stage.status_name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={handleSaveAmocrmDefaultPipeline}
+                        disabled={!amocrmDefaultPipelineDirty || savingAmocrmPipeline}
+                        className="w-full"
+                      >
+                        {savingAmocrmPipeline ? 'Сохранение...' : 'Сохранить настройки воронки'}
+                      </Button>
+                    </>
+                  )}
+
+                  {!amocrmPipelines && !loadingAmocrmPipelines && (
+                    <p className="text-xs text-muted-foreground">
+                      Нажмите "Обновить" для загрузки воронок из AmoCRM
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* TEMPORARILY HIDDEN: Key Stages Configuration
               <Button

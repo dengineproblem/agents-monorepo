@@ -734,3 +734,100 @@ export async function setScheduledFields(
 
   return response.json();
 }
+
+// --- Auto-create leads setting ---
+
+export interface AmoCRMAutoCreateSetting {
+  enabled: boolean;
+  amocrmConnected: boolean;
+}
+
+export async function getAmoCRMAutoCreateSetting(
+  userAccountId: string,
+  accountId?: string
+): Promise<AmoCRMAutoCreateSetting> {
+  const queryParams = new URLSearchParams({ userAccountId });
+  if (accountId) queryParams.set('accountId', accountId);
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/auto-create-leads?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to get auto-create setting');
+  }
+
+  return response.json();
+}
+
+export async function setAmoCRMAutoCreateSetting(
+  userAccountId: string,
+  enabled: boolean,
+  accountId?: string
+): Promise<{ success: boolean; enabled: boolean }> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/auto-create-leads`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAccountId, accountId, enabled }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to update auto-create setting');
+  }
+
+  return response.json();
+}
+
+// --- Default pipeline setting ---
+
+export interface AmoCRMDefaultPipeline {
+  pipelineId: number | null;
+  statusId: number | null;
+}
+
+export async function getAmoCRMDefaultPipeline(
+  userAccountId: string,
+  accountId?: string
+): Promise<AmoCRMDefaultPipeline> {
+  const queryParams = new URLSearchParams({ userAccountId });
+  if (accountId) queryParams.set('accountId', accountId);
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/default-pipeline?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to get default pipeline');
+  }
+
+  return response.json();
+}
+
+export async function setAmoCRMDefaultPipeline(
+  userAccountId: string,
+  pipelineId: number | null,
+  statusId: number | null,
+  accountId?: string
+): Promise<{ success: boolean }> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/default-pipeline`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAccountId, accountId, pipelineId, statusId }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to update default pipeline');
+  }
+
+  return response.json();
+}

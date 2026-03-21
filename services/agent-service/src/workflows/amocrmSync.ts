@@ -1148,3 +1148,242 @@ async function handleDealClosureFromStatusChange(
     // Don't throw - this is a secondary operation
   }
 }
+
+/**
+ * Check if AmoCRM auto-create leads toggle is enabled for user
+ */
+export async function checkAmoCRMAutoCreate(
+  userAccountId: string,
+  accountId: string | null
+): Promise<{ enabled: boolean }> {
+  try {
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('multi_account_enabled, amocrm_auto_create_leads, amocrm_subdomain')
+      .eq('id', userAccountId)
+      .single();
+
+    if (!userAccount) {
+      return { enabled: false };
+    }
+
+    const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+    if (isMultiAccountMode) {
+      const { data: adAccount } = await supabase
+        .from('ad_accounts')
+        .select('amocrm_auto_create_leads, amocrm_subdomain')
+        .eq('id', accountId)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (!adAccount || !adAccount.amocrm_subdomain) {
+        return { enabled: false };
+      }
+
+      return { enabled: adAccount.amocrm_auto_create_leads === true };
+    }
+
+    if (!userAccount.amocrm_subdomain) {
+      return { enabled: false };
+    }
+
+    return { enabled: userAccount.amocrm_auto_create_leads === true };
+
+  } catch (error) {
+    console.error('Error checking AmoCRM auto-create setting:', error);
+    return { enabled: false };
+  }
+}
+
+/**
+ * Get default pipeline/status settings for auto-created leads
+ */
+async function getAmoCRMDefaultPipeline(
+  userAccountId: string,
+  accountId: string | null
+): Promise<{ pipelineId: number | null; statusId: number | null }> {
+  try {
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('multi_account_enabled, amocrm_default_pipeline_id, amocrm_default_status_id')
+      .eq('id', userAccountId)
+      .single();
+
+    if (!userAccount) {
+      return { pipelineId: null, statusId: null };
+    }
+
+    const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
+
+    if (isMultiAccountMode) {
+      const { data: adAccount } = await supabase
+        .from('ad_accounts')
+        .select('amocrm_default_pipeline_id, amocrm_default_status_id')
+        .eq('id', accountId)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      return {
+        pipelineId: adAccount?.amocrm_default_pipeline_id ?? null,
+        statusId: adAccount?.amocrm_default_status_id ?? null
+      };
+    }
+
+    return {
+      pipelineId: userAccount.amocrm_default_pipeline_id ?? null,
+      statusId: userAccount.amocrm_default_status_id ?? null
+    };
+  } catch {
+    return { pipelineId: null, statusId: null };
+  }
+}
+
+interface LeadDataForAmoCRM {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  utm_source: string | null;
+  utm_campaign: string | null;
+}
+
+/**
+ * Push lead directly to AmoCRM (without requiring leadId in DB)
+ * Used for parallel execution alongside DB insert
+ */
+export async function pushLeadToAmoCRMDirect(
+  leadData: LeadDataForAmoCRM,
+  userAccountId: string,
+  accountId: string | null,
+  app: FastifyInstance
+): Promise<{
+  amocrmLeadId: number;
+  amocrmContactId: number;
+} | null> {
+  const syncStartTime = Date.now();
+
+  try {
+    app.log.info({
+      userAccountId,
+      accountId,
+      hasPhone: !!leadData.phone,
+      hasName: !!leadData.name
+    }, '[AmoCRMSync] Starting direct push to AmoCRM');
+
+    // 1. Get valid token and default pipeline settings
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId, accountId);
+    const defaultPipeline = await getAmoCRMDefaultPipeline(userAccountId, accountId);
+
+    // 2. Normalize phone
+    const phone = leadData.phone ? normalizePhone(leadData.phone) : null;
+    const displayName = leadData.name || 'Лид из Facebook';
+
+    if (!phone) {
+      app.log.warn({ userAccountId }, '[AmoCRMSync] Lead has no phone number - skipping');
+      return null;
+    }
+
+    // 3. Find or create contact
+    let contact = await findContactByPhone(phone, subdomain, accessToken);
+    let contactId: number;
+
+    if (!contact) {
+      const { first_name, last_name } = extractName(displayName);
+
+      const newContact: AmoCRMContact = {
+        name: `${first_name}${last_name ? ' ' + last_name : ''}`,
+        first_name,
+        last_name,
+        custom_fields_values: [
+          {
+            field_code: 'PHONE',
+            values: [{ value: phone }]
+          }
+        ]
+      };
+
+      contact = await createContact(newContact, subdomain, accessToken);
+      contactId = contact.id!;
+
+      app.log.info({ contactId, phone: `${phone.slice(0, 4)}***` }, '[AmoCRMSync] Created new AmoCRM contact');
+
+      await logSync({
+        userAccountId,
+        amocrmContactId: contactId,
+        syncType: 'contact_to_amocrm',
+        syncStatus: 'success',
+        requestJson: newContact,
+        responseJson: contact
+      });
+    } else {
+      contactId = contact.id!;
+      app.log.info({ contactId, phone: `${phone.slice(0, 4)}***` }, '[AmoCRMSync] Found existing AmoCRM contact');
+    }
+
+    // 4. Create lead
+    const leadName = leadData.utm_campaign
+      ? `Лид: ${leadData.utm_campaign}`
+      : `Лид от ${new Date().toLocaleDateString('ru-RU')}`;
+
+    const amocrmLead: AmoCRMLead = {
+      name: leadName,
+      price: 0,
+      pipeline_id: defaultPipeline.pipelineId ?? undefined,
+      status_id: defaultPipeline.statusId ?? undefined,
+      custom_fields_values: [],
+      _embedded: {
+        contacts: [{ id: contactId }]
+      }
+    };
+
+    // Add UTM as tags
+    const tags: string[] = [];
+    if (leadData.utm_source) tags.push(`utm_source:${leadData.utm_source}`);
+    if (leadData.utm_campaign) tags.push(`utm_campaign:${leadData.utm_campaign}`);
+
+    if (tags.length > 0) {
+      amocrmLead._embedded = {
+        ...amocrmLead._embedded,
+        tags: tags.map(name => ({ name })) as any
+      };
+    }
+
+    const createdLead = await createLead(amocrmLead, subdomain, accessToken);
+    const amocrmLeadId = createdLead.id!;
+
+    app.log.info({
+      amocrmLeadId,
+      contactId,
+      elapsedMs: Date.now() - syncStartTime
+    }, '[AmoCRMSync] AmoCRM lead created successfully');
+
+    await logSync({
+      userAccountId,
+      amocrmLeadId,
+      amocrmContactId: contactId,
+      syncType: 'lead_to_amocrm',
+      syncStatus: 'success',
+      requestJson: amocrmLead,
+      responseJson: createdLead
+    });
+
+    return { amocrmLeadId, amocrmContactId: contactId };
+
+  } catch (error: any) {
+    app.log.error({
+      error: error.message,
+      userAccountId,
+      elapsedMs: Date.now() - syncStartTime
+    }, '[AmoCRMSync] Failed to push lead to AmoCRM');
+
+    await logSync({
+      userAccountId,
+      syncType: 'lead_to_amocrm',
+      syncStatus: 'failed',
+      errorMessage: error.message,
+      errorCode: error.code
+    });
+
+    return null;
+  }
+}
