@@ -2,6 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import pg from 'pg';
 import { pino } from 'pino';
 import { initSession, destroySession } from './sessionManager.js';
+import { extractAdAttribution } from './adAttribution.js';
+import { updateLeadAttribution } from './leadAttributionUpdater.js';
 
 const { Pool } = pg;
 const log = pino({ name: 'missed-messages' });
@@ -294,6 +296,14 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
 
         if (!hasEvo) {
           // Evolution вообще не знает об этом контакте — первое сообщение не дошло
+
+          // Извлекаем ad-атрибуцию из сообщений (ctwaContext / URL / unattributed)
+          const attribution = extractAdAttribution(recentIncoming);
+          if (attribution.pattern === 'none') {
+            // full_miss + нет метаданных = вероятно с рекламы, но неопознано
+            attribution.pattern = 'unattributed';
+          }
+
           const texts = recentIncoming
             .map((m: any) => extractMessageText(m))
             .filter(Boolean);
@@ -311,7 +321,13 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
           }, 'Recovering fully missed conversation');
 
           const pushed = await pushToChatbot(instanceName, contactPhone, combinedText);
-          if (pushed) recoveredCount++;
+          if (pushed) {
+            recoveredCount++;
+            // Обновляем атрибуцию лида (async, не блокирует recovery)
+            updateLeadAttribution(contactPhone, account.id, attribution).catch((err: any) => {
+              log.error({ contactPhone, err: err.message }, 'Failed to update lead attribution');
+            });
+          }
 
           await new Promise(r => setTimeout(r, 2000));
           continue;
@@ -342,6 +358,10 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
 
         // Есть пропущенные сообщения — берём те, что Evolution не видел
         const missingMessages = missedIncoming.slice(evoIncomingAfter);
+
+        // Извлекаем ad-атрибуцию (без unattributed fallback — контакт уже общается)
+        const dialogAttribution = extractAdAttribution(missingMessages);
+
         const texts = missingMessages
           .map((m: any) => extractMessageText(m))
           .filter(Boolean);
@@ -361,7 +381,15 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
         }, 'Recovering missed messages in ongoing dialog');
 
         const pushed = await pushToChatbot(instanceName, contactPhone, combinedText);
-        if (pushed) recoveredCount++;
+        if (pushed) {
+          recoveredCount++;
+          // Обновляем атрибуцию если найдены ad-метаданные (не unattributed для dialog_miss)
+          if (dialogAttribution.pattern !== 'none') {
+            updateLeadAttribution(contactPhone, account.id, dialogAttribution).catch((err: any) => {
+              log.error({ contactPhone, err: err.message }, 'Failed to update lead attribution (dialog_miss)');
+            });
+          }
+        }
 
         await new Promise(r => setTimeout(r, 2000));
       } catch (err: any) {

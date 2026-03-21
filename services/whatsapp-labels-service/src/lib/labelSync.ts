@@ -146,10 +146,14 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
       const currentLabels = await chat.getLabels();
       const currentLabelIds = currentLabels.map((l: any) => l.id);
 
+      log.info({ leadId: lead.id, chatId, currentLabelIds, targetLabelId: labelId }, 'Current labels on chat');
+
       // Only add if not already present
       if (!currentLabelIds.includes(labelId)) {
-        await chat.changeLabels([...currentLabelIds, labelId]);
-        log.info({ leadId: lead.id, chatId, labelId }, 'Label assigned');
+        const newLabelIds = [...currentLabelIds, labelId];
+        log.info({ leadId: lead.id, chatId, newLabelIds }, 'Calling changeLabels');
+        const result = await chat.changeLabels(newLabelIds);
+        log.info({ leadId: lead.id, chatId, labelId, result: JSON.stringify(result) }, 'Label assigned');
       } else {
         log.info({ leadId: lead.id, chatId }, 'Label already present');
       }

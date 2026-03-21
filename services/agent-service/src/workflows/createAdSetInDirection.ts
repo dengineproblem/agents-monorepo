@@ -741,8 +741,8 @@ export async function workflowCreateAdSetInDirection(
       );
     } catch (error: any) {
       // Проверяем, является ли это ошибкой 2446885 (WhatsApp Business requirement)
-      const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
-      const isWhatsAppError = errorSubcode === 2446885 || errorSubcode === 2446886;
+      const errorSubcode = error?.fb?.error_subcode || error?.error?.error_subcode || error?.error_subcode;
+      const isWhatsAppError = errorSubcode === 2446885 || errorSubcode === 2446886 || errorSubcode === 1487246;
 
       if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number && effective_page_id) {
         log.warn({

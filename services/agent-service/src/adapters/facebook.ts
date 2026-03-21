@@ -107,14 +107,15 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!res.ok) {
-    log.error({ status: res.status, error: json?.error?.message }, '[graph] Facebook API error');
+    log.error({ status: res.status, error: json?.error?.message, error_user_title: json?.error?.error_user_title, error_user_msg: json?.error?.error_user_msg }, '[graph] Facebook API error');
     const g = json?.error || {};
     const err: any = new Error(g?.message || text || `HTTP ${res.status}`);
     err.fb = {
       status: res.status,
       method, path,
       params: params,
-      type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id
+      type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id,
+      error_user_title: g?.error_user_title, error_user_msg: g?.error_user_msg
     };
     const resolution = resolveFacebookError(err.fb);
     log.error({
