@@ -1533,6 +1533,25 @@ function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjecti
           all_action_types: allActionTypes
         }
       };
+    } else if (objective === 'instagram_dm') {
+      // Instagram DM метрики (аналогично WhatsApp)
+      const linkClicksTotal = extractActionValue(actions, 'link_click');
+      const conversationsTotal = extractActionValue(actions, 'onsite_conversion.total_messaging_connection');
+      const qualityLeadsTotal = extractActionValue(actions, 'onsite_conversion.messaging_user_depth_2_message_send');
+
+      const conversionRate = linkClicksTotal > 0 ? (conversationsTotal / linkClicksTotal) * 100 : 0;
+      const qualityConversionRate = linkClicksTotal > 0 ? (qualityLeadsTotal / linkClicksTotal) * 100 : 0;
+
+      objectiveMetrics = {
+        instagram_dm_metrics: {
+          link_clicks: linkClicksTotal,
+          conversations_started: conversationsTotal,
+          quality_leads: qualityLeadsTotal,
+          conversion_rate: conversionRate.toFixed(1),
+          quality_conversion_rate: qualityConversionRate.toFixed(1),
+          all_action_types: allActionTypes
+        }
+      };
     }
 
     result.push({

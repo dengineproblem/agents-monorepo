@@ -1284,10 +1284,10 @@ const AccountRow: React.FC<AccountRowProps> = ({
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
-  // Проверяем, есть ли хотя бы одно WhatsApp направление
-  // Качество лидов показываем только для WhatsApp (messaging_apps), не для лид-форм
+  // Проверяем, есть ли хотя бы одно направление с переписками (WhatsApp или Instagram DM)
   const hasWhatsAppDirections = directions.some(d =>
     d.objective === 'whatsapp' ||
+    d.objective === 'instagram_dm' ||
     (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
   );
 
@@ -1622,9 +1622,10 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   // Находим direction для этой кампании
   const direction = directions.find(d => d.fb_campaign_id === campaign.campaign_id);
 
-  // Качество лидов показываем если есть хотя бы один WhatsApp direction в аккаунте
+  // Качество лидов показываем если есть хотя бы одно направление с переписками
   const hasWhatsAppDirections = directions.some(d =>
     d.objective === 'whatsapp' ||
+    d.objective === 'instagram_dm' ||
     (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
   );
   const isWhatsAppCampaign = hasWhatsAppDirections;

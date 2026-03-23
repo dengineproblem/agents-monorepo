@@ -9,7 +9,7 @@ import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
 import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
 
-type ObjectiveType = 'WhatsApp' | 'Conversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
+type ObjectiveType = 'WhatsApp' | 'Conversions' | 'Instagram' | 'InstagramDM' | 'SiteLeads' | 'LeadForms' | 'AppInstalls';
 
 type CreateCampaignParams = {
   user_creative_ids: string[]; // МАССИВ креативов для создания нескольких ads в одном adset
@@ -156,6 +156,10 @@ export async function workflowCreateCampaignWithCreative(
       fb_objective = 'OUTCOME_APP_PROMOTION';
       optimization_goal = 'APP_INSTALLS';
       break;
+    case 'InstagramDM':
+      fb_objective = 'OUTCOME_ENGAGEMENT';
+      optimization_goal = 'CONVERSATIONS';
+      break;
     default:
       throw new Error(`Unknown objective: ${objective}`);
   }
@@ -189,6 +193,9 @@ export async function workflowCreateCampaignWithCreative(
           break;
         case 'LeadForms':
           fb_creative_id = creative.fb_creative_id_lead_forms;
+          break;
+        case 'InstagramDM':
+          fb_creative_id = creative.fb_creative_id_whatsapp;
           break;
       }
     }
@@ -329,6 +336,14 @@ export async function workflowCreateCampaignWithCreative(
     adsetBody.promoted_object = {
       page_id: String(page_id),
       ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+    };
+  }
+
+  // Для Instagram DM добавляем destination_type и promoted_object
+  if (objective === 'InstagramDM' && page_id) {
+    adsetBody.destination_type = 'INSTAGRAM_DIRECT';
+    adsetBody.promoted_object = {
+      page_id: String(page_id),
     };
   }
 

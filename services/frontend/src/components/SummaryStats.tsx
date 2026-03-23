@@ -29,12 +29,14 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   const userAccountId = storedUser ? JSON.parse(storedUser).id : null;
   const { directions } = useDirections(userAccountId, currentAdAccountId, directionsPlatform);
 
-  // Проверяем, есть ли хотя бы одно WhatsApp направление
-  // objective='whatsapp' — переписки, objective='conversions' + conversion_channel='whatsapp' — конверсии через WA
+  // Проверяем, есть ли хотя бы одно направление с переписками (WhatsApp или Instagram DM)
+  // objective='whatsapp' — переписки WA, objective='instagram_dm' — переписки IG,
+  // objective='conversions' + conversion_channel='whatsapp' — конверсии через WA
   const hasWhatsAppDirections = useMemo(() => {
     if (platform === 'tiktok') return false;
     return directions.some(d =>
       d.objective === 'whatsapp' ||
+      d.objective === 'instagram_dm' ||
       (d.objective === 'conversions' && d.conversion_channel === 'whatsapp')
     );
   }, [directions, platform]);

@@ -539,6 +539,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               promoted_object = {
                 page_id: credentials.fbPageId
               };
+            } else if (direction.objective === 'instagram_dm') {
+              // Для Instagram DM — page_id, destination_type в adset
+              promoted_object = {
+                page_id: credentials.fbPageId
+              };
             } else if (direction.objective === 'site_leads') {
               // Для site_leads (OFFSITE_CONVERSIONS) promoted_object содержит pixel_id и custom_event_type
               // link НЕ нужен в promoted_object — он уже в креативе

@@ -7,7 +7,8 @@ import {
   createInstagramCarouselCreative,
   createWebsiteLeadsCarouselCreative,
   createLeadFormCarouselCreative,
-  createAppInstallsCarouselCreative
+  createAppInstallsCarouselCreative,
+  createInstagramDMCarouselCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -100,7 +101,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+      const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
       app.log.info({ objective, conversion_channel: (direction as any).conversion_channel }, 'Direction objective');
 
       // 3. Загружаем настройки из default_ad_settings
@@ -281,6 +282,20 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           message: description
         });
         fbCreativeId = result.id;
+      } else if (objective === 'instagram_dm') {
+        if (!instagramId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Instagram DM requires instagram_id. Please connect an Instagram account.'
+          });
+        }
+        const result = await createInstagramDMCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          cards: cardParams,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description
+        });
+        fbCreativeId = result.id;
       } else if (objective === 'site_leads' || (objective === 'conversions' && (direction as any).conversion_channel === 'site')) {
         if (!siteUrl) {
           return reply.status(400).send({
@@ -366,7 +381,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Данные карусели для отображения миниатюр и текстов
           carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
-          ...((objective === 'whatsapp' || (objective === 'conversions' && (direction as any).conversion_channel === 'whatsapp')) && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...((objective === 'whatsapp' || objective === 'instagram_dm' || (objective === 'conversions' && (direction as any).conversion_channel === 'whatsapp')) && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
           ...((objective === 'site_leads' || (objective === 'conversions' && (direction as any).conversion_channel === 'site')) && { fb_creative_id_site_leads: fbCreativeId }),
           ...((objective === 'lead_forms' || (objective === 'conversions' && (direction as any).conversion_channel === 'lead_form')) && { fb_creative_id_lead_forms: fbCreativeId })

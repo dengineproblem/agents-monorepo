@@ -458,7 +458,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         }
       }
 
-      if (objective === 'instagram_traffic' && !instagramUrl.trim()) {
+      if ((objective === 'instagram_traffic' || objective === 'instagram_dm') && !instagramUrl.trim()) {
         setError('Введите Instagram URL');
         return;
       }
@@ -502,7 +502,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             // Для site_leads обязателен, для остальных — опционален
             pixel_id: pixelId || null,
             ...((objective === 'whatsapp' || (objective === 'conversions' && conversionChannel === 'whatsapp')) && { client_question: clientQuestion.trim() }),
-            ...(objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
+            ...((objective === 'instagram_traffic' || objective === 'instagram_dm') && { instagram_url: instagramUrl.trim() }),
             ...((objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site')) && {
               site_url: siteUrl.trim(),
               utm_tag: utmTag.trim() || DEFAULT_UTM,
@@ -730,6 +730,14 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
                       <Label htmlFor="obj-instagram" className="font-normal cursor-pointer">
                         {OBJECTIVE_DESCRIPTIONS.instagram_traffic}
+                      </Label>
+                    </div>
+                  )}
+                  {hasInstagramId && (
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="instagram_dm" id="obj-instagram-dm" />
+                      <Label htmlFor="obj-instagram-dm" className="font-normal cursor-pointer">
+                        {OBJECTIVE_DESCRIPTIONS.instagram_dm}
                       </Label>
                     </div>
                   )}
@@ -1876,7 +1884,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {needsFacebook && objective === 'instagram_traffic' && (
+          {needsFacebook && (objective === 'instagram_traffic' || objective === 'instagram_dm') && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">📱 Instagram</h3>
               

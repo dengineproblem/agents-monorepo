@@ -9,12 +9,14 @@ const OBJECTIVE_LABELS: Record<string, string> = {
   'app_installs': 'app',
   'site_leads': 'site leads',
   'instagram_traffic': 'clicks',
+  'instagram_dm': 'ig dm',
   // PascalCase формат (из createCampaignWithCreative)
   'WhatsApp': 'wa',
   'LeadForms': 'leadforms',
   'AppInstalls': 'app',
   'SiteLeads': 'site leads',
   'Instagram': 'clicks',
+  'InstagramDM': 'ig dm',
 };
 
 function generateShortId(): string {

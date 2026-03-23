@@ -361,7 +361,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         return;
       }
 
-      if (direction.objective === 'instagram_traffic' && !instagramUrl.trim()) {
+      if ((direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && !instagramUrl.trim()) {
         setError('Введите Instagram URL');
         return;
       }
@@ -423,7 +423,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         ...(isTikTok && direction.tiktok_objective === 'whatsapp' && {
           client_question: clientQuestion.trim(),
         }),
-        ...(!isTikTok && direction.objective === 'instagram_traffic' && {
+        ...(!isTikTok && (direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && {
           instagram_url: instagramUrl.trim(),
         }),
         ...(!isTikTok && direction.objective === 'site_leads' && {
@@ -1033,7 +1033,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 </div>
               )}
 
-              {!isTikTok && direction.objective === 'instagram_traffic' && (
+              {!isTikTok && (direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">📱 Instagram</h3>
                   

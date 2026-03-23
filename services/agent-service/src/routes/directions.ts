@@ -56,7 +56,7 @@ const DefaultSettingsSchema = z.object({
 
 type DirectionPlatform = z.infer<typeof DirectionPlatformSchema>;
 type TikTokObjectiveInput = z.infer<typeof TikTokObjectiveSchema>;
-type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
 const DEFAULT_FB_DAILY_BUDGET_CENTS = 500;
@@ -108,7 +108,7 @@ const CreateDirectionSchema = z.object({
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
   platform: DirectionPlatformSchema.optional(),
   name: z.string().min(2).max(100),
-  objective: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']).optional(),
+  objective: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'instagram_dm', 'site_leads', 'lead_forms', 'app_installs']).optional(),
   conversion_channel: z.enum(['whatsapp', 'lead_form', 'site']).optional(),
   optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
   use_instagram: z.boolean().optional(),
@@ -275,6 +275,10 @@ async function createFacebookCampaign(
     case 'app_installs':
       fbObjective = 'OUTCOME_APP_PROMOTION';
       objectiveReadable = 'App Installs';
+      break;
+    case 'instagram_dm':
+      fbObjective = 'OUTCOME_ENGAGEMENT';
+      objectiveReadable = 'Instagram DM';
       break;
     default:
       throw new Error(`Unknown objective: ${objective}`);

@@ -20,6 +20,7 @@ import {
   uploadImage,
   createWhatsAppCreative,
   createInstagramCreative,
+  createInstagramDMCreative,
   createWebsiteLeadsCreative,
   createLeadFormVideoCreative,
   createAppInstallsVideoCreative
@@ -659,7 +660,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let utm = null;
     let leadFormId: string | null = null;
     let appStoreUrl: string | null = null;
-    let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
+    let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
     let useInstagram = true; // По умолчанию используем Instagram
     let direction: any = null; // для доступа к conversion_channel
 
@@ -744,6 +745,18 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = instagramCreative.id;
+    } else if (objective === 'instagram_dm') {
+      if (!instagramId) {
+        throw new Error('Instagram DM requires instagram_id. Please connect an Instagram account.');
+      }
+      const igDmCreative = await createInstagramDMCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+        videoId: fbVideo.id,
+        pageId: pageId,
+        instagramId: instagramId,
+        message: description,
+        thumbnailHash: thumbnailResult.hash
+      });
+      fbCreativeId = igDmCreative.id;
     } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {
       if (!siteUrl) {
         throw new Error('site_url is required for site_leads objective');
@@ -822,6 +835,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     // Сохраняем fb_creative_id в соответствующее поле по типу objective
     if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) updateData.fb_creative_id_whatsapp = fbCreativeId;
     else if (objective === 'instagram_traffic') updateData.fb_creative_id_instagram_traffic = fbCreativeId;
+    else if (objective === 'instagram_dm') updateData.fb_creative_id_whatsapp = fbCreativeId; // Instagram DM uses same creative format as WhatsApp
     else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) updateData.fb_creative_id_site_leads = fbCreativeId;
     else if (objective === 'lead_forms' || (objective === 'conversions' && direction?.conversion_channel === 'lead_form')) updateData.fb_creative_id_lead_forms = fbCreativeId;
 

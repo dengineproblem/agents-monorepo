@@ -945,22 +945,27 @@ export const adsHandlers = {
     // 2. Get adset to determine objective
     let adsetInfo;
     try {
-      adsetInfo = await fbGraph('GET', adset_id, accessToken, { fields: 'id,name,campaign_id,optimization_goal' });
+      adsetInfo = await fbGraph('GET', adset_id, accessToken, { fields: 'id,name,campaign_id,optimization_goal,destination_type' });
     } catch (fbError) {
       return { success: false, error: `Адсет не найден: ${fbError.message}` };
     }
 
-    // Determine objective from optimization_goal
-    const goalToObjective = {
-      'CONVERSATIONS': 'whatsapp',
-      'LINK_CLICKS': 'instagram_traffic',
-      'OFFSITE_CONVERSIONS': 'site_leads',
-      'LEAD_GENERATION': 'lead_forms'
-    };
-    const objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
+    // Determine objective from optimization_goal + destination_type
+    let objective;
+    if (adsetInfo.optimization_goal === 'CONVERSATIONS' && adsetInfo.destination_type === 'INSTAGRAM_DIRECT') {
+      objective = 'instagram_dm';
+    } else {
+      const goalToObjective = {
+        'CONVERSATIONS': 'whatsapp',
+        'LINK_CLICKS': 'instagram_traffic',
+        'OFFSITE_CONVERSIONS': 'site_leads',
+        'LEAD_GENERATION': 'lead_forms'
+      };
+      objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
+    }
 
     // Get appropriate FB creative ID
-    const creativeIdField = objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
+    const creativeIdField = (objective === 'whatsapp' || objective === 'instagram_dm') ? 'fb_creative_id_whatsapp'
       : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
       : objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
       : 'fb_creative_id_site_leads';

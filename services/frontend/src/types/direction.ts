@@ -1,6 +1,6 @@
 // Типы данных для направлений бизнеса
 
-export type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type DirectionObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
 export type ConversionChannel = 'whatsapp' | 'lead_form' | 'site';
 export type OptimizationLevel = 'level_1' | 'level_2' | 'level_3';
 export type DirectionPlatform = 'facebook' | 'tiktok' | 'both';
@@ -273,6 +273,7 @@ export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp',
   conversions: 'Конверсии (CAPI)',
   instagram_traffic: 'Instagram Traffic',
+  instagram_dm: 'Instagram DM',
   site_leads: 'Site Leads',
   lead_forms: 'Lead Forms',
   app_installs: 'App Installs',
@@ -282,6 +283,7 @@ export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp (переписки)',
   conversions: 'Конверсии (CAPI-оптимизация)',
   instagram_traffic: 'Instagram Traffic (переходы)',
+  instagram_dm: 'Instagram DM (переписки)',
   site_leads: 'Site Leads (заявки на сайте)',
   lead_forms: 'Lead Forms (лидформы Facebook)',
   app_installs: 'App Installs (установки приложения)',

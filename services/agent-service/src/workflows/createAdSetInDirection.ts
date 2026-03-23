@@ -203,6 +203,11 @@ export async function workflowCreateAdSetInDirection(
       fb_objective = 'OUTCOME_APP_PROMOTION';
       optimization_goal = 'APP_INSTALLS';
       break;
+    case 'instagram_dm':
+      fb_objective = 'OUTCOME_ENGAGEMENT';
+      optimization_goal = 'CONVERSATIONS';
+      destination_type = 'INSTAGRAM_DIRECT';
+      break;
     default:
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
@@ -239,6 +244,9 @@ export async function workflowCreateAdSetInDirection(
           break;
         case 'lead_forms':
           fb_creative_id = creative.fb_creative_id_lead_forms;
+          break;
+        case 'instagram_dm':
+          fb_creative_id = creative.fb_creative_id_whatsapp;
           break;
       }
     }
@@ -478,6 +486,14 @@ export async function workflowCreateAdSetInDirection(
     adsetBody.promoted_object = {
       page_id: String(effective_page_id),
       ...(whatsapp_phone_number && { whatsapp_phone_number })
+    };
+  }
+
+  // Для Instagram DM добавляем destination_type и promoted_object
+  if (direction.objective === 'instagram_dm' && effective_page_id) {
+    adsetBody.destination_type = 'INSTAGRAM_DIRECT';
+    adsetBody.promoted_object = {
+      page_id: String(effective_page_id),
     };
   }
 

@@ -8,7 +8,7 @@ import { createLogger } from './logger.js';
 
 const log = createLogger({ module: 'settingsHelpers' });
 
-export type CampaignObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type CampaignObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 export type DirectionAudienceControls = {
   advantageAudienceEnabled?: boolean | null;

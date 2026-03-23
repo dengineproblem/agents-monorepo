@@ -73,14 +73,15 @@ const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+export type CampaignObjective = 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Conversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Conversions' | 'Instagram' | 'InstagramDM' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
     conversions: 'Conversions' as const,
     instagram_traffic: 'Instagram' as const,
+    instagram_dm: 'InstagramDM' as const,
     site_leads: 'SiteLeads' as const,
     lead_forms: 'LeadForms' as const,
     app_installs: 'AppInstalls' as const,
@@ -1233,6 +1234,8 @@ export async function getAvailableCreatives(
           return !!c.fb_creative_id_whatsapp;
         case 'instagram_traffic':
           return !!c.fb_creative_id_instagram_traffic;
+        case 'instagram_dm':
+          return !!c.fb_creative_id_whatsapp;
         case 'site_leads':
           return !!c.fb_creative_id_site_leads;
         case 'lead_forms':
@@ -1267,6 +1270,7 @@ export async function getAvailableCreatives(
     switch (objective) {
       case 'whatsapp':
       case 'conversions':
+      case 'instagram_dm':
         return c.fb_creative_id_whatsapp;
       case 'instagram_traffic':
         return c.fb_creative_id_instagram_traffic;
@@ -1307,6 +1311,7 @@ export async function getAvailableCreatives(
     switch (objective) {
       case 'whatsapp':
       case 'conversions':
+      case 'instagram_dm':
         fbCreativeId = creative.fb_creative_id_whatsapp;
         break;
       case 'instagram_traffic':
@@ -2258,6 +2263,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
       return 'LEAD_GENERATION';
     case 'app_installs':
       return 'APP_INSTALLS';
+    case 'instagram_dm':
+      return 'CONVERSATIONS';
     default:
       return 'CONVERSATIONS';
   }
@@ -2365,9 +2372,9 @@ export async function createAdSetInCampaign(params: {
     body.start_time = start_time;
   }
 
-  // Для WhatsApp добавляем destination_type
+  // Для WhatsApp/Instagram DM добавляем destination_type
   if (optimization_goal === 'CONVERSATIONS') {
-    body.destination_type = 'WHATSAPP';
+    body.destination_type = objective === 'instagram_dm' ? 'INSTAGRAM_DIRECT' : 'WHATSAPP';
   }
 
   // WhatsApp-конверсии: OFFSITE_CONVERSIONS + destination WhatsApp
@@ -2501,6 +2508,8 @@ export function getCreativeIdForObjective(creative: AvailableCreative, objective
       return creative.fb_creative_id_lead_forms;
     case 'app_installs':
       return creative.fb_creative_id || null;
+    case 'instagram_dm':
+      return creative.fb_creative_id_whatsapp;
     default:
       return null;
   }

@@ -816,6 +816,46 @@ export async function createWhatsAppCreative(
   }
 }
 
+/**
+ * Instagram DM Video Creative — переписки в Instagram Direct
+ * CTA: INSTAGRAM_MESSAGE (аналог WhatsApp, но для Instagram)
+ */
+export async function createInstagramDMCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    thumbnailHash?: string;
+    imageUrl?: string;
+  }
+): Promise<{ id: string }> {
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: { type: "INSTAGRAM_MESSAGE" }
+  };
+
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  } else if (params.imageUrl) {
+    videoData.image_url = params.imageUrl;
+  }
+
+  const objectStorySpec: any = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    video_data: videoData
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Video – Instagram DM",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
 export async function createInstagramCreative(
   adAccountId: string,
   token: string,
@@ -1308,6 +1348,36 @@ export async function createInstagramImageCreative(
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, {
     name: "Instagram Profile Image Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
+/**
+ * Instagram DM Image Creative — переписки в Instagram Direct
+ */
+export async function createInstagramDMImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash,
+      message: params.message,
+      link: "https://www.instagram.com/",
+      call_to_action: { type: "INSTAGRAM_MESSAGE" }
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Image – Instagram DM",
     object_story_spec: JSON.stringify(objectStorySpec)
   });
 }
@@ -1886,6 +1956,46 @@ export async function createInstagramCarouselCreative(
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Instagram carousel creative');
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Instagram DM Carousel Creative — переписки в Instagram Direct
+ */
+export async function createInstagramDMCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    link: "https://www.instagram.com/",
+    call_to_action: { type: "INSTAGRAM_MESSAGE" }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      link: "https://www.instagram.com/",
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: { type: "INSTAGRAM_MESSAGE" }
+    }
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Instagram DM carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Carousel – Instagram DM",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
 }
 
 /**

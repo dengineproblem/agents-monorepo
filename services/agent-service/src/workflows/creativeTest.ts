@@ -154,6 +154,9 @@ export async function workflowStartCreativeTest(
       case 'lead_forms':
         fb_creative_id = creative.fb_creative_id_lead_forms;
         break;
+      case 'instagram_dm':
+        fb_creative_id = creative.fb_creative_id_whatsapp;
+        break;
       default:
         throw new Error(`Unknown objective: ${direction.objective}`);
     }
@@ -379,6 +382,15 @@ export async function workflowStartCreativeTest(
       }
       break;
     }
+
+    case 'instagram_dm':
+      fb_objective = 'OUTCOME_ENGAGEMENT';
+      optimization_goal = 'CONVERSATIONS';
+      destination_type = 'INSTAGRAM_DIRECT';
+      promoted_object = {
+        page_id: String(page_id)
+      };
+      break;
 
     case 'app_installs':
       fb_objective = 'OUTCOME_APP_PROMOTION';
