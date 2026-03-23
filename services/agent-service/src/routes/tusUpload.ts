@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { processVideoTranscription, extractVideoThumbnail, extractVideoThumbnail916 } from '../lib/transcription.js';
 import {
+  graph,
   uploadVideo,
   uploadImage,
   createWhatsAppCreative,
@@ -613,9 +614,37 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       durationMs: Date.now() - fbUploadStartTime
     }, '[TUS] Video uploaded to Facebook successfully');
 
-    // Ждём обработки Facebook
+    // Ждём обработки видео Facebook (polling статуса)
     log.info({ uploadId }, '[TUS] Waiting for Facebook to process video...');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    const maxWaitMs = 120_000; // макс 2 минуты
+    const pollIntervalMs = 5_000; // проверяем каждые 5 сек
+    const waitStart = Date.now();
+    let videoReady = false;
+
+    while (Date.now() - waitStart < maxWaitMs) {
+      try {
+        const videoStatus = await graph('GET', fbVideo.id, ACCESS_TOKEN, { fields: 'status' });
+        const status = videoStatus?.status?.video_status;
+        log.info({ uploadId, videoId: fbVideo.id, status }, '[TUS] Video processing status');
+
+        if (status === 'ready') {
+          videoReady = true;
+          break;
+        }
+        if (status === 'error') {
+          throw new Error('Facebook video processing failed');
+        }
+      } catch (err: any) {
+        // Если ошибка не связана со статусом — пробуем дальше
+        if (err.message === 'Facebook video processing failed') throw err;
+        log.warn({ uploadId, err: err.message }, '[TUS] Error checking video status, retrying...');
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    if (!videoReady) {
+      log.warn({ uploadId, videoId: fbVideo.id, waitedMs: Date.now() - waitStart }, '[TUS] Video not ready after max wait, proceeding anyway...');
+    }
 
     // Извлекаем thumbnail
     log.info({ uploadId }, '[TUS] Extracting thumbnail from video...');
