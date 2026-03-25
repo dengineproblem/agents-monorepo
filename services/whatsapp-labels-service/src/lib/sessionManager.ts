@@ -47,8 +47,6 @@ export async function initSession(userAccountId: string): Promise<SessionState> 
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--disable-gpu',
-        '--single-process',
-        '--no-zygote',
       ],
     },
   });

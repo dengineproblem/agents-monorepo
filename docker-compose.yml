@@ -380,6 +380,7 @@ services:
       - EVOLUTION_DB_NAME=evolution
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    shm_size: '512m'
     volumes:
       - wwebjs-sessions:/app/.wwebjs_auth
     restart: unless-stopped
