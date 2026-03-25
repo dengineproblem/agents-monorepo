@@ -8,6 +8,7 @@ import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
 import { whatsappApi } from '@/services/whatsappApi';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
 import { WhatsAppLabelsDialog } from './WhatsAppLabelsDialog';
+import { API_BASE_URL } from '@/config/api';
 
 interface WhatsAppConnectionCardProps {
   userAccountId: string | null;
@@ -27,8 +28,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
   const checkLabelConfig = useCallback(async () => {
     if (!userAccountId) return;
     try {
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
-      const res = await fetch(`${apiBase}/user/profile`, {
+      const res = await fetch(`${API_BASE_URL}/user/profile`, {
         headers: { 'x-user-id': userAccountId },
       });
       if (res.ok) {
@@ -161,9 +161,8 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
               </div>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {numbers.map((number) => {
-                // WABA номера всегда "подключены" через webhook
                 const isWaba = number.connection_type === 'waba';
                 const isConnected = isWaba || number.connection_status === 'connected';
                 const isConnecting = !isWaba && number.connection_status === 'connecting';
@@ -171,106 +170,87 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                 return (
                   <div
                     key={number.id}
-                    className="flex items-center justify-between p-4 border border-muted rounded-lg hover:bg-muted/50 transition-colors"
+                    className="flex items-center justify-between p-3 border border-muted rounded-lg hover:bg-muted/50 transition-colors"
                   >
-                    <div className="flex items-center space-x-3">
-                      {isConnected ? (
-                        isWaba ? (
-                          <Cloud className="h-5 w-5 text-blue-500" />
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0 w-5 flex justify-center">
+                        {isConnected ? (
+                          isWaba ? (
+                            <Cloud className="h-5 w-5 text-blue-500" />
+                          ) : (
+                            <Smartphone className="h-5 w-5 text-green-500" />
+                          )
                         ) : (
-                          <Smartphone className="h-5 w-5 text-green-500" />
-                        )
-                      ) : (
-                        <PhoneOff className="h-5 w-5 text-muted-foreground" />
-                      )}
+                          <PhoneOff className="h-5 w-5 text-muted-foreground" />
+                        )}
+                      </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <p className="font-medium">{number.phone_number}</p>
+                          <p className="text-sm font-medium">{number.phone_number}</p>
                           {isWaba && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                              <Cloud className="w-3 h-3" />
                               WABA
                             </span>
                           )}
                         </div>
-                        {number.label && (
-                          <p className="text-sm text-muted-foreground">{number.label}</p>
-                        )}
-                        {isWaba && (
-                          <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1 mt-0.5">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Подключен через Meta Cloud API
-                          </p>
-                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {isWaba ? 'Meta Cloud API' : number.label || 'Evolution API'}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Кнопки управления номерами */}
-                    {isWaba ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDeleteWaba(number.id)}
-                        className="px-2 sm:px-4"
-                      >
-                        <X className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Удалить</span>
-                      </Button>
-                    ) : (
-                      <Button
-                        variant={isConnected || isConnecting ? 'outline' : 'default'}
-                        size="sm"
-                        onClick={() => {
-                          if (isConnected) {
-                            handleDisconnect(number.instance_name!);
-                          } else if (isConnecting) {
-                            handleResetConnection(number.id);
-                          } else {
-                            handleConnect(number.id, number.phone_number);
-                          }
-                        }}
-                        className="px-2 sm:px-4"
-                      >
-                        {isConnected ? (
-                          <>
-                            <X className="h-4 w-4 sm:mr-2" />
-                            <span className="hidden sm:inline">Отключить</span>
-                          </>
-                        ) : isConnecting ? (
-                          <>
-                            <X className="h-4 w-4 sm:mr-2" />
-                            <span className="hidden sm:inline">Отменить</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="h-4 w-4 sm:mr-2" />
-                            <span className="hidden sm:inline">Подключить</span>
-                          </>
-                        )}
-                      </Button>
-                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (isWaba) {
+                          handleDeleteWaba(number.id);
+                        } else if (isConnected) {
+                          handleDisconnect(number.instance_name!);
+                        } else if (isConnecting) {
+                          handleResetConnection(number.id);
+                        } else {
+                          handleConnect(number.id, number.phone_number);
+                        }
+                      }}
+                    >
+                      {isConnected || isWaba ? (
+                        <>
+                          <X className="h-4 w-4 mr-1" />
+                          Отключить
+                        </>
+                      ) : isConnecting ? (
+                        <>
+                          <X className="h-4 w-4 mr-1" />
+                          Отменить
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-1" />
+                          Подключить
+                        </>
+                      )}
+                    </Button>
                   </div>
                 );
               })}
-            </div>
-          )}
 
-          {/* Кнопка подключения автоматических ярлыков */}
-          {numbers.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-muted">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {wwebjsLabelConfigured ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <Tag className="h-4 w-4 text-muted-foreground" />
-                  )}
+              {/* Авто-ярлыки — тот же стиль что и номера */}
+              <div className="flex items-center justify-between p-3 border border-muted rounded-lg hover:bg-muted/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-5 flex justify-center">
+                    {wwebjsLabelConfigured ? (
+                      <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    ) : (
+                      <Tag className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
                   <div>
                     <p className="text-sm font-medium">Авто-ярлыки</p>
                     <p className="text-xs text-muted-foreground">
                       {wwebjsLabelConfigured
-                        ? 'Настроено — ярлыки проставляются каждую ночь в 03:00'
-                        : 'Автоматическая простановка ярлыков квалифицированным лидам'}
+                        ? 'Ярлыки проставляются каждую ночь в 03:00'
+                        : 'Простановка ярлыков квалифицированным лидам'}
                     </p>
                   </div>
                 </div>
@@ -279,7 +259,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                   size="sm"
                   onClick={() => setLabelsDialogOpen(true)}
                 >
-                  <Tag className="h-4 w-4 mr-2" />
+                  <Tag className="h-4 w-4 mr-1" />
                   {wwebjsLabelConfigured ? 'Изменить' : 'Настроить'}
                 </Button>
               </div>
