@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +22,26 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
 
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [labelsDialogOpen, setLabelsDialogOpen] = useState(false);
+  const [wwebjsLabelConfigured, setWwebjsLabelConfigured] = useState(false);
+
+  const checkLabelConfig = useCallback(async () => {
+    if (!userAccountId) return;
+    try {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const res = await fetch(`${apiBase}/user/profile`, {
+        headers: { 'x-user-id': userAccountId },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWwebjsLabelConfigured(!!data?.wwebjs_label_id);
+      }
+    } catch { /* ignore */ }
+  }, [userAccountId]);
+
+  useEffect(() => {
+    checkLabelConfig();
+  }, [checkLabelConfig]);
+
   const [selectedNumber, setSelectedNumber] = useState<{
     id: string;
     phone_number: string;
@@ -240,11 +260,17 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
             <div className="mt-4 pt-4 border-t border-muted">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Tag className="h-4 w-4 text-muted-foreground" />
+                  {wwebjsLabelConfigured ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <Tag className="h-4 w-4 text-muted-foreground" />
+                  )}
                   <div>
                     <p className="text-sm font-medium">Авто-ярлыки</p>
                     <p className="text-xs text-muted-foreground">
-                      Автоматическая простановка ярлыков квалифицированным лидам
+                      {wwebjsLabelConfigured
+                        ? 'Настроено — ярлыки проставляются каждую ночь в 03:00'
+                        : 'Автоматическая простановка ярлыков квалифицированным лидам'}
                     </p>
                   </div>
                 </div>
@@ -254,7 +280,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                   onClick={() => setLabelsDialogOpen(true)}
                 >
                   <Tag className="h-4 w-4 mr-2" />
-                  Настроить
+                  {wwebjsLabelConfigured ? 'Изменить' : 'Настроить'}
                 </Button>
               </div>
             </div>
@@ -281,6 +307,9 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
           open={labelsDialogOpen}
           onOpenChange={setLabelsDialogOpen}
           userAccountId={userAccountId}
+          onConfigured={() => {
+            setWwebjsLabelConfigured(true);
+          }}
         />
       )}
     </>

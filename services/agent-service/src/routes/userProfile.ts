@@ -28,7 +28,7 @@ const PROFILE_SELECT_COLUMNS = [
   'prompt1', 'prompt2', 'prompt3', 'prompt4',
   'skip_whatsapp_number_in_api', 'use_account_timezone', 'preferred_check_hour_local',
   'onboarding_stage', 'onboarding_tags', 'community_channel_invited',
-  'fb_connection_status', 'whatsapp_phone_number',
+  'fb_connection_status', 'whatsapp_phone_number', 'wwebjs_label_id',
   'created_at', 'updated_at', 'last_session_at',
 ].join(', ');
 
