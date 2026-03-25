@@ -175,11 +175,22 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         });
       }
 
+      // Получаем parent_user_account_id для привязки к аккаунту владельца
+      const { data: consultant } = await supabase
+        .from('consultants')
+        .select('parent_user_account_id')
+        .eq('id', consultantId)
+        .single();
+
+      const ownerUserAccountId = consultant?.parent_user_account_id || null;
+
       // Создаём продажу
       const { data: sale, error: saleError } = await supabase
         .from('purchases')
         .insert({
           consultant_id: consultantId,
+          user_account_id: ownerUserAccountId,
+          source: 'crm_consultant',
           client_name: clientName,
           client_phone: clientPhone,
           amount: body.amount,
@@ -202,6 +213,24 @@ export async function consultantSalesRoutes(app: FastifyInstance) {
         amount: body.amount,
         productName: body.product_name
       }, 'Sale created by consultant');
+
+      // Sync purchase → leads.sale_amount для ROI аналитики
+      if (clientPhone && ownerUserAccountId) {
+        try {
+          const agentServiceUrl = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
+          await fetch(`${agentServiceUrl}/sync-lead-sale-amount`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientPhone,
+              userAccountId: ownerUserAccountId
+            })
+          });
+          app.log.info({ clientPhone, consultantId }, 'Synced consultant sale to lead sale_amount');
+        } catch (syncError: any) {
+          app.log.error({ error: syncError.message, clientPhone }, 'Failed to sync consultant sale to lead sale_amount');
+        }
+      }
 
       return reply.send(sale);
     } catch (error: any) {

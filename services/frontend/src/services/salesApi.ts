@@ -185,7 +185,7 @@ class SalesApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/purchases/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(updateData)
       });
       if (!res.ok) {
@@ -196,6 +196,22 @@ class SalesApiService {
       return { data, error: null };
     } catch (error) {
       return { data: null, error };
+    }
+  }
+
+  async deletePurchase(id: string): Promise<{ error: any }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/purchases/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        return { error: errBody.error || res.statusText };
+      }
+      return { error: null };
+    } catch (error) {
+      return { error };
     }
   }
 
@@ -467,7 +483,7 @@ class SalesApiService {
       }
 
       // ШАГ 3: Загружаем лиды для расчёта выручки (связь с purchases)
-      const leadsParams = new URLSearchParams({ userAccountId });
+      const leadsParams = new URLSearchParams({ userAccountId, limit: '10000' });
       if (shouldFilterByAccountId(accountId)) {
         leadsParams.set('accountId', accountId!);
       }
@@ -832,62 +848,19 @@ class SalesApiService {
   }
 
   // Обновляем sale_amount в лиде после добавления продажи
+  // Делегируем серверу — он сам считает SUM(purchases) и обновляет leads
   private async updateLeadSaleAmount(clientPhone: string, userAccountId: string) {
     try {
-      console.log('🔄 Обновляем sale_amount в лиде...');
-
-      // Считаем общую сумму всех продаж клиента через backend API
-      const saleSumParams = new URLSearchParams({ userAccountId });
-      const saleSumRes = await fetch(`${API_BASE_URL}/purchases?${saleSumParams}`, {
-        headers: getAuthHeaders()
+      const res = await fetch(`${API_BASE_URL}/sync-lead-sale-amount`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ clientPhone, userAccountId })
       });
-      if (!saleSumRes.ok) {
-        console.error('❌ Ошибка подсчета суммы продаж:', saleSumRes.statusText);
-        return;
+      if (!res.ok) {
+        console.error('Ошибка синхронизации sale_amount:', res.statusText);
       }
-      const saleSumBody = await saleSumRes.json();
-      const totalSales = (saleSumBody.purchases || []).filter((p: any) => p.client_phone === clientPhone);
-
-      const totalAmount = totalSales.reduce((sum: number, sale: any) => sum + Number(sale.amount), 0) || 0;
-      console.log('💰 Общая сумма продаж клиента:', totalAmount);
-
-      // Лиды хранят телефон в chat_id (WhatsApp) или phone (сайт)
-      const digits = clientPhone.replace(/\D/g, '');
-
-      // Находим лиды по телефону, чтобы получить их ID для обновления
-      const saleLeadsParams = new URLSearchParams({ userAccountId });
-      const saleLeadsRes = await fetch(`${API_BASE_URL}/leads?${saleLeadsParams}`, {
-        headers: getAuthHeaders()
-      });
-      if (!saleLeadsRes.ok) {
-        console.error('❌ Ошибка загрузки лидов для обновления sale_amount:', saleLeadsRes.statusText);
-        return;
-      }
-      const saleLeadsBody = await saleLeadsRes.json();
-      const chatIdCandidates = new Set([digits, `${digits}@s.whatsapp.net`, `${digits}@c.us`]);
-      const phoneCandidates = new Set([digits, `+${digits}`]);
-      const matchingLeads = (saleLeadsBody.leads || []).filter((l: any) =>
-        chatIdCandidates.has(l.chat_id) || phoneCandidates.has(l.phone)
-      );
-
-      // Обновляем sale_amount в каждом найденном лиде через PATCH
-      for (const lead of matchingLeads) {
-        const updateRes = await fetch(`${API_BASE_URL}/leads/${lead.id}?userAccountId=${userAccountId}`, {
-          method: 'PATCH',
-          headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ sale_amount: totalAmount })
-        });
-        if (!updateRes.ok) {
-          console.error('❌ Ошибка обновления sale_amount в лиде:', lead.id, updateRes.statusText);
-        }
-      }
-
-      if (matchingLeads.length > 0) {
-        console.log('✅ sale_amount обновлен в лидах:', totalAmount, 'count:', matchingLeads.length);
-      }
-      
     } catch (error) {
-      console.error('❌ Ошибка в updateLeadSaleAmount:', error);
+      console.error('Ошибка в updateLeadSaleAmount:', error);
     }
   }
 

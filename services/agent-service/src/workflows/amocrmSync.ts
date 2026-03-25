@@ -28,6 +28,7 @@ import {
   sendCrmCapiLevels,
   summarizeDirectionCapiSettings
 } from '../lib/crmCapi.js';
+import { syncPurchasesToLeadSaleAmount } from '../lib/purchaseSync.js';
 
 /**
  * Qualification field configuration from user_accounts.amocrm_qualification_fields
@@ -621,6 +622,7 @@ export async function processDealWebhook(
       amocrm_status_id: dealStatus,
       user_account_id: userAccountId,
       account_id: ourLead.account_id || null,  // UUID для мультиаккаунтности
+      source: 'amocrm',
       updated_at: new Date().toISOString()
     };
 
@@ -645,6 +647,16 @@ export async function processDealWebhook(
           .single();
 
         app.log.info({ purchaseId: newPurchase?.id, dealId }, 'Created purchase from AmoCRM deal');
+      }
+    }
+
+    // Sync purchase → leads.sale_amount для ROI аналитики
+    if (clientPhone && userAccountId) {
+      try {
+        await syncPurchasesToLeadSaleAmount(clientPhone, userAccountId);
+        app.log.info({ clientPhone, dealId }, 'Synced AmoCRM purchase to lead sale_amount');
+      } catch (syncError: any) {
+        app.log.error({ error: syncError.message, clientPhone, dealId }, 'Failed to sync AmoCRM purchase to lead sale_amount');
       }
     }
 

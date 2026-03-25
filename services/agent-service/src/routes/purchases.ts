@@ -11,6 +11,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
+import { syncPurchasesToLeadSaleAmount } from '../lib/purchaseSync.js';
 
 const log = createLogger({ module: 'purchasesRoutes' });
 
@@ -72,7 +73,7 @@ export default async function purchasesRoutes(app: FastifyInstance) {
       const body = req.body as Record<string, unknown>;
 
       // IDOR protection: force user_account_id from header
-      const data = { ...body, user_account_id: userId };
+      const data = { ...body, user_account_id: userId, source: (body as any).source || 'manual' };
 
       const { data: inserted, error } = await supabase
         .from('purchases')
@@ -126,6 +127,127 @@ export default async function purchasesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       log.error({ error }, 'Error updating purchase');
+      return reply.status(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  // ----------------------------------------
+  // DELETE /purchases/:id
+  // ----------------------------------------
+  app.delete('/purchases/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header' });
+      }
+
+      const { id } = req.params as { id: string };
+
+      // Получаем данные перед удалением (для sync)
+      const { data: purchase } = await supabase
+        .from('purchases')
+        .select('client_phone')
+        .eq('id', id)
+        .eq('user_account_id', userId)
+        .single();
+
+      if (!purchase) {
+        return reply.status(404).send({ error: 'Purchase not found or not owned by user' });
+      }
+
+      const { error } = await supabase
+        .from('purchases')
+        .delete()
+        .eq('id', id)
+        .eq('user_account_id', userId);
+
+      if (error) {
+        log.error({ error, userId, id }, 'Failed to delete purchase');
+        return reply.status(500).send({ error: 'Failed to delete purchase' });
+      }
+
+      // Пересчитываем sale_amount после удаления
+      if (purchase.client_phone) {
+        try {
+          await syncPurchasesToLeadSaleAmount(purchase.client_phone, userId);
+        } catch (syncErr) {
+          log.error({ error: syncErr }, 'Failed to sync after delete');
+        }
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      log.error({ error }, 'Error deleting purchase');
+      return reply.status(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  // ----------------------------------------
+  // POST /sync-lead-sale-amount
+  // Пересчитывает sale_amount в leads на основе purchases
+  // Вызывается из: frontend, AmoCRM webhook, CRM consultant sales
+  // ----------------------------------------
+  app.post('/sync-lead-sale-amount', async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { clientPhone, userAccountId } = req.body as {
+        clientPhone?: string;
+        userAccountId?: string;
+      };
+
+      if (!clientPhone || !userAccountId) {
+        return reply.status(400).send({ error: 'Missing clientPhone or userAccountId' });
+      }
+
+      const result = await syncPurchasesToLeadSaleAmount(clientPhone, userAccountId);
+      return result;
+    } catch (error: any) {
+      log.error({ error }, 'Error syncing lead sale amount');
+      return reply.status(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
+
+  // ----------------------------------------
+  // POST /sync-lead-sale-amount/backfill
+  // Одноразовый бэкфилл: пересчитывает leads.sale_amount для ВСЕХ purchases
+  // ----------------------------------------
+  app.post('/sync-lead-sale-amount/backfill', async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId } = req.body as { userAccountId?: string };
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'Missing userAccountId' });
+      }
+
+      // Получаем уникальные телефоны из purchases
+      const { data: purchases, error } = await supabase
+        .from('purchases')
+        .select('client_phone')
+        .eq('user_account_id', userAccountId)
+        .not('client_phone', 'is', null);
+
+      if (error) {
+        return reply.status(500).send({ error: error.message });
+      }
+
+      const uniquePhones = [...new Set((purchases || []).map(p => p.client_phone).filter(Boolean))];
+      log.info({ userAccountId, totalPhones: uniquePhones.length }, 'Starting sale_amount backfill');
+
+      let synced = 0;
+      let errors = 0;
+
+      for (const phone of uniquePhones) {
+        try {
+          const result = await syncPurchasesToLeadSaleAmount(phone, userAccountId);
+          if (result.updatedLeads > 0) synced++;
+        } catch (e) {
+          errors++;
+        }
+      }
+
+      const result = { totalPhones: uniquePhones.length, synced, errors };
+      log.info(result, 'Backfill completed');
+      return result;
+    } catch (error: any) {
+      log.error({ error }, 'Error in backfill');
       return reply.status(500).send({ error: 'internal_error', message: error.message });
     }
   });

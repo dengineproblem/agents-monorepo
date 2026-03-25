@@ -3,7 +3,7 @@ import { salesApi } from '@/services/salesApi';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ShoppingCart, Edit, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ShoppingCart, Edit, Trash2, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { exportToCSV, formatDateForExport, formatAmountForExport, formatDateTime } from '@/lib/exportUtils';
 
 const ITEMS_PER_PAGE = 20;
@@ -16,19 +16,13 @@ import {
   DialogFooter,
   DialogClose
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue
-} from '@/components/ui/select';
 
 interface Purchase {
   id: string;
   client_phone: string;
   amount: number;
   campaign_name?: string;
+  source?: string;
   created_at: string;
 }
 
@@ -37,14 +31,20 @@ interface SalesListProps {
   accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'Вручную',
+  amocrm: 'AmoCRM',
+  bitrix24: 'Bitrix24',
+  crm_consultant: 'CRM',
+};
+
 const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
   const [sales, setSales] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<Purchase>>({});
   const [modalOpen, setModalOpen] = useState(false);
-  const [campaigns, setCampaigns] = useState<{id: string, name: string}[]>([]);
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Пагинация
@@ -56,22 +56,9 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
 
   const loadSales = async () => {
     setLoading(true);
-    // Передаём accountId для фильтрации по рекламному аккаунту
     const { data, error } = await salesApi.getAllPurchases(userAccountId, accountId);
     if (!error && data) setSales(data);
     setLoading(false);
-  };
-
-  const loadCampaigns = async (userAccountId: string) => {
-    setLoadingCampaigns(true);
-    try {
-      const result = await salesApi.getExistingCampaigns(userAccountId);
-      setCampaigns(result);
-    } catch (e) {
-      setCampaigns([]);
-    } finally {
-      setLoadingCampaigns(false);
-    }
   };
 
   useEffect(() => {
@@ -84,9 +71,7 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
     setEditData({
       client_phone: sale.client_phone,
       amount: sale.amount,
-      campaign_name: sale.campaign_name || '',
     });
-    if (userAccountId) loadCampaigns(userAccountId);
     setModalOpen(true);
   };
 
@@ -104,11 +89,18 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
     loadSales();
   };
 
+  const handleDelete = async (id: string) => {
+    await salesApi.deletePurchase(id);
+    setDeleteConfirmId(null);
+    loadSales();
+  };
+
   const handleExport = () => {
     exportToCSV(sales, [
       { header: 'Дата', accessor: (s) => formatDateForExport(s.created_at) },
       { header: 'Телефон', accessor: (s) => s.client_phone },
       { header: 'Сумма', accessor: (s) => formatAmountForExport(s.amount) },
+      { header: 'Источник', accessor: (s) => SOURCE_LABELS[s.source || 'manual'] || s.source || '' },
       { header: 'Креатив', accessor: (s) => s.campaign_name || '' },
     ], 'sales');
   };
@@ -162,7 +154,7 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
                     <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Дата</th>
                     <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Телефон</th>
                     <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Сумма</th>
-                    <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">Креатив</th>
+                    <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">Источник</th>
                     <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground whitespace-nowrap">Действия</th>
                   </tr>
                 </thead>
@@ -172,113 +164,125 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
                       <td className="py-2 px-3 whitespace-nowrap text-xs">{formatDateTime(sale.created_at)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{sale.client_phone}</td>
                       <td className="py-2 px-3 text-left whitespace-nowrap font-medium text-green-600">{sale.amount} ₸</td>
-                      <td className="py-2 px-3 whitespace-nowrap hidden sm:table-cell text-xs">{sale.campaign_name || '—'}</td>
+                      <td className="py-2 px-3 whitespace-nowrap hidden sm:table-cell text-xs text-muted-foreground">
+                        {SOURCE_LABELS[sale.source || 'manual'] || sale.source || '—'}
+                      </td>
                       <td className="py-2 px-3 text-center whitespace-nowrap">
-                        <Dialog open={modalOpen && editingId === sale.id} onOpenChange={setModalOpen}>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              title="Редактировать"
-                              onClick={() => startEdit(sale)}
-                              aria-label="Редактировать"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                      <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                          <DialogTitle>Редактировать продажу</DialogTitle>
-                        </DialogHeader>
-                        <div className="space-y-3 mt-4">
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium">Телефон клиента</label>
-                            <Input
-                              value={editData.client_phone || ''}
-                              onChange={e => setEditData({ ...editData, client_phone: e.target.value })}
-                              placeholder="+7 (___) ___-__-__"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium">Сумма продажи</label>
-                            <Input
-                              type="number"
-                              value={editData.amount || ''}
-                              onChange={e => setEditData({ ...editData, amount: Number(e.target.value) })}
-                              placeholder="0"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium">Кампания</label>
-                            {loadingCampaigns ? (
-                              <div className="text-center text-xs text-muted-foreground py-2">Загрузка кампаний...</div>
-                            ) : (
-                              <Select
-                                value={campaigns.find(c => c.name === editData.campaign_name)?.id || ''}
-                                onValueChange={val => {
-                                  const selected = campaigns.find(c => c.id === val);
-                                  setEditData({ ...editData, campaign_name: selected ? selected.name : '' });
-                                }}
+                        <div className="flex items-center justify-center gap-1">
+                          {/* Редактирование */}
+                          <Dialog open={modalOpen && editingId === sale.id} onOpenChange={(open) => { if (!open) cancelEdit(); }}>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                title="Редактировать"
+                                onClick={() => startEdit(sale)}
                               >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Выберите кампанию" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {campaigns.map(c => (
-                                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                          </div>
-                        </div>
-                        <DialogFooter className="mt-6 gap-2">
-                          <DialogClose asChild>
-                            <Button variant="outline" onClick={cancelEdit}>Отмена</Button>
-                          </DialogClose>
-                          <Button onClick={() => saveEdit(sale.id)}>Сохранить</Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-md">
+                              <DialogHeader>
+                                <DialogTitle>Редактировать продажу</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-3 mt-4">
+                                <div className="space-y-1.5">
+                                  <label className="text-sm font-medium">Телефон клиента</label>
+                                  <Input
+                                    value={editData.client_phone || ''}
+                                    onChange={e => setEditData({ ...editData, client_phone: e.target.value })}
+                                    placeholder="+7 (___) ___-__-__"
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-sm font-medium">Сумма продажи</label>
+                                  <Input
+                                    type="number"
+                                    value={editData.amount || ''}
+                                    onChange={e => setEditData({ ...editData, amount: Number(e.target.value) })}
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </div>
+                              <DialogFooter className="mt-6 gap-2">
+                                <DialogClose asChild>
+                                  <Button variant="outline" onClick={cancelEdit}>Отмена</Button>
+                                </DialogClose>
+                                <Button onClick={() => saveEdit(sale.id)}>Сохранить</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
 
-          {/* Пагинация */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between p-4 border-t">
-              <div className="text-xs text-muted-foreground">
-                Показано {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sales.length)} из {sales.length}
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm px-2">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 w-8 p-0"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+                          {/* Удаление */}
+                          <Dialog open={deleteConfirmId === sale.id} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                                title="Удалить"
+                                onClick={() => setDeleteConfirmId(sale.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-sm">
+                              <DialogHeader>
+                                <DialogTitle>Удалить продажу?</DialogTitle>
+                              </DialogHeader>
+                              <p className="text-sm text-muted-foreground mt-2">
+                                {sale.client_phone} — {sale.amount} ₸
+                              </p>
+                              <DialogFooter className="mt-4 gap-2">
+                                <DialogClose asChild>
+                                  <Button variant="outline">Отмена</Button>
+                                </DialogClose>
+                                <Button variant="destructive" onClick={() => handleDelete(sale.id)}>
+                                  Удалить
+                                </Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
+
+            {/* Пагинация */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between p-4 border-t">
+                <div className="text-xs text-muted-foreground">
+                  Показано {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sales.length)} из {sales.length}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm px-2">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -286,4 +290,4 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
   );
 };
 
-export default SalesList; 
+export default SalesList;
