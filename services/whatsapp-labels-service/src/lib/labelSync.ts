@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { pino } from 'pino';
-import { initSession, destroySession, getSession } from './sessionManager.js';
+import { initSession, destroySession, getSession, checkSessionAlive } from './sessionManager.js';
 
 const log = pino({ name: 'label-sync' });
 
@@ -125,6 +125,14 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
 
   if (!session.ready) {
     log.warn({ userAccountId: account.id }, 'Session not ready (needs QR scan?) — skipping');
+    await destroySession(account.id);
+    return 0;
+  }
+
+  // Verify session is truly connected before proceeding
+  const { alive, state } = await checkSessionAlive(account.id);
+  if (!alive) {
+    log.error({ userAccountId: account.id, waState: state }, 'Session marked ready but not CONNECTED — aborting sync');
     await destroySession(account.id);
     return 0;
   }

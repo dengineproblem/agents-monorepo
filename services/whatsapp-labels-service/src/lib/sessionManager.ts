@@ -94,6 +94,14 @@ export async function initSession(userAccountId: string): Promise<SessionState> 
       reject(new Error(`Auth failure: ${msg}`));
     });
 
+    client.on('change_state', (newState: string) => {
+      log.info({ userAccountId, newState }, 'Session state changed');
+      if (newState === 'UNPAIRED' || newState === 'CONFLICT') {
+        log.warn({ userAccountId, newState }, 'Session lost connection — marking not ready');
+        state.ready = false;
+      }
+    });
+
     client.on('disconnected', (reason: string) => {
       log.warn({ userAccountId, reason }, 'Session disconnected');
       state.ready = false;
@@ -107,6 +115,31 @@ export async function initSession(userAccountId: string): Promise<SessionState> 
       reject(err);
     });
   });
+}
+
+/**
+ * Check if session is truly connected (not just marked ready in memory).
+ * Returns WAState: CONNECTED, OPENING, PAIRING, TIMEOUT, UNPAIRED, etc.
+ */
+export async function checkSessionAlive(userAccountId: string): Promise<{ alive: boolean; state: string }> {
+  const session = sessions.get(userAccountId);
+  if (!session || !session.ready) {
+    return { alive: false, state: 'NO_SESSION' };
+  }
+
+  try {
+    const waState = await session.client.getState();
+    const alive = waState === 'CONNECTED';
+    if (!alive) {
+      log.warn({ userAccountId, waState }, 'Session not connected');
+      session.ready = false;
+    }
+    return { alive, state: waState || 'UNKNOWN' };
+  } catch (err: any) {
+    log.error({ userAccountId, err: err.message }, 'Failed to get session state — likely dead');
+    session.ready = false;
+    return { alive: false, state: 'ERROR' };
+  }
 }
 
 /**

@@ -230,7 +230,8 @@ ${formatMessages(dialog.messages)}
  */
 async function getRecentDialogs(userAccountId: string): Promise<DialogToAnalyze[]> {
   const db = getSupabase();
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const hours = parseInt(process.env.QUALIFICATION_WINDOW_HOURS || '48', 10);
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await db
     .from('dialog_analysis')
