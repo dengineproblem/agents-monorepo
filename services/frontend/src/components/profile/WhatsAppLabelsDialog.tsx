@@ -19,7 +19,7 @@ interface WhatsAppLabelsDialogProps {
   onConfigured?: () => void;
 }
 
-const LABELS_SERVICE_URL = import.meta.env.VITE_WHATSAPP_LABELS_SERVICE_URL || 'http://localhost:8089';
+const LABELS_SERVICE_URL = import.meta.env.VITE_WHATSAPP_LABELS_SERVICE_URL || `${window.location.origin}/wwebjs`;
 
 type Step = 'qr' | 'select_label' | 'done';
 
