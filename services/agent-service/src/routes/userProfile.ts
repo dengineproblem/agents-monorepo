@@ -314,15 +314,11 @@ export default async function userProfileRoutes(app: FastifyInstance) {
   // ----------------------------------------
   app.put<{ Params: { id: string } }>('/user-accounts/:id/wwebjs-label', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = req.params;
-    const { labelId } = req.body as { labelId: string };
-
-    if (!labelId) {
-      return reply.status(400).send({ error: 'labelId is required' });
-    }
+    const { labelId } = req.body as { labelId: string | null };
 
     const { error } = await supabase
       .from('user_accounts')
-      .update({ wwebjs_label_id: labelId })
+      .update({ wwebjs_label_id: labelId || null })
       .eq('id', id);
 
     if (error) {

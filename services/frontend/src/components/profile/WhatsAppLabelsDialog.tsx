@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, QrCode, CheckCircle2, Tag } from 'lucide-react';
+import { Loader2, QrCode, CheckCircle2, Tag, Trash2, RefreshCw } from 'lucide-react';
 // @ts-ignore - direct browser entry to bypass Rollup resolve issues in Docker Alpine
 import QRCode from 'qrcode/lib/browser';
 
@@ -16,12 +16,14 @@ interface WhatsAppLabelsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   userAccountId: string;
+  isConfigured?: boolean;
   onConfigured?: () => void;
+  onReset?: () => void;
 }
 
 const LABELS_SERVICE_URL = import.meta.env.VITE_WHATSAPP_LABELS_SERVICE_URL || `${window.location.origin}/wwebjs`;
 
-type Step = 'qr' | 'select_label' | 'done';
+type Step = 'loading' | 'qr' | 'select_label' | 'done';
 
 interface WaLabel {
   id: string;
@@ -33,28 +35,49 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
   open,
   onOpenChange,
   userAccountId,
+  isConfigured = false,
   onConfigured,
+  onReset,
 }) => {
-  const [step, setStep] = useState<Step>('qr');
+  const [step, setStep] = useState<Step>('loading');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('initializing');
   const [labels, setLabels] = useState<WaLabel[]>([]);
   const [selectedLabelId, setSelectedLabelId] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchLabels = useCallback(async () => {
+    try {
+      const res = await fetch(`${LABELS_SERVICE_URL}/sessions/${userAccountId}/labels`);
+      const data = await res.json();
+
+      if (Array.isArray(data)) {
+        setLabels(data);
+        setStep('select_label');
+      } else {
+        setError('Не удалось получить список ярлыков');
+      }
+    } catch (err: any) {
+      setError('Не удалось получить ярлыки: ' + (err.message || ''));
+    }
+  }, [userAccountId]);
 
   const startSession = useCallback(async () => {
     try {
       setError(null);
+      setStep('loading');
       const res = await fetch(`${LABELS_SERVICE_URL}/qr/${userAccountId}`, { method: 'POST' });
       const data = await res.json();
 
       if (data.status === 'connected') {
-        // Already connected — go to label selection
         fetchLabels();
         return;
       }
+
+      setStep('qr');
 
       if (data.qrCode) {
         const dataUrl = await QRCode.toDataURL(data.qrCode, { width: 300, margin: 2 });
@@ -83,31 +106,15 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
       }, 3000);
     } catch (err: any) {
       setError(err.message || 'Не удалось инициализировать сессию');
+      setStep('qr');
     }
-  }, [userAccountId]);
-
-  const fetchLabels = useCallback(async () => {
-    try {
-      const res = await fetch(`${LABELS_SERVICE_URL}/sessions/${userAccountId}/labels`);
-      const data = await res.json();
-
-      if (Array.isArray(data)) {
-        setLabels(data);
-        setStep('select_label');
-      } else {
-        setError('Не удалось получить список ярлыков');
-      }
-    } catch (err: any) {
-      setError('Не удалось получить ярлыки: ' + (err.message || ''));
-    }
-  }, [userAccountId]);
+  }, [userAccountId, fetchLabels]);
 
   const saveLabel = async () => {
     if (!selectedLabelId) return;
 
     setSaving(true);
     try {
-      // Save wwebjs_label_id to user_accounts via agent-service API
       const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
       const res = await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
         method: 'PUT',
@@ -126,15 +133,45 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
     }
   };
 
+  const resetSession = async () => {
+    if (!confirm('Сбросить подключение wwebjs? Потребуется повторное сканирование QR-кода.')) return;
+
+    setResetting(true);
+    try {
+      await fetch(`${LABELS_SERVICE_URL}/sessions/${userAccountId}`, { method: 'DELETE' });
+
+      // Очищаем wwebjs_label_id
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labelId: null }),
+      });
+
+      onReset?.();
+      onOpenChange(false);
+    } catch (err: any) {
+      setError('Не удалось сбросить: ' + (err.message || ''));
+    } finally {
+      setResetting(false);
+    }
+  };
+
   useEffect(() => {
     if (open) {
-      setStep('qr');
       setQrDataUrl(null);
       setStatus('initializing');
       setLabels([]);
       setSelectedLabelId('');
       setError(null);
-      startSession();
+
+      if (isConfigured) {
+        // Уже настроено — сразу пробуем загрузить ярлыки (поднимет сессию)
+        startSession();
+      } else {
+        // Первый раз — показываем QR
+        startSession();
+      }
     }
 
     return () => {
@@ -143,7 +180,7 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
         pollRef.current = null;
       }
     };
-  }, [open, startSession]);
+  }, [open, startSession, isConfigured]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -151,9 +188,10 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Tag className="h-5 w-5" />
-            Подключение ярлыков WhatsApp
+            {isConfigured ? 'Настройки ярлыков WhatsApp' : 'Подключение ярлыков WhatsApp'}
           </DialogTitle>
           <DialogDescription>
+            {step === 'loading' && 'Подключение к WhatsApp...'}
             {step === 'qr' && 'Отсканируйте QR-код в WhatsApp Business для автоматической простановки ярлыков'}
             {step === 'select_label' && 'Выберите ярлык, который будет ставиться квалифицированным лидам'}
             {step === 'done' && 'Ярлыки настроены!'}
@@ -163,6 +201,13 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
         <div className="flex flex-col items-center gap-4 py-4">
           {error && (
             <p className="text-sm text-red-600 text-center">{error}</p>
+          )}
+
+          {step === 'loading' && (
+            <div className="flex flex-col items-center gap-3 py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Подключение к WhatsApp...</p>
+            </div>
           )}
 
           {step === 'qr' && (
@@ -186,8 +231,9 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
           {step === 'select_label' && (
             <div className="w-full space-y-4">
               <p className="text-sm">
-                WhatsApp подключён. Теперь выберите ярлык, который будет автоматически проставляться
-                квалифицированным лидам:
+                {isConfigured
+                  ? 'Выберите ярлык для квалифицированных лидов:'
+                  : 'WhatsApp подключён. Теперь выберите ярлык, который будет автоматически проставляться квалифицированным лидам:'}
               </p>
 
               <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
@@ -223,6 +269,28 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
                   'Сохранить'
                 )}
               </Button>
+
+              {isConfigured && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={resetSession}
+                  disabled={resetting}
+                  className="w-full"
+                >
+                  {resetting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Сброс...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Сбросить подключение
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           )}
 

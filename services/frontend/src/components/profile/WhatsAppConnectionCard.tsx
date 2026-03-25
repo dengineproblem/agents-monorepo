@@ -307,8 +307,12 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
           open={labelsDialogOpen}
           onOpenChange={setLabelsDialogOpen}
           userAccountId={userAccountId}
+          isConfigured={wwebjsLabelConfigured}
           onConfigured={() => {
             setWwebjsLabelConfigured(true);
+          }}
+          onReset={() => {
+            setWwebjsLabelConfigured(false);
           }}
         />
       )}
