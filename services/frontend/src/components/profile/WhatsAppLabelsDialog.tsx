@@ -108,8 +108,8 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
     setSaving(true);
     try {
       // Save wwebjs_label_id to user_accounts via agent-service API
-      const apiBase = import.meta.env.VITE_API_BASE_URL || '';
-      const res = await fetch(`${apiBase}/api/user-accounts/${userAccountId}/wwebjs-label`, {
+      const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+      const res = await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ labelId: selectedLabelId }),
