@@ -18,6 +18,14 @@ interface TelegramResponse {
   };
 }
 
+type MediaType = 'photo' | 'document' | 'voice' | 'audio';
+
+interface SendMediaOptions {
+  caption?: string;
+  filename?: string;
+  contentType?: string;
+}
+
 export type MessageSource = 'admin' | 'bot' | 'onboarding' | 'broadcast' | 'external';
 
 interface SendOptions {
@@ -268,6 +276,101 @@ export async function kickFromChannel(channelId: string | number, userId: string
   } catch (error: any) {
     log.error({ channelId, userId, error: error.message }, 'kickFromChannel error');
     return false;
+  }
+}
+
+// =====================================================
+// Отправка медиа в Telegram
+// =====================================================
+
+/**
+ * Отправляет фото в Telegram
+ */
+export async function sendTelegramPhoto(
+  chatId: string | number,
+  buffer: Buffer,
+  options: SendMediaOptions = {},
+  botToken?: string
+): Promise<TelegramResponse> {
+  const apiUrl = botToken ? `https://api.telegram.org/bot${botToken}` : TELEGRAM_API_URL;
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  formData.append('photo', new Blob([new Uint8Array(buffer)], { type: options.contentType || 'image/jpeg' }), options.filename || 'photo.jpg');
+  if (options.caption) {
+    formData.append('caption', options.caption);
+    formData.append('parse_mode', 'HTML');
+  }
+
+  const response = await fetch(`${apiUrl}/sendPhoto`, { method: 'POST', body: formData });
+  return response.json() as Promise<TelegramResponse>;
+}
+
+/**
+ * Отправляет документ в Telegram
+ */
+export async function sendTelegramDocument(
+  chatId: string | number,
+  buffer: Buffer,
+  options: SendMediaOptions = {},
+  botToken?: string
+): Promise<TelegramResponse> {
+  const apiUrl = botToken ? `https://api.telegram.org/bot${botToken}` : TELEGRAM_API_URL;
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  formData.append('document', new Blob([new Uint8Array(buffer)], { type: options.contentType || 'application/octet-stream' }), options.filename || 'document');
+  if (options.caption) {
+    formData.append('caption', options.caption);
+    formData.append('parse_mode', 'HTML');
+  }
+
+  const response = await fetch(`${apiUrl}/sendDocument`, { method: 'POST', body: formData });
+  return response.json() as Promise<TelegramResponse>;
+}
+
+/**
+ * Отправляет голосовое сообщение в Telegram
+ */
+export async function sendTelegramVoice(
+  chatId: string | number,
+  buffer: Buffer,
+  options: SendMediaOptions = {},
+  botToken?: string
+): Promise<TelegramResponse> {
+  const apiUrl = botToken ? `https://api.telegram.org/bot${botToken}` : TELEGRAM_API_URL;
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  formData.append('voice', new Blob([new Uint8Array(buffer)], { type: options.contentType || 'audio/ogg' }), options.filename || 'voice.ogg');
+  if (options.caption) {
+    formData.append('caption', options.caption);
+    formData.append('parse_mode', 'HTML');
+  }
+
+  const response = await fetch(`${apiUrl}/sendVoice`, { method: 'POST', body: formData });
+  return response.json() as Promise<TelegramResponse>;
+}
+
+/**
+ * Универсальная функция отправки медиа в Telegram
+ * Маршрутизирует на нужный метод в зависимости от типа
+ */
+export async function sendTelegramMedia(
+  chatId: string | number,
+  buffer: Buffer,
+  mediaType: MediaType,
+  options: SendMediaOptions = {},
+  botToken?: string
+): Promise<TelegramResponse> {
+  switch (mediaType) {
+    case 'photo':
+      return sendTelegramPhoto(chatId, buffer, options, botToken);
+    case 'voice':
+      return sendTelegramVoice(chatId, buffer, options, botToken);
+    case 'audio':
+      // Аудио файлы отправляем как документы (sendAudio в Telegram для музыкальных файлов)
+      return sendTelegramDocument(chatId, buffer, options, botToken);
+    case 'document':
+    default:
+      return sendTelegramDocument(chatId, buffer, options, botToken);
   }
 }
 

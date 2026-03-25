@@ -6,7 +6,7 @@
  * @module pages/admin/AdminChats
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -17,6 +17,10 @@ import {
   CheckCheck,
   MessageSquare,
   Mic,
+  Paperclip,
+  X,
+  FileText,
+  Music,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -45,18 +49,162 @@ interface ChatMessage {
   user_account_id: string;
   direction: 'to_user' | 'from_user';
   message: string | null;
-  media_type?: 'voice' | 'photo' | 'text';
+  media_type?: 'voice' | 'photo' | 'text' | 'document' | 'audio';
   media_url?: string;
   media_metadata?: {
     duration?: number;
     file_size?: number;
     width?: number;
     height?: number;
+    filename?: string;
+    content_type?: string;
   };
   delivered: boolean;
   read_at: string | null;
   created_at: string;
 }
+
+/** Форматирует размер файла */
+function formatFileSize(bytes?: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Рендерит содержимое одного сообщения (медиа + текст) */
+function MessageContent({ msg }: { msg: ChatMessage }) {
+  return (
+    <>
+      {/* VOICE MESSAGE */}
+      {msg.media_type === 'voice' && msg.media_url && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Mic className="h-4 w-4" />
+            <span>Голосовое сообщение</span>
+            {msg.media_metadata?.duration && (
+              <span className="text-xs opacity-70">
+                {Math.floor(msg.media_metadata.duration)}с
+              </span>
+            )}
+          </div>
+          <audio controls className="w-full max-w-xs" preload="metadata">
+            <source src={msg.media_url} type="audio/ogg" />
+            Ваш браузер не поддерживает аудио
+          </audio>
+        </div>
+      )}
+
+      {/* PHOTO MESSAGE */}
+      {msg.media_type === 'photo' && msg.media_url && (
+        <div className="space-y-2">
+          <img
+            src={msg.media_url}
+            alt="Фото"
+            className="rounded-lg max-w-sm cursor-pointer hover:opacity-90 transition-opacity"
+            onClick={() => window.open(msg.media_url, '_blank')}
+            loading="lazy"
+          />
+          {msg.message && (
+            <p className="text-sm whitespace-pre-wrap break-words mt-2">
+              {msg.message}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* DOCUMENT MESSAGE */}
+      {msg.media_type === 'document' && msg.media_url && (
+        <div className="space-y-2">
+          <a
+            href={msg.media_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 p-2 rounded bg-background/10 hover:bg-background/20 transition-colors"
+          >
+            <FileText className="h-5 w-5 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {msg.media_metadata?.filename || 'Документ'}
+              </p>
+              {msg.media_metadata?.file_size && (
+                <p className="text-xs opacity-70">{formatFileSize(msg.media_metadata.file_size)}</p>
+              )}
+            </div>
+          </a>
+          {msg.message && (
+            <p className="text-sm whitespace-pre-wrap break-words mt-1">{msg.message}</p>
+          )}
+        </div>
+      )}
+
+      {/* AUDIO MESSAGE */}
+      {msg.media_type === 'audio' && msg.media_url && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Music className="h-4 w-4" />
+            <span>{msg.media_metadata?.filename || 'Аудио'}</span>
+          </div>
+          <audio controls className="w-full max-w-xs" preload="metadata">
+            <source src={msg.media_url} />
+            Ваш браузер не поддерживает аудио
+          </audio>
+          {msg.message && (
+            <p className="text-sm whitespace-pre-wrap break-words mt-1">{msg.message}</p>
+          )}
+        </div>
+      )}
+
+      {/* TEXT MESSAGE */}
+      {(!msg.media_type || msg.media_type === 'text') && msg.message && (
+        <p className="text-sm whitespace-pre-wrap break-words">
+          {msg.message}
+        </p>
+      )}
+
+      {/* ERROR FALLBACK */}
+      {!msg.message && !msg.media_url && (
+        <p className="text-sm opacity-50 italic">[Медиа не загружено]</p>
+      )}
+    </>
+  );
+}
+
+/** Превью прикреплённого файла */
+function AttachmentPreview({
+  file,
+  preview,
+  onRemove,
+}: {
+  file: File;
+  preview: string | null;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="px-4 pt-3 flex items-center gap-3">
+      {preview ? (
+        <img src={preview} className="h-16 w-16 object-cover rounded border" alt="Preview" />
+      ) : (
+        <div className="h-16 w-16 rounded border flex items-center justify-center bg-muted">
+          {file.type.startsWith('audio/') ? (
+            <Music className="h-6 w-6 text-muted-foreground" />
+          ) : (
+            <FileText className="h-6 w-6 text-muted-foreground" />
+          )}
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{file.name}</p>
+        <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
+      </div>
+      <Button variant="ghost" size="icon" onClick={onRemove} className="shrink-0">
+        <X className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+const FILE_ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt';
 
 const AdminChats: React.FC = () => {
   const { userId } = useParams();
@@ -74,7 +222,29 @@ const AdminChats: React.FC = () => {
   const [totalUsers, setTotalUsers] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const PAGE_SIZE = 20;
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachedFile(file);
+    if (file.type.startsWith('image/')) {
+      setAttachedPreview(URL.createObjectURL(file));
+    } else {
+      setAttachedPreview(null);
+    }
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
+  const clearAttachment = () => {
+    if (attachedPreview) URL.revokeObjectURL(attachedPreview);
+    setAttachedFile(null);
+    setAttachedPreview(null);
+  };
 
   // Fetch user by ID (for direct URL navigation to users not in list)
   const fetchUserById = useCallback(async (uId: string) => {
@@ -227,8 +397,37 @@ const AdminChats: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchUsers, debouncedSearch]);
 
-  // Send message
+  // Send media message
+  const handleSendMedia = async () => {
+    if (!attachedFile || !selectedUser || sending) return;
+    setSending(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', attachedFile);
+      if (newMessage.trim()) formData.append('caption', newMessage.trim());
+
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${selectedUser.id}/media`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
+        setNewMessage('');
+        clearAttachment();
+      }
+    } catch (err) {
+      console.error('Error sending media:', err);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Send text message
   const handleSendMessage = async () => {
+    if (attachedFile) return handleSendMedia();
     if (!newMessage.trim() || !selectedUser || sending) return;
 
     setSending(true);
@@ -408,55 +607,7 @@ const AdminChats: React.FC = () => {
                           : 'mr-auto bg-muted'
                       )}
                     >
-                      {/* VOICE MESSAGE */}
-                      {msg.media_type === 'voice' && msg.media_url && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-sm">
-                            <Mic className="h-4 w-4" />
-                            <span>Голосовое сообщение</span>
-                            {msg.media_metadata?.duration && (
-                              <span className="text-xs opacity-70">
-                                {Math.floor(msg.media_metadata.duration)}с
-                              </span>
-                            )}
-                          </div>
-                          <audio controls className="w-full max-w-xs" preload="metadata">
-                            <source src={msg.media_url} type="audio/ogg" />
-                            Ваш браузер не поддерживает аудио
-                          </audio>
-                        </div>
-                      )}
-
-                      {/* PHOTO MESSAGE */}
-                      {msg.media_type === 'photo' && msg.media_url && (
-                        <div className="space-y-2">
-                          <img
-                            src={msg.media_url}
-                            alt="Фото от пользователя"
-                            className="rounded-lg max-w-sm cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(msg.media_url, '_blank')}
-                            loading="lazy"
-                          />
-                          {msg.message && (
-                            <p className="text-sm whitespace-pre-wrap break-words mt-2">
-                              {msg.message}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* TEXT MESSAGE */}
-                      {(!msg.media_type || msg.media_type === 'text') && msg.message && (
-                        <p className="text-sm whitespace-pre-wrap break-words">
-                          {msg.message}
-                        </p>
-                      )}
-
-                      {/* ERROR FALLBACK */}
-                      {!msg.message && !msg.media_url && (
-                        <p className="text-sm opacity-50 italic">[Медиа не загружено]</p>
-                      )}
-
+                      <MessageContent msg={msg} />
                       <div
                         className={cn(
                           'flex items-center gap-1 mt-1',
@@ -488,21 +639,42 @@ const AdminChats: React.FC = () => {
               )}
             </div>
 
+            {/* Attachment Preview */}
+            {attachedFile && (
+              <AttachmentPreview file={attachedFile} preview={attachedPreview} onRemove={clearAttachment} />
+            )}
+
             {/* Input */}
-            <div className="p-4 border-t flex gap-2">
+            <div className="p-4 border-t flex gap-2 items-end">
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept={FILE_ACCEPT}
+                onChange={handleFileSelect}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || !selectedUser.telegram_id}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
               <Textarea
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Написать сообщение..."
+                placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
                 disabled={sending || !selectedUser.telegram_id}
                 className="resize-none min-h-[60px]"
                 rows={2}
               />
               <Button
                 onClick={handleSendMessage}
-                disabled={!newMessage.trim() || sending || !selectedUser.telegram_id}
-                className="self-end"
+                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id}
+                className="shrink-0"
               >
                 {sending ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
@@ -540,6 +712,27 @@ const MoltbotChat: React.FC = () => {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttachedFile(file);
+    if (file.type.startsWith('image/')) {
+      setAttachedPreview(URL.createObjectURL(file));
+    } else {
+      setAttachedPreview(null);
+    }
+    e.target.value = '';
+  };
+
+  const clearAttachment = () => {
+    if (attachedPreview) URL.revokeObjectURL(attachedPreview);
+    setAttachedFile(null);
+    setAttachedPreview(null);
+  };
 
   // Fetch users with messages from support bot
   const fetchUsers = useCallback(async () => {
@@ -607,8 +800,37 @@ const MoltbotChat: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchUsers]);
 
+  // Send media message
+  const handleSendMedia = async () => {
+    if (!attachedFile || !selectedUser || sending) return;
+    setSending(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', attachedFile);
+      if (newMessage.trim()) formData.append('caption', newMessage.trim());
+
+      const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${selectedUser.id}/media`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
+        setNewMessage('');
+        clearAttachment();
+      }
+    } catch (err) {
+      console.error('Error sending support media:', err);
+    } finally {
+      setSending(false);
+    }
+  };
+
   // Send message to support bot
   const handleSendMessage = async () => {
+    if (attachedFile) return handleSendMedia();
     if (!newMessage.trim() || !selectedUser || sending) return;
 
     setSending(true);
@@ -783,55 +1005,7 @@ const MoltbotChat: React.FC = () => {
                           : 'mr-auto bg-muted'
                       )}
                     >
-                      {/* VOICE MESSAGE */}
-                      {msg.media_type === 'voice' && msg.media_url && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2 text-sm">
-                            <Mic className="h-4 w-4" />
-                            <span>Голосовое сообщение</span>
-                            {msg.media_metadata?.duration && (
-                              <span className="text-xs opacity-70">
-                                {Math.floor(msg.media_metadata.duration)}с
-                              </span>
-                            )}
-                          </div>
-                          <audio controls className="w-full max-w-xs" preload="metadata">
-                            <source src={msg.media_url} type="audio/ogg" />
-                            Ваш браузер не поддерживает аудио
-                          </audio>
-                        </div>
-                      )}
-
-                      {/* PHOTO MESSAGE */}
-                      {msg.media_type === 'photo' && msg.media_url && (
-                        <div className="space-y-2">
-                          <img
-                            src={msg.media_url}
-                            alt="Фото от пользователя"
-                            className="rounded-lg max-w-sm cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(msg.media_url, '_blank')}
-                            loading="lazy"
-                          />
-                          {msg.message && (
-                            <p className="text-sm whitespace-pre-wrap break-words mt-2">
-                              {msg.message}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* TEXT MESSAGE */}
-                      {(!msg.media_type || msg.media_type === 'text') && msg.message && (
-                        <p className="text-sm whitespace-pre-wrap break-words">
-                          {msg.message}
-                        </p>
-                      )}
-
-                      {/* ERROR FALLBACK */}
-                      {!msg.message && !msg.media_url && (
-                        <p className="text-sm opacity-50 italic">[Медиа не загружено]</p>
-                      )}
-
+                      <MessageContent msg={msg} />
                       <div
                         className={cn(
                           'flex items-center gap-1 mt-1',
@@ -863,21 +1037,42 @@ const MoltbotChat: React.FC = () => {
               )}
             </div>
 
+            {/* Attachment Preview */}
+            {attachedFile && (
+              <AttachmentPreview file={attachedFile} preview={attachedPreview} onRemove={clearAttachment} />
+            )}
+
             {/* Input */}
-            <div className="p-4 border-t flex gap-2">
+            <div className="p-4 border-t flex gap-2 items-end">
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept={FILE_ACCEPT}
+                onChange={handleFileSelect}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || !selectedUser.telegram_id}
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
               <Textarea
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Написать сообщение..."
+                placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
                 disabled={sending || !selectedUser.telegram_id}
                 className="resize-none min-h-[60px]"
                 rows={2}
               />
               <Button
                 onClick={handleSendMessage}
-                disabled={!newMessage.trim() || sending || !selectedUser.telegram_id}
-                className="self-end"
+                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id}
+                className="shrink-0"
               >
                 {sending ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />

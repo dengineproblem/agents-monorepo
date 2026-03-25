@@ -133,9 +133,19 @@ async function ensureChatMediaBucketExists(): Promise<void> {
           'audio/ogg',
           'audio/mpeg',
           'audio/mp4',
+          'audio/wav',
+          'audio/webm',
           'image/jpeg',
           'image/png',
           'image/webp',
+          'image/gif',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/zip',
+          'text/plain',
         ],
       });
 
@@ -153,18 +163,30 @@ async function ensureChatMediaBucketExists(): Promise<void> {
 /**
  * Определяет расширение файла по типу контента
  */
-function getFileExtension(contentType: string, mediaType: 'voice' | 'photo'): string {
-  if (mediaType === 'voice') {
+function getFileExtension(contentType: string, mediaType: string): string {
+  if (mediaType === 'voice' || mediaType === 'audio') {
     if (contentType.includes('ogg')) return 'ogg';
     if (contentType.includes('mpeg') || contentType.includes('mp3')) return 'mp3';
     if (contentType.includes('mp4')) return 'm4a';
-    return 'ogg'; // default для голосовых
+    if (contentType.includes('wav')) return 'wav';
+    if (contentType.includes('webm')) return 'webm';
+    return 'ogg';
   }
 
   if (mediaType === 'photo') {
     if (contentType.includes('png')) return 'png';
     if (contentType.includes('webp')) return 'webp';
-    return 'jpg'; // default для фото
+    if (contentType.includes('gif')) return 'gif';
+    return 'jpg';
+  }
+
+  if (mediaType === 'document') {
+    if (contentType.includes('pdf')) return 'pdf';
+    if (contentType.includes('msword') || contentType.includes('wordprocessingml')) return 'docx';
+    if (contentType.includes('ms-excel') || contentType.includes('spreadsheetml')) return 'xlsx';
+    if (contentType.includes('zip')) return 'zip';
+    if (contentType.includes('text/plain')) return 'txt';
+    return 'bin';
   }
 
   return 'bin';
@@ -277,6 +299,80 @@ export async function uploadTelegramMediaToStorage(
       { error: String(error), fileId, userId, mediaType },
       'Error uploading media to storage'
     );
+    return null;
+  }
+}
+
+/**
+ * Загружает buffer напрямую в Supabase Storage (для отправки из админки)
+ *
+ * @param buffer - Содержимое файла
+ * @param userId - ID пользователя (для организации папок)
+ * @param mediaType - Тип медиа (photo, voice, document, audio)
+ * @param contentType - MIME type файла
+ * @param filename - Оригинальное имя файла (опционально)
+ * @returns {url, metadata} или null при ошибке
+ */
+export async function uploadBufferToStorage(
+  buffer: Buffer,
+  userId: string,
+  mediaType: string,
+  contentType: string,
+  filename?: string
+): Promise<MediaUploadResult | null> {
+  log.info({ userId, mediaType, contentType, filename, size: buffer.length }, 'Uploading buffer to storage');
+
+  try {
+    if (!bucketInitialized) {
+      await ensureChatMediaBucketExists();
+      bucketInitialized = true;
+    }
+
+    if (buffer.length > MAX_FILE_SIZE_BYTES) {
+      log.error({ size: buffer.length }, 'File too large');
+      return null;
+    }
+
+    const extension = filename
+      ? filename.split('.').pop() || getFileExtension(contentType, mediaType)
+      : getFileExtension(contentType, mediaType);
+
+    const storagePath = `${mediaType}/${userId}/${randomUUID()}.${extension}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(storagePath, buffer, {
+        contentType,
+        cacheControl: '31536000',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      log.error({ error: uploadError.message, storagePath }, 'Failed to upload to Supabase Storage');
+      return null;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(storagePath);
+
+    if (!publicUrlData?.publicUrl) {
+      log.error({ storagePath }, 'Failed to get public URL');
+      return null;
+    }
+
+    log.info({ storagePath, url: publicUrlData.publicUrl }, 'Buffer uploaded successfully');
+
+    return {
+      url: publicUrlData.publicUrl,
+      metadata: {
+        file_size: buffer.length,
+        content_type: contentType,
+        filename: filename || undefined,
+      },
+    };
+  } catch (error) {
+    log.error({ error: String(error), userId, mediaType }, 'Error uploading buffer to storage');
     return null;
   }
 }

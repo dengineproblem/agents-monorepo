@@ -9,9 +9,12 @@
  */
 
 import { FastifyInstance } from 'fastify';
+import multipart from '@fastify/multipart';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { sendTelegramMedia } from '../lib/telegramNotifier.js';
+import { uploadBufferToStorage } from '../lib/chatMediaHandler.js';
 
 const log = createLogger({ module: 'adminMoltbot' });
 
@@ -34,7 +37,143 @@ interface MoltbotResponse {
 // Routes
 // =====================================================
 
+/** Определяет media_type по MIME type файла */
+function detectMediaType(mimeType: string): 'photo' | 'document' | 'voice' | 'audio' {
+  if (mimeType.startsWith('image/')) return 'photo';
+  if (mimeType === 'audio/ogg' || mimeType === 'audio/webm') return 'voice';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return 'document';
+}
+
 export default async function adminMoltbotRoutes(app: FastifyInstance) {
+
+  // Регистрируем multipart для загрузки файлов
+  await app.register(multipart, {
+    limits: { fileSize: 25 * 1024 * 1024 },
+  });
+
+  /**
+   * POST /admin/moltbot/chats/:userId/media
+   * Отправляет медиа-файл пользователю через support бота
+   */
+  app.post('/admin/moltbot/chats/:userId/media', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+      const adminId = req.headers['x-user-id'] as string;
+
+      const botToken = process.env.SUPPORT_BOT_TELEGRAM_TOKEN;
+      if (!botToken) {
+        return res.status(500).send({ error: 'Support bot not configured' });
+      }
+
+      // Парсим multipart
+      const parts = req.parts();
+      let fileBuffer: Buffer | null = null;
+      let fileMimeType = '';
+      let fileName = '';
+      let caption = '';
+
+      for await (const part of parts) {
+        if (part.type === 'file' && part.fieldname === 'file') {
+          fileBuffer = await part.toBuffer();
+          fileMimeType = part.mimetype;
+          fileName = part.filename;
+        } else if (part.type === 'field') {
+          if (part.fieldname === 'caption') caption = String(part.value || '');
+        }
+      }
+
+      if (!fileBuffer || !fileMimeType) {
+        return res.status(400).send({ error: 'File is required' });
+      }
+
+      // Получаем telegram_id пользователя
+      const { data: user, error: userError } = await supabase
+        .from('user_accounts')
+        .select('telegram_id, username')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !user) {
+        return res.status(404).send({ error: 'User not found' });
+      }
+      if (!user.telegram_id) {
+        return res.status(400).send({ error: 'User has no Telegram ID' });
+      }
+
+      const mediaType = detectMediaType(fileMimeType);
+
+      // Загружаем в Supabase Storage
+      const uploadResult = await uploadBufferToStorage(fileBuffer, userId, mediaType, fileMimeType, fileName);
+      if (!uploadResult) {
+        return res.status(500).send({ error: 'Failed to upload file to storage' });
+      }
+
+      // Отправляем в Telegram через support бота
+      const telegramResult = await sendTelegramMedia(user.telegram_id, fileBuffer, mediaType, {
+        caption: caption || undefined,
+        filename: fileName,
+        contentType: fileMimeType,
+      }, botToken);
+
+      if (!telegramResult.ok) {
+        log.error({ userId, description: telegramResult.description }, 'Failed to send media via support bot');
+        return res.status(500).send({ error: 'Failed to send media to Telegram' });
+      }
+
+      // Сохраняем в БД
+      const { data: chatMessage, error: insertError } = await supabase
+        .from('admin_user_chats')
+        .insert({
+          user_account_id: userId,
+          direction: 'to_user',
+          message: caption || null,
+          media_type: mediaType,
+          media_url: uploadResult.url,
+          media_metadata: {
+            ...uploadResult.metadata,
+            filename: fileName,
+            telegram_message_id: telegramResult.result?.message_id,
+          },
+          admin_id: adminId || null,
+          source: 'support',
+          delivered: true,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        log.error({ error: insertError.message }, 'Failed to save support media message');
+      }
+
+      log.info({ userId, mediaType, fileName, adminId }, 'Support media sent to user');
+
+      return res.send({
+        success: true,
+        message: chatMessage || {
+          direction: 'to_user',
+          media_type: mediaType,
+          media_url: uploadResult.url,
+          media_metadata: uploadResult.metadata,
+          message: caption || null,
+          created_at: new Date().toISOString(),
+        },
+      });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error sending support media message');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_moltbot_send_media',
+        endpoint: '/admin/moltbot/chats/:userId/media',
+        severity: 'warning',
+      }).catch(() => {});
+
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
 
   /**
    * POST /admin/moltbot/chat
