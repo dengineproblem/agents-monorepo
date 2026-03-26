@@ -1101,6 +1101,21 @@ export async function consultationsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Client phone not found in dialog_analysis' });
       }
 
+      // Валидация: телефон должен быть реальным (7–13 цифр, не Meta Lead ID)
+      const phoneDigits = clientInfo.phone.replace(/\D/g, '');
+      if (phoneDigits.length > 13 || phoneDigits.length < 7 || phoneDigits.startsWith('0')) {
+        app.log.warn({
+          dialog_analysis_id: body.dialog_analysis_id,
+          phone: clientInfo.phone,
+          phoneDigits,
+        }, '[book-from-bot] Invalid phone number (likely Meta Lead ID) — rejecting booking');
+        return reply.status(400).send({
+          error: 'Invalid phone number',
+          message: 'К сожалению, ваш номер телефона не определился автоматически. Пожалуйста, напишите ваш номер телефона, чтобы мы могли с вами связаться.',
+          code: 'INVALID_PHONE'
+        });
+      }
+
       // Find consultant by short consultant_id (first 6 chars of UUID)
       // Supabase ilike не работает с UUID типом, поэтому получаем всех активных и фильтруем
       const { data: allConsultants, error: consultantError } = await supabase
