@@ -20,6 +20,7 @@ import { getValidBitrix24Token } from '../lib/bitrix24Tokens.js';
 import {
   createLead as createBitrix24Lead,
   createDeal as createBitrix24Deal,
+  updateDeal as updateBitrix24Deal,
   createContact as createBitrix24Contact,
   findByPhone,
   normalizePhone,
@@ -236,6 +237,15 @@ export async function pushLeadToBitrix24Direct(
     // Get default stage settings
     const defaultStageSettings = await getDefaultStageSettings(userAccountId, accountId);
 
+    app.log.info({
+      sourceId: defaultStageSettings.sourceId,
+      leadStatus: defaultStageSettings.leadStatus,
+      dealCategory: defaultStageSettings.dealCategory,
+      dealStage: defaultStageSettings.dealStage,
+      userAccountId,
+      accountId
+    }, '[Bitrix24Sync] Default stage settings loaded');
+
     // 2. Normalize phone
     const phone = leadData.phone ? normalizePhone(leadData.phone) : null;
     const displayName = leadData.name || 'Лид из Facebook';
@@ -372,9 +382,18 @@ export async function pushLeadToBitrix24Direct(
 
       bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
+      // Re-apply SOURCE_ID after creation — Bitrix24 automations may clear it on ONCRMDEALADD
+      const sourceIdToSet = defaultStageSettings.sourceId || 'WEB';
+      try {
+        await updateBitrix24Deal(domain, accessToken, bitrix24DealId, { SOURCE_ID: sourceIdToSet });
+      } catch (err: any) {
+        app.log.warn({ bitrix24DealId, sourceId: sourceIdToSet, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID after deal creation');
+      }
+
       app.log.info({
         bitrix24DealId,
         bitrix24ContactId,
+        sourceId: sourceIdToSet,
         elapsedMs: Date.now() - syncStartTime
       }, '[Bitrix24Sync] Bitrix24 deal created successfully');
 
@@ -708,10 +727,19 @@ export async function syncLeadToBitrix24(
 
         bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
+        // Re-apply SOURCE_ID after creation — Bitrix24 automations may clear it on ONCRMDEALADD
+        const sourceIdToSet2 = defaultStageSettings.sourceId || 'WEB';
+        try {
+          await updateBitrix24Deal(domain, accessToken, bitrix24DealId, { SOURCE_ID: sourceIdToSet2 });
+        } catch (err: any) {
+          app.log.warn({ bitrix24DealId, sourceId: sourceIdToSet2, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID after deal creation');
+        }
+
         app.log.info({
           leadId,
           bitrix24DealId,
           bitrix24ContactId,
+          sourceId: sourceIdToSet2,
           elapsedMs: Date.now() - syncStartTime
         }, '[Bitrix24Sync] Bitrix24 deal created successfully');
 
