@@ -1176,6 +1176,36 @@ export async function consultationsRoutes(app: FastifyInstance) {
       }
       // =======================================================================
 
+      // ============ ДЕДУПЛИКАЦИЯ: Проверка на дубли консультаций ============
+      // Один клиент может иметь два dialog_analysis (Lead ID + реальный номер),
+      // бот может записать с обоих. Проверяем по имени + консультант + дата.
+      const clientName = body.client_name || clientInfo.name;
+      if (clientName) {
+        const { data: existingConsultation } = await supabase
+          .from('consultations')
+          .select('id, client_phone, date, start_time')
+          .eq('consultant_id', consultantId)
+          .eq('date', body.date)
+          .eq('client_name', clientName)
+          .in('status', ['scheduled', 'confirmed'])
+          .maybeSingle();
+
+        if (existingConsultation) {
+          app.log.warn({
+            dialog_analysis_id: body.dialog_analysis_id,
+            existing_consultation_id: existingConsultation.id,
+            client_name: clientName,
+            date: body.date,
+          }, '[book-from-bot] Duplicate consultation detected — same client + consultant + date');
+          return reply.status(409).send({
+            error: 'Duplicate consultation',
+            message: `Вы уже записаны на ${body.date} к этому специалисту! Если хотите изменить время, сначала отмените текущую запись.`,
+            code: 'DUPLICATE_CONSULTATION'
+          });
+        }
+      }
+      // =======================================================================
+
       // Calculate end time
       const [startHour, startMin] = body.start_time.split(':').map(Number);
       const endMinTotal = startHour * 60 + startMin + body.duration_minutes;
