@@ -23,35 +23,35 @@ export async function authRoutes(app: FastifyInstance) {
 
     if (consultantAccount) {
       const isBcryptConsultant = consultantAccount.password?.startsWith('$2a$') || consultantAccount.password?.startsWith('$2b$');
-      const match = isBcryptConsultant
+      const consultantMatch = isBcryptConsultant
         ? await bcrypt.compare(password, consultantAccount.password)
         : password === consultantAccount.password;
-      if (!match) {
-        return reply.status(401).send({ error: 'Invalid credentials' });
+
+      if (consultantMatch) {
+        // Получаем данные консультанта
+        const { data: consultant, error: consultantError } = await supabase
+          .from('consultants')
+          .select('id, name, is_active')
+          .eq('id', consultantAccount.consultant_id)
+          .single();
+
+        if (consultantError || !consultant || !consultant.is_active) {
+          return reply.status(403).send({ error: 'Consultant profile not found or inactive' });
+        }
+
+        return reply.send({
+          id: consultantAccount.id,
+          username: consultantAccount.username,
+          role: 'consultant',
+          is_tech_admin: false,
+          consultantId: consultant.id,
+          consultantName: consultant.name,
+        });
       }
-
-      // Получаем данные консультанта
-      const { data: consultant, error: consultantError } = await supabase
-        .from('consultants')
-        .select('id, name, is_active')
-        .eq('id', consultantAccount.consultant_id)
-        .single();
-
-      if (consultantError || !consultant || !consultant.is_active) {
-        return reply.status(403).send({ error: 'Consultant profile not found or inactive' });
-      }
-
-      return reply.send({
-        id: consultantAccount.id,
-        username: consultantAccount.username,
-        role: 'consultant',
-        is_tech_admin: false,
-        consultantId: consultant.id,
-        consultantName: consultant.name,
-      });
+      // Пароль не подошёл — пробуем user_accounts ниже
     }
 
-    // 2. Если не найдено — проверяем user_accounts (админы/менеджеры)
+    // 2. Проверяем user_accounts (админы/менеджеры)
     const { data: userAccount, error: userError } = await supabase
       .from('user_accounts')
       .select('id, username, password, role, is_tech_admin')

@@ -8,6 +8,7 @@ import { sendTelegramNotification, formatManualMatchMessage } from '../lib/teleg
 import { getLastMessageTime } from '../lib/evolutionDb.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { transcribeWhatsAppVoice, WhatsAppAudioMessage } from '../lib/whatsappVoiceHandler.js';
+import { normalizePhoneNumber } from '../lib/phoneNormalization.js';
 import axios from 'axios';
 
 // Период "тишины" в днях - если последнее сообщение было раньше, считаем текущее "первым"
@@ -356,14 +357,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
         app.log.info({ remoteJid, instance }, 'Skipping @lid non-ad message without remoteJidAlt');
         return;
       }
-      clientPhone = remoteJidAlt
-        .replace('@s.whatsapp.net', '')
-        .replace('@c.us', '')
-        .replace('@lid', '');
+      clientPhone = normalizePhoneNumber(remoteJidAlt);
     } else {
-      clientPhone = remoteJid
-        .replace('@s.whatsapp.net', '')
-        .replace('@c.us', '');
+      clientPhone = normalizePhoneNumber(remoteJid);
     }
 
     // Для текстовых сообщений пробуем умный матчинг по client_question
@@ -469,10 +465,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       return;
     }
     // Лид из рекламы: используем remoteJidAlt (настоящий номер клиента)
-    clientPhone = remoteJidAlt
-      .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
-      .replace('@c.us', '')            // Обычный контакт (старый формат)
-      .replace('@lid', '');            // На случай если remoteJidAlt тоже @lid
+    clientPhone = normalizePhoneNumber(remoteJidAlt);
 
     app.log.info({
       remoteJid,
@@ -482,10 +475,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     }, 'Using remoteJidAlt for ad lead phone number');
   } else {
     // Обычное сообщение: используем remoteJid
-    clientPhone = remoteJid
-      .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
-      .replace('@c.us', '')            // Обычный контакт (старый формат)
-      .replace('@g.us', '');           // Групповой чат
+    clientPhone = normalizePhoneNumber(remoteJid);
   }
 
   // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
@@ -1247,14 +1237,9 @@ async function handleSmartMatching(
       app.log.info({ remoteJid, instance }, 'Skipping @lid smart match without remoteJidAlt');
       return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
     }
-    clientPhone = remoteJidAlt
-      .replace('@s.whatsapp.net', '')
-      .replace('@c.us', '')
-      .replace('@lid', '');
+    clientPhone = normalizePhoneNumber(remoteJidAlt);
   } else {
-    clientPhone = remoteJid
-      .replace('@s.whatsapp.net', '')
-      .replace('@c.us', '');
+    clientPhone = normalizePhoneNumber(remoteJid);
   }
 
   // Найти whatsapp_phone_number_id
@@ -1470,9 +1455,7 @@ async function handleOperatorIntervention(
     app.log.debug({ remoteJid, instance }, 'Skipping outgoing @lid message');
     return;
   }
-  const clientPhone = remoteJid
-    .replace('@s.whatsapp.net', '')
-    .replace('@c.us', '');
+  const clientPhone = normalizePhoneNumber(remoteJid);
 
   // Находим dialog_analysis для этого чата
   const { data: lead, error: leadError } = await supabase
