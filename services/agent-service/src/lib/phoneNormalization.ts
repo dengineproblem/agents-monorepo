@@ -48,6 +48,27 @@ export function normalizePhoneNumber(phone: string | null | undefined): string {
 }
 
 /**
+ * Validate that a normalized phone number looks like a real phone number.
+ * Rejects Meta Lead IDs and other non-phone identifiers that slip through as remoteJid.
+ *
+ * E.164 max = 15 digits; real phones are 7–15 digits with a valid country code prefix.
+ * We keep the check simple: length 7–15 and must NOT start with 0.
+ *
+ * @param phone - Already normalized phone (digits only, no +)
+ * @returns true if it looks like a real phone number
+ */
+export function isValidPhoneNumber(phone: string): boolean {
+  if (!phone) return false;
+  // Must be digits only (normalizePhoneNumber guarantees this, but guard anyway)
+  if (!/^\d+$/.test(phone)) return false;
+  // E.164: 7–15 digits
+  if (phone.length < 7 || phone.length > 15) return false;
+  // Real country codes never start with 0
+  if (phone.startsWith('0')) return false;
+  return true;
+}
+
+/**
  * Check if two phone numbers match after normalization
  * 
  * @param phone1 - First phone number

@@ -8,7 +8,7 @@ import { sendTelegramNotification, formatManualMatchMessage } from '../lib/teleg
 import { getLastMessageTime } from '../lib/evolutionDb.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { transcribeWhatsAppVoice, WhatsAppAudioMessage } from '../lib/whatsappVoiceHandler.js';
-import { normalizePhoneNumber } from '../lib/phoneNormalization.js';
+import { normalizePhoneNumber, isValidPhoneNumber } from '../lib/phoneNormalization.js';
 import axios from 'axios';
 
 // Период "тишины" в днях - если последнее сообщение было раньше, считаем текущее "первым"
@@ -362,6 +362,18 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       clientPhone = normalizePhoneNumber(remoteJid);
     }
 
+    // Валидация: не обрабатываем сообщения с невалидным номером
+    if (!isValidPhoneNumber(clientPhone)) {
+      app.log.warn({
+        clientPhone,
+        remoteJid,
+        remoteJidAlt: remoteJidAlt || null,
+        instance,
+        pushName: pushName || null,
+      }, 'Invalid phone number from non-ad webhook — skipping. Raw JIDs logged for diagnostics.');
+      return;
+    }
+
     // Для текстовых сообщений пробуем умный матчинг по client_question
     // handleSmartMatching возвращает instanceData если нашёл инстанс (и возможно создал dialog_analysis)
     let instanceData: { user_account_id: string; account_id: string | null } | null = null;
@@ -476,6 +488,19 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   } else {
     // Обычное сообщение: используем remoteJid
     clientPhone = normalizePhoneNumber(remoteJid);
+  }
+
+  // Валидация: не создаём lead/dialog с невалидным номером (Meta Lead ID и т.п.)
+  if (!isValidPhoneNumber(clientPhone)) {
+    app.log.warn({
+      clientPhone,
+      remoteJid,
+      remoteJidAlt: remoteJidAlt || null,
+      instance,
+      sourceId: finalSourceId,
+      pushName: pushName || null,
+    }, 'Invalid phone number from ad webhook — skipping lead/dialog creation. Raw JIDs logged for diagnostics.');
+    return;
   }
 
   // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
@@ -1240,6 +1265,18 @@ async function handleSmartMatching(
     clientPhone = normalizePhoneNumber(remoteJidAlt);
   } else {
     clientPhone = normalizePhoneNumber(remoteJid);
+  }
+
+  // Валидация: не создаём лида с невалидным номером
+  if (!isValidPhoneNumber(clientPhone)) {
+    app.log.warn({
+      clientPhone,
+      remoteJid,
+      remoteJidAlt: remoteJidAlt || null,
+      instance,
+      pushName: pushName || null,
+    }, 'Invalid phone number in smart matching — skipping lead creation. Raw JIDs logged for diagnostics.');
+    return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
   }
 
   // Найти whatsapp_phone_number_id
