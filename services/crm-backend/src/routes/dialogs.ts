@@ -198,7 +198,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
         
         let dbQuery = supabase
           .from('dialog_analysis')
-          .select('*')
+          .select('id, instance_name, user_account_id, account_id, contact_phone, contact_name, incoming_count, outgoing_count, first_message, last_message, lead_tags, business_type, is_owner, qualification_complete, custom_fields, funnel_stage, interest_level, main_intent, objection, action, score, reasoning, assigned_to_human, assigned_consultant_id, bot_paused, bot_paused_until, last_bot_message_at, autopilot_enabled, manual_notes, uses_ads_now, ad_budget, audio_transcripts, has_sales_dept, has_unread, has_booking, is_medical, runs_ads, summary, tags, instagram_url, sent_instagram, direction_id, engagement_trend, drop_point, hidden_objections, insights_json, qualification_result, reactivation_score, reactivation_attempts, last_reactivation_at, last_client_message_at, last_consultant_message_at, last_unanswered_message, follow_up_scheduled_at, campaign_messages_count, last_campaign_message_at, funnel_stage_history, is_on_key_stage, key_stage_entered_at, key_stage_left_at, ctwa_clid, ttclid, capi_interest_sent, capi_qualified_sent, capi_scheduled_sent, capi_msg_count, analyzed_at, created_at, updated_at')
           .eq('user_account_id', userAccountId)
           .order('score', { ascending: false })
           .order('last_message', { ascending: false })
