@@ -339,7 +339,9 @@ const AdminOnboarding: React.FC = () => {
   // Fetch kanban data
   const fetchKanbanData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/kanban`);
+      const res = await fetch(`${API_BASE_URL}/onboarding/kanban`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setKanbanData(data);
@@ -360,7 +362,9 @@ const AdminOnboarding: React.FC = () => {
   const fetchUserDetail = async (userId: string) => {
     setLoadingDetail(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/onboarding/user/${userId}`);
+      const res = await fetch(`${API_BASE_URL}/onboarding/user/${userId}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setUserDetail(data);

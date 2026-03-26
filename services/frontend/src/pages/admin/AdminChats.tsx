@@ -469,7 +469,10 @@ const AdminChats: React.FC = () => {
       <TabsContent value="user-chats" className="mt-0">
         <div className="flex h-[calc(100vh-180px)] border rounded-lg overflow-hidden">
           {/* Users List */}
-          <div className="w-80 border-r flex flex-col">
+          <div className={cn(
+            'w-full md:w-80 border-r flex flex-col shrink-0',
+            selectedUser && 'hidden md:flex'
+          )}>
         <div className="p-3 border-b">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -553,12 +556,23 @@ const AdminChats: React.FC = () => {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className={cn(
+        'flex-1 flex flex-col min-w-0',
+        !selectedUser && 'hidden md:flex'
+      )}>
         {selectedUser ? (
           <>
             {/* Chat Header */}
             <div className="p-4 border-b flex items-center justify-between">
               <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="md:hidden shrink-0"
+                  onClick={() => setSelectedUser(null)}
+                >
+                  ←
+                </Button>
                 <div className="relative">
                   <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
                     <User className="h-5 w-5" />
@@ -601,7 +615,7 @@ const AdminChats: React.FC = () => {
                     <div
                       key={msg.id}
                       className={cn(
-                        'flex flex-col max-w-[70%] rounded-lg p-3',
+                        'flex flex-col max-w-[85%] md:max-w-[70%] rounded-lg p-3',
                         msg.direction === 'to_user'
                           ? 'ml-auto bg-primary text-primary-foreground'
                           : 'mr-auto bg-muted'
@@ -882,7 +896,10 @@ const MoltbotChat: React.FC = () => {
   return (
     <div className="flex h-[calc(100vh-180px)] border rounded-lg overflow-hidden">
       {/* Users List */}
-      <div className="w-80 border-r flex flex-col">
+      <div className={cn(
+        'w-full md:w-80 border-r flex flex-col shrink-0',
+        selectedUser && 'hidden md:flex'
+      )}>
         <div className="p-3 border-b">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -951,12 +968,23 @@ const MoltbotChat: React.FC = () => {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className={cn(
+        'flex-1 flex flex-col min-w-0',
+        !selectedUser && 'hidden md:flex'
+      )}>
         {selectedUser ? (
           <>
             {/* Chat Header */}
             <div className="p-4 border-b flex items-center justify-between">
               <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="md:hidden shrink-0"
+                  onClick={() => setSelectedUser(null)}
+                >
+                  ←
+                </Button>
                 <div className="relative">
                   <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
                     <User className="h-5 w-5" />
@@ -999,7 +1027,7 @@ const MoltbotChat: React.FC = () => {
                     <div
                       key={msg.id}
                       className={cn(
-                        'flex flex-col max-w-[70%] rounded-lg p-3',
+                        'flex flex-col max-w-[85%] md:max-w-[70%] rounded-lg p-3',
                         msg.direction === 'to_user'
                           ? 'ml-auto bg-primary text-primary-foreground'
                           : 'mr-auto bg-muted'

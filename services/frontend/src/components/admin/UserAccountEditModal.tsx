@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { getAuthHeaders } from '@/lib/apiAuth';
 import {
   Dialog,
   DialogContent,
@@ -119,7 +120,9 @@ export function UserAccountEditModal({
   const fetchUser = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`);
+      const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
@@ -140,9 +143,7 @@ export function UserAccountEditModal({
     try {
       const res = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(formData),
       });
 

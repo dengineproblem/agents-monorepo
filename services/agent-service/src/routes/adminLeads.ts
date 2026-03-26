@@ -161,8 +161,8 @@ export default async function adminLeadsRoutes(app: FastifyInstance) {
         // Парсим телефон из chat_id для WhatsApp лидов
         let phoneNumber = lead.phone;
         if (!phoneNumber && lead.chat_id && lead.source_type === 'whatsapp') {
-          // Формат: 79123456789@s.whatsapp.net или 79123456789@c.us
-          const match = lead.chat_id.match(/^(\d+)@/);
+          // Формат: 79123456789@s.whatsapp.net, 79123456789@c.us, или просто 79123456789
+          const match = lead.chat_id.match(/^(\d+)(@|$)/);
           if (match) {
             phoneNumber = '+' + match[1];
           }
