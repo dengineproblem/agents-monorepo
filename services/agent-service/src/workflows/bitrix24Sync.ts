@@ -382,13 +382,17 @@ export async function pushLeadToBitrix24Direct(
 
       bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
-      // Re-apply SOURCE_ID after creation — Bitrix24 automations may clear it on ONCRMDEALADD
+      // Re-apply SOURCE_ID after delay — Bitrix24 automations clear it on ONCRMDEALADD
       const sourceIdToSet = defaultStageSettings.sourceId || 'WEB';
-      try {
-        await updateBitrix24Deal(domain, accessToken, bitrix24DealId, { SOURCE_ID: sourceIdToSet });
-      } catch (err: any) {
-        app.log.warn({ bitrix24DealId, sourceId: sourceIdToSet, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID after deal creation');
-      }
+      const dealIdForUpdate = bitrix24DealId;
+      setTimeout(async () => {
+        try {
+          await updateBitrix24Deal(domain, accessToken, dealIdForUpdate, { SOURCE_ID: sourceIdToSet });
+          app.log.info({ bitrix24DealId: dealIdForUpdate, sourceId: sourceIdToSet }, '[Bitrix24Sync] SOURCE_ID re-applied after delay');
+        } catch (err: any) {
+          app.log.warn({ bitrix24DealId: dealIdForUpdate, sourceId: sourceIdToSet, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID');
+        }
+      }, 3000);
 
       app.log.info({
         bitrix24DealId,
@@ -727,13 +731,17 @@ export async function syncLeadToBitrix24(
 
         bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
-        // Re-apply SOURCE_ID after creation — Bitrix24 automations may clear it on ONCRMDEALADD
+        // Re-apply SOURCE_ID after delay — Bitrix24 automations clear it on ONCRMDEALADD
         const sourceIdToSet2 = defaultStageSettings.sourceId || 'WEB';
-        try {
-          await updateBitrix24Deal(domain, accessToken, bitrix24DealId, { SOURCE_ID: sourceIdToSet2 });
-        } catch (err: any) {
-          app.log.warn({ bitrix24DealId, sourceId: sourceIdToSet2, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID after deal creation');
-        }
+        const dealIdForUpdate2 = bitrix24DealId;
+        setTimeout(async () => {
+          try {
+            await updateBitrix24Deal(domain, accessToken, dealIdForUpdate2, { SOURCE_ID: sourceIdToSet2 });
+            app.log.info({ bitrix24DealId: dealIdForUpdate2, sourceId: sourceIdToSet2 }, '[Bitrix24Sync] SOURCE_ID re-applied after delay');
+          } catch (err: any) {
+            app.log.warn({ bitrix24DealId: dealIdForUpdate2, sourceId: sourceIdToSet2, error: err.message }, '[Bitrix24Sync] Failed to re-apply SOURCE_ID');
+          }
+        }, 3000);
 
         app.log.info({
           leadId,
