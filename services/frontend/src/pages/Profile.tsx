@@ -36,8 +36,10 @@ import {
   setBitrix24AutoCreateSetting,
   getBitrix24DefaultStage,
   setBitrix24DefaultStage,
+  getBitrix24Sources,
   type Bitrix24Status,
   type Bitrix24Pipelines,
+  type Bitrix24Source,
 } from '@/services/bitrix24Api';
 import {
   getAmoCRMAutoCreateSetting,
@@ -238,6 +240,8 @@ const Profile: React.FC = () => {
   const [defaultLeadStatus, setDefaultLeadStatus] = useState<string | null>(null);
   const [defaultDealCategory, setDefaultDealCategory] = useState<number | null>(null);
   const [defaultDealStage, setDefaultDealStage] = useState<string | null>(null);
+  const [defaultSourceId, setDefaultSourceId] = useState<string | null>(null);
+  const [bitrix24Sources, setBitrix24Sources] = useState<Bitrix24Source[]>([]);
 
   // Facebook Manual Connect Modal
   const [facebookManualModal, setFacebookManualModal] = useState(false);
@@ -1133,15 +1137,19 @@ const Profile: React.FC = () => {
       const loadPipelinesAndDefaults = async () => {
         setLoadingPipelines(true);
         try {
-          // Load pipelines (pass accountId for multi-account mode)
-          const pipelines = await getBitrix24Pipelines(user.id, accountId || undefined);
+          // Load pipelines, sources, and default stage settings in parallel
+          const [pipelines, defaults, sourcesResult] = await Promise.all([
+            getBitrix24Pipelines(user.id, accountId || undefined),
+            getBitrix24DefaultStage(user.id, accountId || undefined),
+            getBitrix24Sources(user.id, accountId || undefined).catch(() => ({ sources: [] }))
+          ]);
           setBitrix24Pipelines(pipelines);
+          setBitrix24Sources(sourcesResult.sources);
 
-          // Load default stage settings
-          const defaults = await getBitrix24DefaultStage(user.id, accountId || undefined);
           setDefaultLeadStatus(defaults.leadStatus);
           setDefaultDealCategory(defaults.dealCategory);
           setDefaultDealStage(defaults.dealStage);
+          setDefaultSourceId(defaults.sourceId);
           setDefaultStagesDirty(false); // Reset dirty flag after loading
         } catch (error) {
           console.error('Error loading pipelines:', error);
@@ -1190,6 +1198,12 @@ const Profile: React.FC = () => {
     setDefaultStagesDirty(true);
   };
 
+  // Handle source change - only update local state
+  const handleSourceIdChange = (value: string) => {
+    setDefaultSourceId(value || null);
+    setDefaultStagesDirty(true);
+  };
+
   // Handle deal pipeline (category) change - only update local state
   const handleDealCategoryChange = (categoryId: string) => {
     const newCategoryId = categoryId ? parseInt(categoryId) : null;
@@ -1208,7 +1222,7 @@ const Profile: React.FC = () => {
       const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
 
       // Build update object based on entity type
-      const updateData: { leadStatus?: string | null; dealCategory?: number | null; dealStage?: string | null } = {};
+      const updateData: { leadStatus?: string | null; dealCategory?: number | null; dealStage?: string | null; sourceId?: string | null } = {};
 
       if (bitrix24EntityType === 'lead' || bitrix24EntityType === 'both') {
         updateData.leadStatus = defaultLeadStatus;
@@ -1218,6 +1232,8 @@ const Profile: React.FC = () => {
         updateData.dealCategory = defaultDealCategory;
         updateData.dealStage = defaultDealStage;
       }
+
+      updateData.sourceId = defaultSourceId;
 
       await setBitrix24DefaultStage(user.id, updateData, accountId || undefined);
       setDefaultStagesDirty(false);
@@ -2478,6 +2494,29 @@ const Profile: React.FC = () => {
                     </>
                   )}
 
+                  {/* Источник в Bitrix24 */}
+                  {bitrix24Sources.length > 0 && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Источник</Label>
+                      <Select
+                        value={defaultSourceId || ''}
+                        onValueChange={handleSourceIdChange}
+                        disabled={loadingPipelines}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Не задан (WEB)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bitrix24Sources.map((source) => (
+                            <SelectItem key={source.statusId} value={source.statusId}>
+                              {source.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
                   {!bitrix24Pipelines && !loadingPipelines && (
                     <p className="text-xs text-muted-foreground">
                       Нажмите "Обновить" для загрузки воронок из Bitrix24
@@ -2490,7 +2529,7 @@ const Profile: React.FC = () => {
                       disabled={!defaultStagesDirty || savingDefaultStages}
                       className="w-full"
                     >
-                      {savingDefaultStages ? 'Сохранение...' : 'Сохранить настройки этапов'}
+                      {savingDefaultStages ? 'Сохранение...' : 'Сохранить настройки'}
                     </Button>
                   )}
                 </div>

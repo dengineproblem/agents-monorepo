@@ -620,6 +620,13 @@ export interface DefaultStageSetting {
   leadStatus: string | null;
   dealCategory: number | null;
   dealStage: string | null;
+  sourceId: string | null;
+}
+
+export interface Bitrix24Source {
+  statusId: string;
+  name: string;
+  sort: number;
 }
 
 /**
@@ -721,6 +728,7 @@ export async function setBitrix24DefaultStage(
     leadStatus?: string | null;
     dealCategory?: number | null;
     dealStage?: string | null;
+    sourceId?: string | null;
   },
   accountId?: string
 ): Promise<{ success: boolean }> {
@@ -733,6 +741,39 @@ export async function setBitrix24DefaultStage(
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.message || 'Failed to update default stage setting');
+  }
+
+  return response.json();
+}
+
+// ============================================================================
+// Sources API
+// ============================================================================
+
+/**
+ * Get available sources from Bitrix24 CRM
+ *
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Array of sources
+ */
+export async function getBitrix24Sources(
+  userAccountId: string,
+  accountId?: string
+): Promise<{ sources: Bitrix24Source[] }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/bitrix24/sources?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch Bitrix24 sources');
   }
 
   return response.json();

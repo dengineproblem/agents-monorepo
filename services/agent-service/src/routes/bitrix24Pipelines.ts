@@ -26,6 +26,7 @@ import {
   findByPhone,
   extractPhone,
   normalizePhone,
+  bitrix24Request,
   Bitrix24Status,
   Bitrix24DealCategory
 } from '../adapters/bitrix24.js';
@@ -1617,6 +1618,59 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
   });
 
   // ============================================================================
+  // Sources Endpoint
+  // ============================================================================
+
+  /**
+   * GET /bitrix24/sources
+   *
+   * Get list of available sources from Bitrix24 CRM
+   * Fetches crm.status.list with ENTITY_ID=SOURCE filter
+   */
+  app.get('/bitrix24/sources', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, accountId } = parsed.data;
+
+      const { accessToken, domain } = await getValidBitrix24Token(userAccountId, accountId || null);
+
+      const sources = await bitrix24Request<Bitrix24Status[]>({
+        domain,
+        accessToken,
+        method: 'crm.status.list',
+        params: {
+          filter: { ENTITY_ID: 'SOURCE' },
+          order: { SORT: 'ASC' }
+        }
+      });
+
+      const result = (sources || []).map((s: any) => ({
+        statusId: s.STATUS_ID,
+        name: s.NAME,
+        sort: parseInt(s.SORT, 10)
+      }));
+
+      return reply.send({ sources: result });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching Bitrix24 sources');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  // ============================================================================
   // Default Stage Setting Endpoints
   // ============================================================================
 
@@ -1642,7 +1696,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       // Check if multi-account mode is enabled
       const { data: userAccount } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled, bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+        .select('multi_account_enabled, bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
         .eq('id', userAccountId)
         .single();
 
@@ -1659,7 +1713,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         // Multi-account mode: get from ad_accounts
         const { data: adAccount } = await supabase
           .from('ad_accounts')
-          .select('bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+          .select('bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
           .eq('id', accountId)
           .eq('user_account_id', userAccountId)
           .single();
@@ -1675,7 +1729,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
           entityType: adAccount.bitrix24_entity_type || 'lead',
           leadStatus: adAccount.bitrix24_default_lead_status ?? null,
           dealCategory: adAccount.bitrix24_default_deal_category ?? null,
-          dealStage: adAccount.bitrix24_default_deal_stage ?? null
+          dealStage: adAccount.bitrix24_default_deal_stage ?? null,
+          sourceId: adAccount.bitrix24_default_source_id ?? null
         });
       }
 
@@ -1684,7 +1739,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         entityType: userAccount.bitrix24_entity_type || 'lead',
         leadStatus: userAccount.bitrix24_default_lead_status ?? null,
         dealCategory: userAccount.bitrix24_default_deal_category ?? null,
-        dealStage: userAccount.bitrix24_default_deal_stage ?? null
+        dealStage: userAccount.bitrix24_default_deal_stage ?? null,
+        sourceId: userAccount.bitrix24_default_source_id ?? null
       });
 
     } catch (error: any) {
@@ -1710,7 +1766,8 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         accountId: z.string().uuid().optional(),
         leadStatus: z.string().nullable().optional(),
         dealCategory: z.number().nullable().optional(),
-        dealStage: z.string().nullable().optional()
+        dealStage: z.string().nullable().optional(),
+        sourceId: z.string().nullable().optional()
       });
 
       const parsed = DefaultStageBodySchema.safeParse(request.body);
@@ -1722,7 +1779,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId, accountId, leadStatus, dealCategory, dealStage } = parsed.data;
+      const { userAccountId, accountId, leadStatus, dealCategory, dealStage, sourceId } = parsed.data;
 
       // Check if multi-account mode is enabled
       const { data: userAccount } = await supabase
@@ -1750,6 +1807,9 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       }
       if (dealStage !== undefined) {
         updateData.bitrix24_default_deal_stage = dealStage;
+      }
+      if (sourceId !== undefined) {
+        updateData.bitrix24_default_source_id = sourceId;
       }
 
       if (Object.keys(updateData).length === 0) {

@@ -119,17 +119,18 @@ async function getDefaultStageSettings(
   leadStatus: string | null;
   dealCategory: number | null;
   dealStage: string | null;
+  sourceId: string | null;
 }> {
   try {
     // Check if multi-account mode is enabled
     const { data: userAccount } = await supabase
       .from('user_accounts')
-      .select('multi_account_enabled, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+      .select('multi_account_enabled, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
       .eq('id', userAccountId)
       .single();
 
     if (!userAccount) {
-      return { leadStatus: null, dealCategory: null, dealStage: null };
+      return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
     }
 
     const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
@@ -138,19 +139,20 @@ async function getDefaultStageSettings(
       // Multi-account mode: get from ad_accounts
       const { data: adAccount } = await supabase
         .from('ad_accounts')
-        .select('bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage')
+        .select('bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
         .eq('id', accountId)
         .eq('user_account_id', userAccountId)
         .single();
 
       if (!adAccount) {
-        return { leadStatus: null, dealCategory: null, dealStage: null };
+        return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
       }
 
       return {
         leadStatus: adAccount.bitrix24_default_lead_status ?? null,
         dealCategory: adAccount.bitrix24_default_deal_category ?? null,
-        dealStage: adAccount.bitrix24_default_deal_stage ?? null
+        dealStage: adAccount.bitrix24_default_deal_stage ?? null,
+        sourceId: adAccount.bitrix24_default_source_id ?? null
       };
     }
 
@@ -158,12 +160,13 @@ async function getDefaultStageSettings(
     return {
       leadStatus: userAccount.bitrix24_default_lead_status ?? null,
       dealCategory: userAccount.bitrix24_default_deal_category ?? null,
-      dealStage: userAccount.bitrix24_default_deal_stage ?? null
+      dealStage: userAccount.bitrix24_default_deal_stage ?? null,
+      sourceId: userAccount.bitrix24_default_source_id ?? null
     };
 
   } catch (error) {
     console.error('Error getting default stage settings:', error);
-    return { leadStatus: null, dealCategory: null, dealStage: null };
+    return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
   }
 }
 
@@ -283,7 +286,7 @@ export async function pushLeadToBitrix24Direct(
         NAME,
         LAST_NAME,
         PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-        SOURCE_ID: 'WEB',
+        SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
         SOURCE_DESCRIPTION: 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
@@ -321,7 +324,7 @@ export async function pushLeadToBitrix24Direct(
           NAME,
           LAST_NAME,
           PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-          SOURCE_ID: 'WEB'
+          SOURCE_ID: defaultStageSettings.sourceId || 'WEB'
         };
 
         if (leadData.email) {
@@ -350,7 +353,7 @@ export async function pushLeadToBitrix24Direct(
       const dealFields: Partial<Bitrix24Deal> = {
         TITLE: `Сделка: ${displayName}`,
         CONTACT_ID: String(bitrix24ContactId),
-        SOURCE_ID: 'WEB',
+        SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
         SOURCE_DESCRIPTION: 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
@@ -594,7 +597,7 @@ export async function syncLeadToBitrix24(
           NAME,
           LAST_NAME,
           PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-          SOURCE_ID: 'WEB',
+          SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
           SOURCE_DESCRIPTION: 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
@@ -642,7 +645,7 @@ export async function syncLeadToBitrix24(
             NAME,
             LAST_NAME,
             PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-            SOURCE_ID: 'WEB'
+            SOURCE_ID: defaultStageSettings.sourceId || 'WEB'
           };
 
           if (lead.email) {
@@ -675,7 +678,7 @@ export async function syncLeadToBitrix24(
         const dealFields: Partial<Bitrix24Deal> = {
           TITLE: `Сделка: ${displayName}`,
           CONTACT_ID: String(bitrix24ContactId),
-          SOURCE_ID: 'WEB',
+          SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
           SOURCE_DESCRIPTION: 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
