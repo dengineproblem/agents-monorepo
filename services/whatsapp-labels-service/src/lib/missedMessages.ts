@@ -300,6 +300,26 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
           continue;
         }
 
+        // @lid чаты — CTWA Lead ID от Facebook Ads. chat ID = Facebook Lead ID, не телефон.
+        // Пытаемся получить реальный номер из контакта.
+        let resolvedPhone = contactPhone;
+        if (chat.id._serialized.includes('@lid')) {
+          try {
+            const contact = await chat.getContact();
+            const contactNumber = contact?.number || contact?.id?.user;
+            if (contactNumber && /^\d{10,15}$/.test(contactNumber)) {
+              resolvedPhone = contactNumber;
+              log.info({ lidChatId: chat.id._serialized, resolvedPhone }, 'Resolved @lid chat to phone number');
+            } else {
+              log.warn({ lidChatId: chat.id._serialized, contactNumber }, 'Cannot resolve @lid chat phone — skipping');
+              continue;
+            }
+          } catch (err: any) {
+            log.warn({ lidChatId: chat.id._serialized, err: err.message }, 'Failed to resolve @lid contact — skipping');
+            continue;
+          }
+        }
+
         // Получаем последние сообщения из wwebjs
         const wwebjsMessages = await chat.fetchMessages({ limit: 10 });
 
@@ -314,7 +334,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
         const instanceName = account.instanceNames[0];
 
         // ─── Тип 1: Полный пропуск ───
-        const hasEvo = await hasEvolutionMessages(instanceName, contactPhone);
+        const hasEvo = await hasEvolutionMessages(instanceName, resolvedPhone);
 
         if (!hasEvo) {
           // Evolution вообще не знает об этом контакте — первое сообщение не дошло
@@ -336,18 +356,18 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
 
           log.info({
             type: 'full_miss',
-            contactPhone,
+            contactPhone: resolvedPhone,
             instanceName,
             messageCount: texts.length,
             preview: combinedText.substring(0, 100),
           }, 'Recovering fully missed conversation');
 
-          const pushed = await pushToChatbot(instanceName, contactPhone, combinedText);
+          const pushed = await pushToChatbot(instanceName, resolvedPhone, combinedText);
           if (pushed) {
             recoveredCount++;
             // Обновляем атрибуцию лида (async, не блокирует recovery)
-            updateLeadAttribution(contactPhone, account.id, attribution).catch((err: any) => {
-              log.error({ contactPhone, err: err.message }, 'Failed to update lead attribution');
+            updateLeadAttribution(resolvedPhone, account.id, attribution).catch((err: any) => {
+              log.error({ contactPhone: resolvedPhone, err: err.message }, 'Failed to update lead attribution');
             });
           }
 
@@ -356,7 +376,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
         }
 
         // ─── Тип 2: Пропуск в диалоге ───
-        const lastEvo = await getLastEvoMessage(instanceName, contactPhone);
+        const lastEvo = await getLastEvoMessage(instanceName, resolvedPhone);
 
         if (!lastEvo) continue; // не должно произойти после hasEvo=true, но на всякий случай
 
@@ -371,7 +391,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
         if (missedIncoming.length === 0) continue;
 
         // Сверяем количество: сколько входящих в Evolution после lastEvoTimestamp
-        const evoIncomingAfter = await countEvoMessagesAfter(instanceName, contactPhone, lastEvoTimestamp);
+        const evoIncomingAfter = await countEvoMessagesAfter(instanceName, resolvedPhone, lastEvoTimestamp);
 
         if (evoIncomingAfter >= missedIncoming.length) {
           // Evolution получил все сообщения — бот просто не ответил по своим правилам
@@ -394,7 +414,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
 
         log.info({
           type: 'dialog_miss',
-          contactPhone,
+          contactPhone: resolvedPhone,
           instanceName,
           evoIncomingAfter,
           wwebjsIncoming: missedIncoming.length,
@@ -402,13 +422,13 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
           preview: combinedText.substring(0, 100),
         }, 'Recovering missed messages in ongoing dialog');
 
-        const pushed = await pushToChatbot(instanceName, contactPhone, combinedText);
+        const pushed = await pushToChatbot(instanceName, resolvedPhone, combinedText);
         if (pushed) {
           recoveredCount++;
           // Обновляем атрибуцию если найдены ad-метаданные (не unattributed для dialog_miss)
           if (dialogAttribution.pattern !== 'none') {
-            updateLeadAttribution(contactPhone, account.id, dialogAttribution).catch((err: any) => {
-              log.error({ contactPhone, err: err.message }, 'Failed to update lead attribution (dialog_miss)');
+            updateLeadAttribution(resolvedPhone, account.id, dialogAttribution).catch((err: any) => {
+              log.error({ contactPhone: resolvedPhone, err: err.message }, 'Failed to update lead attribution (dialog_miss)');
             });
           }
         }
