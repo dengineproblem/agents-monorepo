@@ -253,6 +253,12 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
     return 0;
   }
 
+  // Ждём синхронизации чатов после подключения — wwebjs нужно время чтобы
+  // подгрузить свежие timestamps с сервера WhatsApp
+  const SYNC_DELAY_MS = parseInt(process.env.WWEBJS_SYNC_DELAY_MS || '15000');
+  log.info({ userAccountId: account.id, syncDelayMs: SYNC_DELAY_MS }, 'Waiting for chat sync');
+  await new Promise(r => setTimeout(r, SYNC_DELAY_MS));
+
   const cutoffTimestamp = Math.floor(Date.now() / 1000) - (MAX_MESSAGE_AGE_HOURS * 3600);
   let recoveredCount = 0;
 
@@ -267,7 +273,23 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
       return true;
     });
 
-    log.info({ userAccountId: account.id, totalChats: chats.length, recentChats: recentChats.length }, 'Scanning chats');
+    // Диагностика: показать самые свежие timestamps чатов
+    const nonGroupChats = chats.filter((c: any) => !c.isGroup && c.timestamp);
+    const sortedByTimestamp = nonGroupChats
+      .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, 5);
+    const topTimestamps = sortedByTimestamp.map((c: any) => ({
+      chatId: c.id._serialized,
+      timestamp: c.timestamp,
+      date: new Date(c.timestamp * 1000).toISOString(),
+    }));
+    log.info({
+      userAccountId: account.id,
+      totalChats: chats.length,
+      recentChats: recentChats.length,
+      cutoffDate: new Date(cutoffTimestamp * 1000).toISOString(),
+      topChatTimestamps: topTimestamps,
+    }, 'Scanning chats');
 
     for (const chat of recentChats) {
       try {
