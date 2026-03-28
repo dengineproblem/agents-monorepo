@@ -64,8 +64,9 @@ async function findLead(
   contactPhone: string,
   userAccountId: string
 ): Promise<{ id: string; source_id: string | null; creative_id: string | null } | null> {
-  // Пробуем оба формата chat_id
+  // Пробуем все форматы chat_id (в БД хранится без суффикса, но на всякий случай проверяем все)
   const candidates = [
+    contactPhone,
     `${contactPhone}@s.whatsapp.net`,
     `${contactPhone}@c.us`,
   ];
