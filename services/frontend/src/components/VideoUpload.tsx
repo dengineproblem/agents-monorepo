@@ -9,6 +9,7 @@ import { salesApi } from '@/services/salesApi';
 import { facebookApi } from '@/services/facebookApi';
 import { type MultiAdSetLaunchResponse } from '@/services/manualLaunchApi';
 import { ManualLaunchDialog } from '@/components/ManualLaunchDialog';
+import { AILaunchDialog } from '@/components/AILaunchDialog';
 import CallbackRequest from './CallbackRequest';
 import { getAuthHeaders } from '@/lib/apiAuth';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -17,9 +18,8 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDirections } from '@/hooks/useDirections';
 import { getDirectionObjectiveLabel } from '@/types/direction';
@@ -215,7 +215,6 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   // Для кнопки запуска рекламы
   const [launchDialogOpen, setLaunchDialogOpen] = useState(false);
   const [launchLoading, setLaunchLoading] = useState(false);
-  const [autoStartMode, setAutoStartMode] = useState<'now' | 'midnight_almaty'>('midnight_almaty');
   
   // Для ручного запуска
   const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
@@ -1114,25 +1113,32 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   };
 
   // Запуск рекламы
-  const handleLaunchAd = async () => {
+  const handleLaunchAd = async (directionIds: string[], startMode: 'now' | 'midnight_almaty') => {
     setLaunchLoading(true);
-    
+
     try {
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
         toast.error('Пользователь не авторизован');
         return;
       }
-      
+
       const userData = JSON.parse(storedUser);
       const userId = userData.id;
-      
+
       if (!userId) {
         toast.error('ID пользователя не найден');
         return;
       }
 
-      console.log('Запускаем рекламу для всех активных направлений:', { userId, currentAdAccountId });
+      console.log('[handleLaunchAd] Starting AI launch:', {
+        userId,
+        accountId: currentAdAccountId,
+        platform,
+        startMode,
+        directionIds,
+        directionsCount: directionIds.length,
+      });
 
       // Проверяем account_id только для мультиаккаунтности (legacy режим не требует)
       if (multiAccountEnabled && !currentAdAccountId) {
@@ -1148,16 +1154,18 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
       const payload: Record<string, any> = {
         user_account_id: userId,
-        account_id: currentAdAccountId, // UUID для мультиаккаунтности
-        start_mode: autoStartMode,
+        account_id: currentAdAccountId,
+        start_mode: startMode,
+        direction_ids: directionIds,
       };
 
       if (!isTikTokAutoLaunch) {
-        payload.objective = 'whatsapp'; // Указываем objective для AI-агента
-        payload.auto_activate = false; // Создаем в паузе для проверки
+        payload.objective = 'whatsapp';
+        payload.auto_activate = false;
       }
 
-      // Отправляем запрос на AI-автозапуск (берет первые 5 креативов на направление)
+      console.log('[handleLaunchAd] Sending request:', { endpoint, payload });
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -1168,9 +1176,15 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
       const data = await response.json();
 
+      console.log('[handleLaunchAd] Response:', {
+        status: response.status,
+        success: data.success,
+        resultsCount: data.results?.length,
+        error: data.error,
+      });
+
       if (data.success && Array.isArray(data.results)) {
         const normalizedResults = normalizeAutoLaunchResults(data.results);
-        // Сохраняем результаты и показываем модалку
         setAutoLaunchResults(normalizedResults);
         setAutoLaunchResultDialogOpen(true);
         setLaunchDialogOpen(false);
@@ -1178,7 +1192,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         toast.error(data.error || 'Не удалось запустить рекламу');
       }
     } catch (error) {
-      console.error('Ошибка запуска рекламы:', error);
+      console.error('[handleLaunchAd] Error:', error);
       toast.error('Ошибка при запуске рекламы');
     } finally {
       setLaunchLoading(false);
@@ -1488,61 +1502,15 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           ) : platform === 'tiktok' ? (
             /* Действия для TikTok */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <Dialog open={launchDialogOpen} onOpenChange={setLaunchDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    disabled={isUploading || directions.length === 0}
-                    className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
-                  >
-                    <Rocket className="mr-2 h-4 w-4" />
-                    Запуск с AI
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Запуск с AI</DialogTitle>
-                    <DialogDescription>
-                      Реклама будет запущена для всех активных направлений
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="pt-2 space-y-2">
-                    <Label>Время запуска</Label>
-                    <RadioGroup
-                      value={autoStartMode}
-                      onValueChange={(v: 'now' | 'midnight_almaty') => setAutoStartMode(v)}
-                      className="grid grid-cols-1 gap-2"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="midnight_almaty" id="auto-start-midnight-tiktok" />
-                        <Label htmlFor="auto-start-midnight-tiktok" className="cursor-pointer">С полуночи (Алматы)</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="now" id="auto-start-now-tiktok" />
-                        <Label htmlFor="auto-start-now-tiktok" className="cursor-pointer">Сейчас</Label>
-                      </div>
-                    </RadioGroup>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button variant="outline" onClick={() => setLaunchDialogOpen(false)} disabled={launchLoading}>
-                      Отмена
-                    </Button>
-                    <Button onClick={handleLaunchAd} disabled={launchLoading} className="dark:bg-gray-700 dark:hover:bg-gray-800">
-                      {launchLoading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Запуск...
-                        </>
-                      ) : (
-                        <>
-                          <Rocket className="h-4 w-4 mr-2" />
-                          Запустить
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <Button
+                variant="outline"
+                disabled={isUploading || directions.length === 0}
+                onClick={() => setLaunchDialogOpen(true)}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Rocket className="mr-2 h-4 w-4" />
+                Запуск с AI
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setManualLaunchDialogOpen(true)}
@@ -1588,61 +1556,15 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           ) : (
             /* Полный набор кнопок для Instagram */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <Dialog open={launchDialogOpen} onOpenChange={setLaunchDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    disabled={isUploading || ((placement === 'instagram' || placement === 'both') && !selectedDirectionId)}
-                    className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
-                  >
-                    <Rocket className="mr-2 h-4 w-4" />
-                    Запуск с AI
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Запуск с AI</DialogTitle>
-                    <DialogDescription>
-                      Реклама будет запущена для всех активных направлений
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="pt-2 space-y-2">
-                    <Label>Время запуска</Label>
-                    <RadioGroup
-                      value={autoStartMode}
-                      onValueChange={(v: 'now' | 'midnight_almaty') => setAutoStartMode(v)}
-                      className="grid grid-cols-1 gap-2"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="midnight_almaty" id="auto-start-midnight" />
-                        <Label htmlFor="auto-start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="now" id="auto-start-now" />
-                        <Label htmlFor="auto-start-now" className="cursor-pointer">Сейчас</Label>
-                      </div>
-                    </RadioGroup>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button variant="outline" onClick={() => setLaunchDialogOpen(false)} disabled={launchLoading}>
-                      Отмена
-                    </Button>
-                    <Button onClick={handleLaunchAd} disabled={launchLoading} className="dark:bg-gray-700 dark:hover:bg-gray-800">
-                      {launchLoading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          Запуск...
-                        </>
-                      ) : (
-                        <>
-                          <Rocket className="h-4 w-4 mr-2" />
-                          Запустить
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <Button
+                variant="outline"
+                disabled={isUploading || ((placement === 'instagram' || placement === 'both') && !selectedDirectionId)}
+                onClick={() => setLaunchDialogOpen(true)}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Rocket className="mr-2 h-4 w-4" />
+                Запуск с AI
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setManualLaunchDialogOpen(true)}
@@ -2880,6 +2802,15 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             </div>
           </div>
         )}
+
+        {/* Модальное окно для AI-запуска с выбором направлений */}
+        <AILaunchDialog
+          open={launchDialogOpen}
+          onOpenChange={setLaunchDialogOpen}
+          directions={directions}
+          launchLoading={launchLoading}
+          onLaunch={handleLaunchAd}
+        />
 
         {/* Модальное окно для ручного запуска (multi-adset) */}
         {userData?.id && (

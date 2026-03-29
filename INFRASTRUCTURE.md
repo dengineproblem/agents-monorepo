@@ -87,6 +87,9 @@ auto-launch         scoring agent              creative tests
    - Файл: `services/agent-service/src/lib/campaignBuilder.ts`
    - Функция: `getCreativeMetrics()`
    - Логика: Сначала БД → fallback на FB API
+   - Endpoints: `POST /campaign-builder/auto-launch-v2` (Facebook), `POST /tiktok-campaign-builder/auto-launch` (TikTok)
+   - Параметр `direction_ids?: string[]` — опциональный фильтр по направлениям (если не передан, запуск для всех активных)
+   - UI: компонент `AILaunchDialog` (`services/frontend/src/components/AILaunchDialog.tsx`) — чекбоксы направлений + выбор времени запуска
 
 4. **creative test analyzer:**
    - Файл: `services/agent-brain/src/analyzerService.js`

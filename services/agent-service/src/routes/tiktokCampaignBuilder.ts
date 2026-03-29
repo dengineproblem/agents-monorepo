@@ -70,6 +70,10 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                 { type: 'string', format: 'uuid' },
                 { type: 'null' }
               ]
+            },
+            direction_ids: {
+              type: 'array',
+              items: { type: 'string', format: 'uuid' }
             }
           },
           anyOf: [
@@ -85,10 +89,12 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         user_account_id?: string;
         userId?: string;
         account_id?: string;
+        direction_ids?: string[];
       };
 
       const user_account_id = body.user_account_id || body.userId;
       const account_id = body.account_id;
+      const direction_ids = body.direction_ids;
 
       if (!user_account_id) {
         return reply.status(400).send({
@@ -97,7 +103,12 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         });
       }
 
-      log.info({ userAccountId: user_account_id, accountId: account_id }, 'TikTok auto-launch request');
+      log.info({
+        userAccountId: user_account_id,
+        accountId: account_id,
+        directionIds: direction_ids,
+        directionIdsCount: direction_ids?.length ?? 'all',
+      }, 'TikTok auto-launch request');
 
       try {
         // Получаем TikTok credentials
@@ -131,7 +142,14 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
           });
         }
 
-        const activeDirections = directions || [];
+        let activeDirections = directions || [];
+
+        // Фильтрация по выбранным направлениям (если переданы)
+        if (direction_ids && direction_ids.length > 0) {
+          const idSet = new Set(direction_ids);
+          activeDirections = activeDirections.filter((d: any) => idSet.has(d.id));
+          log.info({ requested: direction_ids.length, matched: activeDirections.length }, 'Filtered directions by direction_ids');
+        }
 
         if (activeDirections.length === 0) {
           log.warn({ userAccountId: user_account_id }, 'No active TikTok directions found');

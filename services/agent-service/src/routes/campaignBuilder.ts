@@ -105,6 +105,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 { type: 'null' }
               ]
             }, // UUID из ad_accounts - nullable для legacy режима
+            direction_ids: {
+              type: 'array',
+              items: { type: 'string', format: 'uuid' }
+            },
+            start_mode: { type: 'string', enum: ['now', 'midnight_almaty'] },
           },
           anyOf: [
             { required: ['user_account_id'] },
@@ -119,10 +124,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         user_account_id?: string;
         userId?: string;
         account_id?: string;
+        direction_ids?: string[];
+        start_mode?: 'now' | 'midnight_almaty';
       };
 
       const user_account_id = body.user_account_id || body.userId;
       const account_id = body.account_id;
+      const direction_ids = body.direction_ids;
 
       if (!user_account_id) {
         return reply.status(400).send({
@@ -131,7 +139,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      log.info({ userAccountId: user_account_id, accountId: account_id }, 'Auto-launch request for all directions');
+      log.info({
+        userAccountId: user_account_id,
+        accountId: account_id,
+        directionIds: direction_ids,
+        directionIdsCount: direction_ids?.length ?? 'all',
+        startMode: body.start_mode,
+      }, 'Auto-launch request');
 
       try {
         // Получаем credentials (с поддержкой мультиаккаунтности)
@@ -175,7 +189,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        const activeDirections = directions || [];
+        let activeDirections = directions || [];
+
+        // Фильтрация по выбранным направлениям (если переданы)
+        if (direction_ids && direction_ids.length > 0) {
+          const idSet = new Set(direction_ids);
+          activeDirections = activeDirections.filter((d: any) => idSet.has(d.id));
+          log.info({ requested: direction_ids.length, matched: activeDirections.length }, 'Filtered directions by direction_ids');
+        }
 
         if (activeDirections.length === 0) {
           log.warn({ userAccountId: user_account_id, accountId: account_id }, 'No active directions found');
