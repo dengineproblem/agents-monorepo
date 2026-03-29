@@ -1035,6 +1035,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     onSelectionChange={setSelectedCities}
                     disabled={isSubmitting}
                     portalContainer={dialogContentRef.current}
+                    platform={needsFacebook ? 'facebook' : 'tiktok'}
                   />
                 </div>
 
@@ -1206,6 +1207,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       onSelectionChange={setTikTokSelectedCities}
                       disabled={isSubmitting}
                       portalContainer={dialogContentRef.current}
+                      platform="tiktok"
                     />
                   </div>
 

@@ -4,13 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Search, X, Loader2, ChevronDown, Globe, MapPin, Map } from 'lucide-react';
 import { facebookApi, type GeoLocationResult } from '@/services/facebookApi';
+import { tiktokApi, type TikTokRegionResult } from '@/services/tiktokApi';
 import { GEO_GROUPS, COUNTRY_IDS, CYPRUS_GEO_IDS } from '@/constants/cities';
-
-interface SelectedGeo {
-  id: string;
-  name: string;
-  type?: string;
-}
 
 interface GeoLocationSearchProps {
   selectedCities: string[];
@@ -18,12 +13,15 @@ interface GeoLocationSearchProps {
   disabled?: boolean;
   /** ref контейнера для Popover portal */
   portalContainer?: HTMLElement | null;
+  /** Платформа: facebook показывает FB поиск, tiktok — TikTok поиск */
+  platform?: 'facebook' | 'tiktok';
 }
 
 const TYPE_LABELS: Record<string, string> = {
   country: 'Страна',
   region: 'Регион',
   city: 'Город',
+  province: 'Провинция',
   zip: 'Индекс',
   geo_market: 'Рынок',
   electoral_district: 'Округ',
@@ -32,6 +30,7 @@ const TYPE_LABELS: Record<string, string> = {
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   country: <Globe className="h-3.5 w-3.5 text-blue-500 shrink-0" />,
   region: <Map className="h-3.5 w-3.5 text-orange-500 shrink-0" />,
+  province: <Map className="h-3.5 w-3.5 text-orange-500 shrink-0" />,
   city: <MapPin className="h-3.5 w-3.5 text-green-500 shrink-0" />,
 };
 
@@ -43,37 +42,65 @@ for (const g of GEO_GROUPS) {
   }
 }
 
+/** Унифицированный результат поиска */
+interface SearchResult {
+  id: string;
+  name: string;
+  type: string;
+  subtitle: string;
+}
+
 export function GeoLocationSearch({
   selectedCities,
   onSelectionChange,
   disabled = false,
   portalContainer,
+  platform = 'facebook',
 }: GeoLocationSearchProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<GeoLocationResult[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'search' | 'groups'>('groups');
-  // Храним маппинг id → name для выбранных через поиск локаций
   const [searchedNames, setSearchedNames] = useState<Record<string, string>>({});
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const doSearch = useCallback(async (q: string) => {
     if (q.length < 2) {
-      setResults([]);
+      setSearchResults([]);
       return;
     }
     setLoading(true);
     try {
-      const data = await facebookApi.searchGeoLocations(q, ['country', 'region', 'city'], 20);
-      setResults(data);
+      if (platform === 'tiktok') {
+        const data = await tiktokApi.searchRegions(q);
+        setSearchResults(data.map((r: TikTokRegionResult) => ({
+          id: r.location_id,
+          name: r.name,
+          type: r.level,
+          subtitle: TYPE_LABELS[r.level] || r.level,
+        })));
+      } else {
+        const data = await facebookApi.searchGeoLocations(q, ['country', 'region', 'city'], 20);
+        setSearchResults(data.map((loc: GeoLocationResult) => {
+          const id = loc.type === 'country'
+            ? (loc.key.length === 2 ? loc.key : loc.country_code || loc.key)
+            : loc.key;
+          return {
+            id,
+            name: loc.name,
+            type: loc.type,
+            subtitle: [TYPE_LABELS[loc.type] || loc.type, loc.region, loc.country_name].filter(Boolean).join(' · '),
+          };
+        }));
+      }
     } catch {
-      setResults([]);
+      setSearchResults([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [platform]);
 
   const handleQueryChange = (value: string) => {
     setQuery(value);
@@ -82,7 +109,6 @@ export function GeoLocationSearch({
     debounceRef.current = setTimeout(() => doSearch(value), 350);
   };
 
-  // Cleanup debounce
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
   const toggleGeo = (id: string, name?: string) => {
@@ -90,7 +116,6 @@ export function GeoLocationSearch({
     if (selectedCities.includes(id)) {
       next = selectedCities.filter(c => c !== id);
     } else {
-      // Логика взаимоисключения KZ/CY как раньше
       if (id === 'KZ') {
         next = selectedCities.filter(c => COUNTRY_IDS.includes(c) || CYPRUS_GEO_IDS.includes(c));
         next.push(id);
@@ -107,7 +132,6 @@ export function GeoLocationSearch({
         next = [...selectedCities, id];
       }
     }
-    // Запомним name для id найденных через поиск
     if (name && !KNOWN_NAMES[id]) {
       setSearchedNames(prev => ({ ...prev, [id]: name }));
     }
@@ -133,6 +157,8 @@ export function GeoLocationSearch({
     if (isCyprusGeo && isCYSelected) return true;
     return false;
   };
+
+  const searchLabel = platform === 'tiktok' ? 'Поиск TikTok' : 'Поиск Facebook';
 
   const popoverContentProps: Record<string, unknown> = {};
   if (portalContainer) {
@@ -183,7 +209,7 @@ export function GeoLocationSearch({
               <button
                 type="button"
                 className={`text-xs px-2 py-1 rounded ${tab === 'groups' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
-                onClick={() => { setTab('groups'); setQuery(''); setResults([]); }}
+                onClick={() => { setTab('groups'); setQuery(''); setSearchResults([]); }}
               >
                 Быстрый выбор
               </button>
@@ -192,7 +218,7 @@ export function GeoLocationSearch({
                 className={`text-xs px-2 py-1 rounded ${tab === 'search' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'}`}
                 onClick={() => setTab('search')}
               >
-                Поиск Facebook
+                {searchLabel}
               </button>
             </div>
           </div>
@@ -201,7 +227,7 @@ export function GeoLocationSearch({
           <div className="overflow-y-auto p-2 flex-1 min-h-0 max-h-[300px]">
             {tab === 'search' ? (
               <>
-                {!loading && results.length === 0 && query.length >= 2 && (
+                {!loading && searchResults.length === 0 && query.length >= 2 && (
                   <div className="text-sm text-muted-foreground text-center py-4">
                     Ничего не найдено
                   </div>
@@ -211,66 +237,63 @@ export function GeoLocationSearch({
                     Введите минимум 2 символа для поиска
                   </div>
                 )}
-                {results.map((loc) => {
-                  const id = loc.type === 'country' ? (loc.key.length === 2 ? loc.key : loc.country_code || loc.key) : loc.key;
-                  const checked = selectedCities.includes(id);
-                  const subtitle = [
-                    TYPE_LABELS[loc.type] || loc.type,
-                    loc.region,
-                    loc.country_name,
-                  ].filter(Boolean).join(' · ');
-
-                  return (
-                    <div
-                      key={`${loc.type}-${loc.key}`}
-                      className={`flex items-center gap-2 cursor-pointer text-sm py-1.5 hover:bg-accent px-2 rounded select-none`}
-                      onClick={() => toggleGeo(id, loc.name)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleGeo(id, loc.name)}
-                        className="shrink-0"
-                      />
-                      {TYPE_ICONS[loc.type] || <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                      <div className="min-w-0">
-                        <div className="truncate">{loc.name}</div>
-                        <div className="text-[10px] text-muted-foreground truncate">{subtitle}</div>
-                      </div>
+                {searchResults.map((item) => (
+                  <div
+                    key={`${item.type}-${item.id}`}
+                    className="flex items-center gap-2 cursor-pointer text-sm py-1.5 hover:bg-accent px-2 rounded select-none"
+                    onClick={() => toggleGeo(item.id, item.name)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedCities.includes(item.id)}
+                      onChange={() => toggleGeo(item.id, item.name)}
+                      className="shrink-0"
+                    />
+                    {TYPE_ICONS[item.type] || <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                    <div className="min-w-0">
+                      <div className="truncate">{item.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{item.subtitle}</div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </>
             ) : (
-              /* Быстрый выбор — захардкоженные группы */
-              GEO_GROUPS.map(group => (
-                <div key={group.label} className="mb-2">
-                  <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
-                    {group.label}
+              /* Быстрый выбор — захардкоженные группы с локальным фильтром */
+              GEO_GROUPS.map(group => {
+                const searchLower = query.toLowerCase();
+                const filteredItems = query
+                  ? group.items.filter(c => c.name.toLowerCase().includes(searchLower))
+                  : group.items;
+                if (filteredItems.length === 0) return null;
+                return (
+                  <div key={group.label} className="mb-2">
+                    <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
+                      {group.label}
+                    </div>
+                    {filteredItems.map(city => {
+                      const itemDisabled = isDisabledItem(city.id);
+                      return (
+                        <div
+                          key={city.id}
+                          className={`flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none ${itemDisabled ? 'opacity-50' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!itemDisabled) toggleGeo(city.id, city.name);
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedCities.includes(city.id)}
+                            disabled={itemDisabled}
+                            onChange={() => { if (!itemDisabled) toggleGeo(city.id, city.name); }}
+                          />
+                          <span>{city.name}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {group.items.map(city => {
-                    const itemDisabled = isDisabledItem(city.id);
-                    return (
-                      <div
-                        key={city.id}
-                        className={`flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none ${itemDisabled ? 'opacity-50' : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!itemDisabled) toggleGeo(city.id, city.name);
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedCities.includes(city.id)}
-                          disabled={itemDisabled}
-                          onChange={() => { if (!itemDisabled) toggleGeo(city.id, city.name); }}
-                        />
-                        <span>{city.name}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -298,7 +321,7 @@ export function GeoLocationSearch({
           <div className="p-2 border-t">
             <Button
               className="w-full"
-              onClick={() => { setOpen(false); setQuery(''); setResults([]); setTab('groups'); }}
+              onClick={() => { setOpen(false); setQuery(''); setSearchResults([]); setTab('groups'); }}
               variant="outline"
               size="sm"
             >

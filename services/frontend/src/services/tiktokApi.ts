@@ -170,7 +170,36 @@ const hasValidTikTokConfig = () => {
 };
 
 // TikTok API сервис
+export interface TikTokRegionResult {
+  location_id: string;
+  name: string;
+  level: string; // 'country', 'province', 'city'
+  parent_id?: string;
+}
+
 export const tiktokApi = {
+  /**
+   * Поиск регионов/городов через TikTok Tool Region API
+   * Endpoint: GET tool/region/
+   */
+  searchRegions: async (query: string): Promise<TikTokRegionResult[]> => {
+    if (!query || query.length < 2) return [];
+    if (!hasValidTikTokConfig()) return [];
+
+    try {
+      const data = await fetchFromTikTokAPI('tool/region/', {
+        language: 'ru',
+      }, 'GET');
+
+      const allRegions: TikTokRegionResult[] = data?.data?.list || [];
+      const q = query.toLowerCase();
+      return allRegions.filter(r => r.name.toLowerCase().includes(q));
+    } catch (error) {
+      console.error('[searchRegions] Ошибка:', error);
+      return [];
+    }
+  },
+
   // Получить все кампании TikTok
   getCampaigns: async (): Promise<TikTokCampaign[]> => {
     console.log('Запрос на получение TikTok кампаний');
