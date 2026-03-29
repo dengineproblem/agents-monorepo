@@ -4,6 +4,8 @@ import { initSession, destroySession, getSession, checkSessionAlive } from './se
 
 const log = pino({ name: 'label-sync' });
 
+const SYNC_DELAY_MS = parseInt(process.env.WWEBJS_SYNC_DELAY_MS || '15000', 10);
+
 let supabase: SupabaseClient;
 
 function getSupabase(): SupabaseClient {
@@ -147,7 +149,7 @@ async function markPaidSynced(leadId: number): Promise<void> {
 }
 
 /**
- * Apply a WhatsApp label to a chat. Returns true on success.
+ * Apply a WhatsApp label to a chat. Returns true only if label is verified present.
  */
 async function applyLabel(session: any, lead: LeadToSync, labelId: string): Promise<boolean> {
   const chatId = toChatId(lead.chat_id);
@@ -165,7 +167,17 @@ async function applyLabel(session: any, lead: LeadToSync, labelId: string): Prom
     const newLabelIds = [...currentLabelIds, labelId];
     log.info({ leadId: lead.id, chatId, newLabelIds }, 'Calling changeLabels');
     const result = await chat.changeLabels(newLabelIds);
-    log.info({ leadId: lead.id, chatId, labelId, result: JSON.stringify(result) }, 'Label assigned');
+    log.info({ leadId: lead.id, chatId, labelId, result: JSON.stringify(result) }, 'changeLabels response');
+
+    // Verify label was actually applied by re-reading labels
+    await new Promise(r => setTimeout(r, 500));
+    const verifyLabels = await chat.getLabels();
+    const verifyLabelIds = verifyLabels.map((l: any) => l.id);
+    if (!verifyLabelIds.includes(labelId)) {
+      log.error({ leadId: lead.id, chatId, labelId, verifyLabelIds }, 'Label NOT verified after changeLabels — session may be stale');
+      return false;
+    }
+    log.info({ leadId: lead.id, chatId, labelId }, 'Label verified present');
   } else {
     log.info({ leadId: lead.id, chatId, labelId }, 'Label already present');
   }
@@ -213,6 +225,34 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
   const { alive, state } = await checkSessionAlive(account.id);
   if (!alive) {
     log.error({ userAccountId: account.id, waState: state }, 'Session marked ready but not CONNECTED — aborting sync');
+    await destroySession(account.id);
+    return 0;
+  }
+
+  // Wait for wwebjs to fully sync with WhatsApp servers.
+  // Without this delay, ready fires before the push channel is established,
+  // and changeLabels() executes locally but never reaches WhatsApp servers.
+  log.info({ userAccountId: account.id, syncDelayMs: SYNC_DELAY_MS }, 'Waiting for session sync');
+  await new Promise(r => setTimeout(r, SYNC_DELAY_MS));
+
+  // Re-verify connection after sync delay (session may have dropped during wait)
+  const postSyncCheck = await checkSessionAlive(account.id);
+  if (!postSyncCheck.alive) {
+    log.error({ userAccountId: account.id, waState: postSyncCheck.state }, 'Session lost connection during sync delay — aborting');
+    await destroySession(account.id);
+    return 0;
+  }
+
+  // Sanity check: getChats() forces a real round-trip to WhatsApp servers.
+  // If session is stale (e.g. linked device expired), this will reveal it.
+  try {
+    const chats = await session.client.getChats();
+    log.info({ userAccountId: account.id, chatCount: chats.length }, 'Session sanity check passed — chats loaded from server');
+    if (chats.length === 0) {
+      log.warn({ userAccountId: account.id }, 'getChats() returned 0 chats — session may be stale');
+    }
+  } catch (err: any) {
+    log.error({ userAccountId: account.id, err: err.message }, 'getChats() failed — session is dead, aborting');
     await destroySession(account.id);
     return 0;
   }
