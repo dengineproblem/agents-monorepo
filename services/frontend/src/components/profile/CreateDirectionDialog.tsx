@@ -663,12 +663,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       {OBJECTIVE_DESCRIPTIONS.whatsapp}
                     </Label>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="conversions" id="obj-conversions" />
-                    <Label htmlFor="obj-conversions" className="font-normal cursor-pointer">
-                      {OBJECTIVE_DESCRIPTIONS.conversions}
-                    </Label>
-                  </div>
                   {hasInstagramId && (
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="instagram_traffic" id="obj-instagram" />

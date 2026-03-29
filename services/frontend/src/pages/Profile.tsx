@@ -1591,16 +1591,6 @@ const Profile: React.FC = () => {
                 connected: isTildaConnected,
                 onClick: () => setTildaInstructionsModal(true),
               }] : []),
-              {
-                id: 'meta_capi' as const,
-                title: 'Meta CAPI',
-                connected: capiSettings.length > 0,
-                onClick: () => setCapiSettingsModalOpen(true),
-                editMode: true,
-                badge: capiSettings.length > 0
-                  ? `${capiSettings.length} ${capiSettings.length === 1 ? 'канал' : 'канала'}`
-                  : undefined,
-              },
             ]}
           />
 
