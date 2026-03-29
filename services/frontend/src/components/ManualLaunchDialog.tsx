@@ -21,6 +21,7 @@ type AdSetConfig = {
   id: string;
   creative_ids: Set<string>;
   daily_budget: number;
+  optimization_goal_override?: string;
 };
 
 let adsetIdCounter = 0;
@@ -189,6 +190,12 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
     ));
   }, []);
 
+  const updateOptGoal = useCallback((adsetId: string, goal: string) => {
+    setAdsets(prev => prev.map(a =>
+      a.id === adsetId ? { ...a, optimization_goal_override: goal === 'CONVERSATIONS' ? undefined : goal } : a
+    ));
+  }, []);
+
   const handleLaunch = async () => {
     if (!direction) {
       toast.error('Выберите направление');
@@ -224,6 +231,7 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
           creative_ids: Array.from(a.creative_ids),
           daily_budget_cents: isTikTok ? undefined : Math.round(a.daily_budget * 100),
           daily_budget: isTikTok ? a.daily_budget : undefined,
+          optimization_goal_override: !isTikTok ? a.optimization_goal_override : undefined,
         })),
       });
 
@@ -376,6 +384,29 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
                       />
                     </div>
                   </div>
+
+                  {/* Цель оптимизации (только WhatsApp + Facebook) */}
+                  {direction?.objective === 'whatsapp' && !isTikTok && (
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-muted-foreground whitespace-nowrap">
+                        Оптимизация
+                      </Label>
+                      <Select
+                        value={adset.optimization_goal_override || 'CONVERSATIONS'}
+                        onValueChange={(v) => updateOptGoal(adset.id, v)}
+                        disabled={isLaunching}
+                      >
+                        <SelectTrigger className="w-full h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CONVERSATIONS">Переписки (стандарт)</SelectItem>
+                          <SelectItem value="LEAD_GENERATION">Лиды</SelectItem>
+                          <SelectItem value="MESSAGING_PURCHASE_CONVERSION">Покупки</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   {/* Креативы */}
                   <div className="space-y-1 max-h-[140px] overflow-y-auto">

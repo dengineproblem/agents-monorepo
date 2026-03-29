@@ -27,6 +27,7 @@ type CreateAdSetInDirectionParams = {
   source: AdsetSource; // Источник создания: 'Manual' | 'Brain' | 'AI Launch' | 'Test'
   auto_activate?: boolean; // Если true - сразу активирует adset (по умолчанию true)
   start_mode?: 'now' | 'midnight_almaty'; // Когда запускать: сейчас или с ближайшей полуночи (UTC+5)
+  optimization_goal_override?: string; // Для WhatsApp: CONVERSATIONS | LEAD_GENERATION | MESSAGING_PURCHASE_CONVERSION
 };
 
 type CreateAdSetInDirectionContext = {
@@ -98,6 +99,7 @@ export async function workflowCreateAdSetInDirection(
     user_creative_ids_count: user_creative_ids.length,
     user_creative_ids,
     daily_budget_cents,
+    optimization_goal_override: params.optimization_goal_override || null,
     auto_activate,
     userAccountId: user_account_id,
     userAccountName: userAccountProfile?.username
@@ -170,11 +172,17 @@ export async function workflowCreateAdSetInDirection(
   let destination_type: string | undefined;
   
   switch (direction.objective) {
-    case 'whatsapp':
+    case 'whatsapp': {
       fb_objective = 'OUTCOME_ENGAGEMENT';
       optimization_goal = 'CONVERSATIONS';
       destination_type = 'WHATSAPP';
+      const WHATSAPP_OPT_GOALS = ['CONVERSATIONS', 'LEAD_GENERATION', 'MESSAGING_PURCHASE_CONVERSION'];
+      if (params.optimization_goal_override && WHATSAPP_OPT_GOALS.includes(params.optimization_goal_override)) {
+        optimization_goal = params.optimization_goal_override;
+        log.info({ override: params.optimization_goal_override }, 'Applied WhatsApp optimization_goal override');
+      }
       break;
+    }
     case 'conversions':
       if (direction.conversion_channel === 'lead_form') {
         // Lead form + CRM CAPI: QUALITY_LEAD оптимизирует по конвертированным лидам через CAPI
@@ -212,43 +220,53 @@ export async function workflowCreateAdSetInDirection(
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
 
-  // Для каждого креатива извлекаем fb_creative_id
-  // Новый стандарт: один креатив = один objective, используем fb_creative_id
-  // Фолбэк на старые поля для обратной совместимости
-  const creative_data = creatives.map((creative, index) => {
-    let fb_creative_id: string | null = creative.fb_creative_id;
+  // Предупреждение: override передан, но objective не whatsapp — игнорируем
+  if (params.optimization_goal_override && direction.objective !== 'whatsapp') {
+    log.warn({
+      optimization_goal_override: params.optimization_goal_override,
+      objective: direction.objective,
+    }, 'optimization_goal_override ignored: only supported for whatsapp objective');
+  }
 
-    // Фолбэк на старые поля (deprecated)
-    if (!fb_creative_id) {
-      switch (direction.objective) {
-        case 'whatsapp':
+  // Для каждого креатива извлекаем fb_creative_id
+  // Для objective-specific креативов (lead_forms, site_leads и т.д.) сначала проверяем
+  // специализированное поле, т.к. unified fb_creative_id может не содержать нужных параметров
+  const creative_data = creatives.map((creative, index) => {
+    let fb_creative_id: string | null = null;
+
+    // Сначала пробуем objective-specific поле
+    switch (direction.objective) {
+      case 'whatsapp':
+        fb_creative_id = creative.fb_creative_id_whatsapp;
+        break;
+      case 'conversions': {
+        const channel = direction.conversion_channel || 'whatsapp';
+        if (channel === 'whatsapp') {
           fb_creative_id = creative.fb_creative_id_whatsapp;
-          break;
-        case 'conversions': {
-          // Выбираем fb_creative_id по conversion_channel
-          const channel = direction.conversion_channel || 'whatsapp';
-          if (channel === 'whatsapp') {
-            fb_creative_id = creative.fb_creative_id_whatsapp;
-          } else if (channel === 'lead_form') {
-            fb_creative_id = creative.fb_creative_id_lead_forms;
-          } else if (channel === 'site') {
-            fb_creative_id = creative.fb_creative_id_site_leads;
-          }
-          break;
-        }
-        case 'instagram_traffic':
-          fb_creative_id = creative.fb_creative_id_instagram_traffic;
-          break;
-        case 'site_leads':
-          fb_creative_id = creative.fb_creative_id_site_leads;
-          break;
-        case 'lead_forms':
+        } else if (channel === 'lead_form') {
           fb_creative_id = creative.fb_creative_id_lead_forms;
-          break;
-        case 'instagram_dm':
-          fb_creative_id = creative.fb_creative_id_whatsapp;
-          break;
+        } else if (channel === 'site') {
+          fb_creative_id = creative.fb_creative_id_site_leads;
+        }
+        break;
       }
+      case 'instagram_traffic':
+        fb_creative_id = creative.fb_creative_id_instagram_traffic;
+        break;
+      case 'site_leads':
+        fb_creative_id = creative.fb_creative_id_site_leads;
+        break;
+      case 'lead_forms':
+        fb_creative_id = creative.fb_creative_id_lead_forms;
+        break;
+      case 'instagram_dm':
+        fb_creative_id = creative.fb_creative_id_whatsapp;
+        break;
+    }
+
+    // Фолбэк на unified fb_creative_id
+    if (!fb_creative_id) {
+      fb_creative_id = creative.fb_creative_id;
     }
 
     if (!fb_creative_id) {
@@ -257,9 +275,10 @@ export async function workflowCreateAdSetInDirection(
         objective: direction.objective,
         creative_id: creative.id,
         has_unified_fb_creative_id: Boolean(creative.fb_creative_id),
+        has_lead_forms_id: Boolean(creative.fb_creative_id_lead_forms),
         has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads),
       }, 'Creative does not have required fb_creative_id for objective');
-      throw new Error(`Creative ${creative.id} does not have fb_creative_id for objective ${direction.objective}`);
+      throw new Error(`Креатив "${creative.title || creative.id}" не имеет версии для "${direction.objective}". Перезагрузите креатив в направление с правильным objective.`);
     }
 
     return {
@@ -982,6 +1001,17 @@ export async function workflowCreateAdSetInDirection(
   // ===================================================
   // RETURN
   // ===================================================
+  log.info({
+    adsetId: adset_id,
+    direction_id,
+    directionName: direction.name,
+    objective: direction.objective,
+    optimization_goal,
+    optimization_goal_override: params.optimization_goal_override || null,
+    adsCount: created_ads.length,
+    autoActivate: auto_activate,
+  }, 'createAdSetInDirection workflow completed');
+
   return {
     success: true,
     direction_id: direction_id,
@@ -991,7 +1021,8 @@ export async function workflowCreateAdSetInDirection(
     ads: created_ads,
     ads_count: created_ads.length,
     objective: direction.objective,
+    optimization_goal,
     conversion_channel: direction.conversion_channel || null,
-    message: `AdSet created in direction "${direction.name}" with ${created_ads.length} ad(s) (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'})`,
+    message: `AdSet created in direction "${direction.name}" with ${created_ads.length} ad(s) (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'}, optimization: ${optimization_goal})`,
   };
 }

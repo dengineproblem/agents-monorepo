@@ -1008,7 +1008,7 @@ function extractActionValue(actions, actionType) {
 async function fetchAdsetsConfig(adAccountId, accessToken, logger) {
   const normalizedId = normalizeAdAccountId(adAccountId);
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/adsets`);
-  url.searchParams.set('fields', 'id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
+  url.searchParams.set('fields', 'id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status,optimization_goal');
   url.searchParams.set('limit', '500');
   url.searchParams.set('access_token', accessToken);
 
@@ -2342,6 +2342,14 @@ export async function runScoringAgent(userAccount, options = {}) {
       diagnostics: diagnostics.length
     });
     
+    // Создаём Map для быстрого поиска optimization_goal из adsetsConfig
+    const optGoalMap = new Map();
+    if (adsetsConfig?.data && Array.isArray(adsetsConfig.data)) {
+      for (const cfg of adsetsConfig.data) {
+        if (cfg.optimization_goal) optGoalMap.set(cfg.id, cfg.optimization_goal);
+      }
+    }
+
     // Объединяем данные с diagnostics
     const adsetsWithTrends = adsetMetrics.map(adset => {
       const diag = diagnostics.find(d => d.adset_id === adset.adset_id);
@@ -2353,6 +2361,7 @@ export async function runScoringAgent(userAccount, options = {}) {
         campaign_id: adset.campaign_id,
         campaign_name: adset.campaign_name,
         objective: adset.objective, // ✅ ДОБАВЛЕНО
+        optimization_goal: optGoalMap.get(adset.adset_id) || null, // ✅ Из FB API для Brain
         metrics_last_7d: adset.metrics_last_7d,
         trends: {
           // Короткий тренд (1 день): вчера vs позавчера
@@ -2939,7 +2948,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           daily_budget_cents: adset.daily_budget ? parseInt(adset.daily_budget) : null,
           lifetime_budget_cents: adset.lifetime_budget ? parseInt(adset.lifetime_budget) : null,
           status: adset.status,
-          effective_status: adset.effective_status
+          effective_status: adset.effective_status,
+          optimization_goal: adset.optimization_goal || null
         });
       }
     }
@@ -4277,8 +4287,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             target_cpl_source: a.target_cpl_source,
             metrics_source: a.metrics_source,
             metrics: a.metrics,
-            // Добавляем бюджет адсета
+            // Добавляем бюджет и optimization_goal адсета
             current_budget_cents: adsetBudgets.get(a.adset_id)?.daily_budget_cents || null,
+            optimization_goal: adsetBudgets.get(a.adset_id)?.optimization_goal || null,
             // Объявления внутри адсета (для анализа пожирателей)
             ads: adsByAdset.get(a.adset_id) || []
           })),

@@ -1965,7 +1965,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- Выбирай креативы с наименьшим avg_cpl (даже если он выше плана)',
   '- КРИТИЧЕСКИ ВАЖНО: выбирай ТОЛЬКО креативы с direction_id === direction_id направления!',
   '- Используй Direction.CreateAdSetWithCreatives с user_creative_ids из ready_creatives',
-  '- Параметры: direction_id (UUID направления), user_creative_ids (массив), daily_budget_cents, adset_name, auto_activate',
+  '- Параметры: direction_id (UUID направления), user_creative_ids (массив), daily_budget_cents, adset_name, auto_activate, optimization_goal_override (опционально: CONVERSATIONS | LEAD_GENERATION | MESSAGING_PURCHASE_CONVERSION)',
   '',
   '🎯 ПРИОРИТЕТ 4: LAL ДУБЛЬ (если нет креативов вообще)',
   '- Применяется ТОЛЬКО если unused_creatives = [] И ready_creatives = []',
@@ -2068,7 +2068,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+. ⚠️ ДОСТУПНО ТОЛЬКО если account.has_lal_audience === true! При audience_id="use_lal_from_settings" использует готовую LAL аудиторию из настроек пользователя.',
-  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАЕТ НОВЫЙ AD SET через Facebook API внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах direction_daily_budget_cents направления (см. жёсткий контроль). (4) Бюджет НОВОГО ad set: от 300 до min(2000, оставшийся_свободный_бюджет_направления) центов. Формула: max_budget = direction_daily_budget_cents - сумма(daily_budget всех остальных АКТИВНЫХ ad sets). НЕ ПРЕВЫШАЙ остаток бюджета! (5) За один запуск по одному направлению создавай не более 3 новых ad set\'ов. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1–3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном ad set.',
+  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?","optimization_goal_override?"} — СОЗДАЕТ НОВЫЙ AD SET через Facebook API внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. optimization_goal_override (опционально): CONVERSATIONS | LEAD_GENERATION | MESSAGING_PURCHASE_CONVERSION — зеркалируй optimization_goal лучших работающих адсетов. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах direction_daily_budget_cents направления (см. жёсткий контроль). (4) Бюджет НОВОГО ad set: от 300 до min(2000, оставшийся_свободный_бюджет_направления) центов. Формула: max_budget = direction_daily_budget_cents - сумма(daily_budget всех остальных АКТИВНЫХ ad sets). НЕ ПРЕВЫШАЙ остаток бюджета! (5) За один запуск по одному направлению создавай не более 3 новых ad set\'ов. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1–3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном ad set.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -2393,6 +2393,12 @@ function validateAndNormalizeActions(actions) {
         const nb = toInt(params.daily_budget_cents);
         if (nb === null) throw new Error('Direction.CreateAdSetWithCreatives: daily_budget_cents must be int');
         params.daily_budget_cents = Math.max(300, Math.min(10000, nb));
+      }
+      if (params.optimization_goal_override !== undefined) {
+        const VALID_OPT_GOALS = ['CONVERSATIONS', 'LEAD_GENERATION', 'MESSAGING_PURCHASE_CONVERSION'];
+        if (!VALID_OPT_GOALS.includes(params.optimization_goal_override)) {
+          throw new Error(`Direction.CreateAdSetWithCreatives: optimization_goal_override must be one of ${VALID_OPT_GOALS.join(', ')}`);
+        }
       }
     }
     if (type === 'Direction.UseExistingAdSetWithCreatives') {

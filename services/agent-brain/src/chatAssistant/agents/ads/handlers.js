@@ -851,7 +851,7 @@ export const adsHandlers = {
    * PROXY: delegates to agent-service /api/campaign-builder/manual-launch-multi
    * for full production workflow (targeting, batch API, direction_adsets, etc.)
    */
-  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, start_mode, dry_run }, { accessToken, adAccountId, userAccountId, pageId, adAccountDbId }) {
+  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, start_mode, optimization_goal_override, dry_run }, { accessToken, adAccountId, userAccountId, pageId, adAccountDbId }) {
     // Dry-run: lightweight preview without calling agent-service
     if (dry_run) {
       return adsDryRunHandlers.createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name }, { userAccountId, adAccountId, adAccountDbId });
@@ -882,7 +882,9 @@ export const adsHandlers = {
       handler: 'createAdSet',
       direction_id,
       creative_ids: resolvedCreativeIds,
+      daily_budget_cents,
       start_mode,
+      optimization_goal_override: optimization_goal_override || null,
       proxy: 'agent-service/manual-launch-multi',
     }, 'createAdSet: proxying to agent-service');
 
@@ -895,6 +897,7 @@ export const adsHandlers = {
         adsets: [{
           creative_ids: resolvedCreativeIds,
           daily_budget_cents: daily_budget_cents || undefined,
+          optimization_goal_override: optimization_goal_override || undefined,
         }],
       };
 

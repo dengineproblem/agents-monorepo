@@ -33,7 +33,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setWwebjsLabelConfigured(!!data?.wwebjs_label_id);
+        setWwebjsLabelConfigured(!!data?.wwebjs_label_id_lead || !!data?.wwebjs_label_id);
       }
     } catch { /* ignore */ }
   }, [userAccountId]);

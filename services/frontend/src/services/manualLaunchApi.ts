@@ -60,6 +60,7 @@ export interface MultiAdSetLaunchRequest {
     creative_ids: string[];
     daily_budget_cents?: number;
     daily_budget?: number;
+    optimization_goal_override?: string;
   }>;
 }
 
@@ -117,6 +118,7 @@ export async function manualLaunchMultiAdSets(
           adsets: request.adsets.map(a => ({
             creative_ids: a.creative_ids,
             daily_budget_cents: a.daily_budget_cents,
+            optimization_goal_override: a.optimization_goal_override,
           })),
         };
 

@@ -158,6 +158,17 @@ KPI И ЛИДЫ (action_breakdowns=action_type)
 - Для Site Leads, Lead Forms и Instagram: данные всегда валидны, можно анализировать сразу
 - Если objective != "whatsapp" — НЕ упоминай ожидание качества из WhatsApp и не ссылайся на QCPL
 
+🔄 OPTIMIZATION GOAL ДЛЯ WHATSAPP
+- Каждый WhatsApp адсет имеет поле \`optimization_goal\` (из FB API).
+- Возможные значения: CONVERSATIONS (стандарт), LEAD_GENERATION (лиды), MESSAGING_PURCHASE_CONVERSION (покупки).
+- В одной кампании (направлении) могут быть адсеты с РАЗНЫМИ optimization_goal.
+- При создании новых адсетов:
+  • Анализируй какой optimization_goal показывает лучший CPL/QCPL среди существующих адсетов
+  • Создавай новые адсеты с optimization_goal, который показал лучшие результаты
+  • Для этого передавай параметр \`optimization_goal_override\` в Direction.CreateAdSetWithCreatives
+  • По умолчанию (без override) используется CONVERSATIONS
+- ВАЖНО: НЕ переключай optimization_goal самостоятельно если пользователь не создал ни одного адсета с другим goal. Зеркалируй то, что уже работает.
+
 ⚠️ КРИТИЧЕСКИ ВАЖНО:
 - Смотри на поле \`objective\` в КАЖДОМ adset в данных
 - Давай аналитику ТОЛЬКО по тем типам кампаний (objectives) которые реально присутствуют в данных

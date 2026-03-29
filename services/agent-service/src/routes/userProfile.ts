@@ -28,7 +28,7 @@ const PROFILE_SELECT_COLUMNS = [
   'prompt1', 'prompt2', 'prompt3', 'prompt4',
   'skip_whatsapp_number_in_api', 'use_account_timezone', 'preferred_check_hour_local',
   'onboarding_stage', 'onboarding_tags', 'community_channel_invited',
-  'fb_connection_status', 'whatsapp_phone_number', 'wwebjs_label_id',
+  'fb_connection_status', 'whatsapp_phone_number', 'wwebjs_label_id', 'wwebjs_label_id_lead', 'wwebjs_label_id_paid',
   'created_at', 'updated_at', 'last_session_at',
 ].join(', ');
 
@@ -310,22 +310,38 @@ export default async function userProfileRoutes(app: FastifyInstance) {
 
   // ----------------------------------------
   // PUT /user-accounts/:id/wwebjs-label
-  // Save WhatsApp label ID for auto-labeling qualified leads
+  // Save WhatsApp label IDs for auto-labeling (lead + paid)
   // ----------------------------------------
   app.put<{ Params: { id: string } }>('/user-accounts/:id/wwebjs-label', async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     const { id } = req.params;
-    const { labelId } = req.body as { labelId: string | null };
+    const body = req.body as { labelId?: string | null; leadLabelId?: string | null; paidLabelId?: string | null };
+
+    const update: Record<string, string | null> = {};
+
+    if (body.leadLabelId !== undefined) {
+      // Новый формат: два отдельных ярлыка
+      update.wwebjs_label_id_lead = body.leadLabelId || null;
+      update.wwebjs_label_id = body.leadLabelId || null; // обратная совместимость
+    }
+    if (body.paidLabelId !== undefined) {
+      update.wwebjs_label_id_paid = body.paidLabelId || null;
+    }
+    if (body.labelId !== undefined && body.leadLabelId === undefined) {
+      // Старый формат: единый labelId (обратная совместимость)
+      update.wwebjs_label_id = body.labelId || null;
+      update.wwebjs_label_id_lead = body.labelId || null;
+    }
 
     const { error } = await supabase
       .from('user_accounts')
-      .update({ wwebjs_label_id: labelId || null })
+      .update(update)
       .eq('id', id);
 
     if (error) {
-      log.error({ error, userId: id }, 'Failed to save wwebjs_label_id');
+      log.error({ error, userId: id }, 'Failed to save wwebjs label config');
       return reply.status(500).send({ error: 'Failed to save label config' });
     }
 
-    return { ok: true, labelId };
+    return { ok: true, ...update };
   });
 }

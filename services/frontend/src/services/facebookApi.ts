@@ -607,7 +607,69 @@ const getCurrentPageId = async (): Promise<string | null> => {
 };
 
 // Facebook API сервис
+export interface GeoLocationResult {
+  key: string;
+  name: string;
+  type: 'country' | 'region' | 'city' | 'zip' | 'geo_market' | 'electoral_district';
+  country_code?: string;
+  country_name?: string;
+  region?: string;
+  region_id?: number;
+  supports_city?: boolean;
+  supports_region?: boolean;
+}
+
 export const facebookApi = {
+  /**
+   * Поиск гео-локаций через Facebook Targeting Search API
+   * Endpoint: GET /search?type=adgeolocation
+   */
+  searchGeoLocations: async (
+    query: string,
+    locationTypes?: string[],
+    limit: number = 25,
+  ): Promise<GeoLocationResult[]> => {
+    if (!query || query.length < 2) return [];
+    if (!await hasValidConfig()) return [];
+
+    try {
+      const params: Record<string, string> = {
+        type: 'adgeolocation',
+        q: query,
+        limit: String(limit),
+      };
+
+      if (locationTypes && locationTypes.length > 0) {
+        params.location_types = JSON.stringify(locationTypes);
+      }
+
+      const adAccountId = getCurrentInternalAdAccountId();
+
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          path: 'search',
+          params,
+          method: 'GET',
+          adAccountId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[searchGeoLocations] Ошибка:', errorData);
+        return [];
+      }
+
+      const result = await response.json();
+      return (result.data || []) as GeoLocationResult[];
+    } catch (error) {
+      console.error('[searchGeoLocations] Ошибка:', error);
+      return [];
+    }
+  },
+
   // Получить список лидформ для текущей страницы Facebook
   getLeadForms: async (): Promise<Array<{ id: string; name: string; status: string }>> => {
     if (!await hasValidConfig()) {

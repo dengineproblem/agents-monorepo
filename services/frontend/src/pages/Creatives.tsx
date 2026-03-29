@@ -23,7 +23,6 @@ import { API_BASE_URL } from "@/config/api";
 import { format } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDirections } from "@/hooks/useDirections";
 import { getDirectionObjectiveLabel, OBJECTIVE_LABELS } from "@/types/direction";
@@ -210,112 +209,47 @@ const getDirectionDotColor = (directionId: string): string => {
 type DirectionBadgeProps = {
   creative: UserCreative;
   currentDirection: any;
-  directions: any[];
-  onDirectionChange: (directionId: string | null) => Promise<void>;
 };
 
-const DirectionBadge: React.FC<DirectionBadgeProps> = ({ 
-  creative, 
-  currentDirection, 
-  directions,
-  onDirectionChange 
+const DirectionBadge: React.FC<DirectionBadgeProps> = ({
+  creative,
+  currentDirection,
 }) => {
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-
-  const handleDirectionSelect = async (directionId: string | null) => {
-    setOpen(false);
-    await onDirectionChange(directionId);
-  };
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <div onClick={(e) => e.stopPropagation()}>
-          {currentDirection ? (
-            <>
-              {/* Мобильная версия: цветной кружок */}
-              <div
-                className="sm:hidden w-3 h-3 rounded-full cursor-pointer hover:opacity-80 transition-opacity"
-                style={{ backgroundColor: getDirectionDotColor(currentDirection.id) }}
-                title={currentDirection.name}
-              />
-              {/* Десктопная версия: полное название */}
-              <Badge
-                className={`hidden sm:inline-flex ${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity max-w-[120px] truncate`}
-                title={currentDirection.name}
-              >
-                {currentDirection.name}
-              </Badge>
-            </>
-          ) : (
-            <>
-              {/* Мобильная версия: серый кружок */}
-              <div
-                className="sm:hidden w-3 h-3 rounded-full border border-dashed border-gray-400 cursor-pointer hover:bg-muted/50 transition-colors"
-                title="Без направления"
-              />
-              {/* Десктопная версия: полное название */}
-              <Badge
-                variant="outline"
-                className="hidden sm:inline-flex text-xs px-2 py-0.5 text-muted-foreground border-dashed cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap"
-              >
-                Без направления
-              </Badge>
-            </>
-          )}
-        </div>
-      </PopoverTrigger>
-      <PopoverContent 
-        className="w-64 p-2" 
-        align="start"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="space-y-1">
-          <div className="text-xs font-medium text-muted-foreground px-2 py-1">
-            Выберите направление
-          </div>
-          <div className="space-y-0.5 max-h-48 overflow-y-auto">
-            <button
-              onClick={() => handleDirectionSelect(null)}
-              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted transition-colors"
-            >
-              <span className="text-muted-foreground">Без направления</span>
-            </button>
-            {directions.map((dir) => (
-              <button
-                key={dir.id}
-                onClick={() => handleDirectionSelect(dir.id)}
-                className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted transition-colors flex items-center gap-2"
-              >
-                <div
-                  className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: getDirectionDotColor(dir.id) }}
-                />
-                <span className="flex-1 truncate">{dir.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {getDirectionObjectiveLabel(dir)}
-                </span>
-              </button>
-            ))}
-          </div>
-          {directions.length === 0 && (
-            <div className="px-2 py-3 text-xs text-muted-foreground">
-              Нет направлений.{' '}
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  navigate('/profile');
-                }}
-                className="text-primary underline hover:no-underline"
-              >
-                Создать
-              </button>
-            </div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div>
+      {currentDirection ? (
+        <>
+          {/* Мобильная версия: цветной кружок */}
+          <div
+            className="sm:hidden w-3 h-3 rounded-full"
+            style={{ backgroundColor: getDirectionDotColor(currentDirection.id) }}
+            title={currentDirection.name}
+          />
+          {/* Десктопная версия: полное название */}
+          <Badge
+            className={`hidden sm:inline-flex ${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 max-w-[120px] truncate`}
+            title={currentDirection.name}
+          >
+            {currentDirection.name}
+          </Badge>
+        </>
+      ) : (
+        <>
+          {/* Мобильная версия: серый кружок */}
+          <div
+            className="sm:hidden w-3 h-3 rounded-full border border-dashed border-gray-400"
+            title="Без направления"
+          />
+          {/* Десктопная версия: полное название */}
+          <Badge
+            variant="outline"
+            className="hidden sm:inline-flex text-xs px-2 py-0.5 text-muted-foreground border-dashed whitespace-nowrap"
+          >
+            Без направления
+          </Badge>
+        </>
+      )}
+    </div>
   );
 };
 
@@ -2031,22 +1965,6 @@ const Creatives: React.FC = () => {
                       ? directions.find(d => d.id === it.direction_id)
                       : null;
                     
-                    const handleDirectionChange = async (directionId: string | null) => {
-                      const success = await creativesApi.update(it.id, { 
-                        direction_id: directionId 
-                      } as Partial<UserCreative>);
-                      
-                      if (success) {
-                        await reload();
-                        toast.success(
-                          directionId 
-                            ? 'Направление обновлено' 
-                            : 'Направление удалено'
-                        );
-                      } else {
-                        toast.error('Не удалось обновить направление');
-                      }
-                    };
                     
                     return (
                     <AccordionItem key={it.id} value={it.id}>
@@ -2131,8 +2049,6 @@ const Creatives: React.FC = () => {
                             <DirectionBadge
                               creative={it}
                               currentDirection={currentDirection}
-                              directions={directions}
-                              onDirectionChange={handleDirectionChange}
                             />
                           </div>
                         </div>

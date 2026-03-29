@@ -10,19 +10,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import type {
   Direction,
   UpdateDefaultSettingsInput,
   OptimizationLevel
 } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
-import { CITIES_AND_COUNTRIES, COUNTRY_IDS, CYPRUS_GEO_IDS, DEFAULT_UTM } from '@/constants/cities';
+import { DEFAULT_UTM } from '@/constants/cities';
+import { GeoLocationSearch } from '@/components/GeoLocationSearch';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
@@ -84,7 +84,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   // Настройки рекламы
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [cityPopoverOpen, setCityPopoverOpen] = useState(false);
   const [ageMin, setAgeMin] = useState<number>(18);
   const [ageMax, setAgeMax] = useState<number>(65);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
@@ -267,30 +266,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setIsSkadnetworkAttribution(false);
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
-  };
-
-  const handleCitySelection = (cityId: string) => {
-    let nextSelection = [...selectedCities];
-    if (nextSelection.includes(cityId)) {
-      nextSelection = nextSelection.filter(id => id !== cityId);
-    } else {
-      if (cityId === 'KZ') {
-        nextSelection = nextSelection.filter(id => COUNTRY_IDS.includes(id) || CYPRUS_GEO_IDS.includes(id));
-        nextSelection = [...nextSelection, cityId];
-      } else if (cityId === 'CY') {
-        nextSelection = nextSelection.filter(id => !CYPRUS_GEO_IDS.includes(id));
-        nextSelection = [...nextSelection, cityId];
-      } else if (CYPRUS_GEO_IDS.includes(cityId)) {
-        nextSelection = nextSelection.filter(id => id !== 'CY');
-        nextSelection = [...nextSelection, cityId];
-      } else if (!COUNTRY_IDS.includes(cityId)) {
-        nextSelection = nextSelection.filter(id => id !== 'KZ');
-        nextSelection = [...nextSelection, cityId];
-      } else {
-        nextSelection = [...nextSelection, cityId];
-      }
-    }
-    setSelectedCities(nextSelection);
   };
 
   const handleSubmit = async () => {
@@ -646,73 +621,12 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   <Label>
                     География <span className="text-red-500">*</span>
                   </Label>
-                  <Popover open={cityPopoverOpen} onOpenChange={setCityPopoverOpen} modal={false}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" disabled={isSubmitting} className="w-full justify-between">
-                        <span>
-                          {selectedCities.length === 0 ? 'Выберите города' : `Выбрано: ${selectedCities.length}`}
-                        </span>
-                        <ChevronDown className="h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent 
-                      container={dialogContentRef.current}
-                      className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
-                      side="bottom"
-                      align="start"
-                      sideOffset={6}
-                    >
-                      <div className="font-medium text-sm mb-2">Выберите города или страны</div>
-                      <div className="flex flex-col gap-1">
-                        {CITIES_AND_COUNTRIES.map(city => {
-                          const isWholeCountry = city.id === 'KZ' || city.id === 'CY';
-                          const isCyprusGeo = CYPRUS_GEO_IDS.includes(city.id);
-                          const isOtherCountry = COUNTRY_IDS.includes(city.id) && !isWholeCountry;
-                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id) && !CYPRUS_GEO_IDS.includes(id));
-                          const isKZSelected = selectedCities.includes('KZ');
-                          const isCYSelected = selectedCities.includes('CY');
-                          const isDisabled = isSubmitting ||
-                            (city.id === 'KZ' && anyCitySelected) ||
-                            (!isWholeCountry && !isOtherCountry && !isCyprusGeo && isKZSelected) ||
-                            (city.id === 'CY' && selectedCities.some(id => CYPRUS_GEO_IDS.includes(id))) ||
-                            (isCyprusGeo && isCYSelected);
-                          
-                          return (
-                            <div
-                              key={city.id} 
-                              className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!isDisabled) {
-                                  handleCitySelection(city.id);
-                                }
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedCities.includes(city.id)}
-                                disabled={isDisabled}
-                                onChange={() => {
-                                  if (!isDisabled) {
-                                    handleCitySelection(city.id);
-                                  }
-                                }}
-                              />
-                              <span>{city.name}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <Button
-                        className="mt-2"
-                        onClick={() => setCityPopoverOpen(false)}
-                        variant="outline"
-                        size="sm"
-                      >
-                        ОК
-                      </Button>
-                    </PopoverContent>
-                  </Popover>
+                  <GeoLocationSearch
+                    selectedCities={selectedCities}
+                    onSelectionChange={setSelectedCities}
+                    disabled={isSubmitting}
+                    portalContainer={dialogContentRef.current}
+                  />
                 </div>
 
                 {/* Возраст */}

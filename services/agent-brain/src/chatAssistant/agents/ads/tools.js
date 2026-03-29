@@ -736,6 +736,11 @@ dry_run=true ВОЗВРАЩАЕТ:
           type: 'string',
           description: 'Название (опционально - генерируется как "Direction - YYYY-MM-DD")'
         },
+        optimization_goal_override: {
+          type: 'string',
+          enum: ['CONVERSATIONS', 'LEAD_GENERATION', 'MESSAGING_PURCHASE_CONVERSION'],
+          description: 'Override optimization_goal для WhatsApp направлений. По умолчанию CONVERSATIONS. Зеркалируй лучшие работающие адсеты.'
+        },
         dry_run: {
           type: 'boolean',
           description: 'true = только preview'

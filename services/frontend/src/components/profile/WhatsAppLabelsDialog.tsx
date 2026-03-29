@@ -44,7 +44,16 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
   const [status, setStatus] = useState<string>('initializing');
   const [labels, setLabels] = useState<WaLabel[]>([]);
   const [selectedLabelId, setSelectedLabelId] = useState<string>('');
+  const [selectedPaidLabelId, setSelectedPaidLabelId] = useState<string>('');
   const [saving, setSaving] = useState(false);
+
+  // Сброс paid label если совпадает с lead label
+  const handleLeadLabelChange = (value: string) => {
+    setSelectedLabelId(value);
+    if (selectedPaidLabelId === value) {
+      setSelectedPaidLabelId('');
+    }
+  };
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -119,7 +128,10 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
       const res = await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ labelId: selectedLabelId }),
+        body: JSON.stringify({
+          leadLabelId: selectedLabelId,
+          paidLabelId: selectedPaidLabelId || null,
+        }),
       });
 
       if (!res.ok) throw new Error('Не удалось сохранить настройку');
@@ -140,12 +152,12 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
     try {
       await fetch(`${LABELS_SERVICE_URL}/sessions/${userAccountId}`, { method: 'DELETE' });
 
-      // Очищаем wwebjs_label_id
+      // Очищаем ярлыки
       const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
       await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ labelId: null }),
+        body: JSON.stringify({ leadLabelId: null, paidLabelId: null }),
       });
 
       onReset?.();
@@ -163,6 +175,7 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
       setStatus('initializing');
       setLabels([]);
       setSelectedLabelId('');
+      setSelectedPaidLabelId('');
       setError(null);
 
       if (isConfigured) {
@@ -193,7 +206,7 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
           <DialogDescription>
             {step === 'loading' && 'Подключение к WhatsApp...'}
             {step === 'qr' && 'Отсканируйте QR-код в WhatsApp Business для автоматической простановки ярлыков'}
-            {step === 'select_label' && 'Выберите ярлык, который будет ставиться квалифицированным лидам'}
+            {step === 'select_label' && 'Настройте ярлыки для квалифицированных лидов и оплативших клиентов'}
             {step === 'done' && 'Ярлыки настроены!'}
           </DialogDescription>
         </DialogHeader>
@@ -232,28 +245,55 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
             <div className="w-full space-y-4">
               <p className="text-sm">
                 {isConfigured
-                  ? 'Выберите ярлык для квалифицированных лидов:'
-                  : 'WhatsApp подключён. Теперь выберите ярлык, который будет автоматически проставляться квалифицированным лидам:'}
+                  ? 'Настройте ярлыки для автоматической простановки:'
+                  : 'WhatsApp подключён. Настройте ярлыки для автоматической простановки:'}
               </p>
 
-              <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Выберите ярлык" />
-                </SelectTrigger>
-                <SelectContent>
-                  {labels.map((label) => (
-                    <SelectItem key={label.id} value={label.id}>
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="w-3 h-3 rounded-full inline-block"
-                          style={{ backgroundColor: label.hexColor || '#ccc' }}
-                        />
-                        {label.name || `Ярлык ${label.id}`}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Ярлык для квалифицированных лидов</label>
+                <Select value={selectedLabelId} onValueChange={handleLeadLabelChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите ярлык" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {labels.map((label) => (
+                      <SelectItem key={label.id} value={label.id}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full inline-block"
+                            style={{ backgroundColor: label.hexColor || '#ccc' }}
+                          />
+                          {label.name || `Ярлык ${label.id}`}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Ярлык для оплативших клиентов <span className="text-muted-foreground font-normal">(необязательно)</span></label>
+                <Select value={selectedPaidLabelId} onValueChange={setSelectedPaidLabelId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Не выбран" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {labels
+                      .filter((l) => l.id !== selectedLabelId)
+                      .map((label) => (
+                        <SelectItem key={label.id} value={label.id}>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="w-3 h-3 rounded-full inline-block"
+                              style={{ backgroundColor: label.hexColor || '#ccc' }}
+                            />
+                            {label.name || `Ярлык ${label.id}`}
+                          </span>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <Button
                 onClick={saveLabel}

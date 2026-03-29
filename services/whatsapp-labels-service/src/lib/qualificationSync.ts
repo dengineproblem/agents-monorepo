@@ -91,6 +91,7 @@ const openai = new OpenAI({
 });
 
 const QUALIFIED_CONFIDENCE_THRESHOLD = parseFloat(process.env.QUALIFIED_CONFIDENCE_THRESHOLD || '0.7');
+const PAID_CONFIDENCE_THRESHOLD = parseFloat(process.env.PAID_CONFIDENCE_THRESHOLD || '0.8');
 const INTEREST_MSG_THRESHOLD = parseInt(process.env.INTEREST_MSG_THRESHOLD || '3');
 
 interface DialogToAnalyze {
@@ -107,7 +108,9 @@ interface DialogToAnalyze {
 
 interface QualificationResult {
   is_qualified: boolean;
+  is_paid: boolean;
   confidence: number;
+  paid_confidence: number;
   reasoning: string;
 }
 
@@ -132,7 +135,8 @@ async function getQualificationPrompt(userAccountId: string, accountId?: string 
 function getDefaultPrompt(): string {
   return `Ты — AI-агент для квалификации лидов в WhatsApp.
 
-Твоя задача — анализировать переписку и определять:
+Твоя задача — анализировать переписку и определять ДВА статуса:
+
 1. КВАЛИФИКАЦИЯ (is_qualified): клиент ответил на ключевые вопросы и подходит как потенциальный клиент
 
 ПРИЗНАКИ КВАЛИФИЦИРОВАННОГО ЛИДА:
@@ -141,8 +145,19 @@ function getDefaultPrompt(): string {
 - Готов обсуждать детали/цены
 - Не отказался явно
 
+2. ОПЛАТА (is_paid): клиент оплатил, забронировал или записался на ключевой этап воронки
+
+ПРИЗНАКИ ОПЛАТЫ:
+- Клиент прислал скриншот оплаты / чек
+- Клиент написал "оплатил", "перевёл", "забронировал"
+- Менеджер подтвердил получение оплаты
+- Клиент назначил точную дату/время визита и подтвердил запись
+- Есть явное подтверждение сделки от обеих сторон
+
 ВАЖНО:
-- Будь консервативен — только если есть явные признаки`;
+- Будь консервативен — только если есть явные признаки
+- is_paid требует БОЛЕЕ строгих доказательств чем is_qualified
+- Если клиент только обсуждает цену — это НЕ оплата`;
 }
 
 /**
@@ -169,8 +184,19 @@ function formatMessages(messages: DialogToAnalyze['messages']): string {
  * Анализирует один диалог через GPT-4o-mini.
  */
 async function analyzeDialog(dialog: DialogToAnalyze): Promise<QualificationResult | null> {
-  const prompt = await getQualificationPrompt(dialog.user_account_id, dialog.account_id);
-  const systemPrompt = prompt || getDefaultPrompt();
+  const customPrompt = await getQualificationPrompt(dialog.user_account_id, dialog.account_id);
+  const isCustom = !!customPrompt;
+  // Если есть кастомный промпт — оборачиваем его, добавляя инструкцию про is_paid
+  const systemPrompt = customPrompt
+    ? `${customPrompt}\n\nДОПОЛНИТЕЛЬНО — определи факт оплаты (is_paid):\n- is_paid = true если клиент оплатил, забронировал или подтвердил запись\n- Признаки: скриншот оплаты, "оплатил"/"перевёл"/"забронировал", подтверждение менеджера, точная дата визита\n- Будь строг — только явные доказательства оплаты`
+    : getDefaultPrompt();
+
+  log.debug({
+    dialogId: dialog.id,
+    contactPhone: dialog.contact_phone,
+    promptType: isCustom ? 'custom+paid_addon' : 'default',
+    messageCount: dialog.messages?.length ?? 0,
+  }, 'Analyzing dialog');
 
   try {
     const response = await openai.chat.completions.create({
@@ -179,7 +205,7 @@ async function analyzeDialog(dialog: DialogToAnalyze): Promise<QualificationResu
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content: `Проанализируй следующую WhatsApp-переписку и определи квалификацию лида:
+          content: `Проанализируй следующую WhatsApp-переписку и определи квалификацию лида и факт оплаты:
 
 ИСТОРИЯ ПЕРЕПИСКИ:
 ${formatMessages(dialog.messages)}
@@ -192,7 +218,9 @@ ${formatMessages(dialog.messages)}
 Верни JSON:
 {
   "is_qualified": boolean,
+  "is_paid": boolean,
   "confidence": number,
+  "paid_confidence": number,
   "reasoning": string
 }
 
@@ -200,20 +228,30 @@ ${formatMessages(dialog.messages)}
         },
       ],
       temperature: 0.1,
-      max_tokens: 300,
+      max_tokens: 500,
       response_format: { type: 'json_object' },
     });
 
     const content = response.choices[0]?.message?.content;
     if (!content) return null;
 
-    const result = JSON.parse(content) as QualificationResult;
+    const parsed = JSON.parse(content);
+    // Fallback для обратной совместимости: если GPT не вернул is_paid (старый prompt2)
+    const result: QualificationResult = {
+      is_qualified: parsed.is_qualified ?? false,
+      is_paid: parsed.is_paid ?? false,
+      confidence: parsed.confidence ?? 0,
+      paid_confidence: parsed.paid_confidence ?? 0,
+      reasoning: parsed.reasoning ?? '',
+    };
 
     log.info({
       dialogId: dialog.id,
       contactPhone: dialog.contact_phone,
       isQualified: result.is_qualified,
+      isPaid: result.is_paid,
       confidence: result.confidence,
+      paidConfidence: result.paid_confidence,
       reasoning: result.reasoning,
       tokens: response.usage?.total_tokens,
     }, 'Qualification analysis complete');
@@ -249,24 +287,45 @@ async function getRecentDialogs(userAccountId: string): Promise<DialogToAnalyze[
 }
 
 /**
- * Обновить is_qualified в leads на основе результата анализа.
+ * Обновить is_qualified и is_paid в leads на основе результата анализа.
+ * ВАЖНО: is_paid=true необратим — если лид уже оплачен, не понижаем статус.
+ * Это защищает от ситуации когда повторный анализ переписки "забывает" факт оплаты.
  */
-async function updateLeadQualification(
+async function updateLeadStatus(
   userAccountId: string,
   contactPhone: string,
-  isQualified: boolean
+  isQualified: boolean,
+  isPaid: boolean
 ): Promise<void> {
   const db = getSupabase();
 
+  // Если GPT определил is_paid=false, проверяем текущий статус — не понижаем
+  if (!isPaid) {
+    const { data: existing } = await db
+      .from('leads')
+      .select('is_paid')
+      .eq('user_account_id', userAccountId)
+      .eq('chat_id', contactPhone)
+      .eq('source_type', 'whatsapp')
+      .single();
+
+    if (existing?.is_paid) {
+      log.info({ userAccountId, contactPhone }, 'Lead already marked as paid — keeping is_paid=true (irreversible)');
+      isPaid = true;
+    }
+  }
+
   const { error } = await db
     .from('leads')
-    .update({ is_qualified: isQualified })
+    .update({ is_qualified: isQualified, is_paid: isPaid })
     .eq('user_account_id', userAccountId)
     .eq('chat_id', contactPhone)
     .eq('source_type', 'whatsapp');
 
   if (error) {
-    log.error({ userAccountId, contactPhone, error: error.message }, 'Failed to update lead qualification');
+    log.error({ userAccountId, contactPhone, error: error.message }, 'Failed to update lead status');
+  } else {
+    log.debug({ userAccountId, contactPhone, isQualified, isPaid }, 'Lead status updated');
   }
 }
 
@@ -274,18 +333,19 @@ async function updateLeadQualification(
  * Прогнать квалификацию для одного аккаунта.
  * Возвращает количество обновлённых лидов.
  */
-export async function qualifyAccountDialogs(userAccountId: string): Promise<{ analyzed: number; qualified: number }> {
+export async function qualifyAccountDialogs(userAccountId: string): Promise<{ analyzed: number; qualified: number; paid: number }> {
   const dialogs = await getRecentDialogs(userAccountId);
 
   if (dialogs.length === 0) {
     log.info({ userAccountId }, 'No recent dialogs to analyze');
-    return { analyzed: 0, qualified: 0 };
+    return { analyzed: 0, qualified: 0, paid: 0 };
   }
 
   log.info({ userAccountId, dialogCount: dialogs.length }, 'Starting qualification analysis');
 
   let analyzed = 0;
   let qualified = 0;
+  let paid = 0;
 
   for (const dialog of dialogs) {
     // Если messages пусто — фоллбэк на Evolution DB
@@ -304,17 +364,19 @@ export async function qualifyAccountDialogs(userAccountId: string): Promise<{ an
     analyzed++;
 
     const isQualified = result.is_qualified && result.confidence >= QUALIFIED_CONFIDENCE_THRESHOLD;
+    const isPaid = result.is_paid && result.paid_confidence >= PAID_CONFIDENCE_THRESHOLD;
 
-    await updateLeadQualification(dialog.user_account_id, dialog.contact_phone, isQualified);
+    await updateLeadStatus(dialog.user_account_id, dialog.contact_phone, isQualified, isPaid);
 
     if (isQualified) qualified++;
+    if (isPaid) paid++;
 
     // Пауза между запросами к OpenAI (rate limit)
     await new Promise(r => setTimeout(r, 500));
   }
 
-  log.info({ userAccountId, analyzed, qualified, total: dialogs.length }, 'Qualification analysis complete');
-  return { analyzed, qualified };
+  log.info({ userAccountId, analyzed, qualified, paid, total: dialogs.length }, 'Qualification analysis complete');
+  return { analyzed, qualified, paid };
 }
 
 /**
@@ -328,10 +390,11 @@ export async function runQualificationSync(): Promise<void> {
 
   const db = getSupabase();
 
+  // Обратная совместимость: ищем аккаунты с новым ИЛИ старым полем
   const { data: accounts, error } = await db
     .from('user_accounts')
     .select('id')
-    .not('wwebjs_label_id', 'is', null);
+    .or('wwebjs_label_id.not.is.null,wwebjs_label_id_lead.not.is.null');
 
   if (error || !accounts?.length) {
     if (error) log.error({ error: error.message }, 'Failed to fetch accounts');
@@ -343,16 +406,18 @@ export async function runQualificationSync(): Promise<void> {
 
   let totalAnalyzed = 0;
   let totalQualified = 0;
+  let totalPaid = 0;
 
   for (const account of accounts) {
     try {
       const result = await qualifyAccountDialogs(account.id);
       totalAnalyzed += result.analyzed;
       totalQualified += result.qualified;
+      totalPaid += result.paid;
     } catch (err: any) {
       log.error({ userAccountId: account.id, err: err.message }, 'Account qualification failed');
     }
   }
 
-  log.info({ totalAnalyzed, totalQualified, accountCount: accounts.length }, 'Qualification sync finished');
+  log.info({ totalAnalyzed, totalQualified, totalPaid, accountCount: accounts.length }, 'Qualification sync finished');
 }

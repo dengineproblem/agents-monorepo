@@ -489,6 +489,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         daily_budget_cents?: number;
         adset_name?: string;
         auto_activate?: boolean;
+        optimization_goal_override?: string;
       };
       
       if (!p.direction_id) {
@@ -508,6 +509,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           direction_id: p.direction_id,
           user_creative_ids: p.user_creative_ids,
           daily_budget_cents: p.daily_budget_cents,
+          optimization_goal_override: p.optimization_goal_override,
           source: 'Brain',
           auto_activate: true, // ВСЕГДА включаем
           start_mode: (action as any).params?.start_mode || 'now' // Agent Brain всегда запускает немедленно
@@ -529,6 +531,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           user_creative_ids: string[];
           adset_name?: string;
           daily_budget_cents?: number;
+          optimization_goal_override?: string;
         }>;
         auto_activate?: boolean;
       };
@@ -571,6 +574,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
               direction_id: p.direction_id,
               user_creative_ids: adsetConfig.user_creative_ids,
               daily_budget_cents: adsetConfig.daily_budget_cents || 1000,
+              optimization_goal_override: adsetConfig.optimization_goal_override,
               source: 'Brain',
               auto_activate: true, // ВСЕГДА включаем
               start_mode: (action as any).params?.start_mode || 'now'

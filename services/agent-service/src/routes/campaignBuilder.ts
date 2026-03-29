@@ -1329,6 +1329,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 properties: {
                   creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
                   daily_budget_cents: { type: 'number', minimum: 500 },
+                  optimization_goal_override: { type: 'string', enum: ['CONVERSATIONS', 'LEAD_GENERATION', 'MESSAGING_PURCHASE_CONVERSION'] },
                 },
               },
             },
@@ -1344,6 +1345,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         userAccountId: user_account_id,
         directionId: direction_id,
         adsetCount: adsets.length,
+        startMode: start_mode || 'now',
+        adsetDetails: adsets.map((a: any, i: number) => ({
+          index: i,
+          creativeCount: a.creative_ids?.length,
+          dailyBudgetCents: a.daily_budget_cents || null,
+          optimizationGoalOverride: a.optimization_goal_override || null,
+        })),
       }, 'Manual launch multi request');
 
       try {
@@ -1389,6 +1397,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 direction_id,
                 user_creative_ids: adsetConfig.creative_ids,
                 daily_budget_cents: adsetConfig.daily_budget_cents,
+                optimization_goal_override: adsetConfig.optimization_goal_override,
                 source: 'Manual',
                 auto_activate: true,
                 start_mode: start_mode || 'now',
@@ -1403,12 +1412,19 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               { logger: log }
             );
 
+            log.info({
+              adsetId: result.adset_id,
+              optimization_goal: result.optimization_goal || null,
+              adsCreated: result.ads?.length || 0,
+            }, 'Adset created successfully in multi-launch');
+
             results.push({
               success: true,
               adset_id: result.adset_id,
               adset_name: generateAdsetName({ directionName: direction.name, source: 'Manual', objective: direction.objective }),
               ads_created: result.ads?.length || 0,
               ads: result.ads?.map((ad: any) => ({ ad_id: ad.ad_id, name: ad.name })) || [],
+              optimization_goal: result.optimization_goal || null,
             });
           } catch (error: any) {
             log.warn({ err: error, creativeIds: adsetConfig.creative_ids }, 'Failed to create adset in multi-launch');
