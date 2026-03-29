@@ -3506,6 +3506,22 @@ fastify.post('/api/brain/run', async (request, reply) => {
       count: directions.length
     });
 
+    // Подсчёт WhatsApp-ярлыков (для eligibility optimization_goal)
+    const hasWhatsappDir = directions.some(d => d.objective === 'whatsapp');
+    let overnightLabelStats = null;
+    if (hasWhatsappDir && supabase) {
+      const [leadRes, paidRes] = await Promise.all([
+        supabase.from('leads').select('id', { count: 'exact', head: true })
+          .eq('user_account_id', userAccountId).eq('source_type', 'whatsapp')
+          .eq('is_qualified', true).eq('whatsapp_label_synced', true),
+        supabase.from('leads').select('id', { count: 'exact', head: true })
+          .eq('user_account_id', userAccountId).eq('source_type', 'whatsapp')
+          .eq('is_paid', true).eq('whatsapp_paid_label_synced', true),
+      ]);
+      overnightLabelStats = { lead_synced_count: leadRes.count ?? 0, paid_synced_count: paidRes.count ?? 0 };
+      fastify.log.info({ where: 'brain_run', phase: 'label_stats', overnightLabelStats });
+    }
+
     // Если нет направлений — пропускаем аккаунт (по решению пользователя)
     if (accountUUID && (!directions || directions.length === 0)) {
       fastify.log.warn({
@@ -4113,6 +4129,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
       // НАПРАВЛЕНИЯ БИЗНЕСА
       // ========================================
       directions: directionsWithAdSets,
+      // Статистика WhatsApp-ярлыков (для eligibility optimization_goal override)
+      whatsapp_label_stats: overnightLabelStats,
       // ========================================
       // SCORING DATA - от scoring agent
       // ========================================

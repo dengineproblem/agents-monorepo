@@ -3061,6 +3061,33 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     const { data: directions } = await directionsQuery;
 
+    // Подсчёт синхронизированных WhatsApp-ярлыков (для eligibility optimization_goal)
+    const hasWhatsappDir = directions?.some(d => d.objective === 'whatsapp');
+    let labelStats = null;
+    if (hasWhatsappDir) {
+      const [leadRes, paidRes] = await Promise.all([
+        supabase
+          .from('leads')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_account_id', userAccountId)
+          .eq('source_type', 'whatsapp')
+          .eq('is_qualified', true)
+          .eq('whatsapp_label_synced', true),
+        supabase
+          .from('leads')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_account_id', userAccountId)
+          .eq('source_type', 'whatsapp')
+          .eq('is_paid', true)
+          .eq('whatsapp_paid_label_synced', true),
+      ]);
+      labelStats = {
+        lead_synced_count: leadRes.count ?? 0,
+        paid_synced_count: paidRes.count ?? 0,
+      };
+      log.info({ where: 'interactive_brain', labelStats }, 'WhatsApp label stats loaded');
+    }
+
     // ========================================
     // ЗАГРУЗКА НАСТРОЕК АККАУНТА (для внешних кампаний)
     // Приоритет: accountUUID > ad_account_id > user_account_id
@@ -4314,6 +4341,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             default_cpl_target_cents: adAccountSettings?.default_cpl_target_cents || null,
             plan_daily_budget_cents: adAccountSettings?.plan_daily_budget_cents || null
           },
+          // Статистика WhatsApp-ярлыков (для eligibility optimization_goal override)
+          // LEAD_GENERATION доступен при lead_synced_count >= 10
+          // MESSAGING_PURCHASE_CONVERSION доступен при paid_synced_count >= 10
+          whatsapp_label_stats: labelStats,
           // ВАЖНО: используем freshUnusedCreatives загруженные напрямую из БД
           // (не из brainReport который может быть устаревшим на 50+ часов!)
           unused_creatives: freshUnusedCreatives.slice(0, 15),

@@ -162,6 +162,10 @@ KPI И ЛИДЫ (action_breakdowns=action_type)
 - Каждый WhatsApp адсет имеет поле \`optimization_goal\` (из FB API).
 - Возможные значения: CONVERSATIONS (стандарт), LEAD_GENERATION (лиды), MESSAGING_PURCHASE_CONVERSION (покупки).
 - В одной кампании (направлении) могут быть адсеты с РАЗНЫМИ optimization_goal.
+- ELIGIBILITY (поле \`whatsapp_label_stats\` в данных):
+  • LEAD_GENERATION доступен только при lead_synced_count >= 10 (кумулятивно)
+  • MESSAGING_PURCHASE_CONVERSION доступен только при paid_synced_count >= 10 (кумулятивно)
+  • Если whatsapp_label_stats = null или счётчик < 10 — НЕ используй этот optimization_goal
 - При создании новых адсетов:
   • Анализируй какой optimization_goal показывает лучший CPL/QCPL среди существующих адсетов
   • Создавай новые адсеты с optimization_goal, который показал лучшие результаты

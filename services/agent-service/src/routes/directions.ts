@@ -543,6 +543,36 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Подсчёт синхронизированных WhatsApp-ярлыков (для eligibility optimization_goal)
+      // Facebook требует минимум 10 ярлыков для разблокировки LEAD_GENERATION / MESSAGING_PURCHASE_CONVERSION
+      const hasWhatsappDirections = (directions || []).some(d =>
+        d.objective === 'whatsapp' || d.objective === 'whatsapp_conversions'
+      );
+
+      let labelStats: { lead_synced_count: number; paid_synced_count: number } | null = null;
+      if (hasWhatsappDirections) {
+        const [leadResult, paidResult] = await Promise.all([
+          supabase
+            .from('leads')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_account_id', userAccountId)
+            .eq('source_type', 'whatsapp')
+            .eq('is_qualified', true)
+            .eq('whatsapp_label_synced', true),
+          supabase
+            .from('leads')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_account_id', userAccountId)
+            .eq('source_type', 'whatsapp')
+            .eq('is_paid', true)
+            .eq('whatsapp_paid_label_synced', true),
+        ]);
+        labelStats = {
+          lead_synced_count: leadResult.count ?? 0,
+          paid_synced_count: paidResult.count ?? 0,
+        };
+      }
+
       // Преобразуем вложенный объект в простое поле + маппинг обратной совместимости
       const directionsWithNumber = (directions || []).map(dir => {
         // Обратная совместимость: whatsapp_conversions -> conversions + conversion_channel: 'whatsapp'
@@ -564,6 +594,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       return reply.send({
         success: true,
         directions: directionsWithNumber,
+        ...(labelStats && { label_stats: labelStats }),
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error fetching directions list');

@@ -1427,7 +1427,7 @@ const Creatives: React.FC = () => {
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
   // Показываем ВСЕ направления (и Facebook, и TikTok)
-  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
+  const { directions, labelStats, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
   const launchDirection = useMemo(
     () => directions.find(d => d.id === launchDirectionId),
     [directions, launchDirectionId]
@@ -2106,6 +2106,7 @@ const Creatives: React.FC = () => {
           direction={launchDirection}
           platform={isTikTokPlatform ? 'tiktok' : 'facebook'}
           currentAdAccountId={currentAdAccountId}
+          labelStats={labelStats}
           onSuccess={handleLaunchSuccess}
         />
 

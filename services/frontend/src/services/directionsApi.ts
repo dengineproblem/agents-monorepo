@@ -7,6 +7,16 @@ export interface DirectionCustomAudience {
   name: string;
 }
 
+export interface LabelStats {
+  lead_synced_count: number;
+  paid_synced_count: number;
+}
+
+export interface DirectionsListResult {
+  directions: Direction[];
+  labelStats: LabelStats | null;
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data?: T;
@@ -24,7 +34,7 @@ export const directionsApi = {
     userAccountId: string,
     accountId?: string | null,
     platform?: 'facebook' | 'tiktok'
-  ): Promise<Direction[]> {
+  ): Promise<DirectionsListResult> {
     try {
       console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId, 'account_id:', accountId);
 
@@ -44,22 +54,25 @@ export const directionsApi = {
 
       if (!response.ok) {
         console.error('[directionsApi.list] Ошибка HTTP:', response.statusText);
-        return [];
+        return { directions: [], labelStats: null };
       }
 
       const data = await response.json();
       console.log('[directionsApi.list] Результат от API:', data);
 
-      // Бэкенд возвращает: { success: true, directions: [...] }
+      // Бэкенд возвращает: { success: true, directions: [...], label_stats?: {...} }
       if (data.success && data.directions) {
         console.log('[directionsApi.list] Найдено направлений:', data.directions.length);
-        return data.directions;
+        return {
+          directions: data.directions,
+          labelStats: data.label_stats || null,
+        };
       }
 
-      return [];
+      return { directions: [], labelStats: null };
     } catch (error) {
       console.error('[directionsApi.list] Исключение при получении направлений:', error);
-      return [];
+      return { directions: [], labelStats: null };
     }
   },
 

@@ -166,7 +166,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
   const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
-  const { directions, loading: directionsLoading } = useDirections(
+  const { directions, labelStats, loading: directionsLoading } = useDirections(
     userData?.id || null,
     currentAdAccountId,
     directionsPlatform
@@ -2891,6 +2891,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             userId={userData.id}
             platform={isTikTokPlatform ? 'tiktok' : 'facebook'}
             currentAdAccountId={currentAdAccountId}
+            labelStats={labelStats}
             onSuccess={handleLaunchSuccess}
           />
         )}

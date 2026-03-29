@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { directionsApi } from '@/services/directionsApi';
+import { directionsApi, type LabelStats } from '@/services/directionsApi';
 import type { Direction, CreateDirectionPayload, UpdateDirectionPayload } from '@/types/direction';
 
 /**
@@ -14,6 +14,7 @@ export const useDirections = (
   platform?: 'facebook' | 'tiktok'
 ) => {
   const [directions, setDirections] = useState<Direction[]>([]);
+  const [labelStats, setLabelStats] = useState<LabelStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +22,7 @@ export const useDirections = (
   const loadDirections = useCallback(async () => {
     if (!userAccountId) {
       setDirections([]);
+      setLabelStats(null);
       setLoading(false);
       return;
     }
@@ -29,8 +31,9 @@ export const useDirections = (
     setError(null);
 
     try {
-      const data = await directionsApi.list(userAccountId, accountId, platform);
-      setDirections(data);
+      const result = await directionsApi.list(userAccountId, accountId, platform);
+      setDirections(result.directions);
+      setLabelStats(result.labelStats);
     } catch (err) {
       console.error('Ошибка при загрузке направлений:', err);
       setError('Не удалось загрузить направления');
@@ -103,6 +106,7 @@ export const useDirections = (
 
   return {
     directions,
+    labelStats,
     loading,
     error,
     reload: loadDirections,

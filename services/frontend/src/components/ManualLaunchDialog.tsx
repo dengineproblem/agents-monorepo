@@ -10,12 +10,14 @@ import { Loader2, Plus, Rocket, Trash2, Video, Image, Images } from "lucide-reac
 import { toast } from "sonner";
 import { manualLaunchMultiAdSets, type MultiAdSetLaunchResponse } from "@/services/manualLaunchApi";
 import { type UserCreative } from "@/services/creativesApi";
+import { type LabelStats } from "@/services/directionsApi";
 import { type Direction, getDirectionObjectiveLabel } from "@/types/direction";
 import { API_BASE_URL } from "@/config/api";
 import { getAuthHeaders } from '@/lib/apiAuth';
 
 const FACEBOOK_MIN_DAILY_BUDGET = 5;
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
+const OPT_GOAL_LABEL_THRESHOLD = 10; // Facebook требует минимум 10 ярлыков для разблокировки
 
 type AdSetConfig = {
   id: string;
@@ -34,6 +36,7 @@ type ManualLaunchDialogProps = {
   onOpenChange: (open: boolean) => void;
   platform: 'facebook' | 'tiktok';
   currentAdAccountId: string | null;
+  labelStats?: LabelStats | null;
   onSuccess: (result: MultiAdSetLaunchResponse) => void;
 } & (
   | {
@@ -58,7 +61,7 @@ function MediaIcon({ type }: { type?: 'video' | 'image' | 'carousel' | null }) {
 }
 
 export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
-  const { open, onOpenChange, platform, currentAdAccountId, onSuccess } = props;
+  const { open, onOpenChange, platform, currentAdAccountId, labelStats, onSuccess } = props;
 
   const isTikTok = platform === 'tiktok';
   const minBudget = isTikTok ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET;
@@ -385,8 +388,10 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
                     </div>
                   </div>
 
-                  {/* Цель оптимизации (только WhatsApp + Facebook) */}
-                  {direction?.objective === 'whatsapp' && !isTikTok && (
+                  {/* Цель оптимизации (только WhatsApp + Facebook, при наличии достаточного количества ярлыков) */}
+                  {direction?.objective === 'whatsapp' && !isTikTok && labelStats && (
+                    (labelStats.lead_synced_count >= OPT_GOAL_LABEL_THRESHOLD || labelStats.paid_synced_count >= OPT_GOAL_LABEL_THRESHOLD)
+                  ) && (
                     <div className="flex items-center gap-2">
                       <Label className="text-xs text-muted-foreground whitespace-nowrap">
                         Оптимизация
@@ -401,8 +406,16 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="CONVERSATIONS">Переписки (стандарт)</SelectItem>
-                          <SelectItem value="LEAD_GENERATION">Лиды</SelectItem>
-                          <SelectItem value="MESSAGING_PURCHASE_CONVERSION">Покупки</SelectItem>
+                          {labelStats.lead_synced_count >= OPT_GOAL_LABEL_THRESHOLD && (
+                            <SelectItem value="LEAD_GENERATION">
+                              Лиды ({labelStats.lead_synced_count} ярлыков)
+                            </SelectItem>
+                          )}
+                          {labelStats.paid_synced_count >= OPT_GOAL_LABEL_THRESHOLD && (
+                            <SelectItem value="MESSAGING_PURCHASE_CONVERSION">
+                              Покупки ({labelStats.paid_synced_count} ярлыков)
+                            </SelectItem>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>

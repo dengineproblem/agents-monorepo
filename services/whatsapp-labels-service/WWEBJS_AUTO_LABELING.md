@@ -315,13 +315,24 @@ WhatsApp-ярлыки напрямую влияют на оптимизацию 
 | `LEAD_GENERATION` | Оптимизация под квалифицированных лидов | Нужен lead-ярлык (`wwebjs_label_id_lead`) |
 | `MESSAGING_PURCHASE_CONVERSION` | Оптимизация под покупки | Нужен paid-ярлык (`wwebjs_label_id_paid`) |
 
+**Порог разблокировки (eligibility):**
+- Facebook требует минимум **10 ярлыков** (кумулятивно, без временного окна) для разблокировки продвинутых optimization goals
+- `LEAD_GENERATION` — доступен при ≥10 синхронизированных lead-ярлыков
+- `MESSAGING_PURCHASE_CONVERSION` — доступен при ≥10 синхронизированных paid-ярлыков
+- Подсчёт ведётся в таблице `leads`: `whatsapp_label_synced = true` / `whatsapp_paid_label_synced = true`
+- GET `/api/directions` возвращает `label_stats: { lead_synced_count, paid_synced_count }` для whatsapp-аккаунтов
+- **Только предустановленные ярлыки WhatsApp Business** (Paid, Order Complete и т.д.) учитываются Facebook — кастомные игнорируются
+
 **Как это работает:**
-1. Пользователь создаёт AdSet с нужным `optimization_goal` (через ManualLaunchDialog → Select "Оптимизация" или через Brain AI)
-2. Facebook получает сигналы через ярлыки WhatsApp Business (механизм "передачи рекламных данных")
-3. Facebook ищет похожих людей и оптимизирует показы
+1. Система подсчитывает синхронизированные ярлыки per user_account
+2. В ManualLaunchDialog Select "Оптимизация" появляется **только когда** порог достигнут (≥10 ярлыков)
+3. Каждая опция показывает текущее количество ярлыков: `Лиды (15 ярлыков)`
+4. Facebook получает сигналы через ярлыки WhatsApp Business (механизм "передачи рекламных данных")
+5. Facebook ищет похожих людей и оптимизирует показы
 
 **Brain AI (зеркалирование):**
-- Brain видит `optimization_goal` каждого AdSet в данных скоринга
+- Brain видит `optimization_goal` каждого AdSet в данных скоринга и `whatsapp_label_stats` с количеством ярлыков
+- Brain проверяет eligibility: НЕ использует optimization_goal если `whatsapp_label_stats` < 10
 - Если пользователь создал AdSet с `LEAD_GENERATION` и он показывает лучший CPL — Brain создаёт новые AdSet'ы с тем же goal
 - Brain НЕ переключает goal самостоятельно если пользователь не создал ни одного AdSet с другим goal
 - Параметр `optimization_goal_override` передаётся через `Direction.CreateAdSetWithCreatives`
