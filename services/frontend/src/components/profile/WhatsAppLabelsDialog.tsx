@@ -63,16 +63,49 @@ export const WhatsAppLabelsDialog: React.FC<WhatsAppLabelsDialogProps> = ({
       const res = await fetch(`${LABELS_SERVICE_URL}/sessions/${userAccountId}/labels`);
       const data = await res.json();
 
-      if (Array.isArray(data)) {
+      if (!Array.isArray(data)) {
+        setError('Не удалось получить список ярлыков');
+        return;
+      }
+
+      // Автодетект стандартных ярлыков по имени
+      const normalize = (s: string) => s.trim().toLowerCase();
+      const leadLabel = data.find((l: WaLabel) => normalize(l.name) === 'лид' || normalize(l.name) === 'lead');
+      const paidLabel = data.find((l: WaLabel) => normalize(l.name) === 'оплачен' || normalize(l.name) === 'paid');
+
+      if (leadLabel) {
+        // Нашли стандартные ярлыки — сохраняем автоматически
+        setSaving(true);
+        try {
+          const apiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+          const saveRes = await fetch(`${apiBase}/user-accounts/${userAccountId}/wwebjs-label`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              leadLabelId: leadLabel.id,
+              paidLabelId: paidLabel?.id || null,
+            }),
+          });
+          if (!saveRes.ok) throw new Error('Не удалось сохранить настройку');
+          setStep('done');
+          onConfigured?.();
+        } catch (err: any) {
+          setError(err.message);
+          // Fallback — показываем ручной выбор
+          setLabels(data);
+          setStep('select_label');
+        } finally {
+          setSaving(false);
+        }
+      } else {
+        // Стандартные ярлыки не найдены — показываем ручной выбор
         setLabels(data);
         setStep('select_label');
-      } else {
-        setError('Не удалось получить список ярлыков');
       }
     } catch (err: any) {
       setError('Не удалось получить ярлыки: ' + (err.message || ''));
     }
-  }, [userAccountId]);
+  }, [userAccountId, onConfigured]);
 
   const startSession = useCallback(async () => {
     try {

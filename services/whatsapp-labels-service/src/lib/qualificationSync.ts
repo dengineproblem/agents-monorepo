@@ -186,10 +186,9 @@ function formatMessages(messages: DialogToAnalyze['messages']): string {
 async function analyzeDialog(dialog: DialogToAnalyze): Promise<QualificationResult | null> {
   const customPrompt = await getQualificationPrompt(dialog.user_account_id, dialog.account_id);
   const isCustom = !!customPrompt;
-  // Если есть кастомный промпт — оборачиваем его, добавляя инструкцию про is_paid
-  const systemPrompt = customPrompt
-    ? `${customPrompt}\n\nДОПОЛНИТЕЛЬНО — определи факт оплаты (is_paid):\n- is_paid = true если клиент оплатил, забронировал или подтвердил запись\n- Признаки: скриншот оплаты, "оплатил"/"перевёл"/"забронировал", подтверждение менеджера, точная дата визита\n- Будь строг — только явные доказательства оплаты`
-    : getDefaultPrompt();
+  // Кастомный prompt2 полностью управляет критериями (включая is_paid если нужно).
+  // Дефолтный промпт покрывает оба статуса из коробки.
+  const systemPrompt = customPrompt || getDefaultPrompt();
 
   log.debug({
     dialogId: dialog.id,
