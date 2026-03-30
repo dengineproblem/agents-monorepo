@@ -235,34 +235,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                 );
               })}
 
-              {/* Авто-ярлыки — тот же стиль что и номера */}
-              <div className="flex items-center justify-between p-3 border border-muted rounded-lg hover:bg-muted/50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-5 flex justify-center">
-                    {wwebjsLabelConfigured ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <Tag className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Авто-ярлыки</p>
-                    <p className="text-xs text-muted-foreground">
-                      {wwebjsLabelConfigured
-                        ? 'Ярлыки проставляются каждую ночь в 03:00'
-                        : 'Простановка ярлыков квалифицированным лидам'}
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setLabelsDialogOpen(true)}
-                >
-                  <Tag className="h-4 w-4 mr-1" />
-                  {wwebjsLabelConfigured ? 'Изменить' : 'Настроить'}
-                </Button>
-              </div>
+              {/* Авто-ярлыки — скрыто */}
             </div>
           )}
         </CardContent>

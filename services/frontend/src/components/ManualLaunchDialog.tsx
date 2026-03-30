@@ -388,38 +388,7 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
                     </div>
                   </div>
 
-                  {/* Цель оптимизации (только WhatsApp + Facebook, при наличии достаточного количества ярлыков) */}
-                  {direction?.objective === 'whatsapp' && !isTikTok && labelStats && (
-                    (labelStats.lead_synced_count >= OPT_GOAL_LABEL_THRESHOLD || labelStats.paid_synced_count >= OPT_GOAL_LABEL_THRESHOLD)
-                  ) && (
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs text-muted-foreground whitespace-nowrap">
-                        Оптимизация
-                      </Label>
-                      <Select
-                        value={adset.optimization_goal_override || 'CONVERSATIONS'}
-                        onValueChange={(v) => updateOptGoal(adset.id, v)}
-                        disabled={isLaunching}
-                      >
-                        <SelectTrigger className="w-full h-8 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="CONVERSATIONS">Переписки (стандарт)</SelectItem>
-                          {labelStats.lead_synced_count >= OPT_GOAL_LABEL_THRESHOLD && (
-                            <SelectItem value="LEAD_GENERATION">
-                              Лиды ({labelStats.lead_synced_count} ярлыков)
-                            </SelectItem>
-                          )}
-                          {labelStats.paid_synced_count >= OPT_GOAL_LABEL_THRESHOLD && (
-                            <SelectItem value="MESSAGING_PURCHASE_CONVERSION">
-                              Покупки ({labelStats.paid_synced_count} ярлыков)
-                            </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                  {/* Цель оптимизации — скрыто */}
 
                   {/* Креативы */}
                   <div className="space-y-1 max-h-[140px] overflow-y-auto">

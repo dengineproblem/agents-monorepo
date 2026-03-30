@@ -10,10 +10,11 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Download, Zap, Instagram } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Download, Zap, Instagram, Rocket } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { type MultiAdSetLaunchResponse } from "@/services/manualLaunchApi";
 import { ManualLaunchDialog } from "@/components/ManualLaunchDialog";
+import { AILaunchDialog } from "@/components/AILaunchDialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -1310,6 +1311,10 @@ const Creatives: React.FC = () => {
   const [launchResult, setLaunchResult] = useState<MultiAdSetLaunchResponse | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
   const [launchDirectionId, setLaunchDirectionId] = useState<string>('');
+
+  // Состояния для AI Launch
+  const [aiLaunchDialogOpen, setAiLaunchDialogOpen] = useState(false);
+  const [launchLoading, setLaunchLoading] = useState(false);
   const isTikTokPlatform = platform === 'tiktok';
   const adGroupTitle = isTikTokPlatform ? 'Ad Group' : 'Ad Set';
 
@@ -1414,6 +1419,46 @@ const Creatives: React.FC = () => {
     setResultDialogOpen(true);
     setSelectedCreativeIds(new Set());
   }, []);
+
+  // Запуск с AI
+  const handleLaunchAd = async (directionIds: string[], startMode: 'now' | 'midnight_almaty') => {
+    setLaunchLoading(true);
+    try {
+      if (multiAccountEnabled && !currentAdAccountId) {
+        toast.error('Рекламный аккаунт не выбран. Выберите аккаунт в настройках.');
+        return;
+      }
+      const endpoint = isTikTokPlatform
+        ? `${API_BASE_URL}/tiktok-campaign-builder/auto-launch`
+        : `${API_BASE_URL}/campaign-builder/auto-launch-v2`;
+      const payload: Record<string, any> = {
+        user_account_id: userId,
+        account_id: currentAdAccountId,
+        start_mode: startMode,
+        direction_ids: directionIds,
+      };
+      if (!isTikTokPlatform) {
+        payload.objective = 'whatsapp';
+        payload.auto_activate = false;
+      }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setAiLaunchDialogOpen(false);
+        toast.success(data.message || 'Реклама запущена');
+      } else {
+        toast.error(data.error || 'Не удалось запустить рекламу');
+      }
+    } catch {
+      toast.error('Ошибка при запуске рекламы');
+    } finally {
+      setLaunchLoading(false);
+    }
+  };
 
   // Получаем user_id для загрузки направлений (один раз)
   const [userId] = useState<string | null>(() => {
@@ -1921,7 +1966,18 @@ const Creatives: React.FC = () => {
                   </Select>
                 </div>
                 <div className="flex items-center gap-1">
-                  {/* Кнопка создать adset */}
+                  {/* Кнопка AI запуска (всегда видна) */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAiLaunchDialogOpen(true)}
+                    className="h-7 px-2 text-xs gap-1"
+                    disabled={directions.length === 0}
+                  >
+                    <Rocket className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Запуск с AI</span>
+                  </Button>
+                  {/* Кнопка ручного запуска */}
                   {selectedCreativeIds.size > 0 && (
                     <Button
                       size="sm"
@@ -1930,7 +1986,7 @@ const Creatives: React.FC = () => {
                       className="h-7 px-2 text-xs gap-1"
                     >
                       <Megaphone className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">Запустить</span>
+                      <span className="hidden sm:inline">Ручной запуск</span>
                       <span className="sm:hidden">{selectedCreativeIds.size}</span>
                     </Button>
                   )}
@@ -2108,6 +2164,15 @@ const Creatives: React.FC = () => {
           currentAdAccountId={currentAdAccountId}
           labelStats={labelStats}
           onSuccess={handleLaunchSuccess}
+        />
+
+        {/* Модальное окно AI запуска */}
+        <AILaunchDialog
+          open={aiLaunchDialogOpen}
+          onOpenChange={setAiLaunchDialogOpen}
+          directions={directions}
+          launchLoading={launchLoading}
+          onLaunch={handleLaunchAd}
         />
 
         {/* Модальное окно с результатом запуска */}
