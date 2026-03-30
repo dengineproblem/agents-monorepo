@@ -401,7 +401,6 @@ export async function workflowCreateAdSetInDirection(
   // Получаем WhatsApp номер с fallback логикой
   // Нужен для objective=whatsapp И для conversions+whatsapp (destination_type=WHATSAPP)
   let whatsapp_phone_number = null;
-  let waba_phone_id: string | null = null;
   const needsWhatsAppNumber = direction.objective === 'whatsapp'
     || (direction.objective === 'conversions' && (direction.conversion_channel === 'whatsapp' || !direction.conversion_channel));
 
@@ -410,37 +409,35 @@ export async function workflowCreateAdSetInDirection(
     if (direction.whatsapp_phone_number_id) {
       const { data: phoneNumber } = await supabase
         .from('whatsapp_phone_numbers')
-        .select('phone_number, waba_phone_id')
+        .select('phone_number')
         .eq('id', direction.whatsapp_phone_number_id)
         .eq('is_active', true)
         .single();
-
+      
       whatsapp_phone_number = phoneNumber?.phone_number;
-      waba_phone_id = phoneNumber?.waba_phone_id || null;
-
+      
       if (whatsapp_phone_number) {
-        log.info({ phone_number: whatsapp_phone_number, waba_phone_id, source: 'direction' }, 'Using WhatsApp number from direction');
+        log.info({ phone_number: whatsapp_phone_number, source: 'direction' }, 'Using WhatsApp number from direction');
       }
     }
-
+    
     // 2. Fallback: дефолтный номер пользователя
     if (!whatsapp_phone_number) {
       const { data: defaultNumber } = await supabase
         .from('whatsapp_phone_numbers')
-        .select('phone_number, waba_phone_id')
+        .select('phone_number')
         .eq('user_account_id', user_account_id)
         .eq('is_default', true)
         .eq('is_active', true)
         .single();
-
+      
       whatsapp_phone_number = defaultNumber?.phone_number;
-      waba_phone_id = defaultNumber?.waba_phone_id || null;
-
+      
       if (whatsapp_phone_number) {
-        log.info({ phone_number: whatsapp_phone_number, waba_phone_id, source: 'default' }, 'Using default WhatsApp number');
+        log.info({ phone_number: whatsapp_phone_number, source: 'default' }, 'Using default WhatsApp number');
       }
     }
-
+    
     // 3. Fallback: старый номер из user_accounts (обратная совместимость)
     if (!whatsapp_phone_number && userAccount?.whatsapp_phone_number) {
       whatsapp_phone_number = userAccount.whatsapp_phone_number;
@@ -503,21 +500,12 @@ export async function workflowCreateAdSetInDirection(
   if (direction.objective === 'whatsapp' && effective_page_id) {
     adsetBody.destination_type = 'WHATSAPP';
 
-    // Для LEAD_GENERATION нужен whats_app_business_phone_number_id (waba_phone_id из whatsapp_phone_numbers).
-    // Для CONVERSATIONS достаточно whatsapp_phone_number (строка номера).
+    // Всегда включаем номер из направления (если есть)
     // Если получим ошибку 2446885, повторим запрос без номера (см. try-catch ниже)
     adsetBody.promoted_object = {
       page_id: String(effective_page_id),
-      ...(whatsapp_phone_number && { whatsapp_phone_number }),
-      ...(optimization_goal === 'LEAD_GENERATION' && waba_phone_id && { whats_app_business_phone_number_id: waba_phone_id }),
+      ...(whatsapp_phone_number && { whatsapp_phone_number })
     };
-
-    log.info({
-      optimization_goal,
-      waba_phone_id,
-      whatsapp_phone_number: whatsapp_phone_number || null,
-      promoted_object: adsetBody.promoted_object,
-    }, 'WhatsApp adset promoted_object configured');
   }
 
   // Для Instagram DM добавляем destination_type и promoted_object
