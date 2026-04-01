@@ -945,6 +945,29 @@ async function fetchInsightsPreset(adAccountId, accessToken, datePreset) {
   return fbGet(url.toString());
 }
 
+// Запрос по явной дате (включает PAUSED адсеты, в отличие от date_preset: 'yesterday')
+async function fetchInsightsForDate(adAccountId, accessToken, dateStr) {
+  const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/insights`);
+  url.searchParams.set('fields','campaign_name,campaign_id,adset_name,adset_id,spend,actions,cpm,ctr,impressions,frequency');
+  url.searchParams.set('time_range', JSON.stringify({ since: dateStr, until: dateStr }));
+  url.searchParams.set('level','adset');
+  url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+  return fbGet(url.toString());
+}
+
+async function fetchCampaignInsightsForDate(adAccountId, accessToken, dateStr) {
+  const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/insights`);
+  url.searchParams.set('fields','campaign_name,campaign_id,spend,actions,cpm,ctr,impressions,frequency');
+  url.searchParams.set('time_range', JSON.stringify({ since: dateStr, until: dateStr }));
+  url.searchParams.set('level','campaign');
+  url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+  return fbGet(url.toString());
+}
+
 async function fetchAdLevelInsightsPreset(adAccountId, accessToken, datePreset) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/insights`);
   url.searchParams.set('fields','ad_name,ad_id,adset_id,spend,actions,impressions');
@@ -3663,15 +3686,19 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }, `FB API data: ${adsetsCount} adsets`);
 
     const date = new Date().toISOString().slice(0,10);
+    // Вычисляем вчерашнюю дату явно — надёжнее чем date_preset:'yesterday' для PAUSED адсетов
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
     // Детализация по окнам и HS/решениям (детерминированная логика v1.2)
     const [yRows, d3Rows, d7Rows, d30Rows, todayRows, adRowsY, campY, camp3, camp7, camp30, campT, campList] = await Promise.all([
-      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'yesterday').then(r=>r.data||[]).catch(()=>[]),
+      fetchInsightsForDate(ua.ad_account_id, ua.access_token, yesterdayStr).then(r=>r.data||[]).catch(()=>[]),
       fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_3d').then(r=>r.data||[]).catch(()=>[]),
       fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_7d').then(r=>r.data||[]).catch(()=>[]),
       fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_30d').then(r=>r.data||[]).catch(()=>[]),
       fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'today').then(r=>r.data||[]).catch(()=>[]),
       fetchAdLevelInsightsPreset(ua.ad_account_id, ua.access_token, 'yesterday').then(r=>r.data||[]).catch(()=>[]),
-      fetchCampaignInsightsPreset(ua.ad_account_id, ua.access_token, 'yesterday').then(r=>r.data||[]).catch(()=>[]),
+      fetchCampaignInsightsForDate(ua.ad_account_id, ua.access_token, yesterdayStr).then(r=>r.data||[]).catch(()=>[]),
       fetchCampaignInsightsPreset(ua.ad_account_id, ua.access_token, 'last_3d').then(r=>r.data||[]).catch(()=>[]),
       fetchCampaignInsightsPreset(ua.ad_account_id, ua.access_token, 'last_7d').then(r=>r.data||[]).catch(()=>[]),
       fetchCampaignInsightsPreset(ua.ad_account_id, ua.access_token, 'last_30d').then(r=>r.data||[]).catch(()=>[]),
@@ -3862,20 +3889,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // Берем максимум (на случай если на одном уровне данные есть, на другом нет)
     const totalYesterdaySpend = Math.max(totalYesterdaySpendCampaigns, totalYesterdaySpendAdsets);
     
+    // Все adsets с расходами вчера — независимо от текущего статуса (для отчёта)
     const adsetsWithYesterdayResults = adsetList.filter(as => {
-      // Только АКТИВНЫЕ adsets с затратами вчера
-      if (as.effective_status !== 'ACTIVE') return false;
       const yesterdayData = byY.get(as.id)||{};
-      const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
-      return hasResults;
+      return (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
     });
-    
-    // Все adsets с затратами за вчера (независимо от статуса) - для отчета
-    const allAdsetsWithYesterdaySpend = adsetList.filter(as => {
-      const yesterdayData = byY.get(as.id)||{};
-      const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
-      return hasResults;
-    });
+
+    // Только АКТИВНЫЕ adsets с расходами вчера — для принятия решений (изменения бюджетов)
+    const activeAdsetsForActions = adsetsWithYesterdayResults.filter(as => as.effective_status === 'ACTIVE');
+
+    // Все adsets с затратами за вчера (независимо от статуса) - для отчета (алиас для совместимости)
+    const allAdsetsWithYesterdaySpend = adsetsWithYesterdayResults;
     
     fastify.log.info({
       where: 'brain_run',
@@ -3984,7 +4008,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // Причины для report-only mode:
     // 1. Задолженность в кабинете (account_status != 1)
     // 2. Были затраты, но все кампании неактивны
-    const campaignsInactive = adsetsWithYesterdayResults.length === 0 && totalYesterdaySpend > 0;
+    const campaignsInactive = activeAdsetsForActions.length === 0 && totalYesterdaySpend > 0;
     const reportOnlyMode = accountHasDebt || campaignsInactive;
     const reportOnlyReason = accountHasDebt ? 'account_debt' : (campaignsInactive ? 'campaigns_inactive' : null);
     
@@ -4002,7 +4026,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       });
     }
     
-    for (const as of adsetsWithYesterdayResults) {
+    for (const as of activeAdsetsForActions) {
       const id = as.id;
       const windows = { y: byY.get(id)||{}, d3: by3.get(id)||{}, d7: by7.get(id)||{}, d30: by30.get(id)||{}, today: byToday.get(id)||{} };
       const hs = computeHealthScoreForAdset({ weights, classes, targets, windows, peers });
