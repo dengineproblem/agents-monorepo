@@ -1,7 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import multipart from '@fastify/multipart';
-import { createWriteStream, promises as fs } from 'fs';
-import { randomUUID } from 'crypto';
+import { createWriteStream, createReadStream, promises as fs } from 'fs';
+import { randomUUID, createHash } from 'crypto';
 import { pipeline } from 'stream/promises';
 import path from 'path';
 import { z } from 'zod';
@@ -36,6 +36,14 @@ const ProcessVideoSchema = z.object({
 
 type ProcessVideoBody = z.infer<typeof ProcessVideoSchema>;
 
+async function computeFileHash(filePath: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest('hex');
+}
+
 function normalizeAdAccountId(adAccountId: string): string {
   if (!adAccountId) return '';
   const id = String(adAccountId).trim();
@@ -67,7 +75,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           
           // Потоковая запись на диск (без загрузки в память!)
           await pipeline(part.file, createWriteStream(videoPath));
-          
+
           app.log.info(`Video saved to disk: ${videoPath}`);
         } else if (part.type === 'field') {
           (bodyData as any)[part.fieldname] = part.value;
@@ -80,6 +88,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           error: 'Video file is required'
         });
       }
+
+      const fileHash = await computeFileHash(videoPath);
+      app.log.info({ fileHash }, 'File hash computed');
 
       const body = ProcessVideoSchema.parse(bodyData);
 
@@ -220,7 +231,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           status: 'processing',
           direction_id: body.direction_id || null, // Сохраняем direction_id (null для legacy)
           creative_group_id: creativeGroupId, // Cross-platform sync
-          media_type: 'video' // Явно указываем тип медиа
+          media_type: 'video', // Явно указываем тип медиа
+          file_hash: fileHash
         })
         .select()
         .single();
@@ -229,20 +241,41 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         throw new Error(`Failed to create creative record: ${creativeError?.message}`);
       }
 
-      app.log.info(`Creative record created: ${creative.id}, uploading to Facebook...`);
+      app.log.info(`Creative record created: ${creative.id}, checking for duplicate video...`);
 
-      // ОПТИМИЗАЦИЯ: Передаём путь к файлу вместо буфера.
-      // uploadVideo() читает файл потоком напрямую, без загрузки в память.
-      // Это экономит до 500MB RAM на каждую загрузку.
-      const videoStats = await fs.stat(videoPath);
-      app.log.info(`Video file size: ${Math.round(videoStats.size / 1024 / 1024)}MB, uploading to Facebook (streaming mode)...`);
+      // Дедупликация: ищем уже загруженное видео с таким же хэшем для этого аккаунта
+      let deduplicateQuery = supabase
+        .from('user_creatives')
+        .select('fb_video_id')
+        .eq('user_id', body.user_id)
+        .eq('file_hash', fileHash)
+        .eq('status', 'ready')
+        .not('fb_video_id', 'is', null)
+        .neq('id', creative.id);
 
-      const fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoPath);
+      if (body.account_id) {
+        deduplicateQuery = deduplicateQuery.eq('account_id', body.account_id);
+      }
 
-      app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, waiting for processing...`);
+      const { data: existingVideoCreative } = await deduplicateQuery.maybeSingle();
 
-      // Ждем 3 секунды, чтобы Facebook обработал видео
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      let fbVideo: { id: string };
+
+      if (existingVideoCreative?.fb_video_id) {
+        // Видео уже есть на Facebook — переиспользуем fb_video_id
+        fbVideo = { id: existingVideoCreative.fb_video_id };
+        app.log.info({ reusedVideoId: fbVideo.id, fileHash }, 'Deduplication: reusing existing Facebook video, skipping upload');
+      } else {
+        // Новое видео — загружаем на Facebook
+        const videoStats = await fs.stat(videoPath);
+        app.log.info(`Video file size: ${Math.round(videoStats.size / 1024 / 1024)}MB, uploading to Facebook (streaming mode)...`);
+
+        fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoPath);
+        app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, waiting for processing...`);
+
+        // Ждем 3 секунды, чтобы Facebook обработал видео
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
 
       // Извлекаем первый кадр видео для обложки
       app.log.info('Extracting thumbnail from first frame...');

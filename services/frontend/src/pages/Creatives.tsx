@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Download, Zap, Instagram, Rocket } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Download, Zap, Instagram, Rocket, Link2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { type MultiAdSetLaunchResponse } from "@/services/manualLaunchApi";
 import { ManualLaunchDialog } from "@/components/ManualLaunchDialog";
@@ -1483,6 +1483,30 @@ const Creatives: React.FC = () => {
     setSelectedDirectionId('');
   }, [currentAdAccountId]);
 
+  // Состояние модалки "Добавить в направление"
+  const [assignDirCreativeId, setAssignDirCreativeId] = useState<string | null>(null);
+  const [assignDirTargetId, setAssignDirTargetId] = useState('');
+  const [assignDirLoading, setAssignDirLoading] = useState(false);
+  const assignDirCreative = useMemo(() => items.find(i => i.id === assignDirCreativeId), [items, assignDirCreativeId]);
+
+  const handleAssignDirection = async () => {
+    if (!assignDirCreativeId || !assignDirTargetId) return;
+    setAssignDirLoading(true);
+    try {
+      const result = await creativesApi.assignToDirection(assignDirCreativeId, assignDirTargetId, currentAdAccountId);
+      if (result.success) {
+        toast.success('Креатив добавлен в направление');
+        setAssignDirCreativeId(null);
+        setAssignDirTargetId('');
+        await reload();
+      } else {
+        toast.error(result.error || 'Ошибка при привязке к направлению');
+      }
+    } finally {
+      setAssignDirLoading(false);
+    }
+  };
+
   // Автоматически выбираем первое направление если ничего не выбрано
   useEffect(() => {
     if (!directionsLoading && directions.length > 0 && !selectedDirectionId) {
@@ -2141,6 +2165,17 @@ const Creatives: React.FC = () => {
                         imageUrl={it.image_url}
                         carouselData={it.carousel_data}
                       />
+                      {it.media_type === 'video' && it.fb_video_id && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => { setAssignDirCreativeId(it.id); setAssignDirTargetId(''); }}
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                          Добавить в направление
+                        </Button>
+                      )}
                     </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -2151,6 +2186,48 @@ const Creatives: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Модалка: Добавить видео-креатив в другое направление */}
+        <Dialog open={!!assignDirCreativeId} onOpenChange={(open) => { if (!open) setAssignDirCreativeId(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Добавить в направление</DialogTitle>
+              <DialogDescription>
+                Видео уже загружено — будет создан новый FB-креатив с нужным objective.
+                {assignDirCreative?.direction_id && (
+                  <span className="block mt-1 text-xs">
+                    Текущее направление: <span className="font-medium">{directions.find(d => d.id === assignDirCreative.direction_id)?.name ?? 'неизвестно'}</span>
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <Select value={assignDirTargetId} onValueChange={setAssignDirTargetId} disabled={assignDirLoading}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Выберите направление" />
+                </SelectTrigger>
+                <SelectContent>
+                  {directions
+                    .filter(d => d.platform !== 'tiktok' && d.id !== assignDirCreative?.direction_id)
+                    .map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name} ({getDirectionObjectiveLabel(d)})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setAssignDirCreativeId(null)} disabled={assignDirLoading}>
+                Отмена
+              </Button>
+              <Button onClick={handleAssignDirection} disabled={!assignDirTargetId || assignDirLoading}>
+                {assignDirLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Добавить
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Модальное окно для Manual Launch (multi-adset) */}
         <ManualLaunchDialog

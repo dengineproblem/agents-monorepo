@@ -21,6 +21,7 @@ import {
   X,
   FileText,
   Music,
+  Video,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -155,6 +156,23 @@ function MessageContent({ msg }: { msg: ChatMessage }) {
         </div>
       )}
 
+      {/* VIDEO MESSAGE */}
+      {msg.media_type === 'video' && msg.media_url && (
+        <div className="space-y-2">
+          <video
+            controls
+            className="rounded-lg max-w-sm w-full"
+            preload="metadata"
+          >
+            <source src={msg.media_url} />
+            Ваш браузер не поддерживает видео
+          </video>
+          {msg.message && (
+            <p className="text-sm whitespace-pre-wrap break-words mt-1">{msg.message}</p>
+          )}
+        </div>
+      )}
+
       {/* TEXT MESSAGE */}
       {(!msg.media_type || msg.media_type === 'text') && msg.message && (
         <p className="text-sm whitespace-pre-wrap break-words">
@@ -188,6 +206,8 @@ function AttachmentPreview({
         <div className="h-16 w-16 rounded border flex items-center justify-center bg-muted">
           {file.type.startsWith('audio/') ? (
             <Music className="h-6 w-6 text-muted-foreground" />
+          ) : file.type.startsWith('video/') ? (
+            <Video className="h-6 w-6 text-muted-foreground" />
           ) : (
             <FileText className="h-6 w-6 text-muted-foreground" />
           )}
@@ -204,7 +224,7 @@ function AttachmentPreview({
   );
 }
 
-const FILE_ACCEPT = 'image/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt';
+const FILE_ACCEPT = 'image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt';
 
 const AdminChats: React.FC = () => {
   const { userId } = useParams();

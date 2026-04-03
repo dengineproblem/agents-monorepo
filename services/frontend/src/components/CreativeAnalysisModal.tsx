@@ -212,7 +212,7 @@ export const CreativeAnalysisModal: React.FC<CreativeAnalysisModalProps> = ({
     setDirectionsLoading(true);
     try {
       const data = await directionsApi.list(userId, accountId, 'facebook');
-      setDirections(data);
+      setDirections(data.directions);
     } catch (err) {
       console.error('Ошибка загрузки направлений:', err);
       setError('Не удалось загрузить направления');

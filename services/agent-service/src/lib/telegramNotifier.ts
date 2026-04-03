@@ -18,7 +18,7 @@ interface TelegramResponse {
   };
 }
 
-type MediaType = 'photo' | 'document' | 'voice' | 'audio';
+type MediaType = 'photo' | 'document' | 'voice' | 'audio' | 'video';
 
 interface SendMediaOptions {
   caption?: string;
@@ -328,6 +328,28 @@ export async function sendTelegramDocument(
 }
 
 /**
+ * Отправляет видео в Telegram
+ */
+export async function sendTelegramVideo(
+  chatId: string | number,
+  buffer: Buffer,
+  options: SendMediaOptions = {},
+  botToken?: string
+): Promise<TelegramResponse> {
+  const apiUrl = botToken ? `https://api.telegram.org/bot${botToken}` : TELEGRAM_API_URL;
+  const formData = new FormData();
+  formData.append('chat_id', String(chatId));
+  formData.append('video', new Blob([new Uint8Array(buffer)], { type: options.contentType || 'video/mp4' }), options.filename || 'video.mp4');
+  if (options.caption) {
+    formData.append('caption', options.caption);
+    formData.append('parse_mode', 'HTML');
+  }
+
+  const response = await fetch(`${apiUrl}/sendVideo`, { method: 'POST', body: formData });
+  return response.json() as Promise<TelegramResponse>;
+}
+
+/**
  * Отправляет голосовое сообщение в Telegram
  */
 export async function sendTelegramVoice(
@@ -363,6 +385,8 @@ export async function sendTelegramMedia(
   switch (mediaType) {
     case 'photo':
       return sendTelegramPhoto(chatId, buffer, options, botToken);
+    case 'video':
+      return sendTelegramVideo(chatId, buffer, options, botToken);
     case 'voice':
       return sendTelegramVoice(chatId, buffer, options, botToken);
     case 'audio':

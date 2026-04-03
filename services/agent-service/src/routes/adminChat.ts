@@ -40,8 +40,9 @@ interface SendMessageBody {
 }
 
 /** Определяет media_type по MIME type файла */
-function detectMediaType(mimeType: string): 'photo' | 'document' | 'voice' | 'audio' {
+function detectMediaType(mimeType: string): 'photo' | 'document' | 'voice' | 'audio' | 'video' {
   if (mimeType.startsWith('image/')) return 'photo';
+  if (mimeType.startsWith('video/')) return 'video';
   if (mimeType === 'audio/ogg' || mimeType === 'audio/webm') return 'voice';
   if (mimeType.startsWith('audio/')) return 'audio';
   return 'document';

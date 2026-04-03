@@ -99,7 +99,7 @@ export interface CompetitorCreativeData {
 export function extractInstagramHandle(url: string): string | null {
   if (!url) return null;
   const trimmed = url.trim();
-  const urlPatterns = [/instagram\.com\/([a-z0-9._]+)\/?$/i];
+  const urlPatterns = [/instagram\.com\/([a-z0-9._]+)[\/\?]?/i];
   for (const pattern of urlPatterns) {
     const match = trimmed.match(pattern);
     if (match && match[1]) return match[1];
@@ -505,6 +505,13 @@ export async function searchPageByInstagram(
     if (matched.length > 0) {
       log.info({ igHandle: cleanHandle, strategy: strategy.label, matchedPages: matched.map(p => `${p.page_name} (${p.page_id})`) }, 'Найдены совпадающие страницы');
       return matched.map(({ matchScore, ...rest }) => rest);
+    }
+
+    // Fallback: если найдена ровно 1 страница — скорее всего это и есть нужный аккаунт
+    // (страница активно рекламируется по этому handle как keyword)
+    if (allPages.length === 1) {
+      log.info({ igHandle: cleanHandle, strategy: strategy.label, page: allPages[0].page_name }, 'Единственная страница — принимаем как совпадение');
+      return allPages.map(({ matchScore, ...rest }) => rest);
     }
   }
 

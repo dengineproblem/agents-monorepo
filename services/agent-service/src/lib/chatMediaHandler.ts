@@ -116,8 +116,32 @@ async function downloadTelegramFile(filePath: string, botToken: string): Promise
 // Supabase Storage
 // =====================================================
 
+const ALLOWED_MIME_TYPES = [
+  'audio/ogg',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/wav',
+  'audio/webm',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'video/mp4',
+  'video/quicktime',
+  'video/webm',
+  'video/x-msvideo',
+  'video/mpeg',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+  'text/plain',
+];
+
 /**
- * Создаёт bucket 'chat-media' если не существует (ленивая инициализация)
+ * Создаёт или обновляет bucket 'chat-media' (ленивая инициализация)
  */
 async function ensureChatMediaBucketExists(): Promise<void> {
   try {
@@ -129,30 +153,24 @@ async function ensureChatMediaBucketExists(): Promise<void> {
       const { error } = await supabase.storage.createBucket(BUCKET_NAME, {
         public: true,
         fileSizeLimit: MAX_FILE_SIZE_BYTES,
-        allowedMimeTypes: [
-          'audio/ogg',
-          'audio/mpeg',
-          'audio/mp4',
-          'audio/wav',
-          'audio/webm',
-          'image/jpeg',
-          'image/png',
-          'image/webp',
-          'image/gif',
-          'application/pdf',
-          'application/msword',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'application/zip',
-          'text/plain',
-        ],
+        allowedMimeTypes: ALLOWED_MIME_TYPES,
       });
 
       if (error && !error.message.includes('already exists')) {
         log.error({ error: error.message }, `Failed to create bucket ${BUCKET_NAME}`);
       } else {
         log.info(`Bucket "${BUCKET_NAME}" created successfully`);
+      }
+    } else {
+      // Обновляем allowedMimeTypes на случай если bucket создан со старыми ограничениями
+      const { error } = await supabase.storage.updateBucket(BUCKET_NAME, {
+        public: true,
+        fileSizeLimit: MAX_FILE_SIZE_BYTES,
+        allowedMimeTypes: ALLOWED_MIME_TYPES,
+      });
+
+      if (error) {
+        log.warn({ error: error.message }, `Failed to update bucket ${BUCKET_NAME} MIME types`);
       }
     }
   } catch (err) {
@@ -178,6 +196,15 @@ function getFileExtension(contentType: string, mediaType: string): string {
     if (contentType.includes('webp')) return 'webp';
     if (contentType.includes('gif')) return 'gif';
     return 'jpg';
+  }
+
+  if (mediaType === 'video') {
+    if (contentType.includes('mp4')) return 'mp4';
+    if (contentType.includes('quicktime')) return 'mov';
+    if (contentType.includes('webm')) return 'webm';
+    if (contentType.includes('avi') || contentType.includes('msvideo')) return 'avi';
+    if (contentType.includes('mpeg')) return 'mpeg';
+    return 'mp4';
   }
 
   if (mediaType === 'document') {

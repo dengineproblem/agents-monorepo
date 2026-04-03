@@ -637,17 +637,68 @@ API ключ автоматически привязывается к `user_acco
 
 ## AI Bot конфигурации
 
-### GET /ai-bot-configurations
+### GET /ai-bots
+Список ботов.
+
 **Query:** `userAccountId`, `instanceName?`
 
-### POST /ai-bot-configurations
-Создать конфигурацию бота.
+### GET /ai-bots/:botId
+Получить бота по ID.
 
-### PATCH /ai-bot-configurations/:id
-Обновить конфигурацию.
+**Response:**
+```json
+{
+  "id": "uuid",
+  "system_prompt": "string",
+  "model": "string",
+  "temperature": 0.7,
+  "max_tokens": 500,
+  "booking_behavior": {
+    "auto_use_pushname": true,
+    "pushname_fallback_timeout_sec": 300
+  }
+}
+```
 
-### DELETE /ai-bot-configurations/:id
-Удалить конфигурацию.
+### POST /ai-bots
+Создать бота.
+
+### PUT /ai-bots/:botId
+Обновить промпт и настройки.
+
+**Body (все поля опциональны):**
+```json
+{
+  "system_prompt": "string",
+  "model": "string",
+  "temperature": 0.7,
+  "max_tokens": 500
+}
+```
+
+### DELETE /ai-bots/:botId
+Удалить бота.
+
+### POST /ai-bots/:botId/duplicate
+Дублировать бота.
+
+### PATCH /ai-bots/:botId/toggle
+Вкл/выкл бота.
+
+### GET /ai-bots/:botId/functions
+Список функций бота.
+
+### POST /ai-bots/:botId/functions
+Добавить функцию.
+
+### PUT /ai-bots/:botId/functions/:functionId
+Обновить функцию.
+
+### DELETE /ai-bots/:botId/functions/:functionId
+Удалить функцию.
+
+### GET /ai-bots/:botId/linked-instances
+Привязанные WhatsApp инстансы.
 
 ---
 

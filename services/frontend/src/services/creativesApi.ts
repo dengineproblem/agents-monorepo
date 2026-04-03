@@ -711,6 +711,28 @@ export const creativesApi = {
   },
 
   /**
+   * Привязать существующий видео-креатив к другому направлению.
+   * Переиспользует fb_video_id, создаёт новый fb_creative_id под objective нового направления.
+   */
+  async assignToDirection(creativeId: string, targetDirectionId: string, accountId?: string | null): Promise<{ success: boolean; creative_id?: string; error?: string }> {
+    const userId = getUserId();
+    if (!userId) return { success: false, error: 'Not authenticated' };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/user-creatives/${creativeId}/assign-direction`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_direction_id: targetDirectionId, account_id: accountId }),
+      });
+      const data = await response.json();
+      if (!response.ok) return { success: false, error: data.error || 'Unknown error' };
+      return { success: true, creative_id: data.creative_id };
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
    * Проверяет статус импортированных креативов
    */
   async getImportedCreativesStatus(accountId?: string | null): Promise<{
