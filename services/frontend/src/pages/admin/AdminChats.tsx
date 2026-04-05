@@ -871,7 +871,13 @@ const MoltbotChat: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingCancelledRef = useRef(false);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -889,6 +895,83 @@ const MoltbotChat: React.FC = () => {
     if (attachedPreview) URL.revokeObjectURL(attachedPreview);
     setAttachedFile(null);
     setAttachedPreview(null);
+  };
+
+  const startVoiceRecording = async () => {
+    if (attachedFile || isRecording || sending) return;
+    recordingCancelledRef.current = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : 'audio/webm;codecs=opus';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      const targetUserId = selectedUser?.id;
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        setRecordingSeconds(0);
+        if (recordingCancelledRef.current || !targetUserId) return;
+        const allChunks = audioChunksRef.current.filter((c) => c.size > 0);
+        if (!allChunks.length) return;
+        const normalizedType = mimeType.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm';
+        const ext = normalizedType === 'audio/ogg' ? 'ogg' : 'webm';
+        const blob = new Blob(allChunks, { type: normalizedType });
+        const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: normalizedType });
+        setSending(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const res = await fetch(`${API_BASE_URL}/admin/moltbot/chats/${targetUserId}/media`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: formData,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setMessages((prev) => [...prev, data.message]);
+          }
+        } catch (err) {
+          console.error('Error sending voice:', err);
+        } finally {
+          setSending(false);
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } catch {
+      // нет доступа к микрофону
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    recordingCancelledRef.current = true;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    }
   };
 
   // Fetch users with messages from support bot
@@ -1227,22 +1310,46 @@ const MoltbotChat: React.FC = () => {
                 size="icon"
                 className="shrink-0"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={sending || !selectedUser.telegram_id}
+                disabled={sending || !selectedUser.telegram_id || isRecording}
               >
                 <Paperclip className="h-4 w-4" />
               </Button>
-              <Textarea
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
-                disabled={sending || !selectedUser.telegram_id}
-                className="resize-none min-h-[60px]"
-                rows={2}
-              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('shrink-0', isRecording && 'text-red-500')}
+                onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+                disabled={sending || !selectedUser.telegram_id || !!attachedFile}
+              >
+                <Mic className={cn('h-4 w-4', isRecording && 'animate-pulse')} />
+              </Button>
+              {isRecording ? (
+                <div className="flex-1 flex items-center gap-2 px-3 rounded-md border bg-background min-h-[60px]">
+                  <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-sm text-red-500 flex-1">Запись… {recordingSeconds}с</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={cancelVoiceRecording}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Textarea
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
+                  disabled={sending || !selectedUser.telegram_id}
+                  className="resize-none min-h-[60px]"
+                  rows={2}
+                />
+              )}
               <Button
                 onClick={handleSendMessage}
-                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id}
+                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id || isRecording}
                 className="shrink-0"
               >
                 {sending ? (
