@@ -204,7 +204,9 @@ function AttachmentPreview({
         <img src={preview} className="h-16 w-16 object-cover rounded border" alt="Preview" />
       ) : (
         <div className="h-16 w-16 rounded border flex items-center justify-center bg-muted">
-          {file.type.startsWith('audio/') ? (
+          {file.name.startsWith('voice_') ? (
+            <Mic className="h-6 w-6 text-muted-foreground" />
+          ) : file.type.startsWith('audio/') ? (
             <Music className="h-6 w-6 text-muted-foreground" />
           ) : file.type.startsWith('video/') ? (
             <Video className="h-6 w-6 text-muted-foreground" />
@@ -214,7 +216,9 @@ function AttachmentPreview({
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{file.name}</p>
+        <p className="text-sm font-medium truncate">
+            {file.name.startsWith('voice_') ? 'Голосовое сообщение' : file.name}
+          </p>
         <p className="text-xs text-muted-foreground">{formatFileSize(file.size)}</p>
       </div>
       <Button variant="ghost" size="icon" onClick={onRemove} className="shrink-0">
@@ -244,7 +248,13 @@ const AdminChats: React.FC = () => {
   const [currentOffset, setCurrentOffset] = useState(0);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingCancelledRef = useRef(false);
   const PAGE_SIZE = 20;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,6 +274,95 @@ const AdminChats: React.FC = () => {
     if (attachedPreview) URL.revokeObjectURL(attachedPreview);
     setAttachedFile(null);
     setAttachedPreview(null);
+  };
+
+  const startVoiceRecording = async () => {
+    if (attachedFile || isRecording || sending) return;
+    recordingCancelledRef.current = false;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+        ? 'audio/ogg;codecs=opus'
+        : 'audio/webm;codecs=opus';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      // Захватываем userId в момент начала записи — без stale closure
+      const targetUserId = selectedUser?.id;
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        // Чистим интервал здесь — гарантируем что он остановится
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        setRecordingSeconds(0);
+
+        if (recordingCancelledRef.current || !targetUserId) return;
+        // Собираем все чанки в один blob (включая финальный от stop())
+        const allChunks = audioChunksRef.current.filter((c) => c.size > 0);
+        if (!allChunks.length) return;
+
+        const normalizedType = mimeType.startsWith('audio/ogg') ? 'audio/ogg' : 'audio/webm';
+        const ext = normalizedType === 'audio/ogg' ? 'ogg' : 'webm';
+        const blob = new Blob(allChunks, { type: normalizedType });
+        const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: normalizedType });
+
+        // Автоматически отправляем
+        setSending(true);
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          const res = await fetch(`${API_BASE_URL}/admin/chats/${targetUserId}/media`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: formData,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setMessages((prev) => [...prev, data.message]);
+          }
+        } catch (err) {
+          console.error('Error sending voice:', err);
+        } finally {
+          setSending(false);
+        }
+      };
+
+      // Без timeslice — весь аудио накапливается в одном чанке при stop()
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } catch {
+      // нет доступа к микрофону
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    recordingCancelledRef.current = true;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    }
   };
 
   // Fetch user by ID (for direct URL navigation to users not in list)
@@ -692,22 +791,46 @@ const AdminChats: React.FC = () => {
                 size="icon"
                 className="shrink-0"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={sending || !selectedUser.telegram_id}
+                disabled={sending || !selectedUser.telegram_id || isRecording}
               >
                 <Paperclip className="h-4 w-4" />
               </Button>
-              <Textarea
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
-                disabled={sending || !selectedUser.telegram_id}
-                className="resize-none min-h-[60px]"
-                rows={2}
-              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn('shrink-0', isRecording && 'text-red-500')}
+                onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+                disabled={sending || !selectedUser.telegram_id || !!attachedFile}
+              >
+                <Mic className={cn('h-4 w-4', isRecording && 'animate-pulse')} />
+              </Button>
+              {isRecording ? (
+                <div className="flex-1 flex items-center gap-2 px-3 rounded-md border bg-background min-h-[60px]">
+                  <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-sm text-red-500 flex-1">Запись… {recordingSeconds}с</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    onClick={cancelVoiceRecording}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Textarea
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={attachedFile ? 'Подпись (необязательно)...' : 'Написать сообщение...'}
+                  disabled={sending || !selectedUser.telegram_id}
+                  className="resize-none min-h-[60px]"
+                  rows={2}
+                />
+              )}
               <Button
                 onClick={handleSendMessage}
-                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id}
+                disabled={(!newMessage.trim() && !attachedFile) || sending || !selectedUser.telegram_id || isRecording}
                 className="shrink-0"
               >
                 {sending ? (

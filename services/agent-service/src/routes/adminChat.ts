@@ -11,6 +11,7 @@
 
 import { FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
+import { spawn } from 'child_process';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { sendTelegramNotification, sendTelegramMedia } from '../lib/telegramNotifier.js';
@@ -39,11 +40,33 @@ interface SendMessageBody {
   message: string;
 }
 
+/** Конвертирует аудио в OGG Opus через ffmpeg (pipe) */
+async function convertToOggOpus(buffer: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const proc = spawn('ffmpeg', [
+      '-i', 'pipe:0',
+      '-c:a', 'libopus',
+      '-b:a', '64k',
+      '-f', 'ogg',
+      'pipe:1',
+      '-y',
+    ]);
+    proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    proc.on('close', (code) => {
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+    proc.on('error', reject);
+    proc.stdin.end(buffer);
+  });
+}
+
 /** Определяет media_type по MIME type файла */
 function detectMediaType(mimeType: string): 'photo' | 'document' | 'voice' | 'audio' | 'video' {
   if (mimeType.startsWith('image/')) return 'photo';
   if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType === 'audio/ogg' || mimeType === 'audio/webm') return 'voice';
+  if (mimeType.startsWith('audio/ogg') || mimeType.startsWith('audio/webm')) return 'voice';
   if (mimeType.startsWith('audio/')) return 'audio';
   return 'document';
 }
@@ -112,11 +135,27 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         return res.status(500).send({ error: 'Failed to upload file to storage' });
       }
 
+      // Для голосовых WebM конвертируем в OGG Opus (Telegram принимает только OGG/MP3/M4A)
+      let telegramBuffer = fileBuffer;
+      let telegramContentType = fileMimeType;
+      let telegramFileName = fileName;
+      if (mediaType === 'voice' && fileMimeType.startsWith('audio/webm')) {
+        try {
+          telegramBuffer = await convertToOggOpus(fileBuffer);
+          telegramContentType = 'audio/ogg';
+          telegramFileName = fileName.replace(/\.webm$/, '.ogg');
+          log.info({ userId }, 'Voice converted from WebM to OGG for Telegram');
+        } catch (convErr: any) {
+          log.warn({ userId, err: convErr.message }, 'Failed to convert voice, sending as-is');
+        }
+      }
+
       // Отправляем в Telegram
-      const telegramResult = await sendTelegramMedia(user.telegram_id, fileBuffer, mediaType, {
+      log.info({ userId, telegram_id: user.telegram_id, telegram_id_type: typeof user.telegram_id, mediaType }, 'Sending media to Telegram');
+      const telegramResult = await sendTelegramMedia(user.telegram_id, telegramBuffer, mediaType, {
         caption: caption || undefined,
-        filename: fileName,
-        contentType: fileMimeType,
+        filename: telegramFileName,
+        contentType: telegramContentType,
       });
 
       if (!telegramResult.ok) {
