@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { processVideoTranscription, extractVideoThumbnail } from '../lib/transcription.js';
 import {
+  graph,
   uploadVideo,
   uploadImage,
   createWhatsAppCreative,
@@ -59,6 +60,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/process-video', async (request, reply) => {
     let videoPath: string | null = null;
+    let backgroundTranscriptionStarted = false;
 
     try {
       const parts = request.parts();
@@ -196,20 +198,6 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         token_preview: ACCESS_TOKEN.substring(0, 30)
       });
 
-      app.log.info('Starting transcription...');
-
-      let transcription;
-      try {
-        transcription = await processVideoTranscription(videoPath, body.language);
-        app.log.info('Transcription completed successfully');
-      } catch (transcriptionError: any) {
-        app.log.warn(`Transcription failed: ${transcriptionError.message}, continuing without transcript`);
-        transcription = {
-          text: 'Транскрипция недоступна',
-          language: body.language
-        };
-      }
-
       app.log.info('Creating creative record...');
 
       // Generate creative_group_id if not provided (for cross-platform sync)
@@ -273,18 +261,113 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoPath);
         app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, waiting for processing...`);
 
-        // Ждем 3 секунды, чтобы Facebook обработал видео
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        // Ждём обработки видео Facebook (polling статуса, макс 30 сек)
+        const pollMaxMs = 30_000;
+        const pollIntervalMs = 1_000;
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < pollMaxMs) {
+          try {
+            const videoStatus = await graph('GET', fbVideo.id, ACCESS_TOKEN, { fields: 'status' });
+            const status = videoStatus?.status?.video_status;
+            if (status === 'ready') break;
+            if (status === 'error') {
+              app.log.warn({ videoId: fbVideo.id }, 'Facebook video processing error, continuing anyway');
+              break;
+            }
+          } catch (err: any) {
+            app.log.warn({ err: err.message }, 'Error checking video status, continuing');
+            break;
+          }
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+        }
       }
 
-      // Извлекаем первый кадр видео для обложки
-      app.log.info('Extracting thumbnail from first frame...');
-      const thumbnailBuffer = await extractVideoThumbnail(videoPath);
+      // Параллельно: извлекаем thumbnail и загружаем настройки направления
+      app.log.info('Extracting thumbnail and loading direction settings in parallel...');
+
+      const [thumbnailBuffer, directionSettings] = await Promise.all([
+        extractVideoThumbnail(videoPath),
+        (async () => {
+          // ===================================================
+          // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
+          // ===================================================
+          let description = 'Напишите нам, чтобы узнать подробности';
+          let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
+          let siteUrl = null;
+          let utm = null;
+          let leadFormId: string | null = null;
+          let appStoreUrl: string | null = null;
+          let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
+          let direction: any = null; // для доступа к conversion_channel
+
+          if (body.direction_id) {
+            // Загружаем direction для получения objective и conversion_channel
+            const { data: directionData } = await supabase
+              .from('account_directions')
+              .select('objective, platform, conversion_channel, cta_type')
+              .eq('id', body.direction_id)
+              .maybeSingle();
+
+            direction = directionData;
+
+            if (direction?.objective) {
+              objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
+              app.log.info({ direction_id: body.direction_id, objective, conversion_channel: direction.conversion_channel }, 'Loaded objective from direction');
+            }
+
+            // Загружаем настройки из default_ad_settings
+            const { data: defaultSettings } = await supabase
+              .from('default_ad_settings')
+              .select('*')
+              .eq('direction_id', body.direction_id)
+              .maybeSingle();
+
+            if (defaultSettings) {
+              description = defaultSettings.description || description;
+              clientQuestions = defaultSettings.client_questions?.length
+                ? defaultSettings.client_questions
+                : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
+              siteUrl = defaultSettings.site_url;
+              utm = defaultSettings.utm_tag;
+              leadFormId = defaultSettings.lead_form_id;
+              appStoreUrl = defaultSettings.app_store_url || null;
+
+              app.log.info({
+                direction_id: body.direction_id,
+                objective,
+                description,
+                clientQuestions,
+                siteUrl,
+                utm,
+                hasAppStoreUrl: Boolean(appStoreUrl)
+              }, 'Using settings from direction for video creative');
+            } else {
+              app.log.warn({
+                direction_id: body.direction_id
+              }, 'No default settings found for direction, using fallback');
+            }
+          } else {
+            app.log.warn('No direction_id provided for video, using fallback settings');
+          }
+
+          return { description, clientQuestions, siteUrl, utm, leadFormId, appStoreUrl, objective, direction };
+        })()
+      ]);
+
+      const { description, clientQuestions, siteUrl, utm, leadFormId, appStoreUrl, objective, direction } = directionSettings;
+
+      // Проверяем TikTok direction (после параллельной загрузки)
+      if (direction?.platform === 'tiktok') {
+        return reply.status(400).send({
+          success: false,
+          error: 'TikTok directions are not supported for Facebook video creatives'
+        });
+      }
 
       app.log.info('Uploading thumbnail to Facebook...');
       const thumbnailResult = await uploadImage(normalizedAdAccountId, ACCESS_TOKEN, thumbnailBuffer);
-      
-      app.log.info(`Thumbnail uploaded with hash: ${thumbnailResult.hash}, loading direction settings...`);
+
+      app.log.info(`Thumbnail uploaded with hash: ${thumbnailResult.hash}, saving to Supabase Storage...`);
 
       // ===================================================
       // СОХРАНЯЕМ THUMBNAIL В SUPABASE STORAGE
@@ -316,75 +399,6 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       } catch (storageErr: any) {
         app.log.warn(`Failed to save thumbnail to storage: ${storageErr.message}`);
         // Не прерываем - это не критично
-      }
-
-      // ===================================================
-      // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
-      // ===================================================
-      let description = 'Напишите нам, чтобы узнать подробности';
-      let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
-      let siteUrl = null;
-      let utm = null;
-      let leadFormId: string | null = null;
-      let appStoreUrl: string | null = null;
-      let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp'; // default
-      let direction: any = null; // для доступа к conversion_channel
-
-      if (body.direction_id) {
-        // Загружаем direction для получения objective и conversion_channel
-        const { data: directionData } = await supabase
-          .from('account_directions')
-          .select('objective, platform, conversion_channel, cta_type')
-          .eq('id', body.direction_id)
-          .maybeSingle();
-
-        direction = directionData;
-
-        if (direction?.platform === 'tiktok') {
-          return reply.status(400).send({
-            success: false,
-            error: 'TikTok directions are not supported for Facebook video creatives'
-          });
-        }
-
-        if (direction?.objective) {
-          objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
-          app.log.info({ direction_id: body.direction_id, objective, conversion_channel: direction.conversion_channel }, 'Loaded objective from direction');
-        }
-
-        // Загружаем настройки из default_ad_settings
-        const { data: defaultSettings } = await supabase
-          .from('default_ad_settings')
-          .select('*')
-          .eq('direction_id', body.direction_id)
-          .maybeSingle();
-
-        if (defaultSettings) {
-          description = defaultSettings.description || description;
-          clientQuestions = defaultSettings.client_questions?.length
-            ? defaultSettings.client_questions
-            : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
-          siteUrl = defaultSettings.site_url;
-          utm = defaultSettings.utm_tag;
-          leadFormId = defaultSettings.lead_form_id;
-          appStoreUrl = defaultSettings.app_store_url || null;
-
-          app.log.info({
-            direction_id: body.direction_id,
-            objective,
-            description,
-            clientQuestions,
-            siteUrl,
-            utm,
-            hasAppStoreUrl: Boolean(appStoreUrl)
-          }, 'Using settings from direction for video creative');
-        } else {
-          app.log.warn({
-            direction_id: body.direction_id
-          }, 'No default settings found for direction, using fallback');
-        }
-      } else {
-        app.log.warn('No direction_id provided for video, using fallback settings');
       }
 
       // ===================================================
@@ -487,22 +501,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           fbCreativeId = appInstallCreative.id;
         }
 
-        app.log.info(`Creative created with ID: ${fbCreativeId}, saving transcription...`);
-
-        const { error: transcriptError } = await supabase
-          .from('creative_transcripts')
-          .insert({
-            creative_id: creative.id,
-            lang: body.language,
-            source: 'whisper',
-            text: transcription.text,
-            duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
-            status: 'ready'
-          });
-
-        if (transcriptError) {
-          app.log.error(`Failed to save transcription: ${transcriptError.message}`);
-        }
+        app.log.info(`Creative created with ID: ${fbCreativeId}, updating creative record...`);
 
         // Обновляем запись креатива - новый стандарт: один креатив = один objective
         const updateData: any = {
@@ -565,6 +564,33 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         app.log.warn({ err, userId: body.user_id }, 'Failed to update onboarding stage');
       });
 
+      // Запускаем транскрипцию в фоне — не блокируем ответ
+      backgroundTranscriptionStarted = true;
+      const _videoPathForTranscription = videoPath;
+      Promise.resolve().then(async () => {
+        try {
+          const transcript = await processVideoTranscription(_videoPathForTranscription, body.language);
+          await supabase.from('creative_transcripts').insert({
+            creative_id: creative.id,
+            lang: body.language,
+            source: 'whisper',
+            text: transcript.text,
+            duration_sec: transcript.duration ? Math.round(transcript.duration) : null,
+            status: 'ready'
+          });
+          app.log.info({ creativeId: creative.id }, 'Background transcription saved');
+        } catch (err: any) {
+          app.log.warn({ err: err.message, creativeId: creative.id }, 'Background transcription failed');
+        } finally {
+          try {
+            await fs.unlink(_videoPathForTranscription);
+            app.log.info('Temporary video file deleted after background transcription');
+          } catch (unlinkErr: any) {
+            app.log.warn({ err: unlinkErr.message }, 'Failed to delete video file after background transcription');
+          }
+        }
+      }).catch(() => {});
+
       return reply.send({
         success: true,
         message: 'Video processed and creative created successfully',
@@ -573,12 +599,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           fb_video_id: fbVideo.id,
           fb_creative_id: fbCreativeId,
           objective: objective,
-          transcription: {
-            text: transcription.text,
-            language: transcription.language,
-            source: 'whisper',
-            duration_sec: transcription.duration ? Math.round(transcription.duration) : null
-          }
+          transcription: null
         }
       });
 
@@ -623,7 +644,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       });
 
     } finally {
-      if (videoPath) {
+      // Если фоновая транскрипция запущена — она сама удалит файл после завершения
+      if (videoPath && !backgroundTranscriptionStarted) {
         try {
           await fs.unlink(videoPath);
           app.log.info('Temporary video file deleted');
