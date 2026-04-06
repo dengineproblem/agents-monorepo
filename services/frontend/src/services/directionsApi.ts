@@ -209,16 +209,16 @@ export const directionsApi = {
       const response = await fetch(`${API_BASE_URL}/directions/${id}`, {
         method: 'DELETE',
       });
-      
+
       const data = await response.json();
-      
+
       if (!response.ok) {
         return {
           success: false,
           error: data.error || 'Не удалось удалить направление',
         };
       }
-      
+
       return {
         success: true,
       };
@@ -231,3 +231,11 @@ export const directionsApi = {
     }
   },
 };
+
+export async function fetchMetaWelcomeTemplates(
+  pageId: string
+): Promise<{ templates: Array<{ id: string; name: string; questions: string[] }> }> {
+  const params = new URLSearchParams({ pageId });
+  const response = await fetch(`${API_BASE_URL}/directions/meta-welcome-templates?${params.toString()}`);
+  return response.json();
+}

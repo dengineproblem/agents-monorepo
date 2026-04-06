@@ -121,6 +121,7 @@ export interface DirectionDefaultSettingsInput {
   gender?: 'all' | 'male' | 'female';
   description?: string;
   client_question?: string;
+  client_questions?: string[];
   instagram_url?: string;
   site_url?: string;
   pixel_id?: string;
@@ -216,6 +217,7 @@ export interface DefaultAdSettings {
   description: string;
   // WhatsApp специфичные
   client_question: string | null;
+  client_questions: string[] | null;
   // Instagram специфичные
   instagram_url: string | null;
   // Site Leads специфичные
@@ -241,6 +243,7 @@ export interface CreateDefaultSettingsInput {
   gender?: 'all' | 'male' | 'female';
   description?: string;
   client_question?: string;
+  client_questions?: string[];
   instagram_url?: string;
   site_url?: string;
   pixel_id?: string;
@@ -258,6 +261,7 @@ export interface UpdateDefaultSettingsInput {
   gender?: 'all' | 'male' | 'female';
   description?: string;
   client_question?: string;
+  client_questions?: string[];
   instagram_url?: string;
   site_url?: string;
   pixel_id?: string;
