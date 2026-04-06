@@ -94,6 +94,19 @@ export async function workflowCreateAdSetInDirection(
     .eq('id', user_account_id)
     .single();
 
+  // Для multi-account: берём brain_timezone из ad_accounts (приоритет над account_timezone)
+  let effectiveTimezone = userAccountProfile?.account_timezone || null;
+  if (context_account_id) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('brain_timezone')
+      .eq('id', context_account_id)
+      .single();
+    if (adAccount?.brain_timezone) {
+      effectiveTimezone = adAccount.brain_timezone;
+    }
+  }
+
   log.info({
     direction_id,
     user_creative_ids_count: user_creative_ids.length,
@@ -102,7 +115,8 @@ export async function workflowCreateAdSetInDirection(
     optimization_goal_override: params.optimization_goal_override || null,
     auto_activate,
     userAccountId: user_account_id,
-    userAccountName: userAccountProfile?.username
+    userAccountName: userAccountProfile?.username,
+    effectiveTimezone
   }, 'Starting createAdSetInDirection workflow');
 
   // ===================================================
@@ -471,7 +485,7 @@ export async function workflowCreateAdSetInDirection(
     const om = pad(abs % 60);
     return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
   }
-  const tzOffsetMin = getTimezoneOffsetMinutes(userAccountProfile?.account_timezone);
+  const tzOffsetMin = getTimezoneOffsetMinutes(effectiveTimezone);
   const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
   const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
   let m = new Date(localNow);
