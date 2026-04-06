@@ -572,8 +572,8 @@ const getCurrentDailySpend = async () => {
   return total / 100;
 };
 
-// Получить page_id из текущей конфигурации (для Lead Forms)
-const getCurrentPageId = async (): Promise<string | null> => {
+// Получить page_id из текущей конфигурации (для Lead Forms и шаблонов)
+export const getCurrentPageId = async (): Promise<string | null> => {
   const storedUser = localStorage.getItem('user');
 
   if (storedUser) {
