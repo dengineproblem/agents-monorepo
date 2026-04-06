@@ -135,6 +135,7 @@ async function processTikTokUpload(
   const correlationId = randomUUID();
   const startTime = Date.now();
   let creativeId: string | null = null;
+  let backgroundTranscriptionStarted = false;
 
   // Валидация uploadId для защиты от path traversal
   if (!isValidUploadId(uploadId)) {
@@ -187,34 +188,7 @@ async function processTikTokUpload(
       hasIdentity: !!creds.identityId
     }, '[TUS-TikTok] Got TikTok credentials');
 
-    // 2. Транскрипция видео с timeout
-    log.info({ correlationId, uploadId }, '[TUS-TikTok] Starting video transcription');
-    let transcriptionText = 'Транскрипция недоступна';
-    let transcriptionDuration = 0;
-    try {
-      const result = await withTimeout(
-        processVideoTranscription(videoPath, language),
-        TRANSCRIPTION_TIMEOUT_MS,
-        'Transcription'
-      );
-      transcriptionText = result.text;
-      transcriptionDuration = result.duration || 0;
-      log.info({
-        correlationId,
-        uploadId,
-        textLength: transcriptionText.length,
-        duration: transcriptionDuration
-      }, '[TUS-TikTok] Transcription completed');
-    } catch (transcriptionError: any) {
-      log.warn({
-        correlationId,
-        err: transcriptionError,
-        uploadId,
-        isTimeout: transcriptionError.message?.includes('timeout')
-      }, '[TUS-TikTok] Transcription failed, using fallback');
-    }
-
-    // 3. Создать запись креатива в БД
+    // 2. Создать запись креатива в БД (до транскрипции, чтобы polling мог найти запись)
     const { data: creative, error: insertError } = await supabase
       .from('user_creatives')
       .insert({
@@ -294,29 +268,7 @@ async function processTikTokUpload(
       log.warn({ correlationId, err: thumbErr, uploadId }, '[TUS-TikTok] Thumbnail extraction failed, continuing...');
     }
 
-    // 5. Сохранить транскрипцию (graceful fallback)
-    try {
-      await supabase
-        .from('creative_transcripts')
-        .insert({
-          creative_id: creativeId,
-          lang: language,
-          source: 'whisper',
-          text: transcriptionText,
-          duration_sec: Math.round(transcriptionDuration),
-          status: 'ready'
-        });
-      log.info({ correlationId, uploadId, creativeId }, '[TUS-TikTok] Transcription saved');
-    } catch (transcriptSaveError: any) {
-      // Не прерываем основной процесс из-за ошибки сохранения транскрипции
-      log.warn({
-        correlationId,
-        err: transcriptSaveError,
-        creativeId
-      }, '[TUS-TikTok] Failed to save transcription, continuing...');
-    }
-
-    // 6. Обновить креатив с tiktok_video_id (optimistic locking)
+    // 5. Обновить креатив с tiktok_video_id (optimistic locking)
     log.info({
       correlationId,
       creativeId,
@@ -392,6 +344,40 @@ async function processTikTokUpload(
       log.warn({ correlationId, err, userId }, '[TUS-TikTok] Failed to update onboarding');
     });
 
+    // Запускаем транскрипцию в фоне — не блокируем завершение основного потока
+    const bgVideoPath = videoPath;
+    const bgCreativeId = creativeId;
+    backgroundTranscriptionStarted = true;
+    // Используем Promise.resolve().then() для fire-and-forget в следующем тике event loop
+    Promise.resolve().then(() => {
+      log.info({ correlationId, uploadId }, '[TUS-TikTok] Starting background transcription');
+      return withTimeout(
+        processVideoTranscription(bgVideoPath, language),
+        TRANSCRIPTION_TIMEOUT_MS,
+        'Transcription'
+      )
+        .then(async (result) => {
+          await supabase
+            .from('creative_transcripts')
+            .insert({
+              creative_id: bgCreativeId,
+              lang: language,
+              source: 'whisper',
+              text: result.text,
+              duration_sec: result.duration ? Math.round(result.duration) : null,
+              status: 'ready'
+            });
+          log.info({ correlationId, uploadId, creativeId: bgCreativeId }, '[TUS-TikTok] Background transcription saved');
+        })
+        .catch((err: any) => {
+          log.warn({ err, correlationId, uploadId }, '[TUS-TikTok] Background transcription failed');
+        })
+        .finally(async () => {
+          await fs.unlink(bgVideoPath).catch(() => {});
+          log.info({ correlationId, videoPath: bgVideoPath }, '[TUS-TikTok] Video file deleted after background transcription');
+        });
+    }).catch(() => {});
+
   } catch (error: any) {
     const duration = Date.now() - startTime;
     log.error({
@@ -432,13 +418,16 @@ async function processTikTokUpload(
 
     throw error;
   } finally {
-    // Удаляем временные файлы
-    try {
-      await fs.unlink(videoPath);
-      await fs.unlink(`${videoPath}.json`).catch(() => {});
-      log.info({ correlationId, videoPath }, '[TUS-TikTok] Temporary files deleted');
-    } catch (err) {
-      log.warn({ correlationId, err, videoPath }, '[TUS-TikTok] Failed to delete temporary files');
+    // Удаляем .json метаданные TUS (всегда)
+    await fs.unlink(`${videoPath}.json`).catch(() => {});
+    // Видеофайл удаляет фоновая транскрипция; если она не была запущена (ошибка до её старта) — удаляем здесь
+    if (!backgroundTranscriptionStarted) {
+      try {
+        await fs.unlink(videoPath);
+        log.info({ correlationId, videoPath }, '[TUS-TikTok] Temporary video file deleted (no background transcription)');
+      } catch (err) {
+        log.warn({ correlationId, err, videoPath }, '[TUS-TikTok] Failed to delete temporary video file');
+      }
     }
   }
 }
@@ -450,6 +439,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
   const videoPath = path.join(TUS_UPLOAD_DIR, uploadId);
   const startTime = Date.now();
   let creativeId: string | null = null;
+  let backgroundTranscriptionStarted = false;
 
   log.info({ uploadId, metadata }, '[TUS] Starting processing of completed upload');
 
@@ -557,30 +547,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
     const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
 
-    // Транскрипция
-    log.info({ uploadId, language }, '[TUS] Starting transcription...');
-    const transcriptionStartTime = Date.now();
-    let transcription;
-    try {
-      transcription = await processVideoTranscription(videoPath, language);
-      log.info({
-        uploadId,
-        durationMs: Date.now() - transcriptionStartTime,
-        textLength: transcription.text?.length
-      }, '[TUS] Transcription completed');
-    } catch (transcriptionError: any) {
-      log.warn({
-        err: transcriptionError,
-        uploadId,
-        durationMs: Date.now() - transcriptionStartTime
-      }, '[TUS] Transcription failed, continuing without transcript');
-      transcription = {
-        text: 'Транскрипция недоступна',
-        language: language
-      };
-    }
-
-    // Создаём запись креатива
+    // Создаём запись креатива (до транскрипции, чтобы polling мог найти запись сразу)
     log.info({ uploadId, userId, title }, '[TUS] Creating creative record...');
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
@@ -616,8 +583,8 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
     // Ждём обработки видео Facebook (polling статуса)
     log.info({ uploadId }, '[TUS] Waiting for Facebook to process video...');
-    const maxWaitMs = 120_000; // макс 2 минуты
-    const pollIntervalMs = 5_000; // проверяем каждые 5 сек
+    const maxWaitMs = 60_000; // макс 1 минута (маленькие видео готовы быстро)
+    const pollIntervalMs = 2_000; // проверяем каждые 2 сек
     const waitStart = Date.now();
     let videoReady = false;
 
@@ -646,15 +613,79 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       log.warn({ uploadId, videoId: fbVideo.id, waitedMs: Date.now() - waitStart }, '[TUS] Video not ready after max wait, proceeding anyway...');
     }
 
-    // Извлекаем thumbnail
-    log.info({ uploadId }, '[TUS] Extracting thumbnail from video...');
+    // Параллельно: извлекаем thumbnail и загружаем настройки направления
+    log.info({ uploadId }, '[TUS] Extracting thumbnail and loading direction settings in parallel...');
     const thumbnailStartTime = Date.now();
-    const thumbnailBuffer = await extractVideoThumbnail(videoPath);
+
+    // Helper: загрузка настроек направления
+    const loadDirectionSettings = async () => {
+      let description = 'Напишите нам, чтобы узнать подробности';
+      let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
+      let siteUrl = null;
+      let utm = null;
+      let leadFormId: string | null = null;
+      let appStoreUrl: string | null = null;
+      let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
+      let useInstagram = true;
+      let direction: any = null;
+
+      if (directionId) {
+        const { data: directionData } = await supabase
+          .from('account_directions')
+          .select('objective, use_instagram, conversion_channel, cta_type')
+          .eq('id', directionId)
+          .maybeSingle();
+
+        direction = directionData;
+
+        if (direction?.objective) {
+          objective = direction.objective as typeof objective;
+        }
+        if (direction?.use_instagram !== undefined) {
+          useInstagram = direction.use_instagram;
+        }
+
+        // Конфликт: use_instagram=true, но instagram_id отсутствует
+        if (useInstagram && !instagramId) {
+          log.warn({ directionId, objective }, '[TUS] Direction has use_instagram=true but account has no instagram_id — disabling Instagram placement');
+          useInstagram = false;
+        }
+
+        log.info({ directionId, objective, useInstagram, hasInstagramId: !!instagramId }, '[TUS] Direction settings loaded');
+
+        const { data: defaultSettings } = await supabase
+          .from('default_ad_settings')
+          .select('*')
+          .eq('direction_id', directionId)
+          .maybeSingle();
+
+        if (defaultSettings) {
+          description = defaultSettings.description || description;
+          clientQuestions = defaultSettings.client_questions?.length
+            ? defaultSettings.client_questions
+            : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
+          siteUrl = defaultSettings.site_url;
+          utm = defaultSettings.utm_tag;
+          leadFormId = defaultSettings.lead_form_id;
+          appStoreUrl = defaultSettings.app_store_url || null;
+        }
+      }
+
+      return { description, clientQuestions, siteUrl, utm, leadFormId, appStoreUrl, objective, useInstagram, direction };
+    };
+
+    const [thumbnailBuffer, directionSettings] = await Promise.all([
+      extractVideoThumbnail(videoPath),
+      loadDirectionSettings()
+    ]);
+
     log.info({
       uploadId,
       thumbnailSizeKB: Math.round(thumbnailBuffer.length / 1024),
       durationMs: Date.now() - thumbnailStartTime
-    }, '[TUS] Thumbnail extracted');
+    }, '[TUS] Thumbnail extracted and direction settings loaded');
+
+    let { description, clientQuestions, siteUrl, utm, leadFormId, appStoreUrl, objective, useInstagram, direction } = directionSettings;
 
     log.info({ uploadId }, '[TUS] Uploading thumbnail to Facebook...');
     const thumbnailResult = await uploadImage(normalizedAdAccountId, ACCESS_TOKEN, thumbnailBuffer);
@@ -680,59 +711,6 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       }
     } catch (storageErr) {
       log.warn({ err: storageErr }, 'Failed to save thumbnail to storage');
-    }
-
-    // Загружаем настройки направления
-    let description = 'Напишите нам, чтобы узнать подробности';
-    let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
-    let siteUrl = null;
-    let utm = null;
-    let leadFormId: string | null = null;
-    let appStoreUrl: string | null = null;
-    let objective: 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs' = 'whatsapp';
-    let useInstagram = true; // По умолчанию используем Instagram
-    let direction: any = null; // для доступа к conversion_channel
-
-    if (directionId) {
-      const { data: directionData } = await supabase
-        .from('account_directions')
-        .select('objective, use_instagram, conversion_channel, cta_type')
-        .eq('id', directionId)
-        .maybeSingle();
-
-      direction = directionData;
-
-      if (direction?.objective) {
-        objective = direction.objective as typeof objective;
-      }
-      if (direction?.use_instagram !== undefined) {
-        useInstagram = direction.use_instagram;
-      }
-
-      // Конфликт: use_instagram=true, но instagram_id отсутствует
-      if (useInstagram && !instagramId) {
-        log.warn({ directionId, objective }, '[TUS] Direction has use_instagram=true but account has no instagram_id — disabling Instagram placement');
-        useInstagram = false;
-      }
-
-      log.info({ directionId, objective, useInstagram, hasInstagramId: !!instagramId }, '[TUS] Direction settings loaded');
-
-      const { data: defaultSettings } = await supabase
-        .from('default_ad_settings')
-        .select('*')
-        .eq('direction_id', directionId)
-        .maybeSingle();
-
-      if (defaultSettings) {
-        description = defaultSettings.description || description;
-        clientQuestions = defaultSettings.client_questions?.length
-          ? defaultSettings.client_questions
-          : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
-        siteUrl = defaultSettings.site_url;
-        utm = defaultSettings.utm_tag;
-        leadFormId = defaultSettings.lead_form_id;
-        appStoreUrl = defaultSettings.app_store_url || null;
-      }
     }
 
     // Логируем состояние перед созданием креатива
@@ -845,19 +823,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       fbCreativeId = appInstallCreative.id;
     }
 
-    // Сохраняем транскрипцию
-    await supabase
-      .from('creative_transcripts')
-      .insert({
-        creative_id: creative.id,
-        lang: language,
-        source: 'whisper',
-        text: transcription.text,
-        duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
-        status: 'ready'
-      });
-
-    // Обновляем креатив
+    // Обновляем креатив (статус 'ready')
     const updateData: Record<string, string | null> = {
       fb_video_id: fbVideo.id,
       status: 'ready',
@@ -891,6 +857,36 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       totalDurationMs,
       totalDurationSec: Math.round(totalDurationMs / 1000)
     }, '[TUS] ✅ Upload processing completed successfully');
+
+    // Запускаем транскрипцию в фоне — не блокируем завершение основного потока
+    const bgVideoPath = videoPath;
+    const bgCreativeId = creative.id;
+    backgroundTranscriptionStarted = true;
+    // Используем Promise.resolve().then() для fire-and-forget в следующем тике event loop
+    Promise.resolve().then(() => {
+      log.info({ uploadId }, '[TUS] Starting background transcription');
+      return processVideoTranscription(bgVideoPath, language)
+        .then(async (transcript) => {
+          await supabase
+            .from('creative_transcripts')
+            .insert({
+              creative_id: bgCreativeId,
+              lang: language,
+              source: 'whisper',
+              text: transcript.text,
+              duration_sec: transcript.duration ? Math.round(transcript.duration) : null,
+              status: 'ready'
+            });
+          log.info({ uploadId, creativeId: bgCreativeId }, '[TUS] Background transcription saved');
+        })
+        .catch((err: any) => {
+          log.warn({ err, uploadId }, '[TUS] Background transcription failed');
+        })
+        .finally(async () => {
+          await fs.unlink(bgVideoPath).catch(() => {});
+          log.info({ uploadId, videoPath: bgVideoPath }, '[TUS] Video file deleted after background transcription');
+        });
+    }).catch(() => {});
 
     return {
       success: true,
@@ -938,14 +934,16 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
     throw error;
   } finally {
-    // Удаляем временный файл
-    try {
-      await fs.unlink(videoPath);
-      // Также удаляем .json файл метаданных TUS
-      await fs.unlink(`${videoPath}.json`).catch(() => {});
-      log.info({ videoPath }, 'Temporary TUS file deleted');
-    } catch (err) {
-      log.warn({ err, videoPath }, 'Failed to delete temporary TUS file');
+    // Удаляем .json метаданные TUS (всегда)
+    await fs.unlink(`${videoPath}.json`).catch(() => {});
+    // Видеофайл удаляет фоновая транскрипция; если она не была запущена (ошибка до её старта) — удаляем здесь
+    if (!backgroundTranscriptionStarted) {
+      try {
+        await fs.unlink(videoPath);
+        log.info({ videoPath }, '[TUS] Temporary video file deleted (no background transcription)');
+      } catch (err) {
+        log.warn({ err, videoPath }, '[TUS] Failed to delete temporary video file');
+      }
     }
   }
 }
