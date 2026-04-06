@@ -202,18 +202,36 @@ export function normalizePriceSegment(answer: string): string {
  * Парсит список Instagram аккаунтов из строки
  */
 export function parseCompetitorInstagrams(answer: string): string[] {
+  // Разбиваем по переносам строк и запятым (не пробелам — пробел ломает URL)
   return answer
-    .split(/[,\s]+/)
-    .map(handle => {
-      // Убираем @ и URL части
-      let clean = handle.trim().toLowerCase();
-      clean = clean.replace(/^@/, '');
-      clean = clean.replace(/^https?:\/\/(www\.)?instagram\.com\//, '');
-      clean = clean.replace(/\/$/, '');
-      return clean;
+    .split(/[\n,]+/)
+    .map(token => {
+      const trimmed = token.trim();
+      // Пробуем вытащить handle из URL или @handle или username
+      return extractInstagramHandleFromToken(trimmed);
     })
-    .filter(handle => handle.length > 0 && handle.length <= 30)
+    .filter((handle): handle is string => handle !== null && handle.length >= 2 && handle.length <= 30)
     .slice(0, 5); // Максимум 5
+}
+
+function extractInstagramHandleFromToken(token: string): string | null {
+  if (!token) return null;
+  const lower = token.toLowerCase();
+
+  // Полный URL: https://instagram.com/handle или https://www.instagram.com/handle/
+  const urlMatch = lower.match(/instagram\.com\/([a-z0-9._]+)/i);
+  if (urlMatch) return urlMatch[1];
+
+  // @handle
+  if (token.startsWith('@')) {
+    const handle = token.slice(1);
+    if (/^[a-z0-9._]+$/i.test(handle)) return handle.toLowerCase();
+  }
+
+  // Просто username
+  if (/^[a-z0-9._]+$/i.test(token)) return token.toLowerCase();
+
+  return null;
 }
 
 /**
