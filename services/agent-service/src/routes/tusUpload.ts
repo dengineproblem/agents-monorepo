@@ -684,7 +684,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
     // Загружаем настройки направления
     let description = 'Напишите нам, чтобы узнать подробности';
-    let clientQuestion = 'Здравствуйте! Хочу узнать об этом подробнее.';
+    let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
     let siteUrl = null;
     let utm = null;
     let leadFormId: string | null = null;
@@ -725,7 +725,9 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
       if (defaultSettings) {
         description = defaultSettings.description || description;
-        clientQuestion = defaultSettings.client_question || clientQuestion;
+        clientQuestions = defaultSettings.client_questions?.length
+          ? defaultSettings.client_questions
+          : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
         siteUrl = defaultSettings.site_url;
         utm = defaultSettings.utm_tag;
         leadFormId = defaultSettings.lead_form_id;
@@ -756,7 +758,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         pageId: pageId,
         instagramId: useInstagram ? (instagramId || undefined) : undefined, // Передаём Instagram только если use_instagram = true
         message: description,
-        clientQuestion: clientQuestion,
+        clientQuestions: clientQuestions,
         whatsappPhoneNumber: whatsappPhoneNumber || undefined,
         thumbnailHash: thumbnailResult.hash
       });

@@ -657,7 +657,7 @@ export async function createWhatsAppCreative(
     pageId: string;
     instagramId?: string;
     message: string;
-    clientQuestion: string;
+    clientQuestions: string[];
     whatsappPhoneNumber?: string;
     thumbnailHash?: string;
     imageUrl?: string; // Для импортированных видео
@@ -671,7 +671,7 @@ export async function createWhatsAppCreative(
     text_format: {
       customer_action_type: "autofill_message",
       message: {
-        autofill_message: { content: params.clientQuestion },
+        autofill_message: params.clientQuestions.map(q => ({ content: q })),
         text: "Здравствуйте! Чем можем помочь?"
       }
     }
@@ -1161,7 +1161,7 @@ export async function createWhatsAppImageCreative(
     pageId: string;
     instagramId?: string | null;
     message: string;
-    clientQuestion: string;
+    clientQuestions: string[];
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createWhatsAppImageCreative', pageId: params.pageId, hasInstagramId: !!params.instagramId }, '[FB Creative] Building WhatsApp image creative');
@@ -1174,7 +1174,7 @@ export async function createWhatsAppImageCreative(
     text_format: {
       customer_action_type: "autofill_message",
       message: {
-        autofill_message: { content: params.clientQuestion },
+        autofill_message: params.clientQuestions.map(q => ({ content: q })),
         text: "Здравствуйте! Чем можем помочь?"
       }
     }
@@ -1595,7 +1595,7 @@ export async function createWhatsAppImageCreativeMultiFormat(
     pageId: string;
     instagramId?: string | null;
     message: string;
-    clientQuestion: string;
+    clientQuestions: string[];
   }
 ): Promise<{ id: string }> {
   log.info({ fn: 'createWhatsAppImageCreativeMultiFormat', pageId: params.pageId, hasInstagramId: !!params.instagramId }, '[FB Creative] Building WhatsApp multi-format image creative');
@@ -1608,7 +1608,7 @@ export async function createWhatsAppImageCreativeMultiFormat(
     pageId: params.pageId,
     instagramId: params.instagramId,
     message: params.message,
-    clientQuestion: params.clientQuestion
+    clientQuestions: params.clientQuestions
   });
 }
 

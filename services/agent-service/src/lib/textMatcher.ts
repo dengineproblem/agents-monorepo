@@ -100,7 +100,7 @@ export async function matchMessageToDirection(
         id,
         name,
         objective,
-        default_ad_settings!inner(client_question)
+        default_ad_settings!inner(client_question, client_questions)
       `)
       .eq('user_account_id', userAccountId)
       .eq('is_active', true)
@@ -134,26 +134,29 @@ export async function matchMessageToDirection(
     // Сравниваем сообщение с client_question каждого направления
     for (const direction of directions) {
       const settings = direction.default_ad_settings as any;
-      const clientQuestion = settings?.client_question;
+      const allQuestions: string[] = (settings?.client_questions?.length
+        ? settings.client_questions
+        : [settings?.client_question]
+      ).filter(Boolean);
 
-      if (!clientQuestion) {
+      if (allQuestions.length === 0) {
         continue;
       }
 
-      const similarity = calculateSimilarity(messageText, clientQuestion);
+      const maxSimilarity = Math.max(...allQuestions.map(q => calculateSimilarity(messageText, q)));
 
       log.debug({
         directionId: direction.id,
         directionName: direction.name,
-        clientQuestion,
+        allQuestions,
         messageText: messageText.substring(0, 100),
-        similarity
+        maxSimilarity
       }, 'Comparing message with direction');
 
-      if (similarity > bestMatch.similarity) {
+      if (maxSimilarity > bestMatch.similarity) {
         bestMatch = {
-          matched: similarity >= threshold,
-          similarity,
+          matched: maxSimilarity >= threshold,
+          similarity: maxSimilarity,
           directionId: direction.id,
           directionName: direction.name
         };

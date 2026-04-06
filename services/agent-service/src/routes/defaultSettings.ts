@@ -17,6 +17,7 @@ const CreateDefaultSettingsSchema = z.object({
   description: z.string().optional(),
   // WhatsApp specific
   client_question: z.string().optional(),
+  client_questions: z.array(z.string().min(1)).max(5).optional(),
   // Instagram specific
   instagram_url: z.string().url().optional(),
   // Site Leads specific
@@ -38,6 +39,7 @@ const UpdateDefaultSettingsSchema = z.object({
   gender: z.enum(['all', 'male', 'female']).optional(),
   description: z.string().optional(),
   client_question: z.string().optional(),
+  client_questions: z.array(z.string().min(1)).max(5).optional(),
   instagram_url: z.string().url().optional(),
   site_url: z.string().url().optional(),
   pixel_id: z.string().optional(),
@@ -181,7 +183,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             age_max: input.age_max,
             gender: input.gender,
             description: input.description,
-            client_question: input.client_question,
+            client_question: input.client_questions && input.client_questions.length > 0
+              ? input.client_questions[0]
+              : input.client_question,
+            client_questions: input.client_questions,
             instagram_url: input.instagram_url,
             site_url: input.site_url,
             pixel_id: input.pixel_id,
@@ -218,7 +223,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             age_max: input.age_max ?? 65,
             gender: input.gender ?? 'all',
             description: input.description ?? 'Напишите нам, чтобы узнать подробности',
-            client_question: input.client_question,
+            client_question: input.client_questions && input.client_questions.length > 0
+              ? input.client_questions[0]
+              : input.client_question,
+            client_questions: input.client_questions,
             instagram_url: input.instagram_url,
             site_url: input.site_url,
             pixel_id: input.pixel_id,
@@ -295,12 +303,17 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       const input = parseResult.data;
 
       // Обновляем настройки
+      const updatePayload: Record<string, unknown> = {
+        ...input,
+        updated_at: new Date().toISOString(),
+      };
+      // Backward compat: sync client_question from client_questions[0]
+      if (input.client_questions && input.client_questions.length > 0) {
+        updatePayload.client_question = input.client_questions[0];
+      }
       const { data, error } = await supabase
         .from('default_ad_settings')
-        .update({
-          ...input,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', id)
         .select()
         .single();

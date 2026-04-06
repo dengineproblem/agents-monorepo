@@ -25,7 +25,8 @@ import { DEFAULT_UTM } from '@/constants/cities';
 import { GeoLocationSearch } from '@/components/GeoLocationSearch';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
-import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
+import { directionsApi, type DirectionCustomAudience, fetchMetaWelcomeTemplates } from '@/services/directionsApi';
+import { getCurrentPageId } from '@/services/facebookApi';
 import { toast } from 'sonner';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
@@ -94,7 +95,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
   // Специфичные для целей
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState('');
-  const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.');
+  const [clientQuestions, setClientQuestions] = useState<string[]>(['Здравствуйте! Хочу узнать об этом подробнее.']);
+  const [metaTemplates, setMetaTemplates] = useState<Array<{ id: string; name: string; questions: string[] }>>([]);
+  const [showMetaTemplates, setShowMetaTemplates] = useState(false);
+  const [loadingMetaTemplates, setLoadingMetaTemplates] = useState(false);
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
   const [appStoreUrl, setAppStoreUrl] = useState('');
@@ -230,7 +234,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         setDescription(settings.description);
         
         // Специфичные для целей
-        if (settings.client_question) setClientQuestion(settings.client_question);
+        if (settings.client_questions?.length) {
+          setClientQuestions(settings.client_questions);
+        } else if (settings.client_question) {
+          setClientQuestions([settings.client_question]);
+        }
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
         if (settings.app_store_url) setAppStoreUrl(settings.app_store_url);
@@ -259,13 +267,46 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setAgeMax(65);
     setGender('all');
     setDescription('Напишите нам, чтобы узнать подробности');
-    setClientQuestion('Здравствуйте! Хочу узнать об этом подробнее.');
+    setClientQuestions(['Здравствуйте! Хочу узнать об этом подробнее.']);
+    setMetaTemplates([]);
+    setShowMetaTemplates(false);
     setInstagramUrl('');
     setSiteUrl('');
     setAppStoreUrl('');
     setIsSkadnetworkAttribution(false);
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
+  };
+
+  const addQuestion = () => {
+    if (clientQuestions.length < 5) {
+      setClientQuestions([...clientQuestions, '']);
+    }
+  };
+
+  const removeQuestion = (index: number) => {
+    if (clientQuestions.length > 1) {
+      setClientQuestions(clientQuestions.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateQuestion = (index: number, value: string) => {
+    setClientQuestions(clientQuestions.map((q, i) => i === index ? value : q));
+  };
+
+  const loadMetaTemplates = async () => {
+    const pageId = await getCurrentPageId();
+    if (!pageId) return;
+    setLoadingMetaTemplates(true);
+    try {
+      const result = await fetchMetaWelcomeTemplates(pageId);
+      setMetaTemplates(result.templates);
+      setShowMetaTemplates(true);
+    } catch (e) {
+      console.error('Failed to load Meta templates', e);
+    } finally {
+      setLoadingMetaTemplates(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -331,8 +372,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
     // Валидация специфичных полей (Facebook)
     if (!isTikTok) {
-      if (direction.objective === 'whatsapp' && !clientQuestion.trim()) {
-        setError('Введите вопрос клиента для WhatsApp');
+      if (direction.objective === 'whatsapp' && clientQuestions.filter(q => q.trim()).length === 0) {
+        setError('Введите хотя бы один вопрос клиента для WhatsApp');
         return;
       }
 
@@ -393,10 +434,12 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         gender,
         description: description.trim(),
         ...(!isTikTok && direction.objective === 'whatsapp' && {
-          client_question: clientQuestion.trim(),
+          client_question: clientQuestions.find(q => q.trim()) ?? '',
+          client_questions: clientQuestions.filter(q => q.trim()),
         }),
         ...(isTikTok && direction.tiktok_objective === 'whatsapp' && {
-          client_question: clientQuestion.trim(),
+          client_question: clientQuestions.find(q => q.trim()) ?? '',
+          client_questions: clientQuestions.filter(q => q.trim()),
         }),
         ...(!isTikTok && (direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && {
           instagram_url: instagramUrl.trim(),
@@ -789,17 +832,75 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="edit-tt-client-question">
-                      Вопрос клиента <span className="text-red-500">*</span>
-                    </Label>
-                    <Textarea
-                      id="edit-tt-client-question"
-                      placeholder="Здравствуйте! Хочу узнать об этом подробнее."
-                      value={clientQuestion}
-                      onChange={(e) => setClientQuestion(e.target.value)}
-                      disabled={isSubmitting}
-                      rows={2}
-                    />
+                    <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
+                    {clientQuestions.map((q, index) => (
+                      <div key={index} className="flex gap-2 items-start">
+                        <Textarea
+                          value={q}
+                          onChange={(e) => updateQuestion(index, e.target.value)}
+                          placeholder="Введите вопрос клиента..."
+                          className="flex-1"
+                          rows={2}
+                          disabled={isSubmitting}
+                        />
+                        {clientQuestions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(index)}
+                            className="mt-1 text-gray-400 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      {clientQuestions.length < 5 && (
+                        <button
+                          type="button"
+                          onClick={addQuestion}
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          + Добавить вопрос
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={loadMetaTemplates}
+                        disabled={loadingMetaTemplates}
+                        className="text-sm text-gray-600 hover:text-gray-800"
+                      >
+                        {loadingMetaTemplates ? 'Загрузка...' : 'Загрузить из Meta'}
+                      </button>
+                    </div>
+                    {showMetaTemplates && metaTemplates.length > 0 && (
+                      <div className="border rounded p-2 bg-gray-50 space-y-1">
+                        <p className="text-xs text-gray-500">Выберите шаблон из Meta:</p>
+                        {metaTemplates.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            className="block w-full text-left text-sm p-1 hover:bg-gray-100 rounded"
+                            onClick={() => {
+                              setClientQuestions(t.questions.slice(0, 5));
+                              setShowMetaTemplates(false);
+                            }}
+                          >
+                            {t.name} ({t.questions.length} вопрос{t.questions.length > 1 ? 'а' : ''})
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="text-xs text-gray-400"
+                          onClick={() => setShowMetaTemplates(false)}
+                        >
+                          Закрыть
+                        </button>
+                      </div>
+                    )}
+                    {showMetaTemplates && metaTemplates.length === 0 && !loadingMetaTemplates && (
+                      <p className="text-xs text-gray-400">Шаблоны не найдены</p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Это сообщение будет предзаполнено в WhatsApp при переходе по ссылке
                     </p>
@@ -829,17 +930,75 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </div>
                   
                   <div className="space-y-2">
-                    <Label htmlFor="edit-client-question">
-                      Вопрос клиента <span className="text-red-500">*</span>
-                    </Label>
-                    <Textarea
-                      id="edit-client-question"
-                      placeholder="Здравствуйте! Хочу узнать об этом подробнее."
-                      value={clientQuestion}
-                      onChange={(e) => setClientQuestion(e.target.value)}
-                      disabled={isSubmitting}
-                      rows={2}
-                    />
+                    <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
+                    {clientQuestions.map((q, index) => (
+                      <div key={index} className="flex gap-2 items-start">
+                        <Textarea
+                          value={q}
+                          onChange={(e) => updateQuestion(index, e.target.value)}
+                          placeholder="Введите вопрос клиента..."
+                          className="flex-1"
+                          rows={2}
+                          disabled={isSubmitting}
+                        />
+                        {clientQuestions.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(index)}
+                            className="mt-1 text-gray-400 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      {clientQuestions.length < 5 && (
+                        <button
+                          type="button"
+                          onClick={addQuestion}
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          + Добавить вопрос
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={loadMetaTemplates}
+                        disabled={loadingMetaTemplates}
+                        className="text-sm text-gray-600 hover:text-gray-800"
+                      >
+                        {loadingMetaTemplates ? 'Загрузка...' : 'Загрузить из Meta'}
+                      </button>
+                    </div>
+                    {showMetaTemplates && metaTemplates.length > 0 && (
+                      <div className="border rounded p-2 bg-gray-50 space-y-1">
+                        <p className="text-xs text-gray-500">Выберите шаблон из Meta:</p>
+                        {metaTemplates.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            className="block w-full text-left text-sm p-1 hover:bg-gray-100 rounded"
+                            onClick={() => {
+                              setClientQuestions(t.questions.slice(0, 5));
+                              setShowMetaTemplates(false);
+                            }}
+                          >
+                            {t.name} ({t.questions.length} вопрос{t.questions.length > 1 ? 'а' : ''})
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="text-xs text-gray-400"
+                          onClick={() => setShowMetaTemplates(false)}
+                        >
+                          Закрыть
+                        </button>
+                      </div>
+                    )}
+                    {showMetaTemplates && metaTemplates.length === 0 && !loadingMetaTemplates && (
+                      <p className="text-xs text-gray-400">Шаблоны не найдены</p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Это сообщение будет отправлено в WhatsApp от имени клиента
                     </p>
