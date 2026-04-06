@@ -1,6 +1,15 @@
--- Политики для bucket videos в Supabase Storage
--- Применять только если bucket videos существует, но политики отсутствуют
--- Проверить: Supabase Dashboard → Storage → videos → Policies
+-- Создание bucket videos и политики доступа для прямой загрузки из браузера
+
+-- Создаём bucket videos (private, с лимитом 512MB на файл)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'videos',
+  'videos',
+  false,
+  536870912, -- 512 MB
+  ARRAY['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mpeg', 'video/mov']
+)
+ON CONFLICT (id) DO NOTHING;
 
 -- Разрешить аутентифицированным пользователям загружать файлы
 CREATE POLICY "Allow authenticated uploads to videos bucket"
