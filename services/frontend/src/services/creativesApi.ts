@@ -444,7 +444,7 @@ export const creativesApi = {
 
     // Для видео загружаем напрямую в Supabase Storage через TUS
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
+    const authToken = localStorage.getItem('auth_token') || (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
     const storagePath = `uploads/${userId}/${Date.now()}_${file.name.replace(/[^\w.-]+/g, '_')}`;
     const supabaseTusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
     const storageKey = `supabase_upload_${file.name}_${file.size}`;
@@ -455,7 +455,7 @@ export const creativesApi = {
         retryDelays: [0, 1000, 3000, 5000, 10000],
         chunkSize: 6 * 1024 * 1024, // 6MB chunks (Supabase default)
         headers: {
-          Authorization: `Bearer ${supabaseAnonKey}`,
+          Authorization: `Bearer ${authToken}`,
           'x-upsert': 'true',
         },
         metadata: {
