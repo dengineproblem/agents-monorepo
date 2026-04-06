@@ -220,7 +220,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
         // ===================================================
         let description = body.description || 'Напишите нам, чтобы узнать подробности';
-        let clientQuestion = body.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
+        let clientQuestions: string[] = body.client_question ? [body.client_question] : ['Здравствуйте! Хочу узнать об этом подробнее.'];
         let siteUrl = body.site_url || null;
         let utm = body.utm || null;
         let leadFormId: string | null = null;
@@ -259,7 +259,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
           if (defaultSettings) {
             description = defaultSettings.description || description;
-            clientQuestion = defaultSettings.client_question || clientQuestion;
+            clientQuestions = defaultSettings.client_questions?.length
+              ? defaultSettings.client_questions
+              : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
             siteUrl = defaultSettings.site_url || siteUrl;
             utm = defaultSettings.utm_tag || utm;
             leadFormId = defaultSettings.lead_form_id || leadFormId;
@@ -269,7 +271,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
               direction_id: body.direction_id,
               objective,
               description,
-              clientQuestion,
+              clientQuestions,
               siteUrl,
               utm,
               hasAppStoreUrl: Boolean(appStoreUrl)
@@ -296,7 +298,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId,
             message: description,
-            clientQuestion: clientQuestion
+            clientQuestions: clientQuestions
           });
           fbCreativeId = whatsappCreative.id;
         } else if (objective === 'instagram_traffic') {
@@ -602,7 +604,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         .maybeSingle();
 
       const description = defaultSettings?.description || 'Узнайте подробности!';
-      const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.';
+      const clientQuestions: string[] = defaultSettings?.client_questions?.length
+        ? defaultSettings.client_questions
+        : [defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.'];
       let siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
@@ -716,7 +720,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           pageId: pageId,
           instagramId: instagramId,
           message: description,
-          clientQuestion: clientQuestion
+          clientQuestions: clientQuestions
         });
         fbCreativeId = result.id;
       } else if (objective === 'instagram_traffic') {

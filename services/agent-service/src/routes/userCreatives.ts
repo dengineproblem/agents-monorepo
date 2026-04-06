@@ -541,12 +541,14 @@ export default async function userCreativesRoutes(app: FastifyInstance) {
 
       const { data: settings } = await supabase
         .from('default_ad_settings')
-        .select('description, client_question, site_url, utm_tag, lead_form_id, app_store_url')
+        .select('description, client_question, client_questions, site_url, utm_tag, lead_form_id, app_store_url')
         .eq('direction_id', body.target_direction_id)
         .maybeSingle();
 
       const description = settings?.description || 'Напишите нам, чтобы узнать подробности';
-      const clientQuestion = settings?.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
+      const clientQuestions: string[] = (settings as any)?.client_questions?.length
+        ? (settings as any).client_questions
+        : [settings?.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
       const siteUrl = settings?.site_url || null;
       const utm = settings?.utm_tag || null;
       const leadFormId = settings?.lead_form_id || null;
@@ -568,7 +570,7 @@ export default async function userCreativesRoutes(app: FastifyInstance) {
         const c = await createWhatsAppCreative(normalizedAccountId, ACCESS_TOKEN, {
           videoId: source.fb_video_id, pageId,
           instagramId: instagramId || undefined, message: description,
-          clientQuestion, whatsappPhoneNumber: whatsappPhoneNumber || undefined,
+          clientQuestions, whatsappPhoneNumber: whatsappPhoneNumber || undefined,
           thumbnailHash: thumbnailResult.hash,
         });
         fbCreativeId = c.id;

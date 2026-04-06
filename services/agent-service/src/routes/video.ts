@@ -322,7 +322,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
       // ===================================================
       let description = 'Напишите нам, чтобы узнать подробности';
-      let clientQuestion = 'Здравствуйте! Хочу узнать об этом подробнее.';
+      let clientQuestions: string[] = ['Здравствуйте! Хочу узнать об этом подробнее.'];
       let siteUrl = null;
       let utm = null;
       let leadFormId: string | null = null;
@@ -361,7 +361,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
         if (defaultSettings) {
           description = defaultSettings.description || description;
-          clientQuestion = defaultSettings.client_question || clientQuestion;
+          clientQuestions = defaultSettings.client_questions?.length
+            ? defaultSettings.client_questions
+            : [defaultSettings.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
           siteUrl = defaultSettings.site_url;
           utm = defaultSettings.utm_tag;
           leadFormId = defaultSettings.lead_form_id;
@@ -371,7 +373,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             direction_id: body.direction_id,
             objective,
             description,
-            clientQuestion,
+            clientQuestions,
             siteUrl,
             utm,
             hasAppStoreUrl: Boolean(appStoreUrl)
@@ -399,7 +401,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId || undefined,
             message: description,
-            clientQuestion: clientQuestion,
+            clientQuestions: clientQuestions,
             whatsappPhoneNumber: whatsappPhoneNumber || undefined,
             thumbnailHash: thumbnailResult.hash
           });

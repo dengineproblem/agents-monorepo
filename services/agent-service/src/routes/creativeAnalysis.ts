@@ -1110,7 +1110,9 @@ async function importSingleCreative(
               .maybeSingle();
 
             const description = defaultSettings?.description || 'Напишите нам, чтобы узнать подробности';
-            const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
+            const clientQuestions: string[] = defaultSettings?.client_questions?.length
+              ? defaultSettings.client_questions
+              : [defaultSettings?.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.'];
             const siteUrl = defaultSettings?.site_url;
             const utm = defaultSettings?.utm_tag;
             const leadFormId = defaultSettings?.lead_form_id;
@@ -1128,7 +1130,7 @@ async function importSingleCreative(
                 pageId: fullCredentials.pageId,
                 instagramId: useInstagram ? (fullCredentials.instagramId || undefined) : undefined,
                 message: description,
-                clientQuestion: clientQuestion,
+                clientQuestions: clientQuestions,
                 whatsappPhoneNumber: fullCredentials.whatsappPhoneNumber || undefined,
                 imageUrl: creative.thumbnail_url || undefined // используем thumbnail_url из Facebook
               });
