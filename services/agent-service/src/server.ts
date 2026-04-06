@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { actionsRoutes } from './routes/actions.js';
 import { videoRoutes } from './routes/video.js';
+import { videoFromStorageRoutes } from './routes/videoFromStorage.js';
 import { imageRoutes } from './routes/image.js';
 import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
@@ -186,6 +187,7 @@ app.addHook('preHandler', requireActiveAccount);
 
 app.register(actionsRoutes);
 app.register(videoRoutes);
+app.register(videoFromStorageRoutes);
 app.register(tusUploadRoutes);
 app.register(imageRoutes);
 app.register(creativeTestRoutes);
