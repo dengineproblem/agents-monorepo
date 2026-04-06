@@ -442,56 +442,30 @@ export const creativesApi = {
       }
     }
 
-    // Для видео используем TUS resumable upload
-    const tusEndpoint = `${API_BASE_URL}/tus`;
-    const storageKey = `tus_upload_${file.name}_${file.size}`;
-
-    // Собираем metadata для TUS
-    const metadata: Record<string, string> = {
-      filename: file.name,
-      filetype: file.type,
-      user_id: userId,
-      title: title || file.name,
-      language: 'ru'
-    };
-    if (recordId) metadata.record_id = recordId;
-    if (!recordId) metadata.client_request_id = genId();
-    if (description) metadata.description = description;
-    if (directionId) {
-      console.log('[creativesApi.uploadToWebhook] TUS metadata direction_id:', directionId);
-      metadata.direction_id = directionId;
-    }
-    if (adAccountId) {
-      console.log('[creativesApi.uploadToWebhook] TUS metadata account_id:', adAccountId);
-      metadata.account_id = adAccountId;
-    }
-
-    // Добавляем поля целей
-    const cfg = goals || {};
-    if (cfg.whatsapp?.enabled && cfg.whatsapp?.client_question) {
-      metadata.client_question = String(cfg.whatsapp.client_question);
-    }
-    if (cfg.site_leads?.enabled) {
-      if (cfg.site_leads?.site_url) metadata.site_url = String(cfg.site_leads.site_url);
-      if (cfg.site_leads?.utm_tag) metadata.utm = String(cfg.site_leads.utm_tag);
-    }
+    // Для видео загружаем напрямую в Supabase Storage через TUS
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
+    const storagePath = `uploads/${userId}/${Date.now()}_${file.name.replace(/[^\w.-]+/g, '_')}`;
+    const supabaseTusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
+    const storageKey = `supabase_upload_${file.name}_${file.size}`;
 
     return new Promise<boolean>((resolve) => {
       const upload = new tus.Upload(file, {
-        endpoint: tusEndpoint,
-        retryDelays: [0, 1000, 3000, 5000, 10000, 20000, 30000],
-        chunkSize: 5 * 1024 * 1024, // 5MB chunks
-        metadata,
+        endpoint: supabaseTusEndpoint,
+        retryDelays: [0, 1000, 3000, 5000, 10000],
+        chunkSize: 6 * 1024 * 1024, // 6MB chunks (Supabase default)
+        headers: {
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          'x-upsert': 'true',
+        },
+        metadata: {
+          bucketName: 'videos',
+          objectName: storagePath,
+          contentType: file.type || 'video/mp4',
+          cacheControl: '3600',
+        },
         onError: (error) => {
-          console.error('[TUS] Upload error:', error);
-          // Сохраняем URL для возможного resume
-          if (upload.url) {
-            try {
-              localStorage.setItem(storageKey, upload.url);
-            } catch (e) {
-              console.warn('[TUS] Failed to save resume URL:', e);
-            }
-          }
+          console.error('[Supabase TUS] Upload error:', error);
           resolve(false);
         },
         onProgress: (bytesUploaded, bytesTotal) => {
@@ -499,97 +473,89 @@ export const creativesApi = {
           onProgress?.(pct);
         },
         onSuccess: async () => {
-          console.log('[TUS] File upload completed, waiting for processing...');
-          // Удаляем сохранённый URL после успешной загрузки файла
+          console.log('[Supabase TUS] File uploaded to storage, calling backend...');
           try {
             localStorage.removeItem(storageKey);
-          } catch (e) {
-            // ignore
-          }
+          } catch { /* ignore */ }
 
-          // Извлекаем upload_id из URL для точного отслеживания
-          // URL формата: http://localhost:8082/tus/abc123... -> abc123...
-          let uploadId: string | null = null;
-          if (upload.url) {
-            const urlParts = upload.url.split('/tus/');
-            if (urlParts.length > 1) {
-              uploadId = urlParts[1].split('?')[0]; // убираем query params если есть
-              console.log('[TUS] Extracted upload_id:', uploadId);
+          // Tell backend to process the file from storage
+          let creativeId: string | null = null;
+          try {
+            const res = await fetch(`${API_BASE_URL}/process-video-from-storage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                storage_path: storagePath,
+                title: title || file.name,
+                language: 'ru',
+                ...(directionId && { direction_id: directionId }),
+                ...(adAccountId && { account_id: adAccountId }),
+              }),
+            });
+            if (!res.ok) {
+              console.error('[FromStorage] Backend returned error:', res.status);
+              resolve(false);
+              return;
             }
+            const data = await res.json();
+            creativeId = data.creative_id;
+            console.log('[FromStorage] Got creative_id:', creativeId);
+          } catch (e) {
+            console.error('[FromStorage] Failed to call backend:', e);
+            resolve(false);
+            return;
           }
 
-          // Теперь ждём завершения обработки на сервере (Facebook upload)
-          // Делаем polling статуса каждые 2 секунды, максимум 3 минуты
-          const maxAttempts = 90; // 90 * 2 = 180 секунд
-          const pollInterval = 2000;
+          if (!creativeId) {
+            resolve(false);
+            return;
+          }
 
+          // Poll creative status
+          const maxAttempts = 90; // 90 * 2s = 3 minutes
+          const pollInterval = 2000;
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             try {
-              const statusUrl = new URL(`${API_BASE_URL}/tus/processing-status`);
+              const statusUrl = new URL(`${API_BASE_URL}/creative-status`);
+              statusUrl.searchParams.set('creative_id', creativeId);
               statusUrl.searchParams.set('user_id', userId);
-              // Используем upload_id если есть, иначе fallback на title
-              if (uploadId) {
-                statusUrl.searchParams.set('upload_id', uploadId);
-              } else {
-                statusUrl.searchParams.set('title', metadata.title);
-              }
-              if (adAccountId) {
-                statusUrl.searchParams.set('account_id', adAccountId);
-              }
-
               const response = await fetch(statusUrl.toString());
               if (!response.ok) {
-                console.warn('[TUS] Status check failed:', response.status);
                 await new Promise(r => setTimeout(r, pollInterval));
                 continue;
               }
-
               const status = await response.json();
-              console.log('[TUS] Processing status:', status);
-
+              console.log('[FromStorage] Creative status:', status);
               if (status.status === 'success') {
-                console.log('[TUS] Processing completed successfully');
                 onProgress?.(100);
                 resolve(true);
                 return;
               }
-
               if (status.status === 'error') {
-                console.error('[TUS] Processing failed:', status.error);
+                console.error('[FromStorage] Processing failed:', status.error);
                 resolve(false);
                 return;
               }
-
-              // status === 'processing' - продолжаем ждать
               await new Promise(r => setTimeout(r, pollInterval));
             } catch (e) {
-              console.warn('[TUS] Status check error:', e);
+              console.warn('[FromStorage] Status check error:', e);
               await new Promise(r => setTimeout(r, pollInterval));
             }
           }
-
-          // Таймаут - считаем ошибкой
-          console.error('[TUS] Processing timeout after 3 minutes');
+          console.error('[FromStorage] Timeout after 3 minutes');
           resolve(false);
-        }
+        },
       });
 
-      // Пытаемся восстановить незавершённую загрузку
-      const previousUrl = localStorage.getItem(storageKey);
-      if (previousUrl) {
-        console.log('[TUS] Resuming previous upload from:', previousUrl);
-        upload.url = previousUrl;
-      }
-
-      // Проверяем, можно ли продолжить предыдущую загрузку
-      upload.findPreviousUploads().then((previousUploads) => {
-        if (previousUploads.length > 0) {
-          console.log('[TUS] Found previous uploads, resuming...');
-          upload.resumeFromPreviousUpload(previousUploads[0]);
+      // Resume previous upload if exists
+      upload.findPreviousUploads().then((prev) => {
+        if (prev.length > 0) {
+          console.log('[Supabase TUS] Resuming previous upload');
+          upload.resumeFromPreviousUpload(prev[0]);
         }
         upload.start();
       }).catch(() => {
-        // Если не удалось найти предыдущие загрузки, начинаем новую
         upload.start();
       });
     });
