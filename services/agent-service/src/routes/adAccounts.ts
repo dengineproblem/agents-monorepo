@@ -538,7 +538,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       // Проверяем, включена ли мультиаккаунтность
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled')
+        .select('multi_account_enabled, access_token')
         .eq('id', userAccountId)
         .single();
 
@@ -592,6 +592,26 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       Object.keys(dbData).forEach(key => {
         if (dbData[key] === undefined) delete dbData[key];
       });
+
+      // Автоматически определяем brain_timezone по таймзоне Facebook-кабинета
+      // Если brain_timezone не задан явно — запрашиваем у FB API
+      if (!dbData.brain_timezone && adAccountData.fb_ad_account_id && user.access_token) {
+        try {
+          const fbAccountId = String(adAccountData.fb_ad_account_id).startsWith('act_')
+            ? adAccountData.fb_ad_account_id
+            : `act_${adAccountData.fb_ad_account_id}`;
+          const tzRes = await fetch(
+            `https://graph.facebook.com/v21.0/${fbAccountId}?fields=timezone_name&access_token=${user.access_token}`
+          );
+          const tzData: any = await tzRes.json();
+          if (tzData.timezone_name && tzData.timezone_name !== 'Asia/Almaty') {
+            dbData.brain_timezone = tzData.timezone_name;
+            log.info({ fbAccountId, timezone: tzData.timezone_name }, 'Auto-set brain_timezone from FB account');
+          }
+        } catch (tzErr) {
+          log.warn({ error: String(tzErr) }, 'Failed to fetch FB account timezone, using default');
+        }
+      }
 
       // Создаём аккаунт (триггер проверит лимит 5 аккаунтов)
       const { data: adAccount, error } = await supabase

@@ -612,14 +612,45 @@ export default async function onboardingRoutes(app: FastifyInstance) {
 
       const stageFrom = user.onboarding_stage;
 
+      // Автоматически определяем таймзону по Facebook-кабинету
+      const fetchFbTimezone = async (adAccountId: string, accessToken: string): Promise<string | null> => {
+        try {
+          const fbId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+          const res = await fetch(`https://graph.facebook.com/v21.0/${fbId}?fields=timezone_name&access_token=${accessToken}`);
+          const data: any = await res.json();
+          if (data.timezone_name && data.timezone_name !== 'Asia/Almaty') {
+            return data.timezone_name;
+          }
+        } catch (err) {
+          logger.warn({ error: String(err) }, 'Failed to fetch FB account timezone on approve');
+        }
+        return null;
+      };
+
       // Для multi-account: обновляем ad_accounts.connection_status
       if (user.multi_account_enabled && account_id) {
+        const { data: adAcc } = await supabase
+          .from('ad_accounts')
+          .select('ad_account_id, access_token')
+          .eq('id', account_id)
+          .single();
+
+        const adAccountUpdate: Record<string, unknown> = {
+          connection_status: 'connected',
+          updated_at: new Date().toISOString()
+        };
+
+        if (adAcc?.ad_account_id && adAcc?.access_token) {
+          const tz = await fetchFbTimezone(adAcc.ad_account_id, adAcc.access_token);
+          if (tz) {
+            adAccountUpdate.brain_timezone = tz;
+            logger.info({ account_id, timezone: tz }, 'Auto-set brain_timezone from FB account on approve');
+          }
+        }
+
         const { error: adAccountError } = await supabase
           .from('ad_accounts')
-          .update({
-            connection_status: 'connected',
-            updated_at: new Date().toISOString()
-          })
+          .update(adAccountUpdate)
           .eq('id', account_id)
           .eq('user_account_id', userId);
 
@@ -632,13 +663,32 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       }
 
       // Обновляем статус и этап в user_accounts (для legacy и общего отслеживания)
+      const userAccountUpdate: Record<string, unknown> = {
+        fb_connection_status: 'approved',
+        onboarding_stage: 'fb_connected',
+        updated_at: new Date().toISOString()
+      };
+
+      // Для legacy: авто-определяем account_timezone
+      if (!user.multi_account_enabled) {
+        const { data: legacyUser } = await supabase
+          .from('user_accounts')
+          .select('ad_account_id, access_token')
+          .eq('id', userId)
+          .single();
+
+        if (legacyUser?.ad_account_id && legacyUser?.access_token) {
+          const tz = await fetchFbTimezone(legacyUser.ad_account_id, legacyUser.access_token);
+          if (tz) {
+            userAccountUpdate.account_timezone = tz;
+            logger.info({ userId, timezone: tz }, 'Auto-set account_timezone from FB account on approve (legacy)');
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('user_accounts')
-        .update({
-          fb_connection_status: 'approved',
-          onboarding_stage: 'fb_connected',
-          updated_at: new Date().toISOString()
-        })
+        .update(userAccountUpdate)
         .eq('id', userId);
 
       if (error) {

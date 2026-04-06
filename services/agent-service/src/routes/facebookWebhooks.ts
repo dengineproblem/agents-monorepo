@@ -22,6 +22,9 @@ const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const TELEGRAM_BOT_TOKEN = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
 const TELEGRAM_TECH_CHAT_ID = '-5079020326';
 
+// Системный токен для авто-верификации доступа к FB-кабинетам при подключении
+const FACEBOOK_SYSTEM_TOKEN = process.env.FACEBOOK_SYSTEM_TOKEN || '';
+
 // Custom lead notifications per account (hardcoded for specific clients)
 const LEAD_NOTIFICATIONS: Record<string, string> = {
   // Bas Dent - отправка лидов в TG группу
@@ -679,7 +682,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       // Get ALL ad accounts with pagination
       let allAdAccounts: any[] = [];
       let adAccountsUrl: string | null = `https://graph.facebook.com/v21.0/me/adaccounts?` +
-        `fields=id,name,account_status&` +
+        `fields=id,name,account_status,timezone_name&` +
         `limit=500&` +
         `access_token=${access_token}`;
 
@@ -831,6 +834,22 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         log.warn({ pageId: page_id }, 'Could not obtain Page Access Token - Lead Forms may not work');
       }
 
+      // Автоматически определяем account_timezone по таймзоне Facebook-кабинета
+      let accountTimezone: string | null = null;
+      try {
+        const fbAccountId = ad_account_id.startsWith('act_') ? ad_account_id : `act_${ad_account_id}`;
+        const tzRes = await fetch(
+          `https://graph.facebook.com/v21.0/${fbAccountId}?fields=timezone_name&access_token=${access_token}`
+        );
+        const tzData: any = await tzRes.json();
+        if (tzData.timezone_name && tzData.timezone_name !== 'Asia/Almaty') {
+          accountTimezone = tzData.timezone_name;
+          log.info({ fbAccountId, timezone: tzData.timezone_name }, 'Auto-set account_timezone from FB account');
+        }
+      } catch (tzErr) {
+        log.warn({ error: String(tzErr) }, 'Failed to fetch FB account timezone, using default');
+      }
+
       // Update user with selected data
       const { error: updateError } = await freshSupabase
         .from('user_accounts')
@@ -840,6 +859,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           page_id,
           instagram_id: instagram_id || null,
           fb_page_access_token: pageAccessToken || null,
+          ...(accountTimezone ? { account_timezone: accountTimezone } : {}),
           updated_at: new Date().toISOString()
         })
         .eq('id', existingUser.id);
@@ -1155,11 +1175,10 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       log.info({
         user_id,
         page_id,
-        ad_account_id: normalizedAdAccountId,
-        status: 'pending_review'
-      }, 'Manual Facebook connection saved successfully');
+        ad_account_id: normalizedAdAccountId
+      }, 'Manual Facebook connection IDs saved, attempting auto-verification');
 
-      // Get user info and account name for notification
+      // Get user info for notifications
       const { data: userData } = await supabase
         .from('user_accounts')
         .select('username, telegram_id')
@@ -1176,7 +1195,88 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         accountName = adAccountData?.name || '';
       }
 
-      // Send Telegram notification to tech specialists
+      // Авто-верификация через системный токен
+      if (FACEBOOK_SYSTEM_TOKEN) {
+        try {
+          // Проверяем доступ к кабинету и получаем timezone
+          const fbRes = await fetch(
+            `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}?fields=id,name,timezone_name&access_token=${FACEBOOK_SYSTEM_TOKEN}`
+          );
+          const fbData: any = await fbRes.json();
+
+          if (!fbData.error && fbData.id) {
+            log.info({ ad_account_id: normalizedAdAccountId, name: fbData.name }, 'System token has access to ad account — auto-approving');
+
+            const timezone = fbData.timezone_name || 'Asia/Almaty';
+
+            // Получаем Page Access Token
+            const pageAccessToken = await getPageAccessToken(page_id!, FACEBOOK_SYSTEM_TOKEN);
+
+            // Подписываем страницу на leadgen вебхук
+            if (pageAccessToken) {
+              subscribePageToLeadgen(page_id!, pageAccessToken).catch((err: any) => {
+                log.warn({ err, page_id }, 'Failed to subscribe page to leadgen on auto-approve');
+              });
+            }
+
+            if (isMultiAccount && account_id) {
+              await supabase
+                .from('ad_accounts')
+                .update({
+                  access_token: FACEBOOK_SYSTEM_TOKEN,
+                  fb_page_access_token: pageAccessToken || null,
+                  connection_status: 'connected',
+                  ...(timezone !== 'Asia/Almaty' ? { brain_timezone: timezone } : {}),
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', account_id)
+                .eq('user_account_id', user_id);
+            }
+
+            // Legacy и общий статус
+            await supabase
+              .from('user_accounts')
+              .update({
+                ...(!isMultiAccount ? {
+                  access_token: FACEBOOK_SYSTEM_TOKEN,
+                  fb_page_access_token: pageAccessToken || null,
+                  ...(timezone !== 'Asia/Almaty' ? { account_timezone: timezone } : {})
+                } : {}),
+                fb_connection_status: 'approved',
+                onboarding_stage: 'fb_connected',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', user_id);
+
+            // Уведомление пользователю
+            if (userData?.telegram_id && TELEGRAM_BOT_TOKEN) {
+              fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: userData.telegram_id,
+                  text: `✅ <b>Facebook подключен!</b>\n\nВаш рекламный кабинет успешно подключен.\nТеперь вы можете создавать рекламные кампании.\n\n🔗 <a href="https://app.performanteaiagency.com/creatives">Создать креатив</a>`,
+                  parse_mode: 'HTML'
+                })
+              }).catch(() => {});
+            }
+
+            log.info({ user_id, account_id, timezone }, 'FB auto-approved via system token');
+
+            return res.send({
+              success: true,
+              auto_approved: true,
+              message: 'Facebook успешно подключен'
+            });
+          } else {
+            log.warn({ ad_account_id: normalizedAdAccountId, error: fbData.error }, 'System token has no access yet — falling back to pending_review');
+          }
+        } catch (verifyErr) {
+          log.warn({ error: String(verifyErr) }, 'Auto-verification failed — falling back to pending_review');
+        }
+      }
+
+      // Фолбэк: доступа нет или токена нет — отправляем на ручную проверку
       const notificationText = `🔔 <b>Новая заявка на подключение Facebook</b>
 
 👤 Пользователь: ${userData?.username || user_id}
@@ -1190,7 +1290,6 @@ ${instagram_id ? `• Instagram ID: <code>${instagram_id}</code>` : '• Instagr
 
 ⏳ Статус: ожидает проверки`;
 
-      // Send notification in background (don't await to not delay response)
       sendTelegramNotification(notificationText).catch(err => {
         log.error({ err }, 'Failed to send Telegram notification for manual connect');
       });

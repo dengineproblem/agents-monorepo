@@ -141,7 +141,7 @@ export function AILaunchDialog({
           >
             <div className="flex items-center space-x-2">
               <RadioGroupItem value="midnight_almaty" id="ai-start-midnight" />
-              <Label htmlFor="ai-start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
+              <Label htmlFor="ai-start-midnight" className="cursor-pointer">С полуночи</Label>
             </div>
             <div className="flex items-center space-x-2">
               <RadioGroupItem value="now" id="ai-start-now" />

@@ -321,7 +321,7 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
               >
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="midnight_almaty" id="ml-start-midnight" />
-                  <Label htmlFor="ml-start-midnight" className="cursor-pointer text-sm">С полуночи (Алматы)</Label>
+                  <Label htmlFor="ml-start-midnight" className="cursor-pointer text-sm">С полуночи</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <RadioGroupItem value="now" id="ml-start-now" />
