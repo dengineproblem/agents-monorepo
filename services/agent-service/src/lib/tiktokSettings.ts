@@ -299,7 +299,7 @@ export async function getTikTokDirectionSettings(
   const waPhoneNumber = direction.whatsapp_phone_number?.phone_number;
   if (objective === 'whatsapp' && waPhoneNumber) {
     const phone = waPhoneNumber.replace(/[^0-9]/g, '');
-    const text = settings.client_question;
+    const text = settings.client_questions?.[0] ?? settings.client_question;
     landing_page_url = `https://wa.me/${phone}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
   }
 
