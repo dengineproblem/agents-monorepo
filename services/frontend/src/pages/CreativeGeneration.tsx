@@ -25,13 +25,10 @@ import { CompetitorReferenceSelector, type CompetitorReference } from '@/compone
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { ImageHistoryTab } from '@/components/creatives/ImageHistoryTab';
-import { ImageGalleryTab } from '@/components/creatives/ImageGalleryTab';
 import { CarouselHistoryTab } from '@/components/creatives/CarouselHistoryTab';
-import { CarouselGalleryTab } from '@/components/creatives/CarouselGalleryTab';
 import { TextHistoryTab } from '@/components/creatives/TextHistoryTab';
-import { TextGalleryTab } from '@/components/creatives/TextGalleryTab';
 import { galleryApi } from '@/services/galleryApi';
-import { History, GalleryHorizontalEnd, Wand2 as GenerateIcon, Save, RotateCcw } from 'lucide-react';
+import { History, Wand2 as GenerateIcon, Save, RotateCcw } from 'lucide-react';
 import { useImageDraftAutoSave } from '@/hooks/useAutoSaveDraft';
 
 interface CreativeTexts {
@@ -58,9 +55,9 @@ const CreativeGeneration = () => {
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'images');
 
   // Подвкладки для каждой основной вкладки
-  const [imageSubTab, setImageSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
-  const [carouselSubTab, setCarouselSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
-  const [textSubTab, setTextSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
+  const [imageSubTab, setImageSubTab] = useState<'generate' | 'history'>('generate');
+  const [carouselSubTab, setCarouselSubTab] = useState<'generate' | 'history'>('generate');
+  const [textSubTab, setTextSubTab] = useState<'generate' | 'history'>('generate');
 
   // Состояние для сохранения черновика
   const [isSavingDraft, setIsSavingDraft] = useState(false);
@@ -1037,10 +1034,6 @@ const CreativeGeneration = () => {
                     <History className="h-4 w-4" />
                     История
                   </TabsTrigger>
-                  <TabsTrigger value="gallery" className="gap-1">
-                    <GalleryHorizontalEnd className="h-4 w-4" />
-                    Галерея
-                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="generate" className="mt-0">
@@ -1603,9 +1596,6 @@ const CreativeGeneration = () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="gallery" className="mt-0">
-                  <ImageGalleryTab onUseAsReference={handleUseImageAsReference} />
-                </TabsContent>
               </Tabs>
             </TabsContent>
 
@@ -1620,10 +1610,6 @@ const CreativeGeneration = () => {
                   <TabsTrigger value="history" className="gap-1">
                     <History className="h-4 w-4" />
                     История
-                  </TabsTrigger>
-                  <TabsTrigger value="gallery" className="gap-1">
-                    <GalleryHorizontalEnd className="h-4 w-4" />
-                    Галерея
                   </TabsTrigger>
                 </TabsList>
 
@@ -1649,14 +1635,6 @@ const CreativeGeneration = () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="gallery" className="mt-0">
-                  <CarouselGalleryTab
-                    onUseAsReference={(imageUrls) => {
-                      toast.success(`Добавлено ${imageUrls.length} референсов. Переключитесь на генерацию.`);
-                      setCarouselSubTab('generate');
-                    }}
-                  />
-                </TabsContent>
               </Tabs>
             </TabsContent>
 
@@ -1671,10 +1649,6 @@ const CreativeGeneration = () => {
                   <TabsTrigger value="history" className="gap-1">
                     <History className="h-4 w-4" />
                     История
-                  </TabsTrigger>
-                  <TabsTrigger value="gallery" className="gap-1">
-                    <GalleryHorizontalEnd className="h-4 w-4" />
-                    Галерея
                   </TabsTrigger>
                 </TabsList>
 
@@ -1705,18 +1679,6 @@ const CreativeGeneration = () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="gallery" className="mt-0">
-                  <TextGalleryTab
-                    onUseAsReference={(text, textType) => {
-                      const searchParams = new URLSearchParams(location.search);
-                      searchParams.set('prompt', text);
-                      searchParams.set('textType', 'reference');
-                      window.history.replaceState({}, '', `${location.pathname}?${searchParams.toString()}`);
-                      setTextSubTab('generate');
-                      window.location.reload();
-                    }}
-                  />
-                </TabsContent>
               </Tabs>
             </TabsContent>
           </Tabs>
