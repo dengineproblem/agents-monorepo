@@ -232,10 +232,3 @@ export const directionsApi = {
   },
 };
 
-export async function fetchMetaWelcomeTemplates(
-  pageId: string
-): Promise<{ templates: Array<{ id: string; name: string; questions: string[] }> }> {
-  const params = new URLSearchParams({ pageId });
-  const response = await fetch(`${API_BASE_URL}/directions/meta-welcome-templates?${params.toString()}`);
-  return response.json();
-}

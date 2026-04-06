@@ -27,8 +27,8 @@ import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTI
 import { DEFAULT_UTM } from '@/constants/cities';
 import { GeoLocationSearch } from '@/components/GeoLocationSearch';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
-import { facebookApi, getCurrentPageId } from '@/services/facebookApi';
-import { directionsApi, type DirectionCustomAudience, fetchMetaWelcomeTemplates } from '@/services/directionsApi';
+import { facebookApi } from '@/services/facebookApi';
+import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
 // tiktokApi убран - Instant Page ID вводится вручную
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
@@ -126,9 +126,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   
   // Настройки рекламы - Специфичные для целей
   const [clientQuestions, setClientQuestions] = useState<string[]>(['Здравствуйте! Хочу узнать об этом подробнее.']);
-  const [metaTemplates, setMetaTemplates] = useState<Array<{ id: string; name: string; questions: string[] }>>([]);
-  const [showMetaTemplates, setShowMetaTemplates] = useState(false);
-  const [loadingMetaTemplates, setLoadingMetaTemplates] = useState(false);
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
   const [pixelId, setPixelId] = useState('');
@@ -295,21 +292,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
   const updateQuestion = (index: number, value: string) => {
     setClientQuestions(clientQuestions.map((q, i) => i === index ? value : q));
-  };
-
-  const loadMetaTemplates = async () => {
-    const pageId = await getCurrentPageId();
-    if (!pageId) return;
-    setLoadingMetaTemplates(true);
-    try {
-      const result = await fetchMetaWelcomeTemplates(pageId);
-      setMetaTemplates(result.templates);
-      setShowMetaTemplates(true);
-    } catch (e) {
-      console.error('Failed to load Meta templates', e);
-    } finally {
-      setLoadingMetaTemplates(false);
-    }
   };
 
   const handleSubmit = async () => {
@@ -602,8 +584,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setDescription('Напишите нам, чтобы узнать подробности');
     setTikTokDescription('Напишите нам, чтобы узнать подробности');
     setClientQuestions(['Здравствуйте! Хочу узнать об этом подробнее.']);
-    setMetaTemplates([]);
-    setShowMetaTemplates(false);
     setInstagramUrl('');
     setSiteUrl('');
     setPixelId('');
@@ -1484,43 +1464,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       + Добавить вопрос
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={loadMetaTemplates}
-                    disabled={loadingMetaTemplates}
-                    className="text-sm text-gray-600 hover:text-gray-800"
-                  >
-                    {loadingMetaTemplates ? 'Загрузка...' : 'Загрузить из Meta'}
-                  </button>
                 </div>
-                {showMetaTemplates && metaTemplates.length > 0 && (
-                  <div className="border rounded p-2 bg-gray-50 space-y-1">
-                    <p className="text-xs text-gray-500">Выберите шаблон из Meta:</p>
-                    {metaTemplates.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className="block w-full text-left text-sm p-1 hover:bg-gray-100 rounded"
-                        onClick={() => {
-                          setClientQuestions(t.questions.slice(0, 5));
-                          setShowMetaTemplates(false);
-                        }}
-                      >
-                        {t.name} ({t.questions.length} вопрос{t.questions.length > 1 ? 'а' : ''})
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="text-xs text-gray-400"
-                      onClick={() => setShowMetaTemplates(false)}
-                    >
-                      Закрыть
-                    </button>
-                  </div>
-                )}
-                {showMetaTemplates && metaTemplates.length === 0 && !loadingMetaTemplates && (
-                  <p className="text-xs text-gray-400">Шаблоны не найдены</p>
-                )}
                 <p className="text-xs text-muted-foreground">
                   Это сообщение будет предзаполнено в WhatsApp при переходе по ссылке
                 </p>
@@ -1684,43 +1628,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       + Добавить вопрос
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={loadMetaTemplates}
-                    disabled={loadingMetaTemplates}
-                    className="text-sm text-gray-600 hover:text-gray-800"
-                  >
-                    {loadingMetaTemplates ? 'Загрузка...' : 'Загрузить из Meta'}
-                  </button>
                 </div>
-                {showMetaTemplates && metaTemplates.length > 0 && (
-                  <div className="border rounded p-2 bg-gray-50 space-y-1">
-                    <p className="text-xs text-gray-500">Выберите шаблон из Meta:</p>
-                    {metaTemplates.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className="block w-full text-left text-sm p-1 hover:bg-gray-100 rounded"
-                        onClick={() => {
-                          setClientQuestions(t.questions.slice(0, 5));
-                          setShowMetaTemplates(false);
-                        }}
-                      >
-                        {t.name} ({t.questions.length} вопрос{t.questions.length > 1 ? 'а' : ''})
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="text-xs text-gray-400"
-                      onClick={() => setShowMetaTemplates(false)}
-                    >
-                      Закрыть
-                    </button>
-                  </div>
-                )}
-                {showMetaTemplates && metaTemplates.length === 0 && !loadingMetaTemplates && (
-                  <p className="text-xs text-gray-400">Шаблоны не найдены</p>
-                )}
                 <p className="text-xs text-muted-foreground">
                   Это сообщение будет отправлено в WhatsApp от имени клиента
                 </p>

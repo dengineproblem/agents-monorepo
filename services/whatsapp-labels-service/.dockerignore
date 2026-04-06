@@ -1,0 +1,5 @@
+node_modules
+src
+.wwebjs_auth
+*.ts
+!dist/**/*.js

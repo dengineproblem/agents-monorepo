@@ -14,13 +14,6 @@ import { tt } from '../adapters/tiktok.js';
 const log = createLogger({ module: 'directionsRoutes' });
 
 // ========================================
-// META TEMPLATES CACHE
-// ========================================
-
-const metaTemplatesCache = new Map<string, { data: any; ts: number }>();
-const CACHE_TTL = 300_000; // 5 minutes
-
-// ========================================
 // VALIDATION SCHEMAS
 // ========================================
 
@@ -845,98 +838,6 @@ export async function directionsRoutes(app: FastifyInstance) {
         success: false,
         error: error.message || 'Failed to fetch custom audiences',
       });
-    }
-  });
-
-  /**
-   * GET /api/directions/meta-welcome-templates
-   * Загружает шаблоны приветственного сообщения WhatsApp из Meta Ads Manager
-   * @query userAccountId - ID пользователя (обязательный)
-   * @query pageId - ID страницы Facebook (обязательный)
-   */
-  app.get('/directions/meta-welcome-templates', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const userAccountId = (request.query as any).userAccountId;
-      const pageId = (request.query as any).pageId;
-
-      if (!userAccountId) {
-        return reply.code(400).send({ success: false, error: 'userAccountId is required' });
-      }
-      if (!pageId || typeof pageId !== 'string' || pageId.trim() === '') {
-        return reply.code(400).send({ success: false, error: 'pageId is required' });
-      }
-
-      const cacheKey = `${userAccountId}:${pageId}`;
-      const cached = metaTemplatesCache.get(cacheKey);
-      if (cached && Date.now() - cached.ts < CACHE_TTL) {
-        log.info({ userAccountId, pageId }, 'Returning cached meta welcome templates');
-        return reply.send({ templates: cached.data });
-      }
-
-      const { data: userAccount, error: userError } = await supabase
-        .from('user_accounts')
-        .select('access_token, multi_account_enabled')
-        .eq('id', userAccountId)
-        .single();
-
-      if (userError || !userAccount) {
-        return reply.code(404).send({ success: false, error: 'User account not found' });
-      }
-
-      const accessToken = userAccount.access_token;
-      if (!accessToken) {
-        log.warn({ userAccountId }, 'No access token for meta welcome templates');
-        return reply.send({ templates: [] });
-      }
-
-      try {
-        const url = `https://graph.facebook.com/v20.0/${pageId.trim()}/welcome_message_flows?fields=id,name,welcome_message&access_token=${encodeURIComponent(accessToken)}`;
-        const response = await fetch(url);
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          log.warn({ userAccountId, pageId, status: response.status, error: errData }, 'Meta welcome_message_flows API error');
-          return reply.send({ templates: [] });
-        }
-
-        const data = await response.json();
-        const flows: any[] = Array.isArray(data?.data) ? data.data : [];
-
-        const templates = flows.map((flow: any) => {
-          let msg: any;
-          try {
-            msg = typeof flow.welcome_message === 'string'
-              ? JSON.parse(flow.welcome_message)
-              : flow.welcome_message;
-          } catch {
-            msg = null;
-          }
-
-          const questions: string[] = [];
-          const autofill = msg?.text_format?.message?.autofill_message;
-          if (Array.isArray(autofill)) {
-            questions.push(...autofill.map((a: any) => a.content).filter(Boolean));
-          } else if (autofill?.content) {
-            questions.push(autofill.content);
-          }
-
-          return {
-            id: String(flow.id || ''),
-            name: String(flow.name || ''),
-            questions,
-          };
-        });
-
-        metaTemplatesCache.set(cacheKey, { data: templates, ts: Date.now() });
-        log.info({ userAccountId, pageId, count: templates.length }, 'Fetched meta welcome templates');
-        return reply.send({ templates });
-      } catch (apiError: any) {
-        log.warn({ err: apiError, userAccountId, pageId }, 'Error fetching meta welcome templates');
-        return reply.send({ templates: [] });
-      }
-    } catch (error: any) {
-      log.error({ err: error }, 'Unexpected error in meta-welcome-templates');
-      return reply.code(500).send({ success: false, error: error.message || 'Internal error' });
     }
   });
 

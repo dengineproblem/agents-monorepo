@@ -12,6 +12,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import {
   createWhatsAppCreative,
   createInstagramCreative,
+  createInstagramDMCreative,
   createWebsiteLeadsCreative,
   createLeadFormVideoCreative,
   createAppInstallsVideoCreative
@@ -1099,7 +1100,7 @@ async function importSingleCreative(
             .maybeSingle();
 
           if (direction?.objective) {
-            const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
+            const objective = direction.objective as 'whatsapp' | 'conversions' | 'instagram_traffic' | 'instagram_dm' | 'site_leads' | 'lead_forms' | 'app_installs';
             const useInstagram = direction.use_instagram !== false;
 
             // Загружаем default_ad_settings
@@ -1172,6 +1173,15 @@ async function importSingleCreative(
                 });
                 fbCreativeId = leadFormCreative.id;
               }
+            } else if (objective === 'instagram_dm' && fullCredentials.instagramId) {
+              const instagramDMCreative = await createInstagramDMCreative(normalizedAdAccountId, accessToken, {
+                videoId: creative.video_id!,
+                pageId: fullCredentials.pageId,
+                instagramId: fullCredentials.instagramId,
+                message: description,
+                imageUrl: creative.thumbnail_url || undefined,
+              });
+              fbCreativeId = instagramDMCreative.id;
             } else if (objective === 'app_installs') {
               const appConfig = getAppInstallsConfig();
               if (appConfig && appStoreUrl) {
@@ -1203,6 +1213,8 @@ async function importSingleCreative(
 
               // Сохраняем в соответствующее поле по objective
               if (objective === 'whatsapp' || (objective === 'conversions' && direction?.conversion_channel === 'whatsapp')) {
+                updateData.fb_creative_id_whatsapp = fbCreativeId;
+              } else if (objective === 'instagram_dm') {
                 updateData.fb_creative_id_whatsapp = fbCreativeId;
               } else if (objective === 'instagram_traffic') {
                 updateData.fb_creative_id_instagram_traffic = fbCreativeId;
