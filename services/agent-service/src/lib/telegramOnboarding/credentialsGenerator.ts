@@ -9,6 +9,7 @@ import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { supabase } from '../supabase.js';
 import { createLogger } from '../logger.js';
+import { syncCompetitorsFromBriefing } from '../competitorSync.js';
 
 const log = createLogger({ module: 'credentialsGenerator' });
 
@@ -199,6 +200,12 @@ export async function createUserFromOnboarding(
     if (briefingError) {
       log.error({ error: briefingError, userId }, 'Failed to save briefing responses');
       // Не критично - пользователь создан, продолжаем
+    }
+
+    // Синхронизируем конкурентов из брифа (async, не блокируем)
+    if (answers.competitor_instagrams && answers.competitor_instagrams.length > 0) {
+      syncCompetitorsFromBriefing(userId, answers.competitor_instagrams)
+        .catch(err => log.warn({ err, userId }, 'Ошибка синхронизации конкурентов из брифа'));
     }
 
     log.info({ userId, username, telegramId }, 'User created successfully from onboarding');
