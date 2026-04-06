@@ -321,7 +321,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             imageHash: fbImage.hash,
             pageId: pageId,
             instagramId: instagramId,
-            message: description
+            message: description,
+            clientQuestion: clientQuestions[0]
           });
           fbCreativeId = igDmCreative.id;
         } else if (objective === 'site_leads' || (objective === 'conversions' && direction?.conversion_channel === 'site')) {

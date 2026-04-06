@@ -785,6 +785,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         pageId: pageId,
         instagramId: instagramId,
         message: description,
+        clientQuestion: clientQuestions[0],
         thumbnailHash: thumbnailResult.hash
       });
       fbCreativeId = igDmCreative.id;

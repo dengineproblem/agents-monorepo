@@ -428,6 +428,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId,
             message: description,
+            clientQuestion: clientQuestions[0],
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = igDmCreative.id;

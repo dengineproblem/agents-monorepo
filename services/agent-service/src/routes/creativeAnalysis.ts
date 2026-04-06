@@ -1179,6 +1179,7 @@ async function importSingleCreative(
                 pageId: fullCredentials.pageId,
                 instagramId: fullCredentials.instagramId,
                 message: description,
+                clientQuestion: clientQuestions[0],
                 imageUrl: creative.thumbnail_url || undefined,
               });
               fbCreativeId = instagramDMCreative.id;

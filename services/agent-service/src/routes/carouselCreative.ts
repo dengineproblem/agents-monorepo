@@ -112,7 +112,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         .maybeSingle();
 
       const description = defaultSettings?.description || 'Смотрите нашу карусель!';
-      const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.';
+      const clientQuestion = (defaultSettings as any)?.client_questions?.[0] ?? defaultSettings?.client_question ?? 'Здравствуйте! Хочу узнать подробнее.';
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
@@ -293,7 +293,8 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           cards: cardParams,
           pageId: pageId,
           instagramId: instagramId,
-          message: description
+          message: description,
+          clientQuestion: clientQuestion
         });
         fbCreativeId = result.id;
       } else if (objective === 'site_leads' || (objective === 'conversions' && (direction as any).conversion_channel === 'site')) {

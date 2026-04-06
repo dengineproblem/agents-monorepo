@@ -828,6 +828,7 @@ export async function createInstagramDMCreative(
     pageId: string;
     instagramId: string;
     message: string;
+    clientQuestion?: string;
     thumbnailHash?: string;
     imageUrl?: string;
   }
@@ -842,6 +843,22 @@ export async function createInstagramDMCreative(
     videoData.image_hash = params.thumbnailHash;
   } else if (params.imageUrl) {
     videoData.image_url = params.imageUrl;
+  }
+
+  if (params.clientQuestion) {
+    videoData.page_welcome_message = JSON.stringify({
+      type: "VISUAL_EDITOR",
+      version: 2,
+      landing_screen_type: "welcome_message",
+      media_type: "text",
+      text_format: {
+        customer_action_type: "autofill_message",
+        message: {
+          autofill_message: [{ content: params.clientQuestion }],
+          text: "Здравствуйте! Чем можем помочь?"
+        }
+      }
+    });
   }
 
   const objectStorySpec: any = {
@@ -1363,17 +1380,36 @@ export async function createInstagramDMImageCreative(
     pageId: string;
     instagramId: string;
     message: string;
+    clientQuestion?: string;
   }
 ): Promise<{ id: string }> {
+  const linkData: any = {
+    image_hash: params.imageHash,
+    message: params.message,
+    link: "https://www.instagram.com/",
+    call_to_action: { type: "INSTAGRAM_MESSAGE" }
+  };
+
+  if (params.clientQuestion) {
+    linkData.page_welcome_message = JSON.stringify({
+      type: "VISUAL_EDITOR",
+      version: 2,
+      landing_screen_type: "welcome_message",
+      media_type: "text",
+      text_format: {
+        customer_action_type: "autofill_message",
+        message: {
+          autofill_message: [{ content: params.clientQuestion }],
+          text: "Здравствуйте! Чем можем помочь?"
+        }
+      }
+    });
+  }
+
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
-    link_data: {
-      image_hash: params.imageHash,
-      message: params.message,
-      link: "https://www.instagram.com/",
-      call_to_action: { type: "INSTAGRAM_MESSAGE" }
-    }
+    link_data: linkData
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -1969,6 +2005,7 @@ export async function createInstagramDMCarouselCreative(
     pageId: string;
     instagramId: string;
     message: string;
+    clientQuestion?: string;
   }
 ): Promise<{ id: string }> {
   const childAttachments = params.cards.map((card) => ({
@@ -1979,16 +2016,34 @@ export async function createInstagramDMCarouselCreative(
     call_to_action: { type: "INSTAGRAM_MESSAGE" }
   }));
 
+  const linkData: any = {
+    message: params.message,
+    link: "https://www.instagram.com/",
+    multi_share_optimized: true,
+    child_attachments: childAttachments,
+    call_to_action: { type: "INSTAGRAM_MESSAGE" }
+  };
+
+  if (params.clientQuestion) {
+    linkData.page_welcome_message = JSON.stringify({
+      type: "VISUAL_EDITOR",
+      version: 2,
+      landing_screen_type: "welcome_message",
+      media_type: "text",
+      text_format: {
+        customer_action_type: "autofill_message",
+        message: {
+          autofill_message: [{ content: params.clientQuestion }],
+          text: "Здравствуйте! Чем можем помочь?"
+        }
+      }
+    });
+  }
+
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
-    link_data: {
-      message: params.message,
-      link: "https://www.instagram.com/",
-      multi_share_optimized: true,
-      child_attachments: childAttachments,
-      call_to_action: { type: "INSTAGRAM_MESSAGE" }
-    }
+    link_data: linkData
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Instagram DM carousel creative');

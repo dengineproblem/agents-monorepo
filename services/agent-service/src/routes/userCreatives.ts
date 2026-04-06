@@ -586,7 +586,7 @@ export default async function userCreativesRoutes(app: FastifyInstance) {
         if (!instagramId) return reply.status(400).send({ error: 'Instagram ID required for instagram_dm' });
         const c = await createInstagramDMCreative(normalizedAccountId, ACCESS_TOKEN, {
           videoId: source.fb_video_id, pageId, instagramId,
-          message: description, thumbnailHash: thumbnailResult.hash,
+          message: description, clientQuestion: clientQuestions[0], thumbnailHash: thumbnailResult.hash,
         });
         fbCreativeId = c.id;
       } else if (objective === 'site_leads' || (objective === 'conversions' && direction.conversion_channel === 'site')) {
