@@ -564,7 +564,19 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         app.log.warn({ err, userId: body.user_id }, 'Failed to update onboarding stage');
       });
 
-      // Запускаем транскрипцию в фоне — не блокируем ответ
+      reply.send({
+        success: true,
+        message: 'Video processed and creative created successfully',
+        data: {
+          creative_id: creative.id,
+          fb_video_id: fbVideo.id,
+          fb_creative_id: fbCreativeId,
+          objective: objective,
+          transcription: null
+        }
+      });
+
+      // Запускаем транскрипцию в фоне после отправки ответа
       backgroundTranscriptionStarted = true;
       const _videoPathForTranscription = videoPath;
       Promise.resolve().then(async () => {
@@ -590,18 +602,6 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           }
         }
       }).catch(() => {});
-
-      return reply.send({
-        success: true,
-        message: 'Video processed and creative created successfully',
-        data: {
-          creative_id: creative.id,
-          fb_video_id: fbVideo.id,
-          fb_creative_id: fbCreativeId,
-          objective: objective,
-          transcription: null
-        }
-      });
 
     } catch (error: any) {
       app.log.error({
