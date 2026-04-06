@@ -269,7 +269,7 @@ export function formatCompletionMessage(
 
 ⚠️ <i>Сохраните эти данные — они понадобятся для входа!</i>
 
-❓ Нужна помощь? <a href="https://t.me/Moltbot_prfmnt_bot">Техподдержка</a>`;
+❓ Нужна помощь? Напишите прямо в этот чат!`;
 
   return message;
 }
