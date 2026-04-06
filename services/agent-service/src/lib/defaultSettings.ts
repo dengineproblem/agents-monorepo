@@ -25,6 +25,7 @@ export interface DefaultAdSettings {
   
   // WhatsApp
   client_question?: string;
+  client_questions?: string[];
   
   // Instagram Traffic
   instagram_url?: string;

@@ -28,6 +28,7 @@ const DefaultSettingsSchema = z.object({
   description: z.string().optional(),
   // WhatsApp specific
   client_question: z.string().optional(),
+  client_questions: z.array(z.string().min(1)).max(5).optional(),
   // Instagram specific
   instagram_url: z.preprocess((v) => {
     if (!v || v === '') return undefined;
@@ -1264,7 +1265,10 @@ export async function directionsRoutes(app: FastifyInstance) {
             age_max: settingsInput.age_max,
             gender: settingsInput.gender || 'all',
             description: settingsInput.description,
-            client_question: settingsInput.client_question,
+            client_question: settingsInput.client_questions && settingsInput.client_questions.length > 0
+              ? settingsInput.client_questions[0]
+              : settingsInput.client_question,
+            client_questions: settingsInput.client_questions,
             instagram_url: settingsInput.instagram_url,
             site_url: settingsInput.site_url,
             pixel_id: settingsInput.pixel_id,
