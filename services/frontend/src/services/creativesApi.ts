@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
+import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
 export type CarouselCard = {
@@ -441,37 +442,43 @@ export const creativesApi = {
       }
     }
 
-    // Для видео — прямая загрузка в Supabase Storage через XHR (REST API)
-    // Работает с любым форматом ключа (jwt и sb_publishable_*)
+    // Для видео — TUS (resumable upload) в Supabase Storage
+    // Требует JWT-формат ключа (eyJ...), не работает с sb_publishable_*
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
     const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
     const storagePath = `uploads/${userId}/${Date.now()}_${file.name.replace(/[^\w.-]+/g, '_')}`;
+    const supabaseTusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
 
-    // Шаг 1: загрузка в Supabase Storage
+    // Шаг 1: загрузка в Supabase Storage через TUS (до 5GB, chunked 6MB)
     const uploadOk = await new Promise<boolean>((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${supabaseUrl}/storage/v1/object/videos/${storagePath}`, true);
-      xhr.setRequestHeader('Authorization', `Bearer ${anonKey}`);
-      xhr.setRequestHeader('apikey', anonKey);
-      xhr.setRequestHeader('x-upsert', 'true');
-      xhr.setRequestHeader('cache-control', 'max-age=3600');
-      xhr.setRequestHeader('content-type', file.type || 'video/mp4');
-
-      xhr.upload.onprogress = (evt) => {
-        if (evt.lengthComputable && onProgress) {
-          onProgress(Math.round((evt.loaded / evt.total) * 100));
-        }
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(true);
-        } else {
-          console.error('[Supabase Storage] Upload failed:', xhr.status, xhr.responseText);
+      const upload = new tus.Upload(file, {
+        endpoint: supabaseTusEndpoint,
+        retryDelays: [0, 1000, 3000, 5000, 10000],
+        chunkSize: 6 * 1024 * 1024,
+        storeFingerprintForResuming: false, // не сохранять URL старых загрузок
+        headers: {
+          Authorization: `Bearer ${anonKey}`,
+          'x-upsert': 'true',
+        },
+        metadata: {
+          bucketName: 'videos',
+          objectName: storagePath,
+          contentType: file.type || 'video/mp4',
+          cacheControl: '3600',
+        },
+        onError: (error) => {
+          console.error('[Supabase TUS] Upload error:', error);
           resolve(false);
-        }
-      };
-      xhr.onerror = () => { console.error('[Supabase Storage] Network error'); resolve(false); };
-      xhr.send(file);
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
+        },
+        onSuccess: () => {
+          console.log('[Supabase TUS] Upload complete, storage path:', storagePath);
+          resolve(true);
+        },
+      });
+      upload.start();
     });
 
     if (!uploadOk) return false;
