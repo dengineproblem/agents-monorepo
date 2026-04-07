@@ -41,6 +41,24 @@ const RequestSchema = z.object({
 
 export const videoFromStorageRoutes: FastifyPluginAsync = async (app) => {
 
+  // POST /create-upload-url — бэкенд создаёт signed URL для прямой загрузки из браузера
+  app.post('/create-upload-url', async (request: any, reply) => {
+    const { user_id, filename, content_type } = request.body as { user_id?: string; filename?: string; content_type?: string };
+    if (!user_id || !filename) {
+      return reply.status(400).send({ error: 'user_id and filename required' });
+    }
+    const ext = filename.split('.').pop() || 'mp4';
+    const storagePath = `uploads/${user_id}/${Date.now()}_${filename.replace(/[^\w.-]+/g, '_')}`;
+    const { data, error } = await supabase.storage
+      .from('videos')
+      .createSignedUploadUrl(storagePath);
+    if (error || !data) {
+      log.error({ error }, '[create-upload-url] Failed to create signed URL');
+      return reply.status(500).send({ error: 'Failed to create upload URL' });
+    }
+    return reply.send({ signed_url: data.signedUrl, token: data.token, storage_path: storagePath });
+  });
+
   // POST /process-video-from-storage
   // Accepts storage_path (already uploaded to Supabase Storage), processes in background
   app.post('/process-video-from-storage', async (request, reply) => {

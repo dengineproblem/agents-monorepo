@@ -1,7 +1,6 @@
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
-import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
 export type CarouselCard = {
@@ -442,43 +441,47 @@ export const creativesApi = {
       }
     }
 
-    // Для видео — TUS (resumable upload) в Supabase Storage
-    // Требует JWT-формат ключа (eyJ...), не работает с sb_publishable_*
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
-    const storagePath = `uploads/${userId}/${Date.now()}_${file.name.replace(/[^\w.-]+/g, '_')}`;
-    const supabaseTusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
+    // Для видео — загрузка через signed URL (бэкенд выдаёт URL, фронтенд грузит без auth)
+    // Это самый надёжный способ — не зависит от формата anon key в браузере
 
-    // Шаг 1: загрузка в Supabase Storage через TUS (до 5GB, chunked 6MB)
-    const uploadOk = await new Promise<boolean>((resolve) => {
-      const upload = new tus.Upload(file, {
-        endpoint: supabaseTusEndpoint,
-        retryDelays: [0, 1000, 3000, 5000, 10000],
-        chunkSize: 6 * 1024 * 1024,
-        storeFingerprintForResuming: false, // не сохранять URL старых загрузок
-        headers: {
-          Authorization: `Bearer ${anonKey}`,
-          'x-upsert': 'true',
-        },
-        metadata: {
-          bucketName: 'videos',
-          objectName: storagePath,
-          contentType: file.type || 'video/mp4',
-          cacheControl: '3600',
-        },
-        onError: (error) => {
-          console.error('[Supabase TUS] Upload error:', error);
-          resolve(false);
-        },
-        onProgress: (bytesUploaded, bytesTotal) => {
-          onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
-        },
-        onSuccess: () => {
-          console.log('[Supabase TUS] Upload complete, storage path:', storagePath);
-          resolve(true);
-        },
+    // Шаг 1: получить signed upload URL от бэкенда
+    let storagePath: string;
+    let signedUrl: string;
+    try {
+      const urlRes = await fetch(`${API_BASE_URL}/create-upload-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, filename: file.name, content_type: file.type }),
       });
-      upload.start();
+      if (!urlRes.ok) {
+        console.error('[Upload] Failed to get signed URL:', urlRes.status);
+        return false;
+      }
+      const urlData = await urlRes.json();
+      storagePath = urlData.storage_path;
+      signedUrl = urlData.signed_url;
+    } catch (e) {
+      console.error('[Upload] Error getting signed URL:', e);
+      return false;
+    }
+
+    // Шаг 2: загрузка файла по signed URL через XHR (без Authorization header)
+    const uploadOk = await new Promise<boolean>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', signedUrl, true);
+      xhr.setRequestHeader('content-type', file.type || 'video/mp4');
+
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable && onProgress) {
+          onProgress(Math.round((evt.loaded / evt.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        console.log('[Upload] XHR status:', xhr.status, xhr.responseText.slice(0, 100));
+        resolve(xhr.status >= 200 && xhr.status < 300);
+      };
+      xhr.onerror = () => { console.error('[Upload] Network error'); resolve(false); };
+      xhr.send(file);
     });
 
     if (!uploadOk) return false;
