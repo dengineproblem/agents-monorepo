@@ -1,7 +1,6 @@
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
-import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
 export type CarouselCard = {
@@ -442,123 +441,101 @@ export const creativesApi = {
       }
     }
 
-    // Для видео загружаем напрямую в Supabase Storage через TUS
+    // Для видео — прямая загрузка в Supabase Storage через XHR (REST API)
+    // Работает с любым форматом ключа (jwt и sb_publishable_*)
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const authToken = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
+    const anonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string;
     const storagePath = `uploads/${userId}/${Date.now()}_${file.name.replace(/[^\w.-]+/g, '_')}`;
-    const supabaseTusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
-    const storageKey = `supabase_upload_${file.name}_${file.size}`;
 
-    return new Promise<boolean>((resolve) => {
-      const upload = new tus.Upload(file, {
-        endpoint: supabaseTusEndpoint,
-        retryDelays: [0, 1000, 3000, 5000, 10000],
-        chunkSize: 6 * 1024 * 1024, // 6MB chunks (Supabase default)
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          'x-upsert': 'true',
-        },
-        metadata: {
-          bucketName: 'videos',
-          objectName: storagePath,
-          contentType: file.type || 'video/mp4',
-          cacheControl: '3600',
-        },
-        onError: (error) => {
-          console.error('[Supabase TUS] Upload error:', error);
-          resolve(false);
-        },
-        onProgress: (bytesUploaded, bytesTotal) => {
-          const pct = Math.round((bytesUploaded / bytesTotal) * 100);
-          onProgress?.(pct);
-        },
-        onSuccess: async () => {
-          console.log('[Supabase TUS] File uploaded to storage, calling backend...');
-          try {
-            localStorage.removeItem(storageKey);
-          } catch { /* ignore */ }
+    // Шаг 1: загрузка в Supabase Storage
+    const uploadOk = await new Promise<boolean>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${supabaseUrl}/storage/v1/object/videos/${storagePath}`, true);
+      xhr.setRequestHeader('Authorization', `Bearer ${anonKey}`);
+      xhr.setRequestHeader('apikey', anonKey);
+      xhr.setRequestHeader('x-upsert', 'true');
+      xhr.setRequestHeader('cache-control', 'max-age=3600');
+      xhr.setRequestHeader('content-type', file.type || 'video/mp4');
 
-          // Tell backend to process the file from storage
-          let creativeId: string | null = null;
-          try {
-            const res = await fetch(`${API_BASE_URL}/process-video-from-storage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                user_id: userId,
-                storage_path: storagePath,
-                title: title || file.name,
-                language: 'ru',
-                ...(directionId && { direction_id: directionId }),
-                ...(adAccountId && { account_id: adAccountId }),
-              }),
-            });
-            if (!res.ok) {
-              console.error('[FromStorage] Backend returned error:', res.status);
-              resolve(false);
-              return;
-            }
-            const data = await res.json();
-            creativeId = data.creative_id;
-            console.log('[FromStorage] Got creative_id:', creativeId);
-          } catch (e) {
-            console.error('[FromStorage] Failed to call backend:', e);
-            resolve(false);
-            return;
-          }
-
-          if (!creativeId) {
-            resolve(false);
-            return;
-          }
-
-          // Poll creative status
-          const maxAttempts = 90; // 90 * 2s = 3 minutes
-          const pollInterval = 2000;
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            try {
-              const statusUrl = new URL(`${API_BASE_URL}/creative-status`);
-              statusUrl.searchParams.set('creative_id', creativeId);
-              statusUrl.searchParams.set('user_id', userId);
-              const response = await fetch(statusUrl.toString());
-              if (!response.ok) {
-                await new Promise(r => setTimeout(r, pollInterval));
-                continue;
-              }
-              const status = await response.json();
-              console.log('[FromStorage] Creative status:', status);
-              if (status.status === 'success') {
-                onProgress?.(100);
-                resolve(true);
-                return;
-              }
-              if (status.status === 'error') {
-                console.error('[FromStorage] Processing failed:', status.error);
-                resolve(false);
-                return;
-              }
-              await new Promise(r => setTimeout(r, pollInterval));
-            } catch (e) {
-              console.warn('[FromStorage] Status check error:', e);
-              await new Promise(r => setTimeout(r, pollInterval));
-            }
-          }
-          console.error('[FromStorage] Timeout after 3 minutes');
-          resolve(false);
-        },
-      });
-
-      // Resume previous upload if exists
-      upload.findPreviousUploads().then((prev) => {
-        if (prev.length > 0) {
-          console.log('[Supabase TUS] Resuming previous upload');
-          upload.resumeFromPreviousUpload(prev[0]);
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable && onProgress) {
+          onProgress(Math.round((evt.loaded / evt.total) * 100));
         }
-        upload.start();
-      }).catch(() => {
-        upload.start();
-      });
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(true);
+        } else {
+          console.error('[Supabase Storage] Upload failed:', xhr.status, xhr.responseText);
+          resolve(false);
+        }
+      };
+      xhr.onerror = () => { console.error('[Supabase Storage] Network error'); resolve(false); };
+      xhr.send(file);
     });
+
+    if (!uploadOk) return false;
+
+    // Шаг 2: отправить бэкенду путь файла для обработки
+    let creativeId: string | null = null;
+    try {
+      const res = await fetch(`${API_BASE_URL}/process-video-from-storage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          storage_path: storagePath,
+          title: title || file.name,
+          language: 'ru',
+          ...(directionId && { direction_id: directionId }),
+          ...(adAccountId && { account_id: adAccountId }),
+        }),
+      });
+      if (!res.ok) {
+        console.error('[FromStorage] Backend returned error:', res.status);
+        return false;
+      }
+      const data = await res.json();
+      creativeId = data.creative_id;
+      console.log('[FromStorage] Got creative_id:', creativeId);
+    } catch (e) {
+      console.error('[FromStorage] Failed to call backend:', e);
+      return false;
+    }
+
+    if (!creativeId) return false;
+
+    // Шаг 3: поллинг статуса обработки
+    const maxAttempts = 90; // 90 * 2s = 3 минуты
+    const pollInterval = 2000;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const statusUrl = new URL(`${API_BASE_URL}/creative-status`);
+        statusUrl.searchParams.set('creative_id', creativeId);
+        statusUrl.searchParams.set('user_id', userId);
+        const response = await fetch(statusUrl.toString());
+        if (!response.ok) {
+          await new Promise(r => setTimeout(r, pollInterval));
+          continue;
+        }
+        const status = await response.json();
+        console.log('[FromStorage] Creative status:', status);
+        if (status.status === 'success') {
+          onProgress?.(100);
+          return true;
+        }
+        if (status.status === 'error') {
+          console.error('[FromStorage] Processing failed:', status.error);
+          return false;
+        }
+        await new Promise(r => setTimeout(r, pollInterval));
+      } catch (e) {
+        console.warn('[FromStorage] Status check error:', e);
+        await new Promise(r => setTimeout(r, pollInterval));
+      }
+    }
+    console.error('[FromStorage] Timeout after 3 minutes');
+    return false;
   },
 
   /**
