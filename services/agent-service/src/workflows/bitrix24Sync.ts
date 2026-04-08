@@ -121,17 +121,19 @@ async function getDefaultStageSettings(
   dealCategory: number | null;
   dealStage: string | null;
   sourceId: string | null;
+  facebookSourceId: string | null;
+  tiktokSourceId: string | null;
 }> {
   try {
     // Check if multi-account mode is enabled
     const { data: userAccount } = await supabase
       .from('user_accounts')
-      .select('multi_account_enabled, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
+      .select('multi_account_enabled, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id, bitrix24_facebook_source_id, bitrix24_tiktok_source_id')
       .eq('id', userAccountId)
       .single();
 
     if (!userAccount) {
-      return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
+      return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null, facebookSourceId: null, tiktokSourceId: null };
     }
 
     const isMultiAccountMode = userAccount.multi_account_enabled && accountId;
@@ -140,20 +142,22 @@ async function getDefaultStageSettings(
       // Multi-account mode: get from ad_accounts
       const { data: adAccount } = await supabase
         .from('ad_accounts')
-        .select('bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
+        .select('bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id, bitrix24_facebook_source_id, bitrix24_tiktok_source_id')
         .eq('id', accountId)
         .eq('user_account_id', userAccountId)
         .single();
 
       if (!adAccount) {
-        return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
+        return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null, facebookSourceId: null, tiktokSourceId: null };
       }
 
       return {
         leadStatus: adAccount.bitrix24_default_lead_status ?? null,
         dealCategory: adAccount.bitrix24_default_deal_category ?? null,
         dealStage: adAccount.bitrix24_default_deal_stage ?? null,
-        sourceId: adAccount.bitrix24_default_source_id ?? null
+        sourceId: adAccount.bitrix24_default_source_id ?? null,
+        facebookSourceId: (adAccount as any).bitrix24_facebook_source_id ?? null,
+        tiktokSourceId: (adAccount as any).bitrix24_tiktok_source_id ?? null,
       };
     }
 
@@ -162,13 +166,32 @@ async function getDefaultStageSettings(
       leadStatus: userAccount.bitrix24_default_lead_status ?? null,
       dealCategory: userAccount.bitrix24_default_deal_category ?? null,
       dealStage: userAccount.bitrix24_default_deal_stage ?? null,
-      sourceId: userAccount.bitrix24_default_source_id ?? null
+      sourceId: userAccount.bitrix24_default_source_id ?? null,
+      facebookSourceId: (userAccount as any).bitrix24_facebook_source_id ?? null,
+      tiktokSourceId: (userAccount as any).bitrix24_tiktok_source_id ?? null,
     };
 
   } catch (error) {
     console.error('Error getting default stage settings:', error);
-    return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null };
+    return { leadStatus: null, dealCategory: null, dealStage: null, sourceId: null, facebookSourceId: null, tiktokSourceId: null };
   }
+}
+
+/**
+ * Pick the correct Bitrix24 SOURCE_ID based on lead platform.
+ * Priority: platform-specific → default → 'WEB'
+ */
+function pickSourceId(
+  settings: { sourceId: string | null; facebookSourceId: string | null; tiktokSourceId: string | null },
+  utmSource: string | null | undefined
+): string {
+  if (utmSource === 'tiktok_instant_form' && settings.tiktokSourceId) {
+    return settings.tiktokSourceId;
+  }
+  if (utmSource === 'facebook_lead_form' && settings.facebookSourceId) {
+    return settings.facebookSourceId;
+  }
+  return settings.sourceId || 'WEB';
 }
 
 function extractName(name: string): { NAME: string; LAST_NAME?: string } {
@@ -237,9 +260,13 @@ export async function pushLeadToBitrix24Direct(
 
     // Get default stage settings
     const defaultStageSettings = await getDefaultStageSettings(userAccountId, accountId);
+    const resolvedSourceId = pickSourceId(defaultStageSettings, leadData.utm_source);
 
     app.log.info({
       sourceId: defaultStageSettings.sourceId,
+      facebookSourceId: defaultStageSettings.facebookSourceId,
+      tiktokSourceId: defaultStageSettings.tiktokSourceId,
+      resolvedSourceId,
       leadStatus: defaultStageSettings.leadStatus,
       dealCategory: defaultStageSettings.dealCategory,
       dealStage: defaultStageSettings.dealStage,
@@ -297,7 +324,7 @@ export async function pushLeadToBitrix24Direct(
         NAME,
         LAST_NAME,
         PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-        SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
+        SOURCE_ID: resolvedSourceId,
         SOURCE_DESCRIPTION: leadData.source_description || 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
@@ -335,7 +362,7 @@ export async function pushLeadToBitrix24Direct(
           NAME,
           LAST_NAME,
           PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-          SOURCE_ID: defaultStageSettings.sourceId || 'WEB'
+          SOURCE_ID: resolvedSourceId
         };
 
         if (leadData.email) {
@@ -364,7 +391,7 @@ export async function pushLeadToBitrix24Direct(
       const dealFields: Partial<Bitrix24Deal> = {
         TITLE: `Сделка: ${displayName}`,
         CONTACT_ID: String(bitrix24ContactId),
-        SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
+        SOURCE_ID: resolvedSourceId,
         SOURCE_DESCRIPTION: leadData.source_description || 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
@@ -384,7 +411,7 @@ export async function pushLeadToBitrix24Direct(
       bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
       // Re-apply SOURCE_ID after delay — Bitrix24 automations clear it on ONCRMDEALADD
-      const sourceIdToSet = defaultStageSettings.sourceId || 'WEB';
+      const sourceIdToSet = resolvedSourceId;
       const dealIdForUpdate = bitrix24DealId;
       setTimeout(async () => {
         try {
@@ -512,10 +539,12 @@ export async function syncLeadToBitrix24(
 
     // Get default stage settings
     const defaultStageSettings = await getDefaultStageSettings(userAccountId, accountId);
+    const resolvedSourceId = pickSourceId(defaultStageSettings, lead.utm_source);
     app.log.debug({
       leadStatus: defaultStageSettings.leadStatus,
       dealCategory: defaultStageSettings.dealCategory,
-      dealStage: defaultStageSettings.dealStage
+      dealStage: defaultStageSettings.dealStage,
+      resolvedSourceId
     }, '[Bitrix24Sync] Default stage settings loaded');
 
     // 3. Extract contact info
@@ -621,7 +650,7 @@ export async function syncLeadToBitrix24(
           NAME,
           LAST_NAME,
           PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-          SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
+          SOURCE_ID: resolvedSourceId,
           SOURCE_DESCRIPTION: lead.utm_source === 'tiktok_instant_form' ? 'TikTok Instant Forms' : 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
@@ -669,7 +698,7 @@ export async function syncLeadToBitrix24(
             NAME,
             LAST_NAME,
             PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
-            SOURCE_ID: defaultStageSettings.sourceId || 'WEB'
+            SOURCE_ID: resolvedSourceId
           };
 
           if (lead.email) {
@@ -702,7 +731,7 @@ export async function syncLeadToBitrix24(
         const dealFields: Partial<Bitrix24Deal> = {
           TITLE: `Сделка: ${displayName}`,
           CONTACT_ID: String(bitrix24ContactId),
-          SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
+          SOURCE_ID: resolvedSourceId,
           SOURCE_DESCRIPTION: lead.utm_source === 'tiktok_instant_form' ? 'TikTok Instant Forms' : 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
@@ -733,7 +762,7 @@ export async function syncLeadToBitrix24(
         bitrix24DealId = await createBitrix24Deal(domain, accessToken, dealFields);
 
         // Re-apply SOURCE_ID after delay — Bitrix24 automations clear it on ONCRMDEALADD
-        const sourceIdToSet2 = defaultStageSettings.sourceId || 'WEB';
+        const sourceIdToSet2 = resolvedSourceId;
         const dealIdForUpdate2 = bitrix24DealId;
         setTimeout(async () => {
           try {
