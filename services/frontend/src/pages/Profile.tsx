@@ -241,6 +241,8 @@ const Profile: React.FC = () => {
   const [defaultDealCategory, setDefaultDealCategory] = useState<number | null>(null);
   const [defaultDealStage, setDefaultDealStage] = useState<string | null>(null);
   const [defaultSourceId, setDefaultSourceId] = useState<string | null>(null);
+  const [facebookSourceId, setFacebookSourceId] = useState<string | null>(null);
+  const [tiktokSourceId, setTiktokSourceId] = useState<string | null>(null);
   const [bitrix24Sources, setBitrix24Sources] = useState<Bitrix24Source[]>([]);
 
   // Facebook Manual Connect Modal
@@ -1150,6 +1152,8 @@ const Profile: React.FC = () => {
           setDefaultDealCategory(defaults.dealCategory);
           setDefaultDealStage(defaults.dealStage);
           setDefaultSourceId(defaults.sourceId);
+          setFacebookSourceId(defaults.facebookSourceId ?? null);
+          setTiktokSourceId(defaults.tiktokSourceId ?? null);
           setDefaultStagesDirty(false); // Reset dirty flag after loading
         } catch (error) {
           console.error('Error loading pipelines:', error);
@@ -1204,6 +1208,16 @@ const Profile: React.FC = () => {
     setDefaultStagesDirty(true);
   };
 
+  const handleFacebookSourceIdChange = (value: string) => {
+    setFacebookSourceId(value || null);
+    setDefaultStagesDirty(true);
+  };
+
+  const handleTiktokSourceIdChange = (value: string) => {
+    setTiktokSourceId(value || null);
+    setDefaultStagesDirty(true);
+  };
+
   // Handle deal pipeline (category) change - only update local state
   const handleDealCategoryChange = (categoryId: string) => {
     const newCategoryId = categoryId ? parseInt(categoryId) : null;
@@ -1222,7 +1236,7 @@ const Profile: React.FC = () => {
       const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
 
       // Build update object based on entity type
-      const updateData: { leadStatus?: string | null; dealCategory?: number | null; dealStage?: string | null; sourceId?: string | null } = {};
+      const updateData: { leadStatus?: string | null; dealCategory?: number | null; dealStage?: string | null; sourceId?: string | null; facebookSourceId?: string | null; tiktokSourceId?: string | null } = {};
 
       if (bitrix24EntityType === 'lead' || bitrix24EntityType === 'both') {
         updateData.leadStatus = defaultLeadStatus;
@@ -1234,6 +1248,8 @@ const Profile: React.FC = () => {
       }
 
       updateData.sourceId = defaultSourceId;
+      updateData.facebookSourceId = facebookSourceId;
+      updateData.tiktokSourceId = tiktokSourceId;
 
       await setBitrix24DefaultStage(user.id, updateData, accountId || undefined);
       setDefaultStagesDirty(false);
@@ -2484,26 +2500,50 @@ const Profile: React.FC = () => {
                     </>
                   )}
 
-                  {/* Источник в Bitrix24 */}
+                  {/* Источники в Bitrix24 по платформам */}
                   {bitrix24Sources.length > 0 && (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Источник</Label>
-                      <Select
-                        value={defaultSourceId || ''}
-                        onValueChange={handleSourceIdChange}
-                        disabled={loadingPipelines}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Не задан (WEB)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {bitrix24Sources.map((source) => (
-                            <SelectItem key={source.statusId} value={source.statusId}>
-                              {source.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Источник Facebook</Label>
+                        <Select
+                          value={facebookSourceId || ''}
+                          onValueChange={handleFacebookSourceIdChange}
+                          disabled={loadingPipelines}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Не задан (WEB)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Не задан (WEB)</SelectItem>
+                            {bitrix24Sources.map((source) => (
+                              <SelectItem key={source.statusId} value={source.statusId}>
+                                {source.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Источник TikTok</Label>
+                        <Select
+                          value={tiktokSourceId || ''}
+                          onValueChange={handleTiktokSourceIdChange}
+                          disabled={loadingPipelines}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Не задан (WEB)" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Не задан (WEB)</SelectItem>
+                            {bitrix24Sources.map((source) => (
+                              <SelectItem key={source.statusId} value={source.statusId}>
+                                {source.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                   )}
 
