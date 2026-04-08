@@ -1270,8 +1270,12 @@ const Profile: React.FC = () => {
     try {
       const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
       await syncBitrix24Pipelines(user.id, accountId);
-      const pipelines = await getBitrix24Pipelines(user.id, accountId);
+      const [pipelines, sourcesResult] = await Promise.all([
+        getBitrix24Pipelines(user.id, accountId),
+        getBitrix24Sources(user.id, accountId || undefined).catch(() => ({ sources: [] }))
+      ]);
       setBitrix24Pipelines(pipelines);
+      setBitrix24Sources(sourcesResult.sources);
       toast.success('Воронки синхронизированы');
     } catch (error) {
       console.error('Error syncing pipelines:', error);
