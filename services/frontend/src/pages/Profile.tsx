@@ -441,7 +441,8 @@ const Profile: React.FC = () => {
 
       try {
         // In multi-account mode, pass accountId to check correct table
-        const accountId = multiAccountEnabled ? currentAdAccountId : undefined;
+        const effectiveAdAccountId = currentAdAccountId || (contextAdAccounts?.[0]?.id ?? null);
+        const accountId = multiAccountEnabled ? effectiveAdAccountId : undefined;
         const status = await getBitrix24Status(user.id, accountId);
         console.log('Bitrix24 status loaded:', status);
         setBitrix24Connected(status.connected);
