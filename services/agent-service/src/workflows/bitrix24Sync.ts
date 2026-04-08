@@ -196,6 +196,7 @@ export interface LeadDataForBitrix24 {
   utm_campaign?: string | null;
   utm_content?: string | null;
   utm_term?: string | null;
+  source_description?: string | null;
 }
 
 /**
@@ -297,7 +298,7 @@ export async function pushLeadToBitrix24Direct(
         LAST_NAME,
         PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
         SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
-        SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+        SOURCE_DESCRIPTION: leadData.source_description || 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
         UTM_CAMPAIGN: leadData.utm_campaign || undefined,
@@ -364,7 +365,7 @@ export async function pushLeadToBitrix24Direct(
         TITLE: `Сделка: ${displayName}`,
         CONTACT_ID: String(bitrix24ContactId),
         SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
-        SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+        SOURCE_DESCRIPTION: leadData.source_description || 'Facebook Lead Forms',
         UTM_SOURCE: leadData.utm_source || undefined,
         UTM_MEDIUM: leadData.utm_medium || undefined,
         UTM_CAMPAIGN: leadData.utm_campaign || undefined,
@@ -621,7 +622,7 @@ export async function syncLeadToBitrix24(
           LAST_NAME,
           PHONE: [{ VALUE: phone, VALUE_TYPE: 'WORK' }],
           SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
-          SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+          SOURCE_DESCRIPTION: lead.utm_source === 'tiktok_instant_form' ? 'TikTok Instant Forms' : 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
           UTM_CAMPAIGN: lead.utm_campaign || undefined,
@@ -702,7 +703,7 @@ export async function syncLeadToBitrix24(
           TITLE: `Сделка: ${displayName}`,
           CONTACT_ID: String(bitrix24ContactId),
           SOURCE_ID: defaultStageSettings.sourceId || 'WEB',
-          SOURCE_DESCRIPTION: 'Facebook Lead Forms',
+          SOURCE_DESCRIPTION: lead.utm_source === 'tiktok_instant_form' ? 'TikTok Instant Forms' : 'Facebook Lead Forms',
           UTM_SOURCE: lead.utm_source || undefined,
           UTM_MEDIUM: lead.utm_medium || undefined,
           UTM_CAMPAIGN: lead.utm_campaign || undefined,
