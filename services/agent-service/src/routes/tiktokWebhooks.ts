@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
+import { normalizePhone } from '../adapters/bitrix24.js';
 
 const log = createLogger({ module: 'tiktokWebhooks' });
 
@@ -208,7 +209,7 @@ export default async function tiktokWebhooks(app: FastifyInstance) {
         const { data: existingLead } = await supabase
           .from('leads')
           .select('id')
-          .eq('external_lead_id', leadId)
+          .eq('leadgen_id', leadId)
           .maybeSingle();
 
         if (existingLead) {
@@ -229,7 +230,7 @@ export default async function tiktokWebhooks(app: FastifyInstance) {
           page_id: event.data.page_id
         }, '[tiktokWebhooks] Processing lead event...');
 
-        await processLeadEvent(event.data, correlationId);
+        await processLeadEvent(event.data, correlationId, app);
 
         const duration = Date.now() - startTime;
         log.info({
@@ -270,256 +271,326 @@ export default async function tiktokWebhooks(app: FastifyInstance) {
 /**
  * Обработка события лида
  */
-async function processLeadEvent(leadData: TikTokLeadData, correlationId: string): Promise<void> {
+async function processLeadEvent(leadData: TikTokLeadData, correlationId: string, app: FastifyInstance): Promise<void> {
   const processStartTime = Date.now();
 
   log.info({
     correlationId,
     lead_id: leadData.lead_id,
+    advertiser_id: leadData.advertiser_id,
+    campaign_id: leadData.campaign_id,
     page_id: leadData.page_id,
     ad_id: leadData.ad_id,
-    adgroup_id: leadData.adgroup_id,
-    campaign_id: leadData.campaign_id,
-    advertiser_id: leadData.advertiser_id,
     fields_count: leadData.field_data?.length,
-    create_time: leadData.create_time
   }, '[tiktokWebhooks] 🔍 Starting lead processing');
 
-  // Парсим поля лида
+  // ─── Валидация обязательных полей ────────────────────────────────────────────
+  if (!leadData.advertiser_id) {
+    log.warn({
+      correlationId,
+      lead_id: leadData.lead_id,
+    }, '[tiktokWebhooks] ⚠️ Missing advertiser_id in lead data, skipping');
+    return;
+  }
+
+  // ─── ФЛОУ 1: Найти аккаунт по advertiser_id (обязательно) ───────────────────
+  // Аналог FB: найти аккаунт по page_id — без аккаунта лид принять невозможно
+  const { data: adAccount, error: adAccountError } = await supabase
+    .from('ad_accounts')
+    .select('id, user_account_id')
+    .eq('tiktok_business_id', leadData.advertiser_id)
+    .maybeSingle();
+
+  if (adAccountError) {
+    log.error({
+      correlationId,
+      lead_id: leadData.lead_id,
+      advertiser_id: leadData.advertiser_id,
+      error: adAccountError.message,
+    }, '[tiktokWebhooks] ❌ Supabase error querying ad_account, skipping');
+    return;
+  }
+
+  if (!adAccount) {
+    log.warn({
+      correlationId,
+      lead_id: leadData.lead_id,
+      advertiser_id: leadData.advertiser_id,
+    }, '[tiktokWebhooks] ⚠️ No ad_account found for advertiser_id, skipping');
+    return;
+  }
+
+  const userAccountId = adAccount.user_account_id;
+  const accountId = adAccount.id;
+
+  log.info({
+    correlationId,
+    lead_id: leadData.lead_id,
+    account_id: accountId,
+    user_account_id: userAccountId,
+  }, '[tiktokWebhooks] 🏢 Resolved ad_account');
+
+  // ─── ФЛОУ 2: Привязка к направлению (опционально, для аналитики) ─────────────
+  // Ищем по campaign_id → page_id, не блокирует сохранение лида
+  let directionId: string | null = null;
+  let matchedBy: string | null = null;
+
+  if (leadData.campaign_id) {
+    const { data } = await supabase
+      .from('account_directions')
+      .select('id')
+      .eq('tiktok_campaign_id', leadData.campaign_id)
+      .maybeSingle();
+    if (data) {
+      directionId = data.id;
+      matchedBy = 'campaign_id';
+    }
+  }
+
+  if (!directionId && leadData.page_id) {
+    const { data } = await supabase
+      .from('account_directions')
+      .select('id')
+      .eq('tiktok_instant_page_id', leadData.page_id)
+      .maybeSingle();
+    if (data) {
+      directionId = data.id;
+      matchedBy = 'page_id';
+    }
+  }
+
+  log.info({
+    correlationId,
+    lead_id: leadData.lead_id,
+    account_id: accountId,
+    user_account_id: userAccountId,
+    direction_id: directionId,
+    matched_by: matchedBy,
+    search_duration_ms: Date.now() - processStartTime,
+  }, '[tiktokWebhooks] 🎯 Account resolved for lead');
+
+  // ─── Парсинг полей ────────────────────────────────────────────────────────────
+  // Предупреждение если field_data отсутствует или не массив
+  if (!leadData.field_data || !Array.isArray(leadData.field_data)) {
+    log.warn({
+      correlationId,
+      lead_id: leadData.lead_id,
+      field_data_type: typeof leadData.field_data,
+    }, '[tiktokWebhooks] ⚠️ field_data is missing or not an array, lead fields will be empty');
+  }
+
   const fields = parseLeadFields(leadData.field_data);
+
+  // Нормализация телефона
+  let phoneRaw: string | undefined = fields.phone;
+  let phoneNormalized: string | undefined;
+  if (phoneRaw) {
+    phoneNormalized = normalizePhone(phoneRaw);
+    log.info({
+      correlationId,
+      lead_id: leadData.lead_id,
+      phone_raw_masked: maskPhone(phoneRaw),
+      phone_normalized_masked: maskPhone(phoneNormalized),
+    }, '[tiktokWebhooks] 📞 Phone normalized');
+  } else {
+    log.warn({
+      correlationId,
+      lead_id: leadData.lead_id,
+    }, '[tiktokWebhooks] ⚠️ Lead has no phone — CRM push will be skipped');
+  }
 
   log.info({
     correlationId,
     lead_id: leadData.lead_id,
     has_name: !!fields.name,
-    has_phone: !!fields.phone,
-    phone_masked: maskPhone(fields.phone),
+    has_phone: !!phoneNormalized,
+    phone_masked: maskPhone(phoneNormalized),
     has_email: !!fields.email,
-    email_masked: maskEmail(fields.email),
-    extra_fields: Object.keys(fields).filter(k => !['name', 'phone', 'email'].includes(k))
+    direction_id: directionId,
   }, '[tiktokWebhooks] 📋 Parsed lead fields');
 
-  // Ищем направление по campaign_id, page_id или advertiser_id
-  let direction = null;
-  let matchedBy: string | null = null;
+  // ─── Дедупликация перед вставкой в БД ────────────────────────────────────────
+  // Явная проверка до insert, чтобы не делать лишние CRM-пуши для дублей
+  const { data: existingByLeadgenId } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('leadgen_id', leadData.lead_id)
+    .maybeSingle();
 
-  // 1. Сначала по campaign_id (самый точный)
-  if (leadData.campaign_id) {
-    log.debug({ campaign_id: leadData.campaign_id }, '[tiktokWebhooks] Searching by campaign_id...');
-    const { data, error } = await supabase
-      .from('account_directions')
-      .select('id, user_account_id, account_id, name')
-      .eq('tiktok_campaign_id', leadData.campaign_id)
-      .single();
-
-    if (data) {
-      direction = data;
-      matchedBy = 'campaign_id';
-    } else if (error && error.code !== 'PGRST116') {
-      log.warn({ error: error.message }, '[tiktokWebhooks] Error searching by campaign_id');
-    }
-  }
-
-  // 2. Затем по page_id (Instant Page)
-  if (!direction && leadData.page_id) {
-    log.debug({ page_id: leadData.page_id }, '[tiktokWebhooks] Searching by page_id...');
-    const { data, error } = await supabase
-      .from('account_directions')
-      .select('id, user_account_id, account_id, name')
-      .eq('tiktok_instant_page_id', leadData.page_id)
-      .single();
-
-    if (data) {
-      direction = data;
-      matchedBy = 'page_id';
-    } else if (error && error.code !== 'PGRST116') {
-      log.warn({ error: error.message }, '[tiktokWebhooks] Error searching by page_id');
-    }
-  }
-
-  // 3. Fallback: ищем по advertiser_id (если у юзера только одно направление TikTok)
-  if (!direction && leadData.advertiser_id) {
-    log.debug({ advertiser_id: leadData.advertiser_id }, '[tiktokWebhooks] Searching by advertiser_id...');
-
-    // Находим ad_account по advertiser_id
-    const { data: adAccount } = await supabase
-      .from('ad_accounts')
-      .select('id')
-      .eq('tiktok_advertiser_id', leadData.advertiser_id)
-      .single();
-
-    if (adAccount) {
-      // Проверяем, есть ли единственное TikTok направление
-      const { data: directions } = await supabase
-        .from('account_directions')
-        .select('id, user_account_id, account_id, name')
-        .eq('account_id', adAccount.id)
-        .eq('platform', 'tiktok')
-        .eq('tiktok_objective', 'lead_generation');
-
-      if (directions?.length === 1) {
-        direction = directions[0];
-        matchedBy = 'advertiser_id (single direction)';
-        log.info({
-          advertiser_id: leadData.advertiser_id,
-          direction_id: direction.id
-        }, '[tiktokWebhooks] Found single TikTok lead_generation direction by advertiser_id');
-      } else if (directions && directions.length > 1) {
-        log.warn({
-          advertiser_id: leadData.advertiser_id,
-          directions_count: directions.length
-        }, '[tiktokWebhooks] Multiple TikTok directions found, cannot auto-match');
-      }
-    }
-  }
-
-  if (!direction) {
-    log.warn({
+  if (existingByLeadgenId) {
+    log.info({
       correlationId,
       lead_id: leadData.lead_id,
-      campaign_id: leadData.campaign_id,
-      page_id: leadData.page_id,
-      advertiser_id: leadData.advertiser_id,
-      search_duration_ms: Date.now() - processStartTime
-    }, '[tiktokWebhooks] ⚠️ Direction not found for lead, skipping');
+      existing_db_id: existingByLeadgenId.id,
+    }, '[tiktokWebhooks] ℹ️ Duplicate lead skipped (pre-insert check by leadgen_id)');
     return;
   }
 
-  log.info({
-    correlationId,
-    lead_id: leadData.lead_id,
-    direction_id: direction.id,
-    direction_name: direction.name,
-    matched_by: matchedBy,
-    search_duration_ms: Date.now() - processStartTime
-  }, '[tiktokWebhooks] 🎯 Found direction for lead');
+  // ─── ФЛОУ 3: Сохранение лида в БД + CRM параллельно ─────────────────────────
+  // CRM check до параллельных операций (как в FB)
+  let bitrix24Enabled = false;
+  try {
+    const { checkBitrix24AutoCreate } = await import('../workflows/bitrix24Sync.js');
+    const s = await checkBitrix24AutoCreate(userAccountId, accountId);
+    bitrix24Enabled = s.enabled;
+  } catch (err: any) {
+    log.warn({ correlationId, err: err.message }, '[tiktokWebhooks][Bitrix24] Auto-create check failed');
+  }
 
-  // Создаём лид в базе данных
-  const insertStartTime = Date.now();
-  const { data: lead, error: insertError } = await supabase
-    .from('leads')
-    .insert({
-      user_account_id: direction.user_account_id,
-      account_id: direction.account_id,
-      direction_id: direction.id,
-      conversion_source: 'tiktok_instant_form',
-      source_type: 'lead_form',
-      leadgen_id: leadData.lead_id,
-      name: fields.name,
-      phone: fields.phone,
-      email: fields.email
-    })
-    .select()
-    .single();
-
-  if (insertError) {
-    // Проверяем на дублирование (unique constraint violation)
-    if (insertError.code === '23505') {
-      log.info({
-        correlationId,
-        lead_id: leadData.lead_id,
-        direction_id: direction.id,
-        total_duration_ms: Date.now() - processStartTime
-      }, '[tiktokWebhooks] ℹ️ Lead already exists (duplicate via DB constraint), skipping');
-      return;
-    }
-
-    log.error({
-      correlationId,
-      error: insertError.message,
-      error_code: insertError.code,
-      error_details: insertError.details,
-      lead_id: leadData.lead_id,
-      direction_id: direction.id
-    }, '[tiktokWebhooks] ❌ Error inserting lead');
-    throw insertError;
+  let amocrmEnabled = false;
+  try {
+    const { checkAmoCRMAutoCreate } = await import('../workflows/amocrmSync.js');
+    const s = await checkAmoCRMAutoCreate(userAccountId, accountId);
+    amocrmEnabled = s.enabled;
+  } catch (err: any) {
+    log.warn({ correlationId, err: err.message }, '[tiktokWebhooks][AmoCRM] Auto-create check failed');
   }
 
   log.info({
     correlationId,
-    lead_db_id: lead?.id,
     lead_id: leadData.lead_id,
-    ad_id: leadData.ad_id || null,
-    direction_id: direction.id,
-    user_account_id: direction.user_account_id,
-    insert_duration_ms: Date.now() - insertStartTime
-  }, '[tiktokWebhooks] 💾 Lead inserted into DB');
+    bitrix24_enabled: bitrix24Enabled,
+    amocrm_enabled: amocrmEnabled,
+  }, '[tiktokWebhooks] 🔗 CRM integration status');
 
-  // Привязка к креативу через ad_creative_mapping (для ROI аналитики)
+  const dbSavePromise = supabase
+    .from('leads')
+    .insert({
+      user_account_id: userAccountId,
+      account_id: accountId,
+      direction_id: directionId,
+      conversion_source: 'tiktok_instant_form',
+      source_type: 'lead_form',
+      leadgen_id: leadData.lead_id,
+      name: fields.name || null,
+      phone: phoneNormalized || null,
+      email: fields.email || null,
+      utm_source: 'tiktok_instant_form',
+      utm_campaign: leadData.campaign_id || null,
+    })
+    .select('id')
+    .single();
+
+  const bitrix24Promise = bitrix24Enabled && phoneNormalized
+    ? (async () => {
+        const { pushLeadToBitrix24Direct } = await import('../workflows/bitrix24Sync.js');
+        return pushLeadToBitrix24Direct(
+          {
+            name: fields.name || null,
+            phone: phoneNormalized!,
+            email: fields.email || null,
+            utm_source: 'tiktok_instant_form',
+            utm_campaign: leadData.campaign_id || null,
+          },
+          userAccountId,
+          accountId,
+          app
+        );
+      })()
+    : Promise.resolve(null);
+
+  const amocrmPromise = amocrmEnabled && phoneNormalized
+    ? (async () => {
+        const { pushLeadToAmoCRMDirect } = await import('../workflows/amocrmSync.js');
+        return pushLeadToAmoCRMDirect(
+          {
+            name: fields.name || null,
+            phone: phoneNormalized!,
+            email: fields.email || null,
+            utm_source: 'tiktok_instant_form',
+            utm_campaign: leadData.campaign_id || null,
+            fieldData: (leadData.field_data || []).map(f => ({ name: f.field_name, values: [f.field_value] })),
+          },
+          userAccountId,
+          accountId,
+          app
+        );
+      })()
+    : Promise.resolve(null);
+
+  const [dbSettled, bitrix24Settled, amocrmSettled] = await Promise.allSettled([
+    dbSavePromise,
+    bitrix24Promise,
+    amocrmPromise,
+  ]);
+
+  // Проверяем БД (критично)
+  if (dbSettled.status === 'rejected') {
+    log.error({ correlationId, error: dbSettled.reason?.message, lead_id: leadData.lead_id }, '[tiktokWebhooks] ❌ DB save rejected');
+    return;
+  }
+  const { data: lead, error: insertError } = dbSettled.value;
+  if (insertError) {
+    if (insertError.code === '23505') {
+      log.info({ correlationId, lead_id: leadData.lead_id }, '[tiktokWebhooks] ℹ️ Duplicate lead (DB unique constraint), skipping');
+      return;
+    }
+    log.error({ correlationId, error: insertError.message, lead_id: leadData.lead_id }, '[tiktokWebhooks] ❌ DB insert error');
+    return;
+  }
+
+  log.info({ correlationId, lead_db_id: lead?.id, lead_id: leadData.lead_id }, '[tiktokWebhooks] 💾 Lead saved to DB');
+
+  const bitrix24Pushed = bitrix24Settled.status === 'fulfilled' && bitrix24Settled.value !== null;
+  const amocrmPushed = amocrmSettled.status === 'fulfilled' && amocrmSettled.value !== null;
+
+  // Обновляем лид с ID из Bitrix24
+  if (lead?.id && bitrix24Settled.status === 'fulfilled' && bitrix24Settled.value) {
+    const r = bitrix24Settled.value;
+    const upd: Record<string, any> = {};
+    if (r.bitrix24LeadId) { upd.bitrix24_lead_id = r.bitrix24LeadId; upd.bitrix24_entity_type = 'lead'; }
+    if (r.bitrix24DealId) { upd.bitrix24_deal_id = r.bitrix24DealId; upd.bitrix24_entity_type = 'deal'; }
+    if (r.bitrix24ContactId) upd.bitrix24_contact_id = r.bitrix24ContactId;
+    if (Object.keys(upd).length > 0) {
+      await supabase.from('leads').update(upd).eq('id', lead.id);
+      log.info({ correlationId, lead_db_id: lead.id, ...upd }, '[tiktokWebhooks][Bitrix24] ✅ Lead linked');
+    }
+  } else if (bitrix24Enabled && bitrix24Settled.status === 'rejected') {
+    log.warn({ correlationId, error: bitrix24Settled.reason?.message, lead_id: leadData.lead_id }, '[tiktokWebhooks][Bitrix24] ❌ Push failed');
+  }
+
+  // Обновляем лид с ID из AmoCRM
+  if (lead?.id && amocrmSettled.status === 'fulfilled' && amocrmSettled.value) {
+    const r = amocrmSettled.value;
+    const upd: Record<string, any> = {};
+    if (r.amocrmLeadId) upd.amocrm_lead_id = r.amocrmLeadId;
+    if (r.amocrmContactId) upd.amocrm_contact_id = r.amocrmContactId;
+    if (Object.keys(upd).length > 0) {
+      await supabase.from('leads').update(upd).eq('id', lead.id);
+      log.info({ correlationId, lead_db_id: lead.id, ...upd }, '[tiktokWebhooks][AmoCRM] ✅ Lead linked');
+    }
+  } else if (amocrmEnabled && amocrmSettled.status === 'rejected') {
+    log.warn({ correlationId, error: amocrmSettled.reason?.message, lead_id: leadData.lead_id }, '[tiktokWebhooks][AmoCRM] ❌ Push failed');
+  }
+
+  // ─── ФЛОУ 4: Привязка к креативу (опционально, для ROI аналитики) ────────────
   if (lead?.id && leadData.ad_id) {
-    const mappingStartTime = Date.now();
     try {
-      const { data: mapping, error: mappingError } = await supabase
+      const { data: mapping } = await supabase
         .from('ad_creative_mapping')
         .select('user_creative_id')
         .eq('ad_id', leadData.ad_id)
         .maybeSingle();
 
-      if (mappingError) {
-        log.warn({
-          correlationId,
-          error: mappingError.message,
-          error_code: mappingError.code,
-          ad_id: leadData.ad_id
-        }, '[tiktokWebhooks] ⚠️ Error querying ad_creative_mapping');
-      } else if (mapping?.user_creative_id) {
-        const { error: updateError } = await supabase
-          .from('leads')
-          .update({ creative_id: mapping.user_creative_id })
-          .eq('id', lead.id);
-
-        if (updateError) {
-          log.warn({
-            correlationId,
-            error: updateError.message,
-            lead_db_id: lead.id,
-            creative_id: mapping.user_creative_id
-          }, '[tiktokWebhooks] ⚠️ Failed to update lead with creative_id');
-        } else {
-          log.info({
-            correlationId,
-            lead_id: leadData.lead_id,
-            ad_id: leadData.ad_id,
-            creative_id: mapping.user_creative_id,
-            mapping_duration_ms: Date.now() - mappingStartTime
-          }, '[tiktokWebhooks] 🔗 Lead linked to creative via ad_creative_mapping');
-        }
+      if (mapping?.user_creative_id) {
+        await supabase.from('leads').update({ creative_id: mapping.user_creative_id }).eq('id', lead.id);
+        log.info({ correlationId, lead_db_id: lead.id, creative_id: mapping.user_creative_id, ad_id: leadData.ad_id }, '[tiktokWebhooks] 🔗 Lead linked to creative');
       } else {
-        log.warn({
-          correlationId,
-          ad_id: leadData.ad_id,
-          lead_id: leadData.lead_id
-        }, '[tiktokWebhooks] ⚠️ No creative mapping found for ad_id — lead will NOT appear in ROI analytics');
+        log.warn({ correlationId, ad_id: leadData.ad_id }, '[tiktokWebhooks] ⚠️ No creative mapping for ad_id');
       }
-    } catch (mappingErr: any) {
-      // Не критично — лид уже сохранён, привязка к креативу опциональна
-      log.warn({
-        correlationId,
-        error: mappingErr.message,
-        ad_id: leadData.ad_id,
-        mapping_duration_ms: Date.now() - mappingStartTime
-      }, '[tiktokWebhooks] ⚠️ Exception linking lead to creative');
+    } catch (err: any) {
+      log.warn({ correlationId, error: err.message }, '[tiktokWebhooks] ⚠️ Creative mapping error (non-critical)');
     }
-  } else if (lead?.id && !leadData.ad_id) {
-    log.warn({
-      correlationId,
-      lead_id: leadData.lead_id,
-      lead_db_id: lead.id,
-      has_campaign_id: !!leadData.campaign_id,
-      has_adgroup_id: !!leadData.adgroup_id
-    }, '[tiktokWebhooks] ⚠️ Lead has no ad_id — cannot link to creative for ROI analytics');
   }
 
-  const totalDuration = Date.now() - processStartTime;
   log.info({
     correlationId,
     lead_db_id: lead?.id,
     lead_id: leadData.lead_id,
-    direction_id: direction.id,
-    direction_name: direction.name,
-    matched_by: matchedBy,
-    insert_duration_ms: Date.now() - insertStartTime,
-    total_duration_ms: totalDuration
+    direction_id: directionId,
+    bitrix24_pushed: bitrix24Pushed,
+    amocrm_pushed: amocrmPushed,
+    total_duration_ms: Date.now() - processStartTime,
   }, '[tiktokWebhooks] ✅ Lead created successfully');
 }
 

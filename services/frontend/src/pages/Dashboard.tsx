@@ -351,18 +351,26 @@ const Dashboard: React.FC = () => {
           const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
           const u = stored ? JSON.parse(stored) : null;
 
+          // Текущий ad_account (для мультиаккаунтного режима)
+          const currentAcc = (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0)
+            ? (contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0])
+            : null;
+
           // Проверка подключения Facebook с учётом мультиаккаунтного режима
           let isFbConnected = false;
-          if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
+          if (currentAcc) {
             // В мультиаккаунтном режиме проверяем данные в текущем выбранном ad_account
-            const currentAcc = contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0];
             // Для manual-connect достаточно ad_account_id (access_token получается позже через Business Portfolio)
             isFbConnected = !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
           } else {
             // Legacy режим — проверяем в user_accounts
             isFbConnected = !!u?.ad_account_id && u?.ad_account_id !== '';
           }
-          const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
+
+          // Проверка подключения TikTok с учётом мультиаккаунтного режима
+          const isTtConnected = currentAcc
+            ? !!currentAcc?.tiktok_business_id
+            : (tiktokConnected || !!u?.tiktok_business_id);
 
           const openFacebookConnect = () => {
             setShowFacebookConnectModal(true);
@@ -370,7 +378,12 @@ const Dashboard: React.FC = () => {
           
           const openTikTokAuth = () => {
             const uid = u?.id || '';
-            const statePayload = { user_id: uid, ts: Date.now() };
+            const statePayload: Record<string, unknown> = { user_id: uid, ts: Date.now() };
+            // В мультиаккаунтном режиме передаём ad_account_id, чтобы OAuth callback
+            // сохранил токен в ad_accounts, а не в user_accounts
+            if (currentAcc) {
+              statePayload.ad_account_id = currentAcc.id;
+            }
             let state = '';
             try {
               state = encodeURIComponent(btoa(JSON.stringify(statePayload)));

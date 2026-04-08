@@ -382,6 +382,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     loadAutopilotStatus();
   }, [currentAdAccountId, multiAccountEnabled]);
 
+  // Обновляем tiktokConnected при смене текущего ad_account в мультиаккаунтном режиме
+  useEffect(() => {
+    if (multiAccountEnabled && currentAdAccountId && adAccounts.length > 0) {
+      const acc = adAccounts.find(a => a.id === currentAdAccountId);
+      setTiktokConnected(!!acc?.tiktok_business_id && !!acc?.tiktok_account_id);
+    }
+  }, [adAccounts, currentAdAccountId, multiAccountEnabled]);
+
   // Функция для переключения состояния AI автопилота
   const toggleAiAutopilot = async (enabled: boolean) => {
     setAiAutopilotLoading(true);

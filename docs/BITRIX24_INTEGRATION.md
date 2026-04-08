@@ -116,16 +116,26 @@ POST /bitrix24/sync-leads
             └── getDeals(batch) -> update current_status_id, current_pipeline_id
 ```
 
-### Auto-Create Leads Flow (из Facebook Lead Forms)
+### Auto-Create Leads Flow (Facebook Lead Forms и TikTok Instant Forms)
+
+Один флаг `bitrix24_auto_create_leads` в `ad_accounts` включает авто-создание для обоих источников.
 
 ```
-Facebook Lead Form Webhook
-    │
-    ├── facebookWebhooks.ts получает лид
-    │
+Facebook Lead Form Webhook          TikTok Instant Form Webhook
+    │                                   │
+    ├── facebookWebhooks.ts             ├── tiktokWebhooks.ts
+    │                                   │
+    ├── Найти аккаунт по page_id        ├── Найти аккаунт по advertiser_id
+    │   (обязательно)                   │   = tiktok_business_id (обязательно)
+    │                                   │
+    ├── Дедупликация по leadgen_id      ├── Дедупликация по leadgen_id
+    │                                   │
     ├── Проверка: bitrix24_auto_create_leads = true?
     │   │
-    │   └── Да → Вызов syncLeadToBitrix24(leadId)
+    │   └── Да → параллельно:
+    │       ├── DB insert (лид в leads)
+    │       ├── pushLeadToBitrix24Direct()
+    │       └── pushLeadToAmoCRMDirect()
     │
     └── workflows/bitrix24Sync.ts
         │
@@ -145,6 +155,10 @@ Facebook Lead Form Webhook
                 ├── createContact(NAME, PHONE)
                 └── createDeal(CONTACT_ID, TITLE, SOURCE)
 ```
+
+**utm_source** по источнику:
+- Facebook Lead Forms: `utm_source = 'facebook_lead_form'`
+- TikTok Instant Forms: `utm_source = 'tiktok_instant_form'`
 
 **Передаваемые поля (hardcoded):**
 - `NAME`, `LAST_NAME` — из имени лида
