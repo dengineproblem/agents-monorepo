@@ -1696,7 +1696,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       // Check if multi-account mode is enabled
       const { data: userAccount } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled, bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
+        .select('multi_account_enabled, bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id, bitrix24_facebook_source_id, bitrix24_tiktok_source_id')
         .eq('id', userAccountId)
         .single();
 
@@ -1713,7 +1713,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         // Multi-account mode: get from ad_accounts
         const { data: adAccount } = await supabase
           .from('ad_accounts')
-          .select('bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id')
+          .select('bitrix24_entity_type, bitrix24_default_lead_status, bitrix24_default_deal_category, bitrix24_default_deal_stage, bitrix24_default_source_id, bitrix24_facebook_source_id, bitrix24_tiktok_source_id')
           .eq('id', accountId)
           .eq('user_account_id', userAccountId)
           .single();
@@ -1730,7 +1730,9 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
           leadStatus: adAccount.bitrix24_default_lead_status ?? null,
           dealCategory: adAccount.bitrix24_default_deal_category ?? null,
           dealStage: adAccount.bitrix24_default_deal_stage ?? null,
-          sourceId: adAccount.bitrix24_default_source_id ?? null
+          sourceId: adAccount.bitrix24_default_source_id ?? null,
+          facebookSourceId: (adAccount as any).bitrix24_facebook_source_id ?? null,
+          tiktokSourceId: (adAccount as any).bitrix24_tiktok_source_id ?? null,
         });
       }
 
@@ -1740,7 +1742,9 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         leadStatus: userAccount.bitrix24_default_lead_status ?? null,
         dealCategory: userAccount.bitrix24_default_deal_category ?? null,
         dealStage: userAccount.bitrix24_default_deal_stage ?? null,
-        sourceId: userAccount.bitrix24_default_source_id ?? null
+        sourceId: userAccount.bitrix24_default_source_id ?? null,
+        facebookSourceId: (userAccount as any).bitrix24_facebook_source_id ?? null,
+        tiktokSourceId: (userAccount as any).bitrix24_tiktok_source_id ?? null,
       });
 
     } catch (error: any) {
@@ -1767,7 +1771,9 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         leadStatus: z.string().nullable().optional(),
         dealCategory: z.number().nullable().optional(),
         dealStage: z.string().nullable().optional(),
-        sourceId: z.string().nullable().optional()
+        sourceId: z.string().nullable().optional(),
+        facebookSourceId: z.string().nullable().optional(),
+        tiktokSourceId: z.string().nullable().optional()
       });
 
       const parsed = DefaultStageBodySchema.safeParse(request.body);
@@ -1779,7 +1785,7 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { userAccountId, accountId, leadStatus, dealCategory, dealStage, sourceId } = parsed.data;
+      const { userAccountId, accountId, leadStatus, dealCategory, dealStage, sourceId, facebookSourceId, tiktokSourceId } = parsed.data;
 
       // Check if multi-account mode is enabled
       const { data: userAccount } = await supabase
@@ -1810,6 +1816,12 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       }
       if (sourceId !== undefined) {
         updateData.bitrix24_default_source_id = sourceId;
+      }
+      if (facebookSourceId !== undefined) {
+        updateData.bitrix24_facebook_source_id = facebookSourceId;
+      }
+      if (tiktokSourceId !== undefined) {
+        updateData.bitrix24_tiktok_source_id = tiktokSourceId;
       }
 
       if (Object.keys(updateData).length === 0) {
