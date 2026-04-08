@@ -621,6 +621,8 @@ export interface DefaultStageSetting {
   dealCategory: number | null;
   dealStage: string | null;
   sourceId: string | null;
+  facebookSourceId: string | null;
+  tiktokSourceId: string | null;
 }
 
 export interface Bitrix24Source {
@@ -729,6 +731,8 @@ export async function setBitrix24DefaultStage(
     dealCategory?: number | null;
     dealStage?: string | null;
     sourceId?: string | null;
+    facebookSourceId?: string | null;
+    tiktokSourceId?: string | null;
   },
   accountId?: string
 ): Promise<{ success: boolean }> {
