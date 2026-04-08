@@ -454,7 +454,7 @@ const Profile: React.FC = () => {
     };
 
     loadBitrix24Status();
-  }, [user?.id, multiAccountEnabled, currentAdAccountId]);
+  }, [user?.id, multiAccountEnabled, currentAdAccountId, contextAdAccounts]);
 
   // Listen for Bitrix24 connection success
   useEffect(() => {
@@ -2511,15 +2511,15 @@ const Profile: React.FC = () => {
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Источник Facebook</Label>
                         <Select
-                          value={facebookSourceId || ''}
-                          onValueChange={handleFacebookSourceIdChange}
+                          value={facebookSourceId || '__none__'}
+                          onValueChange={(v) => handleFacebookSourceIdChange(v === '__none__' ? '' : v)}
                           disabled={loadingPipelines}
                         >
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Не задан (WEB)" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Не задан (WEB)</SelectItem>
+                            <SelectItem value="__none__">Не задан (WEB)</SelectItem>
                             {bitrix24Sources.map((source) => (
                               <SelectItem key={source.statusId} value={source.statusId}>
                                 {source.name}
@@ -2532,15 +2532,15 @@ const Profile: React.FC = () => {
                       <div className="space-y-1">
                         <Label className="text-xs text-muted-foreground">Источник TikTok</Label>
                         <Select
-                          value={tiktokSourceId || ''}
-                          onValueChange={handleTiktokSourceIdChange}
+                          value={tiktokSourceId || '__none__'}
+                          onValueChange={(v) => handleTiktokSourceIdChange(v === '__none__' ? '' : v)}
                           disabled={loadingPipelines}
                         >
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Не задан (WEB)" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Не задан (WEB)</SelectItem>
+                            <SelectItem value="__none__">Не задан (WEB)</SelectItem>
                             {bitrix24Sources.map((source) => (
                               <SelectItem key={source.statusId} value={source.statusId}>
                                 {source.name}
