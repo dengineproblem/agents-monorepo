@@ -29,6 +29,8 @@ import { APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { useOptimization } from '@/hooks/useOptimization';
 import OptimizationModal from '@/components/optimization/OptimizationModal';
+import { DirectionMultiSelect } from '@/components/ui/direction-multi-select';
+import { creativesApi } from '@/services/creativesApi';
 
 // Основной вебхук для загрузки видео
 const DEFAULT_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/downloadvideo';
@@ -162,7 +164,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
   const [utmTag, setUtmTag] = useState<string>(DEFAULT_UTM);
   const [placement, setPlacement] = useState<'instagram' | 'tiktok' | 'both'>('instagram');
-  const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
+  const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>([]);
+  const extraDirectionIdsRef = useRef<string[]>([]);
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
   const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
@@ -177,7 +180,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     if (!currentAdAccountId) return;
 
     console.log('[VideoUpload] Смена аккаунта, сбрасываем состояние');
-    setSelectedDirectionId('');
+    setSelectedDirectionIds([]);
     setSelectedCreativeId('');
     setExistingCreatives([]);
     setSelectedFile(null);
@@ -186,13 +189,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
   // Автоматически выбираем первое направление если ничего не выбрано
   useEffect(() => {
-    if (!directionsLoading && directions.length > 0 && !selectedDirectionId) {
+    if (!directionsLoading && directions.length > 0 && selectedDirectionIds.length === 0) {
       // Фильтруем по текущей цели, если нужно
       const filtered = directions.filter(d => d.objective === campaignGoal);
       const toSelect = filtered.length > 0 ? filtered[0].id : directions[0].id;
-      setSelectedDirectionId(toSelect);
+      setSelectedDirectionIds([toSelect]);
     }
-  }, [directions, directionsLoading, selectedDirectionId, campaignGoal]);
+  }, [directions, directionsLoading, selectedDirectionIds.length, campaignGoal]);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
   const [retryAttempt, setRetryAttempt] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -467,7 +470,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setProgress(100);
         // фиксируем выбранную цель кампании для последующей оптимизации
         updateCurrentCampaignGoal(campaignGoal);
-        setTimeout(() => {
+        setTimeout(async () => {
           if (fileType === 'video') {
             setSelectedFile(null);
             const input = document.getElementById('video-upload') as HTMLInputElement | null;
@@ -497,6 +500,40 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           setIsRetrying(false);
           setRetryAttempt(0);
           setProgress(0);
+          // Assign to additional directions if any were selected
+          const extraIds = extraDirectionIdsRef.current;
+          if (extraIds.length > 0) {
+            extraDirectionIdsRef.current = [];
+            const storedUser = localStorage.getItem('user');
+            const localUserData = storedUser ? JSON.parse(storedUser) : {};
+            const localUserId = localUserData?.id;
+            if (localUserId) {
+              try {
+                const res = await fetch(`${API_BASE_URL}/user-creatives?user_account_id=${localUserId}${currentAdAccountId ? `&account_id=${currentAdAccountId}` : ''}`, {
+                  headers: getAuthHeaders(),
+                });
+                if (res.ok) {
+                  const creatives = await res.json();
+                  if (creatives?.length > 0) {
+                    const newest = [...creatives].sort((a: any, b: any) =>
+                      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    )[0];
+                    const assignResults = await Promise.allSettled(
+                      extraIds.map(dirId =>
+                        creativesApi.assignToDirection(newest.id, dirId, currentAdAccountId)
+                      )
+                    );
+                    const ok = assignResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+                    if (ok > 0) {
+                      toast.success(`Креатив также привязан к ${ok} дополнительным направлениям`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Ошибка привязки к дополнительным направлениям:', e);
+              }
+            }
+          }
         }, 2000);
       } else if (isWorkflowError(status, responseText)) {
         if (currentAttempt === 0) {
@@ -511,7 +548,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setProgress(100);
         // фиксируем выбранную цель кампании для последующей оптимизации
         updateCurrentCampaignGoal(campaignGoal);
-        setTimeout(() => {
+        setTimeout(async () => {
           if (fileType === 'video') {
             setSelectedFile(null);
             const input = document.getElementById('video-upload') as HTMLInputElement | null;
@@ -541,6 +578,40 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           setIsRetrying(false);
           setRetryAttempt(0);
           setProgress(0);
+          // Assign to additional directions if any were selected
+          const extraIds = extraDirectionIdsRef.current;
+          if (extraIds.length > 0) {
+            extraDirectionIdsRef.current = [];
+            const storedUser = localStorage.getItem('user');
+            const localUserData = storedUser ? JSON.parse(storedUser) : {};
+            const localUserId = localUserData?.id;
+            if (localUserId) {
+              try {
+                const res = await fetch(`${API_BASE_URL}/user-creatives?user_account_id=${localUserId}${currentAdAccountId ? `&account_id=${currentAdAccountId}` : ''}`, {
+                  headers: getAuthHeaders(),
+                });
+                if (res.ok) {
+                  const creatives = await res.json();
+                  if (creatives?.length > 0) {
+                    const newest = [...creatives].sort((a: any, b: any) =>
+                      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    )[0];
+                    const assignResults = await Promise.allSettled(
+                      extraIds.map(dirId =>
+                        creativesApi.assignToDirection(newest.id, dirId, currentAdAccountId)
+                      )
+                    );
+                    const ok = assignResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+                    if (ok > 0) {
+                      toast.success(`Креатив также привязан к ${ok} дополнительным направлениям`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Ошибка привязки к дополнительным направлениям:', e);
+              }
+            }
+          }
         }, 2000);
       }
     };
@@ -590,6 +661,42 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setIsRetrying(false);
         setRetryAttempt(0);
         setProgress(0);
+        // Assign to additional directions if any were selected
+        (async () => {
+          const extraIds = extraDirectionIdsRef.current;
+          if (extraIds.length > 0) {
+            extraDirectionIdsRef.current = [];
+            const storedUser = localStorage.getItem('user');
+            const localUserData = storedUser ? JSON.parse(storedUser) : {};
+            const localUserId = localUserData?.id;
+            if (localUserId) {
+              try {
+                const res = await fetch(`${API_BASE_URL}/user-creatives?user_account_id=${localUserId}${currentAdAccountId ? `&account_id=${currentAdAccountId}` : ''}`, {
+                  headers: getAuthHeaders(),
+                });
+                if (res.ok) {
+                  const creatives = await res.json();
+                  if (creatives?.length > 0) {
+                    const newest = [...creatives].sort((a: any, b: any) =>
+                      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+                    )[0];
+                    const assignResults = await Promise.allSettled(
+                      extraIds.map(dirId =>
+                        creativesApi.assignToDirection(newest.id, dirId, currentAdAccountId)
+                      )
+                    );
+                    const ok = assignResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+                    if (ok > 0) {
+                      toast.success(`Креатив также привязан к ${ok} дополнительным направлениям`);
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Ошибка привязки к дополнительным направлениям:', e);
+              }
+            }
+          }
+        })();
       }
     };
     xhr.send(formData);
@@ -799,7 +906,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       
       const form = new FormData();
       if (actualUserData.id) form.append('user_id', actualUserData.id);
-      if (selectedDirectionId) form.append('direction_id', selectedDirectionId);
+      if (selectedDirectionIds[0]) form.append('direction_id', selectedDirectionIds[0]);
       if (actualUserData.instagram_id) form.append('instagram_id', actualUserData.instagram_id);
       if (actualUserData.telegram_id) form.append('telegram_id', actualUserData.telegram_id);
       if (actualUserData.telegram_bot_token) form.append('telegram_bot_token', actualUserData.telegram_bot_token);
@@ -997,8 +1104,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         return;
       }
 
+      extraDirectionIdsRef.current = selectedDirectionIds.slice(1);
       performUpload(form, webhookUrl, 0, 'video');
-      
+
     } catch (error) {
       console.error('Ошибка при загрузке видео:', error);
       toast.error('Ошибка при загрузке видео: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
@@ -1342,7 +1450,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       const actualUserData = userData || {};
       const form = new FormData();
       if (actualUserData.id) form.append('user_id', actualUserData.id);
-      if (selectedDirectionId) form.append('direction_id', selectedDirectionId);
+      if (selectedDirectionIds[0]) form.append('direction_id', selectedDirectionIds[0]);
       if (actualUserData.instagram_id) form.append('instagram_id', actualUserData.instagram_id);
       if (actualUserData.telegram_id) form.append('telegram_id', actualUserData.telegram_id);
       if (actualUserData.telegram_bot_token) form.append('telegram_bot_token', actualUserData.telegram_bot_token);
@@ -1406,6 +1514,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         toast.error('Некорректный адрес webhook!');
         return;
       }
+      extraDirectionIdsRef.current = selectedDirectionIds.slice(1);
       performUpload(form, webhookUrl, 0, 'image');
     } catch (error) {
       console.error('Ошибка при загрузке изображения:', error);
@@ -1558,7 +1667,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <Button
                 variant="outline"
-                disabled={isUploading || ((placement === 'instagram' || placement === 'both') && !selectedDirectionId)}
+                disabled={isUploading || ((placement === 'instagram' || placement === 'both') && selectedDirectionIds.length === 0)}
                 onClick={() => setLaunchDialogOpen(true)}
                 className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
               >
@@ -1770,28 +1879,16 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     {directions.length > 0 ? (
                       <div className="mb-4">
                         <label className="block mb-1 font-medium">{t('video.businessDirection')}</label>
-                        <Select
-                          value={selectedDirectionId}
-                          onValueChange={setSelectedDirectionId}
+                        <DirectionMultiSelect
+                          directions={directions.filter(d => !campaignGoal || d.objective === campaignGoal)}
+                          selectedIds={selectedDirectionIds}
+                          onChange={setSelectedDirectionIds}
                           disabled={isUploading || directionsLoading}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder={t('video.selectDirection')} className="truncate" />
-                          </SelectTrigger>
-                          <SelectContent className="max-w-[calc(100vw-4rem)]">
-                            {directions
-                              .filter(d => !campaignGoal || d.objective === campaignGoal)
-                              .map((direction) => (
-                                <SelectItem key={direction.id} value={direction.id}>
-                                  <span className="block truncate max-w-[350px]" title={`${direction.name} (${getDirectionObjectiveLabel(direction)})`}>
-                                    {direction.name} ({getDirectionObjectiveLabel(direction)})
-                                  </span>
-                                </SelectItem>
-                              ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder={t('video.selectDirection')}
+                          renderLabel={(d) => `${d.name} (${getDirectionObjectiveLabel(d)})`}
+                        />
                         <p className="text-xs text-muted-foreground mt-1">
-                          Креатив будет связан с выбранным направлением
+                          Креатив будет связан с выбранными направлениями
                         </p>
                       </div>
                     ) : !directionsLoading && (
