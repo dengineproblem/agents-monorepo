@@ -19,7 +19,7 @@ export interface ImageDraft {
   referenceImagePrompt: string;
   generatedImage?: string;
   generatedCreativeId?: string;
-  selectedDirectionId: string;
+  selectedDirectionIds: string[];
   savedAt: number;
 }
 
@@ -53,7 +53,7 @@ export interface CarouselDraft {
     appliedToCards: number[];
   }>;
   generatedCarouselId: string;
-  selectedDirectionId: string;
+  selectedDirectionIds: string[];
   savedAt: number;
 }
 
@@ -92,6 +92,12 @@ export function useImageDraftAutoSave(
       const stored = localStorage.getItem(key);
       if (stored) {
         const draft = JSON.parse(stored) as ImageDraft;
+        // Migrate old draft format (selectedDirectionId: string → selectedDirectionIds: string[])
+        if ('selectedDirectionId' in (draft as any) && !draft.selectedDirectionIds) {
+          draft.selectedDirectionIds = (draft as any).selectedDirectionId
+            ? [(draft as any).selectedDirectionId]
+            : [];
+        }
         // Проверяем что черновик не слишком старый (макс 7 дней)
         const maxAge = 7 * 24 * 60 * 60 * 1000;
         if (Date.now() - draft.savedAt < maxAge) {
@@ -226,6 +232,12 @@ export function useCarouselDraftAutoSave(
       const stored = localStorage.getItem(key);
       if (stored) {
         const draft = JSON.parse(stored) as CarouselDraft;
+        // Migrate old draft format (selectedDirectionId: string → selectedDirectionIds: string[])
+        if ('selectedDirectionId' in (draft as any) && !draft.selectedDirectionIds) {
+          draft.selectedDirectionIds = (draft as any).selectedDirectionId
+            ? [(draft as any).selectedDirectionId]
+            : [];
+        }
         // Проверяем что черновик не слишком старый (макс 7 дней)
         const maxAge = 7 * 24 * 60 * 60 * 1000;
         if (Date.now() - draft.savedAt < maxAge) {
