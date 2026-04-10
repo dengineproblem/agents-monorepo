@@ -80,3 +80,4 @@ password_reset_results.json
 
 # Git worktrees
 .worktrees/
+.claude/worktrees/
