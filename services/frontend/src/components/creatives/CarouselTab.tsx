@@ -867,9 +867,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     } else if (succeeded > 0) {
       toast.warning(`Создан в ${succeeded} из ${results.length} направлениях. Ошибка в ${failed}.`, { id: toastId });
     } else {
-      const firstError = results.find(r => r.status === 'fulfilled') as any;
-      const errorMsg = firstError?.value?.error || 'Ошибка создания креатива';
-      toast.error(errorMsg, { id: toastId });
+      const firstUsableError = results
+        .map(r => r.status === 'fulfilled' ? (r.value as any)?.error : (r as PromiseRejectedResult).reason?.message)
+        .find(Boolean) || 'Ошибка создания креатива';
+      toast.error(firstUsableError, { id: toastId });
     }
 
     setIsCreatingCreative(false);

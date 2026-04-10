@@ -662,7 +662,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setRetryAttempt(0);
         setProgress(0);
         // Assign to additional directions if any were selected
-        (async () => {
+        setTimeout(async () => {
           const extraIds = extraDirectionIdsRef.current;
           if (extraIds.length > 0) {
             extraDirectionIdsRef.current = [];
@@ -696,7 +696,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
               }
             }
           }
-        })();
+        }, 2000);
       }
     };
     xhr.send(formData);

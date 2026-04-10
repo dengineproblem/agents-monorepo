@@ -996,8 +996,10 @@ const CreativeGeneration = () => {
           { id: 'upscale-create' }
         );
       } else {
-        const firstFulfilled = results.find(r => r.status === 'fulfilled') as any;
-        throw new Error(firstFulfilled?.value?.error || 'Ошибка создания креатива в Facebook');
+        const firstUsableError = results
+          .map(r => r.status === 'fulfilled' ? (r.value as any)?.error : (r as PromiseRejectedResult).reason?.message)
+          .find(Boolean) || 'Ошибка создания креатива в Facebook';
+        throw new Error(firstUsableError);
       }
     } catch (error: any) {
       console.error('Ошибка при создании креатива:', error);

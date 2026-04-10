@@ -98,6 +98,9 @@ export function useImageDraftAutoSave(
             ? [(draft as any).selectedDirectionId]
             : [];
         }
+        if (!draft.selectedDirectionIds) {
+          draft.selectedDirectionIds = [];
+        }
         // Проверяем что черновик не слишком старый (макс 7 дней)
         const maxAge = 7 * 24 * 60 * 60 * 1000;
         if (Date.now() - draft.savedAt < maxAge) {
@@ -237,6 +240,9 @@ export function useCarouselDraftAutoSave(
           draft.selectedDirectionIds = (draft as any).selectedDirectionId
             ? [(draft as any).selectedDirectionId]
             : [];
+        }
+        if (!draft.selectedDirectionIds) {
+          draft.selectedDirectionIds = [];
         }
         // Проверяем что черновик не слишком старый (макс 7 дней)
         const maxAge = 7 * 24 * 60 * 60 * 1000;
