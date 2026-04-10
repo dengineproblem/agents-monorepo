@@ -30,6 +30,7 @@ import { TextHistoryTab } from '@/components/creatives/TextHistoryTab';
 import { galleryApi } from '@/services/galleryApi';
 import { History, Wand2 as GenerateIcon, Save, RotateCcw } from 'lucide-react';
 import { useImageDraftAutoSave } from '@/hooks/useAutoSaveDraft';
+import { DirectionMultiSelect } from '@/components/ui/direction-multi-select';
 
 interface CreativeTexts {
   offer: string;
@@ -86,7 +87,7 @@ const CreativeGeneration = () => {
   const [generationsLimit, setGenerationsLimit] = useState<number>(20);
   
   // State для создания креатива
-  const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
+  const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>([]);
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
 
   // State для референсных изображений (до 2)
@@ -173,7 +174,7 @@ const CreativeGeneration = () => {
       referenceImagePrompt,
       generatedImage: generatedImage || undefined,
       generatedCreativeId: generatedCreativeId || undefined,
-      selectedDirectionId
+      selectedDirectionIds
     });
   }, [
     userId,
@@ -185,7 +186,7 @@ const CreativeGeneration = () => {
     referenceImagePrompt,
     generatedImage,
     generatedCreativeId,
-    selectedDirectionId,
+    selectedDirectionIds,
     saveImageDraft
   ]);
 
@@ -204,8 +205,8 @@ const CreativeGeneration = () => {
       if (draft.generatedCreativeId) {
         setGeneratedCreativeId(draft.generatedCreativeId);
       }
-      if (draft.selectedDirectionId) {
-        setSelectedDirectionId(draft.selectedDirectionId);
+      if (draft.selectedDirectionIds?.length) {
+        setSelectedDirectionIds(draft.selectedDirectionIds);
       }
       toast.success('Черновик восстановлен');
     }
@@ -319,7 +320,7 @@ const CreativeGeneration = () => {
     setTexts({ offer: '', bullets: '', profits: '' });
     setGeneratedImage(null);
     setGeneratedCreativeId('');
-    setSelectedDirectionId('');
+    setSelectedDirectionIds([]);
     setReferenceImages([]);
     setReferenceImagePrompt('');
     setCompetitorReference(null);
@@ -662,7 +663,7 @@ const CreativeGeneration = () => {
         profits: texts.profits,
         image_url: generatedImage || '',
         style_id: selectedStyle,
-        direction_id: selectedDirectionId || undefined
+        direction_id: selectedDirectionIds[0] || undefined
       });
 
       if (response.success) {
@@ -739,7 +740,7 @@ const CreativeGeneration = () => {
         offer: texts.offer,
         bullets: texts.bullets,
         profits: texts.profits,
-        direction_id: selectedDirectionId || undefined,
+        direction_id: selectedDirectionIds[0] || undefined,
         style_id: selectedStyle,
         style_prompt: selectedStyle === 'freestyle' ? (stylePrompt || undefined) : undefined, // Для freestyle стиля
         reference_image: referenceImageBase64, // Для обратной совместимости
@@ -923,7 +924,7 @@ const CreativeGeneration = () => {
 
   // Функция создания креатива
   const createCreative = async () => {
-    if (!generatedImage || !selectedDirectionId || !generatedCreativeId) {
+    if (!generatedImage || selectedDirectionIds.length === 0 || !generatedCreativeId) {
       toast.error('Выберите направление');
       return;
     }
@@ -933,56 +934,71 @@ const CreativeGeneration = () => {
     try {
       toast.loading('Подготовка 4K версии (9:16)...', { id: 'upscale-create' });
 
-      // 1. Вызываем upscale до 4K - расширяет 4:5 до 9:16
+      // 1. Upscale once (shared across all directions)
       const upscaleResponse = await fetch(`${CREATIVE_API_BASE}/upscale-to-4k`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          creative_id: generatedCreativeId,
-          user_id: userId
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creative_id: generatedCreativeId, user_id: userId }),
       });
 
       const upscaleData = await upscaleResponse.json();
-
       if (!upscaleData.success || !upscaleData.image_url_4k) {
         throw new Error('Не удалось создать 4K версию изображения');
       }
 
-      toast.success('4K версия готова, создание креатива в Facebook...', { id: 'upscale-create' });
+      toast.loading(
+        selectedDirectionIds.length > 1
+          ? `Создание в ${selectedDirectionIds.length} направлениях...`
+          : 'Создание креатива в Facebook...',
+        { id: 'upscale-create' }
+      );
 
-      // 2. Вызываем API для создания креатива (одно 9:16 изображение)
-      const createResponse = await fetch(`${API_BASE_URL}/create-image-creative`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user_id: userId,
-          account_id: currentAdAccountId || undefined,
-          creative_id: generatedCreativeId,
-          direction_id: selectedDirectionId
-        }),
-      });
+      // 2. Create creative for each direction
+      const results = await Promise.allSettled(
+        selectedDirectionIds.map(directionId =>
+          fetch(`${API_BASE_URL}/create-image-creative`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: userId,
+              account_id: currentAdAccountId || undefined,
+              creative_id: generatedCreativeId,
+              direction_id: directionId,
+            }),
+          }).then(r => r.json())
+        )
+      );
 
-      const createData = await createResponse.json();
+      const succeeded = results.filter(
+        r => r.status === 'fulfilled' && (r.value as any).success
+      ).length;
+      const failed = results.length - succeeded;
 
-      if (!createData.success) {
-        throw new Error(createData.error || 'Ошибка создания креатива в Facebook');
+      if (succeeded === results.length) {
+        const directionNames = selectedDirectionIds
+          .map(id => directions.find(d => d.id === id)?.name || id)
+          .join(', ');
+        toast.success(
+          succeeded === 1
+            ? `Креатив создан! Направление: ${directionNames}`
+            : `Креатив создан в ${succeeded} направлениях: ${directionNames}`,
+          { id: 'upscale-create' }
+        );
+
+        setGeneratedImage(null);
+        setGeneratedCreativeId('');
+        setTexts({ offer: '', bullets: '', profits: '' });
+        setSelectedDirectionIds([]);
+        clearImageDraft();
+      } else if (succeeded > 0) {
+        toast.warning(
+          `Создан в ${succeeded} из ${results.length} направлениях. Ошибка в ${failed}.`,
+          { id: 'upscale-create' }
+        );
+      } else {
+        const firstFulfilled = results.find(r => r.status === 'fulfilled') as any;
+        throw new Error(firstFulfilled?.value?.error || 'Ошибка создания креатива в Facebook');
       }
-
-      toast.success('Креатив создан в Facebook!', { id: 'upscale-create' });
-
-      // Очищаем форму
-      setGeneratedImage(null);
-      setGeneratedCreativeId('');
-      setTexts({ offer: '', bullets: '', profits: '' });
-      setSelectedDirectionId('');
-
-      // Очищаем черновик после успешного создания
-      clearImageDraft();
     } catch (error: any) {
       console.error('Ошибка при создании креатива:', error);
       toast.error(error.message || 'Ошибка создания креатива', { id: 'upscale-create' });
@@ -1545,22 +1561,13 @@ const CreativeGeneration = () => {
                       <HelpTooltip tooltipKey={TooltipKeys.GEN_SELECT_DIRECTION} iconSize="sm" />
                     </Label>
                     {directions.length > 0 ? (
-                      <Select
-                        value={selectedDirectionId}
-                        onValueChange={setSelectedDirectionId}
+                      <DirectionMultiSelect
+                        directions={directions}
+                        selectedIds={selectedDirectionIds}
+                        onChange={setSelectedDirectionIds}
                         disabled={directionsLoading || isCreatingCreative}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Выберите направление" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {directions.map((direction) => (
-                            <SelectItem key={direction.id} value={direction.id}>
-                              {direction.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Выберите направления"
+                      />
                     ) : (
                       <p className="text-sm text-muted-foreground">
                         Направления не найдены. Создайте направление в профиле.
@@ -1570,7 +1577,7 @@ const CreativeGeneration = () => {
 
                             <Button
                     onClick={createCreative} 
-                    disabled={!selectedDirectionId || isCreatingCreative || directionsLoading}
+                    disabled={selectedDirectionIds.length === 0 || isCreatingCreative || directionsLoading}
                     className="w-full"
                         size="lg"
                       >
