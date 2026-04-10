@@ -15,6 +15,7 @@ import JSZip from 'jszip';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { useCarouselDraftAutoSave } from '@/hooks/useAutoSaveDraft';
+import { DirectionMultiSelect } from '@/components/ui/direction-multi-select';
 
 interface CarouselTabProps {
   userId: string | null;
@@ -53,7 +54,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [generatedCarouselId, setGeneratedCarouselId] = useState('');
 
   // State для шага 4: Создание креатива
-  const [selectedDirectionId, setSelectedDirectionId] = useState('');
+  const [selectedDirectionIds, setSelectedDirectionIds] = useState<string[]>([]);
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
 
   // State для перегенерации отдельной карточки
@@ -127,7 +128,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       globalPrompts,
       globalReferences,
       generatedCarouselId,
-      selectedDirectionId
+      selectedDirectionIds
     });
   }, [
     userId,
@@ -140,7 +141,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     globalPrompts,
     globalReferences,
     generatedCarouselId,
-    selectedDirectionId,
+    selectedDirectionIds,
     saveCarouselDraft
   ]);
 
@@ -156,8 +157,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       setGlobalPrompts(draft.globalPrompts);
       setGlobalReferences(draft.globalReferences);
       setGeneratedCarouselId(draft.generatedCarouselId);
-      if (draft.selectedDirectionId) {
-        setSelectedDirectionId(draft.selectedDirectionId);
+      if (draft.selectedDirectionIds?.length) {
+        setSelectedDirectionIds(draft.selectedDirectionIds);
       }
       toast.success('Черновик карусели восстановлен');
     }
@@ -177,7 +178,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setVisualStyle('freestyle');
     setStylePrompt('');
     setGeneratedCarouselId('');
-    setSelectedDirectionId('');
+    setSelectedDirectionIds([]);
     setCardRegenerationPrompts({});
     setCardRegenerationImages({});
     setCardChangeOptions({});
@@ -420,7 +421,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         custom_prompts: customPrompts,
         reference_images: referenceImages,
-        direction_id: selectedDirectionId || undefined
+        direction_id: selectedDirectionIds[0] || undefined
       });
 
       // Очищаем все таймеры
@@ -511,7 +512,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         custom_prompts: customPrompts,
         reference_images: referenceImages,
-        direction_id: selectedDirectionId || undefined
+        direction_id: selectedDirectionIds[0] || undefined
       });
 
       // Очищаем все таймеры
@@ -824,42 +825,54 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   // Создание креатива в Facebook (используем 2K изображения напрямую)
   const handleCreateCreative = async () => {
-    if (!userId || !generatedCarouselId || !selectedDirectionId) {
+    if (!userId || !generatedCarouselId || selectedDirectionIds.length === 0) {
       toast.error('Выберите направление для создания креатива');
       return;
     }
 
     setIsCreatingCreative(true);
-    const toastId = toast.loading('Загружаем карусель в Facebook...');
+    const toastId = toast.loading(
+      selectedDirectionIds.length > 1
+        ? `Загружаем карусель в ${selectedDirectionIds.length} направления...`
+        : 'Загружаем карусель в Facebook...'
+    );
 
-    try {
-      const response = await carouselApi.createCreative({
-        user_id: userId,
-        account_id: currentAdAccountId || undefined,
-        carousel_id: generatedCarouselId,
-        direction_id: selectedDirectionId
-      });
+    const results = await Promise.allSettled(
+      selectedDirectionIds.map(directionId =>
+        carouselApi.createCreative({
+          user_id: userId,
+          account_id: currentAdAccountId || undefined,
+          carousel_id: generatedCarouselId,
+          direction_id: directionId,
+        })
+      )
+    );
 
-      if (response.success) {
-        toast.success(
-          `Креатив создан! ID: ${response.fb_creative_id}`,
-          { id: toastId }
-        );
-        // Очищаем черновик после успешного создания
-        clearCarouselDraft();
-      } else {
-        // Показываем детальную ошибку
-        const errorMessage = response.facebook_error
-          ? `Facebook API: ${response.error}`
-          : response.error || 'Ошибка создания креатива';
-        toast.error(errorMessage, { id: toastId });
-      }
-    } catch (error: any) {
-      console.error('[CarouselTab] Error creating creative:', error);
-      toast.error('Ошибка при создании креатива', { id: toastId });
-    } finally {
-      setIsCreatingCreative(false);
+    const succeeded = results.filter(
+      r => r.status === 'fulfilled' && r.value.success
+    ).length;
+    const failed = results.length - succeeded;
+
+    if (succeeded === results.length) {
+      const directionNames = selectedDirectionIds
+        .map(id => directions.find(d => d.id === id)?.name || id)
+        .join(', ');
+      toast.success(
+        succeeded === 1
+          ? `Креатив создан! Направление: ${directionNames}`
+          : `Креатив создан в ${succeeded} направлениях: ${directionNames}`,
+        { id: toastId }
+      );
+      clearCarouselDraft();
+    } else if (succeeded > 0) {
+      toast.warning(`Создан в ${succeeded} из ${results.length} направлениях. Ошибка в ${failed}.`, { id: toastId });
+    } else {
+      const firstError = results.find(r => r.status === 'fulfilled') as any;
+      const errorMsg = firstError?.value?.error || 'Ошибка создания креатива';
+      toast.error(errorMsg, { id: toastId });
     }
+
+    setIsCreatingCreative(false);
   };
 
   // Сброс формы
@@ -868,7 +881,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setCarouselCards([]);
     setGeneratedCarouselId('');
     setCurrentCardIndex(0);
-    setSelectedDirectionId('');
+    setSelectedDirectionIds([]);
     setGlobalPrompts([]);
     setGlobalReferences([]);
     setCardImageHistory({});  // Очищаем историю изображений
@@ -1657,23 +1670,18 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Направление</Label>
-                    <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId} disabled={!directions.length}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Выберите направление" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {directions.map(d => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <DirectionMultiSelect
+                      directions={directions}
+                      selectedIds={selectedDirectionIds}
+                      onChange={setSelectedDirectionIds}
+                      disabled={!directions.length}
+                      placeholder="Выберите направления"
+                    />
                   </div>
 
                   <Button
                     onClick={handleCreateCreative}
-                    disabled={!selectedDirectionId || isCreatingCreative}
+                    disabled={selectedDirectionIds.length === 0 || isCreatingCreative}
                     className="w-full"
                   >
                     {isCreatingCreative && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
