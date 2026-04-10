@@ -84,6 +84,7 @@ import { startEngagementNotificationCron } from './cron/engagementNotificationCr
 import { startNotificationCampaignCron } from './cron/notificationCampaignCron.js';
 import { startSubscriptionExpiryNotificationCron } from './cron/subscriptionExpiryNotificationCron.js';
 import { startCommunityChannelCron } from './cron/communityChannelCron.js';
+import { startTikTokLeadPoller } from './cron/tiktokLeadPoller.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -285,6 +286,9 @@ startCommunityChannelCron(app as any);
 
 // Запускаем cron для scheduled кампаний уведомлений (каждую минуту)
 startNotificationCampaignCron(app as any);
+
+// Запускаем поллер лидов TikTok (каждые 30 минут)
+startTikTokLeadPoller(app as any);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

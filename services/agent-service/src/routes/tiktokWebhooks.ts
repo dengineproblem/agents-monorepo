@@ -271,7 +271,7 @@ export default async function tiktokWebhooks(app: FastifyInstance) {
 /**
  * Обработка события лида
  */
-async function processLeadEvent(leadData: TikTokLeadData, correlationId: string, app: FastifyInstance): Promise<void> {
+export async function processLeadEvent(leadData: TikTokLeadData, correlationId: string, app: FastifyInstance): Promise<void> {
   const processStartTime = Date.now();
 
   log.info({

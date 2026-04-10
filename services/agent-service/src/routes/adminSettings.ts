@@ -136,4 +136,22 @@ export default async function adminSettingsRoutes(app: FastifyInstance) {
       return res.status(500).send({ error: 'Failed to fetch cron status' });
     }
   });
+
+  /**
+   * POST /admin/tiktok/poll-leads
+   * Ручной запуск поллера лидов TikTok (бэкфил за последние 48ч)
+   */
+  app.post('/admin/tiktok/poll-leads', async (req, res) => {
+    try {
+      const { pollAllAccounts } = await import('../cron/tiktokLeadPoller.js');
+      // Запускаем в фоне, не ждём завершения
+      pollAllAccounts(app as any).catch((err: any) => {
+        log.error({ error: String(err) }, '[admin] TikTok poll-leads background error');
+      });
+      return res.send({ success: true, message: 'TikTok lead poll started (last 48h), check logs for progress' });
+    } catch (err: any) {
+      log.error({ error: String(err) }, '[admin] Error triggering TikTok lead poll');
+      return res.status(500).send({ error: 'Failed to trigger poll' });
+    }
+  });
 }
