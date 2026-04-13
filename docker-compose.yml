@@ -214,6 +214,7 @@ services:
         BUILD_MODE: production
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_BRAIN_API_BASE_URL: ${VITE_BRAIN_API_BASE_URL:-http://localhost:7080}
     environment:
       - NODE_ENV=production
     ports:

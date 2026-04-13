@@ -124,8 +124,6 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
   // Загрузка directions
   useEffect(() => {
     const loadDirections = async () => {
-      if (!effectiveAccountId) return;
-
       const userId = getUserIdFromStorage();
       if (!userId) {
         logger.error('Cannot load directions: no user ID', null);
@@ -133,7 +131,10 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
       }
 
       try {
-        const url = `${API_BASE_URL}/directions?userAccountId=${userId}&accountId=${effectiveAccountId}`;
+        // Для легаси аккаунтов (effectiveAccountId=null) загружаем без accountId — бэкенд вернёт все directions пользователя
+        const url = effectiveAccountId
+          ? `${API_BASE_URL}/directions?userAccountId=${userId}&accountId=${effectiveAccountId}`
+          : `${API_BASE_URL}/directions?userAccountId=${userId}`;
         const response = await fetch(url, {
           headers: { 'Content-Type': 'application/json' },
         });

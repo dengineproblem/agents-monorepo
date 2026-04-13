@@ -1517,7 +1517,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                         <QrCode className="w-5 h-5" />
                         <div className="text-left">
                           <div className="font-medium text-sm">QR-код</div>
-                          <div className="text-xs text-muted-foreground">Evolution API</div>
+                          <div className="text-xs text-muted-foreground">Whatsapp Business</div>
                         </div>
                       </button>
                       <button

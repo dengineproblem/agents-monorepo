@@ -98,7 +98,7 @@ export function OptimizationModal({
 
   // Subtitle based on scope
   const subtitle = scope?.directionId
-    ? `${scope.accountName} / ${scope.directionName}`
+    ? scope.directionName
     : scope?.accountName;
 
   return (

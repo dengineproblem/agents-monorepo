@@ -2582,14 +2582,34 @@ export const adsHandlers = {
       // Мультиаккаунтный режим: загружаем из ad_accounts
       let pageId = null;
       if (userAccount.multi_account_enabled && adAccountDbId) {
-        const { data: adAccount, error: adAccountError } = await supabase
+        let { data: adAccount, error: adAccountError } = await supabase
           .from('ad_accounts')
           .select('id, access_token, ad_account_id, page_id')
           .eq('id', adAccountDbId)
           .eq('user_account_id', userAccountId)
           .single();
 
-        if (adAccountError || !adAccount) {
+        // Фоллбек для легаси аккаунтов где user_account_id не был установлен при миграции
+        if (!adAccount) {
+          const { data: fallbackAccount } = await supabase
+            .from('ad_accounts')
+            .select('id, access_token, ad_account_id, page_id, user_account_id')
+            .eq('id', adAccountDbId)
+            .is('user_account_id', null)
+            .single();
+
+          if (fallbackAccount) {
+            adAccount = fallbackAccount;
+            logger.warn({
+              where: 'triggerBrainOptimizationRun',
+              phase: 'legacy_fallback',
+              adAccountDbId,
+              userAccountId
+            }, 'Using legacy fallback: account found without user_account_id');
+          }
+        }
+
+        if (!adAccount) {
           logger.error({
             where: 'triggerBrainOptimizationRun',
             error: 'Ad account not found',

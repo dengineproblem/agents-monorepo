@@ -220,6 +220,20 @@ async function resolveAdAccountId(userAccountId, adAccountId) {
     return { dbId: null, fbId: userAccount.ad_account_id };
   }
 
+  // Fallback: user_accounts.ad_account_id not set (partial migration) — try ad_accounts table
+  const { data: fallbackAccount } = await supabase
+    .from('ad_accounts')
+    .select('id, ad_account_id')
+    .eq('user_account_id', userAccountId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .single();
+
+  if (fallbackAccount?.ad_account_id) {
+    logger.info({ userAccountId, dbId: fallbackAccount.id, fbId: fallbackAccount.ad_account_id, mode: 'legacy_fallback' }, 'Resolved ad account via fallback');
+    return { dbId: fallbackAccount.id, fbId: fallbackAccount.ad_account_id };
+  }
+
   logger.warn({ userAccountId }, 'No ad account found for user');
   return { dbId: null, fbId: null };
 }

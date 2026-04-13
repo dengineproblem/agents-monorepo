@@ -4160,6 +4160,154 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     }
 
     // ========================================
+    // ЧАСТЬ 4.35: ДЕТЕРМИНИРОВАННОЕ ВЫРАВНИВАНИЕ БЮДЖЕТА ПО НАПРАВЛЕНИЯМ
+    // Если proposals уменьшают/паузят адсеты — сразу компенсируем освободившийся бюджет:
+    //   - mode with_creation + есть first_run креативы → createAdSet
+    //   - иначе → увеличить лучший оставшийся адсет (best-of-bad)
+    // ========================================
+    {
+      const timeContext = isAllowedToCreateAdsets({ logger: log });
+      const canCreate = timeContext.allowed;
+
+      // Считаем освободившийся бюджет по каждому направлению
+      const freedByDir = {};
+      for (const p of proposals) {
+        const dirId = p.direction_id;
+        if (!dirId) continue;
+        if (!freedByDir[dirId]) freedByDir[dirId] = 0;
+        if (p.action === 'updateBudget') {
+          const freed = (p.suggested_action_params?.current_budget_cents || 0) -
+                        (p.suggested_action_params?.new_budget_cents || 0);
+          if (freed > 0) freedByDir[dirId] += freed;
+        } else if (p.action === 'pauseAdSet') {
+          freedByDir[dirId] += p.suggested_action_params?.current_budget_cents || 0;
+        }
+      }
+
+      // ID адсетов которые уже паузятся/режутся в proposals
+      const pausedAdsetIds = new Set(
+        proposals.filter(p => p.action === 'pauseAdSet').map(p => p.entity_id)
+      );
+      const alreadyTargeted = new Set(
+        proposals.filter(p => p.action === 'updateBudget' || p.action === 'createAdSet').map(p => p.entity_id)
+      );
+
+      for (const [dirId, freedCents] of Object.entries(freedByDir)) {
+        if (freedCents < 1000) continue; // меньше $10 — не стоит
+
+        const dir = directionsById.get(dirId);
+        const dirName = dir?.name || dirId;
+
+        if (canCreate) {
+          // mode: with_creation — пробуем создать новый адсет
+          const dirCreatives = freshUnusedCreatives.filter(
+            c => c.direction_id === dirId && c.first_run
+          );
+
+          if (dirCreatives.length > 0) {
+            // Делим на 1-3 адсета
+            const adsetCount = freedCents >= 3500 ? 3 : freedCents >= 2500 ? 2 : 1;
+            const budgetPerAdset = Math.round(freedCents / adsetCount);
+            const creativeChunkSize = Math.ceil(dirCreatives.length / adsetCount);
+
+            for (let i = 0; i < adsetCount; i++) {
+              const chunkCreatives = dirCreatives.slice(i * creativeChunkSize, (i + 1) * creativeChunkSize);
+              if (chunkCreatives.length === 0) break;
+
+              proposals.push({
+                action: 'createAdSet',
+                priority: 'high',
+                entity_type: 'adset',
+                entity_id: `new_${dirId}_${i}`,
+                entity_name: `Новая группа для ${dirName}`,
+                campaign_id: null,
+                campaign_type: 'internal',
+                direction_id: dirId,
+                direction_name: dirName,
+                reason: `Освободилось $${(freedCents / 100).toFixed(0)} из снижений/пауз в направлении «${dirName}». Запускаем новые креативы для поддержания бюджета направления.`,
+                confidence: 0.8,
+                suggested_action_params: {
+                  recommended_budget_cents: budgetPerAdset,
+                  creative_ids: chunkCreatives.map(c => c.id),
+                  creative_titles: chunkCreatives.map(c => c.title?.slice(0, 40)),
+                  freed_budget_cents: freedCents
+                },
+                metrics: {}
+              });
+            }
+
+            log.info({
+              where: 'budget_balancing',
+              directionId: dirId,
+              directionName: dirName,
+              freedCents,
+              adsetCount,
+              creativesAvailable: dirCreatives.length,
+              message: `✅ Детерминированная балансировка: ${adsetCount} createAdSet для $${(freedCents / 100).toFixed(0)} освобождённого бюджета`
+            });
+            continue;
+          }
+        }
+
+        // rebalance_only ИЛИ нет first_run креативов → увеличиваем лучший оставшийся адсет
+        const candidates = adsetAnalysis.filter(a =>
+          a.direction_id === dirId &&
+          !pausedAdsetIds.has(a.adset_id) &&
+          a.hs_class !== 'bad'
+        ).sort((a, b) => b.health_score - a.health_score);
+
+        // Если нет хороших — берём наименее плохой (best-of-bad)
+        const bestAdset = candidates[0] || adsetAnalysis
+          .filter(a => a.direction_id === dirId && !pausedAdsetIds.has(a.adset_id))
+          .sort((a, b) => b.health_score - a.health_score)[0];
+
+        if (bestAdset && !alreadyTargeted.has(bestAdset.adset_id)) {
+          const currentBudget = adsetBudgets.get(bestAdset.adset_id)?.daily_budget_cents || 0;
+          const newBudget = currentBudget + freedCents;
+
+          proposals.push({
+            action: 'updateBudget',
+            priority: 'medium',
+            entity_type: 'adset',
+            entity_id: bestAdset.adset_id,
+            entity_name: bestAdset.adset_name,
+            campaign_id: bestAdset.campaign_id,
+            campaign_type: bestAdset.campaign_type,
+            direction_id: dirId,
+            direction_name: dirName,
+            reason: `Перераспределяем $${(freedCents / 100).toFixed(0)} освободившегося бюджета направления «${dirName}» на лучший адсет «${bestAdset.adset_name}».`,
+            confidence: 0.75,
+            suggested_action_params: {
+              current_budget_cents: currentBudget,
+              new_budget_cents: newBudget,
+              increase_percent: currentBudget > 0 ? Math.round(freedCents / currentBudget * 100) : null,
+              freed_budget_cents: freedCents
+            },
+            metrics: bestAdset.metrics || {}
+          });
+
+          log.info({
+            where: 'budget_balancing',
+            directionId: dirId,
+            directionName: dirName,
+            freedCents,
+            bestAdset: bestAdset.adset_id,
+            hsClass: bestAdset.hs_class,
+            message: `✅ Детерминированная балансировка: перераспределяем $${(freedCents / 100).toFixed(0)} на «${bestAdset.adset_name}»`
+          });
+        } else {
+          log.warn({
+            where: 'budget_balancing',
+            directionId: dirId,
+            directionName: dirName,
+            freedCents,
+            message: `⚠️ Не нашли адсет для перераспределения $${(freedCents / 100).toFixed(0)} в направлении «${dirName}»`
+          });
+        }
+      }
+    }
+
+    // ========================================
     // ЧАСТЬ 4.4: ВЫЗОВ LLM ДЛЯ ГЕНЕРАЦИИ PROPOSALS (NEW!)
     // ========================================
 
