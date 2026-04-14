@@ -4098,7 +4098,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
     
     // Подготовка данных для LLM и фолбэк на детерминистический план
-    
+
+    // Проверяем WhatsApp через таблицу whatsapp_phone_numbers (is_active=true, connected)
+    const { count: waCount } = await supabase
+      .from('whatsapp_phone_numbers')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_account_id', userAccountId)
+      .eq('is_active', true)
+      .eq('connection_status', 'connected')
+      .limit(1);
+    const whatsappConnected = (waCount ?? 0) > 0;
+
     // ========================================
     // НАПРАВЛЕНИЯ БИЗНЕСА + PRE-CREATED AD SETS
     // ========================================
@@ -4144,7 +4154,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         report_only_mode: reportOnlyMode,
         has_lal_audience: !!ua?.ig_seed_audience_id,
         default_adset_mode: ua?.default_adset_mode || 'api_create',
-        whatsapp_connected: !!ua?.whatsapp_phone_number,
+        whatsapp_connected: whatsappConnected,
         account_name: ua?.accountName || null
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
