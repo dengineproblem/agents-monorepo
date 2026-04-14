@@ -2923,7 +2923,7 @@ export const adsHandlers = {
                 suggested_action_params: p.suggested_action_params
               }))
             },
-            report_text: `Brain Mini analysis: ${result.proposals.length} proposals awaiting approval`,
+            report_text: `Brain Mini: ${result.proposals.length} ${result.proposals.length === 1 ? 'предложение ожидает' : result.proposals.length < 5 ? 'предложения ожидают' : 'предложений ожидают'} одобрения`,
             actions_taken: 0,
             actions_failed: 0
           });

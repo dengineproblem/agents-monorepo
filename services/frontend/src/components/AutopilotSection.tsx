@@ -16,6 +16,7 @@ import {
   ChevronUp,
   CheckCircle2,
   XCircle,
+  Clock,
   Activity,
   FileText,
   Eye,
@@ -50,6 +51,7 @@ interface AutopilotSectionProps {
   currentAdAccountId?: string | null;  // Для фильтрации данных
   isMultiAccountMode?: boolean;  // true = мультиаккаунт (без toggle), false = legacy (с toggle)
   onOptimize?: () => void;  // Callback для запуска AI Optimization
+  onReopenPending?: (exec: BrainExecution) => void;  // Открыть pending proposals
 }
 
 // Карта типов действий на понятные названия
@@ -142,7 +144,8 @@ export function AutopilotSection({
   userAccountId,
   currentAdAccountId,
   isMultiAccountMode = false,
-  onOptimize
+  onOptimize,
+  onReopenPending,
 }: AutopilotSectionProps) {
   const { platform } = useAppContext();
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
@@ -303,6 +306,8 @@ export function AutopilotSection({
                     <div className="flex items-center gap-2">
                       {exec.status === 'success' ? (
                         <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400 flex-shrink-0" />
+                      ) : exec.status === 'pending' ? (
+                        <Clock className="h-4 w-4 text-yellow-500 dark:text-yellow-400 flex-shrink-0" />
                       ) : (
                         <XCircle className="h-4 w-4 text-red-500 dark:text-red-400 flex-shrink-0" />
                       )}
@@ -321,7 +326,19 @@ export function AutopilotSection({
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {exec.report_text && (
+                      {/* Кнопка "Рассмотреть" для pending Brain Mini */}
+                      {exec.status === 'pending' && exec.execution_mode === 'manual_trigger' && onReopenPending && exec.plan_json?.proposals?.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-yellow-600 border-yellow-400 hover:bg-yellow-50"
+                          onClick={() => onReopenPending(exec)}
+                        >
+                          <Brain className="h-3.5 w-3.5 mr-1" />
+                          Рассмотреть ({exec.plan_json.proposals.length})
+                        </Button>
+                      )}
+                      {exec.report_text && exec.status !== 'pending' && (
                         <div className="flex items-center gap-0.5">
                           <Button
                             variant="ghost"

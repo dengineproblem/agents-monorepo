@@ -387,6 +387,53 @@ export function useOptimization() {
   }, [getUserAccountId, state.scope, state.proposals, closeModal]);
 
   /**
+   * Загрузить сохранённые proposals из brain_executions и открыть модалку
+   */
+  const loadPendingProposals = useCallback((proposals: BrainMiniProposal[], scope: OptimizationScope) => {
+    const plan: Plan = {
+      description: null,
+      steps: proposals.map(p => ({
+        action: p.action,
+        description: p.reason,
+        params: {
+          entity_id: p.entity_id,
+          entity_name: p.entity_name,
+          direction_name: p.direction_name,
+          direction_id: p.direction_id,
+          campaign_id: p.campaign_id,
+          campaign_type: p.campaign_type,
+          current_budget_cents: p.suggested_action_params?.current_budget_cents as number | undefined,
+          new_budget_cents: p.suggested_action_params?.new_budget_cents as number | undefined,
+          increase_percent: p.suggested_action_params?.increase_percent as number | undefined,
+          decrease_percent: p.suggested_action_params?.decrease_percent as number | undefined,
+          recommended_budget_cents: p.suggested_action_params?.recommended_budget_cents as number | undefined,
+          creative_ids: p.suggested_action_params?.creative_ids as string[] | undefined,
+          creative_titles: p.suggested_action_params?.creative_titles as string[] | undefined,
+        },
+        priority: p.priority,
+        dangerous: p.priority === 'critical',
+      })),
+      estimated_impact: null,
+    };
+
+    setState({
+      isOpen: true,
+      isLoading: false,
+      scope,
+      streamingState: null,
+      plan,
+      content: null,
+      error: null,
+      conversationId: null,
+      isExecuting: false,
+      proposals,
+      adsetAnalysis: [],
+      summary: null,
+      progressMessage: null,
+    });
+  }, []);
+
+  /**
    * Отклонить план
    */
   const reject = useCallback(() => {
@@ -397,6 +444,7 @@ export function useOptimization() {
   return {
     state,
     startOptimization,
+    loadPendingProposals,
     approveSelected,
     reject,
     close: closeModal,

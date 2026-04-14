@@ -14,7 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { ChevronDown, QrCode, Cloud } from 'lucide-react';
+import { ChevronDown, QrCode, Cloud, Check } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import type {
   DirectionObjective,
   ConversionChannel,
@@ -36,6 +38,27 @@ import { TooltipKeys } from '@/content/tooltips';
 export type ConnectionType = 'evolution' | 'waba';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
+
+const PUBLISHER_PLATFORM_OPTIONS = [
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'instagram', label: 'Instagram' },
+];
+
+const FACEBOOK_PLACEMENT_OPTIONS = [
+  { value: 'feed', label: 'Лента (Feed)' },
+  { value: 'story', label: 'Истории (Stories)' },
+  { value: 'reels', label: 'Reels' },
+  { value: 'marketplace', label: 'Маркетплейс' },
+  { value: 'search', label: 'Поиск' },
+  { value: 'instream_video', label: 'In-Stream видео' },
+];
+
+const INSTAGRAM_PLACEMENT_OPTIONS = [
+  { value: 'stream', label: 'Лента (Feed)' },
+  { value: 'story', label: 'Истории (Stories)' },
+  { value: 'reels', label: 'Reels' },
+  { value: 'explore', label: 'Explore' },
+];
 
 interface CreateDirectionDialogProps {
   open: boolean;
@@ -127,6 +150,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // Настройки рекламы - Специфичные для целей
   const [clientQuestions, setClientQuestions] = useState<string[]>(['Здравствуйте! Хочу узнать об этом подробнее.']);
   const [instagramUrl, setInstagramUrl] = useState('');
+  const [publisherPlatforms, setPublisherPlatforms] = useState<string[]>([]);
+  const [facebookPlacements, setFacebookPlacements] = useState<string[]>([]);
+  const [instagramPlacements, setInstagramPlacements] = useState<string[]>([]);
+  const [placementsOpen, setPlacementsOpen] = useState(false);
   const [siteUrl, setSiteUrl] = useState('');
   const [pixelId, setPixelId] = useState('');
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
@@ -465,7 +492,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               client_question: clientQuestions.find(q => q.trim()) ?? '',
               client_questions: clientQuestions.filter(q => q.trim()),
             }),
-            ...((objective === 'instagram_traffic' || objective === 'instagram_dm') && { instagram_url: instagramUrl.trim() }),
+            ...((objective === 'instagram_traffic' || objective === 'instagram_dm') && {
+              instagram_url: instagramUrl.trim(),
+            }),
+            ...(publisherPlatforms.length > 0 && { publisher_platforms: publisherPlatforms }),
+            ...(facebookPlacements.length > 0 && { facebook_placements: facebookPlacements }),
+            ...(instagramPlacements.length > 0 && { instagram_placements: instagramPlacements }),
             ...((objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site')) && {
               site_url: siteUrl.trim(),
               utm_tag: utmTag.trim() || DEFAULT_UTM,
@@ -1349,6 +1381,130 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 </p>
               </div>
             )}
+
+            {needsFacebook && (() => {
+              const hasAny = publisherPlatforms.length > 0 || facebookPlacements.length > 0 || instagramPlacements.length > 0;
+
+              const getSummary = () => {
+                if (!hasAny) return 'Все площадки (Advantage+)';
+                const platforms = publisherPlatforms.length > 0
+                  ? publisherPlatforms
+                  : ['facebook', 'instagram'];
+                const parts: string[] = [];
+                if (platforms.includes('facebook')) {
+                  parts.push(facebookPlacements.length > 0
+                    ? `FB: ${FACEBOOK_PLACEMENT_OPTIONS.filter(o => facebookPlacements.includes(o.value)).map(o => o.label).join(', ')}`
+                    : 'Facebook');
+                }
+                if (platforms.includes('instagram')) {
+                  parts.push(instagramPlacements.length > 0
+                    ? `IG: ${INSTAGRAM_PLACEMENT_OPTIONS.filter(o => instagramPlacements.includes(o.value)).map(o => o.label).join(', ')}`
+                    : 'Instagram');
+                }
+                return parts.join(' · ') || 'Advantage+';
+              };
+
+              const togglePlatform = (val: string) => {
+                setPublisherPlatforms(prev =>
+                  prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                );
+              };
+              const toggleFb = (val: string) => {
+                setFacebookPlacements(prev =>
+                  prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                );
+              };
+              const toggleIg = (val: string) => {
+                setInstagramPlacements(prev =>
+                  prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                );
+              };
+
+              const activePlatforms = publisherPlatforms.length > 0
+                ? publisherPlatforms
+                : ['facebook', 'instagram'];
+
+              return (
+                <div className="space-y-2">
+                  <Label>Площадки и плейсменты</Label>
+                  <Popover open={placementsOpen} onOpenChange={setPlacementsOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <span className={!hasAny ? 'text-muted-foreground' : ''}>{getSummary()}</span>
+                        <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-2" align="start">
+                      <div className="space-y-1">
+                        <div
+                          className="flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer hover:bg-muted"
+                          onClick={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
+                        >
+                          <div className="flex h-4 w-4 items-center justify-center">
+                            {!hasAny && <Check className="h-3 w-3" />}
+                          </div>
+                          <span className="text-sm font-medium">Все площадки (Advantage+)</span>
+                        </div>
+
+                        <div className="border-t my-1" />
+                        <p className="px-2 py-0.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Платформы</p>
+                        {PUBLISHER_PLATFORM_OPTIONS.map(opt => (
+                          <div
+                            key={opt.value}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer hover:bg-muted"
+                            onClick={() => togglePlatform(opt.value)}
+                          >
+                            <Checkbox checked={publisherPlatforms.includes(opt.value)} onCheckedChange={() => togglePlatform(opt.value)} />
+                            <span className="text-sm">{opt.label}</span>
+                          </div>
+                        ))}
+
+                        {activePlatforms.includes('facebook') && (
+                          <>
+                            <div className="border-t my-1" />
+                            <p className="px-2 py-0.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Facebook плейсменты</p>
+                            {FACEBOOK_PLACEMENT_OPTIONS.map(opt => (
+                              <div
+                                key={opt.value}
+                                className="flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer hover:bg-muted pl-4"
+                                onClick={() => toggleFb(opt.value)}
+                              >
+                                <Checkbox checked={facebookPlacements.includes(opt.value)} onCheckedChange={() => toggleFb(opt.value)} />
+                                <span className="text-sm">{opt.label}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+
+                        {activePlatforms.includes('instagram') && (
+                          <>
+                            <div className="border-t my-1" />
+                            <p className="px-2 py-0.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Instagram плейсменты</p>
+                            {INSTAGRAM_PLACEMENT_OPTIONS.map(opt => (
+                              <div
+                                key={opt.value}
+                                className="flex items-center gap-2 rounded px-2 py-1.5 cursor-pointer hover:bg-muted pl-4"
+                                onClick={() => toggleIg(opt.value)}
+                              >
+                                <Checkbox checked={instagramPlacements.includes(opt.value)} onCheckedChange={() => toggleIg(opt.value)} />
+                                <span className="text-sm">{opt.label}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                  <p className="text-xs text-muted-foreground">
+                    Оставьте «Advantage+» — и Facebook сам выберет лучшие площадки.
+                  </p>
+                </div>
+              );
+            })()}
           </div>
 
           <Separator />
@@ -1639,7 +1795,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           {needsFacebook && (objective === 'instagram_traffic' || objective === 'instagram_dm') && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">📱 Instagram</h3>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="instagram-url">
                   Instagram URL <span className="text-red-500">*</span>

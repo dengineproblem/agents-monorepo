@@ -9,6 +9,7 @@ import MonthlyPlanFact from '../components/MonthlyPlanFact';
 import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
 import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
+import { AdStatusSection } from '../components/AdStatusSection';
 import { AutopilotSection } from '../components/AutopilotSection';
 import { SubscriptionExpiredBanner } from '../components/SubscriptionExpiredBanner';
 
@@ -19,7 +20,6 @@ import { OptimizationModal } from '@/components/optimization';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Instagram, AlertCircle, Calendar } from 'lucide-react';
 import { userProfileApi } from '@/services/userProfileApi';
 import { cn } from '@/lib/utils';
@@ -58,6 +58,20 @@ const Dashboard: React.FC = () => {
   // Optimization hook for Brain Mini
   const optimization = useOptimization();
 
+  // Открыть pending proposals из истории
+  const handleReopenPending = (exec: any) => {
+    const proposals = exec.plan_json?.proposals || [];
+    if (!proposals.length) return;
+    const currentAcc = contextAdAccounts?.find((a: any) => a.id === currentAdAccountId);
+    const scope = {
+      accountId: currentAdAccountId || '',
+      accountName: currentAcc?.name || '',
+      directionId: exec.plan_json?.direction_id || proposals[0]?.direction_id || undefined,
+      directionName: proposals[0]?.direction_name || undefined,
+    };
+    optimization.loadPendingProposals(proposals, scope);
+  };
+
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [webhookResult, setWebhookResult] = useState<string>('');
   const [loadingWebhook, setLoadingWebhook] = useState(false);
@@ -72,6 +86,31 @@ const Dashboard: React.FC = () => {
 
   // Проверка на блокировку кабинета (account_status === 3)
   const isPaymentFailed = accountStatus && Number(accountStatus.account_status) === 3;
+
+  // Вычисляем статус подключений (вынесено из IIFE для использования в PageHero)
+  const { isFbConnected, isTtConnected, openFacebookConnect, openTikTokAuth } = useMemo(() => {
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    const u = stored ? JSON.parse(stored) : null;
+    const currentAcc = (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0)
+      ? (contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0])
+      : null;
+    const fbConnected = currentAcc
+      ? !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== ''
+      : !!u?.ad_account_id && u?.ad_account_id !== '';
+    const ttConnected = currentAcc ? !!currentAcc?.tiktok_business_id : (tiktokConnected || !!u?.tiktok_business_id);
+    const openFb = () => setShowFacebookConnectModal(true);
+    const openTt = () => {
+      const uid = u?.id || '';
+      const statePayload: Record<string, unknown> = { user_id: uid, ts: Date.now() };
+      if (currentAcc) statePayload.ad_account_id = currentAcc.id;
+      let state = '';
+      try { state = encodeURIComponent(btoa(JSON.stringify(statePayload))); }
+      catch { state = encodeURIComponent(JSON.stringify(statePayload)); }
+      const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
+      window.open(`https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`, '_blank', 'noopener,noreferrer');
+    };
+    return { isFbConnected: fbConnected, isTtConnected: ttConnected, openFacebookConnect: openFb, openTikTokAuth: openTt };
+  }, [multiAccountEnabled, contextAdAccounts, currentAdAccountId, tiktokConnected]);
 
   // ВАЖНО: useMemo должен быть ДО всех условных return, иначе будет ошибка React Hooks
   const formattedDateRange = useMemo(() => {
@@ -327,7 +366,6 @@ const Dashboard: React.FC = () => {
       <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full" data-tour="dashboard-content">
         <PageHero
           title={(() => {
-            // В мультиаккаунтном режиме показываем имя текущего ad_account
             if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
               const currentAcc = contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0];
               return currentAcc?.name || userName || t('dashboard.title');
@@ -335,7 +373,63 @@ const Dashboard: React.FC = () => {
             return userName || (userTarif === 'target' ? t('dashboard.targetologPanel') : t('dashboard.title'));
           })()}
           subtitle={userTarif === 'target' ? t('dashboard.yourDirectionsAndPlans') : t('campaign.management')}
+          rightContent={FEATURES.SHOW_TIKTOK ? (
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-muted">
+              <button
+                onClick={() => setPlatform('instagram')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all',
+                  platform === 'instagram'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Instagram className="h-3.5 w-3.5" />
+                Instagram
+              </button>
+              <button
+                onClick={() => setPlatform('tiktok')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all',
+                  platform === 'tiktok'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+                </svg>
+                TikTok
+              </button>
+            </div>
+          ) : undefined}
         />
+
+        {/* Баннер подключения — только когда не подключено */}
+        {platform === 'instagram' && !isFbConnected && (
+          <div className="mb-4 flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-300 text-sm">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+              <span>{t('dashboard.connectFacebookDescription')}</span>
+              <HelpTooltip tooltipKey={TooltipKeys.FACEBOOK_CONNECT_BANNER} iconSize="sm" />
+            </div>
+            <Button variant="outline" size="sm" onClick={openFacebookConnect} className="border-blue-300 text-blue-700 hover:bg-blue-100 flex-shrink-0">
+              {t('profile.connect')}
+            </Button>
+          </div>
+        )}
+        {FEATURES.SHOW_TIKTOK && platform === 'tiktok' && !isTtConnected && (
+          <div className="mb-4 flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/20 text-gray-700 dark:text-gray-300 text-sm">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+              <span>Для просмотра статистики TikTok требуется подключение аккаунта.</span>
+              <HelpTooltip tooltipKey={TooltipKeys.TIKTOK_CONNECT_BANNER} iconSize="sm" />
+            </div>
+            <Button variant="outline" size="sm" onClick={openTikTokAuth} className="border-gray-300 flex-shrink-0">
+              Подключить
+            </Button>
+          </div>
+        )}
 
         {formattedDateRange && (
           <div className="mb-6">
@@ -345,147 +439,6 @@ const Dashboard: React.FC = () => {
             </Badge>
           </div>
         )}
-
-        {/* Уведомления о подключении Facebook и TikTok */}
-        {(() => {
-          const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
-          const u = stored ? JSON.parse(stored) : null;
-
-          // Текущий ad_account (для мультиаккаунтного режима)
-          const currentAcc = (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0)
-            ? (contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0])
-            : null;
-
-          // Проверка подключения Facebook с учётом мультиаккаунтного режима
-          let isFbConnected = false;
-          if (currentAcc) {
-            // В мультиаккаунтном режиме проверяем данные в текущем выбранном ad_account
-            // Для manual-connect достаточно ad_account_id (access_token получается позже через Business Portfolio)
-            isFbConnected = !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
-          } else {
-            // Legacy режим — проверяем в user_accounts
-            isFbConnected = !!u?.ad_account_id && u?.ad_account_id !== '';
-          }
-
-          // Проверка подключения TikTok с учётом мультиаккаунтного режима
-          const isTtConnected = currentAcc
-            ? !!currentAcc?.tiktok_business_id
-            : (tiktokConnected || !!u?.tiktok_business_id);
-
-          const openFacebookConnect = () => {
-            setShowFacebookConnectModal(true);
-          };
-          
-          const openTikTokAuth = () => {
-            const uid = u?.id || '';
-            const statePayload: Record<string, unknown> = { user_id: uid, ts: Date.now() };
-            // В мультиаккаунтном режиме передаём ad_account_id, чтобы OAuth callback
-            // сохранил токен в ad_accounts, а не в user_accounts
-            if (currentAcc) {
-              statePayload.ad_account_id = currentAcc.id;
-            }
-            let state = '';
-            try {
-              state = encodeURIComponent(btoa(JSON.stringify(statePayload)));
-            } catch {
-              state = encodeURIComponent(JSON.stringify(statePayload));
-            }
-            const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
-            const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`;
-            window.open(authUrl, '_blank', 'noopener,noreferrer');
-          };
-          
-          // TikTok icon SVG
-          const TikTokIcon = () => (
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
-            </svg>
-          );
-          
-          return (
-            <Card className="mb-6 shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center justify-center md:justify-start gap-3">
-                    <span className="text-sm font-medium text-muted-foreground hidden md:inline">{t('dashboard.platform')}</span>
-                    <Tabs
-                      value={platform}
-                      onValueChange={(value) => setPlatform(value as 'instagram' | 'tiktok')}
-                      className="w-full md:w-auto"
-                    >
-                      <TabsList className="h-auto bg-transparent p-0 gap-2 w-full md:w-auto justify-center md:justify-start">
-                        <div className="flex items-center gap-1">
-                          <TabsTrigger
-                            value="instagram"
-                            className={cn(
-                              "gap-2 transition-all duration-200",
-                              "data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:hover:from-purple-600 data-[state=active]:hover:to-pink-600 data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
-                              "data-[state=inactive]:border data-[state=inactive]:border-purple-200 data-[state=inactive]:text-purple-600 data-[state=inactive]:hover:bg-purple-50 data-[state=inactive]:hover:border-purple-300 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
-                            )}
-                          >
-                            <Instagram className="h-4 w-4" />
-                            Instagram
-                          </TabsTrigger>
-                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" className="hidden md:flex" />
-                        </div>
-                        {FEATURES.SHOW_TIKTOK && (
-                          <div className="flex items-center gap-1">
-                            <TabsTrigger
-                              value="tiktok"
-                              className={cn(
-                                "gap-2 transition-all duration-200",
-                                "data-[state=active]:bg-gradient-to-r data-[state=active]:from-black data-[state=active]:to-gray-900 data-[state=active]:hover:from-gray-900 data-[state=active]:hover:to-black data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
-                                "data-[state=inactive]:border data-[state=inactive]:border-gray-300 data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:border-gray-400 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
-                              )}
-                            >
-                              <TikTokIcon />
-                              TikTok
-                            </TabsTrigger>
-                            <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" className="hidden md:flex" />
-                          </div>
-                        )}
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                  {platform === 'instagram' && !isFbConnected && (
-                    <div className="p-3 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-transparent dark:to-transparent text-blue-700 dark:text-foreground flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-1">
-                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm">{t('dashboard.connectFacebookDescription')}</span>
-                        <HelpTooltip tooltipKey={TooltipKeys.FACEBOOK_CONNECT_BANNER} iconSize="sm" />
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={openFacebookConnect}
-                        className="border-blue-200 dark:border-blue-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 text-blue-700 dark:text-blue-300 hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-800/40 dark:hover:to-indigo-800/40 hover:border-blue-300 dark:hover:border-blue-600 shadow-sm flex-shrink-0 transition-all duration-200"
-                      >
-                        {t('profile.connect')}
-                      </Button>
-                    </div>
-                  )}
-                  {FEATURES.SHOW_TIKTOK && platform === 'tiktok' && !isTtConnected && (
-                    <div className="p-3 rounded-lg border bg-gradient-to-r from-gray-50 to-slate-50 dark:from-transparent dark:to-transparent text-gray-700 dark:text-foreground flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-1">
-                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm">Для просмотра статистики TikTok требуется подключение аккаунта.</span>
-                        <HelpTooltip tooltipKey={TooltipKeys.TIKTOK_CONNECT_BANNER} iconSize="sm" />
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={openTikTokAuth}
-                        className="border-gray-200 bg-gradient-to-r from-gray-50 to-slate-50 text-gray-700 hover:from-gray-100 hover:to-slate-100 hover:border-gray-300 shadow-sm flex-shrink-0 transition-all duration-200"
-                      >
-                        Подключить
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })()}
         {platform === 'instagram' && isPaymentFailed && !hideDebtBanner && (
           <Card className="mb-6 shadow-sm border-red-200 dark:border-red-700">
             <CardContent className="relative p-4 bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-900/50 dark:to-rose-900/50">
@@ -506,8 +459,6 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
         )}
-        <SummaryStats showTitle={userTarif === 'target'} />
-
         {userTarif === 'target' ? (
           <>
             {/* Дашборд для тарифа Target */}
@@ -524,7 +475,9 @@ const Dashboard: React.FC = () => {
           </>
         ) : (
           <>
-            {/* Стандартный дашборд (AI автопилот + кампании) */}
+            {/* Активные кампании, креативы, быстрая остановка */}
+            <AdStatusSection />
+
             {/* AI автопилот - для Instagram */}
             {platform === 'instagram' && FEATURES.SHOW_AI_AUTOPILOT && userAccountId && (
               <AutopilotSection
@@ -534,6 +487,7 @@ const Dashboard: React.FC = () => {
                 userAccountId={userAccountId}
                 currentAdAccountId={currentAdAccountId}
                 isMultiAccountMode={multiAccountEnabled}
+                onReopenPending={handleReopenPending}
               />
             )}
 
@@ -546,6 +500,7 @@ const Dashboard: React.FC = () => {
                 userAccountId={userAccountId}
                 currentAdAccountId={currentAdAccountId}
                 isMultiAccountMode={multiAccountEnabled}
+                onReopenPending={handleReopenPending}
               />
             )}
         

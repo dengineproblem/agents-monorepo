@@ -4193,7 +4193,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       );
 
       for (const [dirId, freedCents] of Object.entries(freedByDir)) {
-        if (freedCents < 1000) continue; // меньше $10 — не стоит
+        if (freedCents < 500) continue; // меньше $5 — не стоит
 
         const dir = directionsById.get(dirId);
         const dirName = dir?.name || dirId;
