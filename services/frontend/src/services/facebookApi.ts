@@ -1121,16 +1121,98 @@ export const facebookApi = {
   getCurrentDailySpend,
 
   /**
+   * Получить активные объявления напрямую по campaign_id (без промежуточного шага adsets).
+   * Быстрее на 1 round-trip по сравнению с campaign→adsets→ads.
+   */
+  /**
+   * Возвращает уникальные креативы кампании с маппингом creative_id → ad_ids[].
+   * Статистику нужно агрегировать по всем ad_ids одного креатива.
+   */
+  getAdsByCampaign: async (campaignId: string): Promise<Array<{
+    creative_id: string;
+    ad_ids: string[];
+    name: string;
+    thumbnail_url: string | null;
+    image_url: string | null;
+    video_id: string | null;
+  }>> => {
+    if (!await hasValidConfig()) return [];
+    try {
+      const data = await fetchFromFacebookAPI(`${campaignId}/ads`, {
+        fields: 'id,name,status,creative{id,name,thumbnail_url,image_url,video_id}',
+        filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE'] }]),
+        limit: '200',
+      });
+      // Маппинг creative_id → { meta, ad_ids[] }
+      const creativeMap = new Map<string, { name: string; thumbnail_url: string | null; image_url: string | null; video_id: string | null; ad_ids: string[] }>();
+      for (const ad of (data?.data || [])) {
+        const cid = ad.creative?.id;
+        if (!cid) continue;
+        if (!creativeMap.has(cid)) {
+          creativeMap.set(cid, {
+            name: ad.creative?.name || ad.name,
+            thumbnail_url: ad.creative?.thumbnail_url || null,
+            image_url: ad.creative?.image_url || null,
+            video_id: ad.creative?.video_id || null,
+            ad_ids: [],
+          });
+        }
+        creativeMap.get(cid)!.ad_ids.push(ad.id);
+      }
+      return Array.from(creativeMap.entries()).map(([creative_id, v]) => ({ creative_id, ...v }));
+    } catch (e) {
+      console.error('getAdsByCampaign error', e);
+      return [];
+    }
+  },
+
+  /**
+   * Статистика объявлений на уровне campaign_id (все адсеты сразу, 1 запрос).
+   */
+  getAdStatsByCampaign: async (campaignId: string, dateRange: DateRange): Promise<Array<{
+    ad_id: string; spend: number; leads: number; cpl: number; qualityLeads: number; cpql: number;
+  }>> => {
+    if (!await hasValidConfig()) return [];
+    try {
+      const FB_API_CONFIG = await getCurrentUserConfig();
+      const response = await fetchFromFacebookAPI(`${FB_API_CONFIG.ad_account_id}/insights`, {
+        level: 'ad',
+        fields: 'ad_id,spend,actions',
+        time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+        filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
+        action_breakdowns: 'action_type',
+        limit: '500',
+      });
+      return (response?.data || []).map((stat: any) => {
+        let messagingLeads = 0, qualityLeads = 0, siteLeads = 0, leadFormLeads = 0;
+        for (const action of (stat.actions || [])) {
+          const v = parseInt(action.value || '0', 10);
+          if (['onsite_conversion.messaging_conversation_started_7d'].includes(action.action_type)) messagingLeads += v;
+          else if (action.action_type === 'onsite_conversion.lead_quality') qualityLeads += v;
+          else if (action.action_type === 'offsite_conversion.fb_pixel_lead') siteLeads = v;
+          else if (action.action_type === 'onsite_conversion.lead_grouped') leadFormLeads = v;
+        }
+        const leads = messagingLeads + Math.max(siteLeads, leadFormLeads);
+        const spend = parseFloat(stat.spend || '0');
+        return { ad_id: stat.ad_id, spend, leads, cpl: leads > 0 ? spend / leads : 0, qualityLeads, cpql: qualityLeads > 0 ? spend / qualityLeads : 0 };
+      });
+    } catch (e) {
+      console.error('getAdStatsByCampaign error', e);
+      return [];
+    }
+  },
+
+  /**
    * Получить объявления для адсета
    */
-  getAdsByAdset: async (adsetId: string): Promise<Array<{ id: string; name: string; status: string; thumbnail_url?: string | null }>> => {
+  getAdsByAdset: async (adsetId: string): Promise<Array<{ id: string; name: string; status: string; thumbnail_url?: string | null; image_url?: string | null; video_id?: string | null }>> => {
     if (!await hasValidConfig()) {
       return [];
     }
     try {
       const endpoint = `${adsetId}/ads`;
       const params = {
-        fields: 'id,name,status,creative{thumbnail_url,image_url}',
+        fields: 'id,name,status,creative{thumbnail_url,image_url,video_id}',
         limit: '200',
       };
       const data = await fetchFromFacebookAPI(endpoint, params);
@@ -1138,11 +1220,36 @@ export const facebookApi = {
         id: ad.id,
         name: ad.name,
         status: ad.status,
-        thumbnail_url: ad.creative?.thumbnail_url || ad.creative?.image_url || null,
+        thumbnail_url: ad.creative?.thumbnail_url || null,
+        image_url: ad.creative?.image_url || null,
+        video_id: ad.creative?.video_id || null,
       }));
     } catch (e) {
       console.error('getAdsByAdset error', e);
       return [];
+    }
+  },
+
+  /**
+   * Получить embed URL для показа FB видео через iframe.
+   * FB не отдаёт source URL — только embed plugin.
+   */
+  getVideoEmbedUrl: async (videoId: string): Promise<{ embedUrl: string; permalinkUrl: string | null } | null> => {
+    const userId = getUserId();
+    if (!userId || !videoId) return null;
+    const adAccountId = getCurrentInternalAdAccountId();
+    const params = new URLSearchParams({ videoId, userId });
+    if (adAccountId) params.set('adAccountId', adAccountId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/fb-video-embed?${params.toString()}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data.embedUrl) return null;
+      return { embedUrl: data.embedUrl, permalinkUrl: data.permalinkUrl || null };
+    } catch {
+      return null;
     }
   },
 

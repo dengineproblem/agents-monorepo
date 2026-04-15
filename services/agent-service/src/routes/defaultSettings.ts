@@ -9,7 +9,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const CreateDefaultSettingsSchema = z.object({
   direction_id: z.string().uuid(),
-  campaign_goal: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']),
+  campaign_goal: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'instagram_dm', 'site_leads', 'lead_forms', 'app_installs']),
   cities: z.array(z.string()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
@@ -30,6 +30,10 @@ const CreateDefaultSettingsSchema = z.object({
   app_id: z.string().optional(),
   app_store_url: z.string().url().optional(),
   is_skadnetwork_attribution: z.boolean().optional(),
+  // Площадки и плейсменты
+  publisher_platforms: z.array(z.enum(['facebook', 'instagram'])).optional(),
+  facebook_placements: z.array(z.enum(['feed', 'story', 'reels', 'marketplace', 'search', 'instream_video'])).optional(),
+  instagram_placements: z.array(z.enum(['stream', 'story', 'reels', 'explore'])).optional(),
 });
 
 const UpdateDefaultSettingsSchema = z.object({
@@ -49,6 +53,10 @@ const UpdateDefaultSettingsSchema = z.object({
   app_id: z.string().optional(),
   app_store_url: z.string().url().optional(),
   is_skadnetwork_attribution: z.boolean().optional(),
+  // Площадки и плейсменты (null = Advantage+ / сброс, array = ручной выбор)
+  publisher_platforms: z.array(z.enum(['facebook', 'instagram'])).nullable().optional(),
+  facebook_placements: z.array(z.enum(['feed', 'story', 'reels', 'marketplace', 'search', 'instream_video'])).nullable().optional(),
+  instagram_placements: z.array(z.enum(['stream', 'story', 'reels', 'explore'])).nullable().optional(),
 });
 
 type CreateDefaultSettingsInput = z.infer<typeof CreateDefaultSettingsSchema>;
@@ -195,6 +203,9 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             app_id: input.app_id,
             app_store_url: input.app_store_url,
             is_skadnetwork_attribution: input.is_skadnetwork_attribution,
+            publisher_platforms: input.publisher_platforms ?? null,
+            facebook_placements: input.facebook_placements ?? null,
+            instagram_placements: input.instagram_placements ?? null,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
@@ -235,6 +246,9 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             app_id: input.app_id,
             app_store_url: input.app_store_url,
             is_skadnetwork_attribution: input.is_skadnetwork_attribution,
+            publisher_platforms: input.publisher_platforms ?? null,
+            facebook_placements: input.facebook_placements ?? null,
+            instagram_placements: input.instagram_placements ?? null,
           })
           .select()
           .single();
@@ -310,6 +324,20 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       // Backward compat: sync client_question from client_questions[0]
       if (input.client_questions && input.client_questions.length > 0) {
         updatePayload.client_question = input.client_questions[0];
+      }
+      // Critical: явно включаем placement-поля чтобы null (сброс в Advantage+) корректно
+      // сохранялся в БД. undefined = поле не прислано = не трогать.
+      // Когда фронтенд присылает null → Zod парсит как null → попадает в input → spread включает.
+      // Когда не присылает → undefined → Supabase клиент стрипает → поле не обновляется (OK).
+      if ('publisher_platforms' in input) {
+        updatePayload.publisher_platforms = input.publisher_platforms ?? null;
+        app.log.info({ publisher_platforms: updatePayload.publisher_platforms }, '[default-settings] Placement fields included in PATCH');
+      }
+      if ('facebook_placements' in input) {
+        updatePayload.facebook_placements = input.facebook_placements ?? null;
+      }
+      if ('instagram_placements' in input) {
+        updatePayload.instagram_placements = input.instagram_placements ?? null;
       }
       const { data, error } = await supabase
         .from('default_ad_settings')

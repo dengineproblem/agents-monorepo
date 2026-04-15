@@ -132,6 +132,10 @@ export interface DirectionDefaultSettingsInput {
   app_id?: string;
   app_store_url?: string;
   is_skadnetwork_attribution?: boolean;
+  // Площадки и плейсменты
+  publisher_platforms?: string[];
+  facebook_placements?: string[];
+  instagram_placements?: string[];
 }
 
 export interface UpdateDirectionPayload {
@@ -230,6 +234,10 @@ export interface DefaultAdSettings {
   app_id: string | null;
   app_store_url: string | null;
   is_skadnetwork_attribution: boolean | null;
+  // Площадки и плейсменты
+  publisher_platforms: string[] | null;
+  facebook_placements: string[] | null;
+  instagram_placements: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -252,6 +260,9 @@ export interface CreateDefaultSettingsInput {
   app_id?: string;
   app_store_url?: string;
   is_skadnetwork_attribution?: boolean;
+  publisher_platforms?: string[];
+  facebook_placements?: string[];
+  instagram_placements?: string[];
 }
 
 export interface UpdateDefaultSettingsInput {
@@ -270,6 +281,9 @@ export interface UpdateDefaultSettingsInput {
   app_id?: string;
   app_store_url?: string;
   is_skadnetwork_attribution?: boolean;
+  publisher_platforms?: string[];
+  facebook_placements?: string[];
+  instagram_placements?: string[];
 }
 
 // Маппинг objective в читаемые названия

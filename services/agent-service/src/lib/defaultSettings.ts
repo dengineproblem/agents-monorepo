@@ -43,6 +43,11 @@ export interface DefaultAdSettings {
   app_store_url?: string;
   is_skadnetwork_attribution?: boolean;
 
+  // Площадки и плейсменты
+  publisher_platforms?: string[] | null;
+  facebook_placements?: string[] | null;
+  instagram_placements?: string[] | null;
+
   created_at: string;
   updated_at: string;
 }

@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Loader2 } from 'lucide-react';
+import { PlacementsSelector } from '@/components/profile/PlacementsSelector';
 import type {
   Direction,
   UpdateDefaultSettingsInput,
@@ -96,6 +97,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState('');
   const [clientQuestions, setClientQuestions] = useState<string[]>(['Здравствуйте! Хочу узнать об этом подробнее.']);
   const [instagramUrl, setInstagramUrl] = useState('');
+  const [publisherPlatforms, setPublisherPlatforms] = useState<string[]>([]);
+  const [facebookPlacements, setFacebookPlacements] = useState<string[]>([]);
+  const [instagramPlacements, setInstagramPlacements] = useState<string[]>([]);
+  const [placementsOpen, setPlacementsOpen] = useState(false);
   const [siteUrl, setSiteUrl] = useState('');
   const [appStoreUrl, setAppStoreUrl] = useState('');
   const [isSkadnetworkAttribution, setIsSkadnetworkAttribution] = useState(false);
@@ -236,6 +241,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           setClientQuestions([settings.client_question]);
         }
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
+        setPublisherPlatforms(settings.publisher_platforms || []);
+        setFacebookPlacements(settings.facebook_placements || []);
+        setInstagramPlacements(settings.instagram_placements || []);
         if (settings.site_url) setSiteUrl(settings.site_url);
         if (settings.app_store_url) setAppStoreUrl(settings.app_store_url);
         setIsSkadnetworkAttribution(Boolean(settings.is_skadnetwork_attribution));
@@ -265,6 +273,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setDescription('Напишите нам, чтобы узнать подробности');
     setClientQuestions(['Здравствуйте! Хочу узнать об этом подробнее.']);
     setInstagramUrl('');
+    setPublisherPlatforms([]);
+    setFacebookPlacements([]);
+    setInstagramPlacements([]);
+    setPlacementsOpen(false);
     setSiteUrl('');
     setAppStoreUrl('');
     setIsSkadnetworkAttribution(false);
@@ -422,6 +434,13 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         }),
         ...(!isTikTok && (direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && {
           instagram_url: instagramUrl.trim(),
+        }),
+        ...(!isTikTok && {
+          // null = явный сброс в Advantage+ (Supabase обновит в null)
+          // array = ручной выбор плейсментов
+          publisher_platforms: publisherPlatforms.length > 0 ? publisherPlatforms : null,
+          facebook_placements: facebookPlacements.length > 0 ? facebookPlacements : null,
+          instagram_placements: instagramPlacements.length > 0 ? instagramPlacements : null,
         }),
         ...(!isTikTok && direction.objective === 'site_leads' && {
           site_url: siteUrl.trim(),
@@ -762,6 +781,31 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     </div>
                   </div>
                 )}
+
+                {!isTikTok && <PlacementsSelector
+                  publisherPlatforms={publisherPlatforms}
+                  facebookPlacements={facebookPlacements}
+                  instagramPlacements={instagramPlacements}
+                  open={placementsOpen}
+                  onOpenChange={setPlacementsOpen}
+                  disabled={isSubmitting}
+                  onReset={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
+                  onTogglePlatform={(val) => {
+                    setPublisherPlatforms(prev => {
+                      const next = prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val];
+                      // Очищаем плейсменты удалённой платформы чтобы не было stale данных
+                      if (!next.includes('facebook')) setFacebookPlacements([]);
+                      if (!next.includes('instagram')) setInstagramPlacements([]);
+                      return next;
+                    });
+                  }}
+                  onToggleFb={(val) => setFacebookPlacements(prev =>
+                    prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                  )}
+                  onToggleIg={(val) => setInstagramPlacements(prev =>
+                    prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                  )}
+                />}
               </div>
 
               <Separator />
@@ -1016,7 +1060,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               {!isTikTok && (direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">📱 Instagram</h3>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="edit-instagram-url">
                       Instagram URL <span className="text-red-500">*</span>

@@ -549,8 +549,9 @@ export async function workflowCreateAdInDirection(
       thumbnailUrls[creative.tiktok_video_id] = creative.thumbnail_url;
     }
   }
+  const effectiveIdentityId = identityId || directionSettings.identity_id || '7627032953973080071';
   const { identityType, displayName, resolvedIdentityId, identityAuthorizedBcId, videoPosters } = await resolveIdentityAndPosters(
-    advertiserId, accessToken, identityId, videoIds, thumbnailUrls
+    advertiserId, accessToken, effectiveIdentityId, videoIds, thumbnailUrls
   );
 
   logger.info({
@@ -793,8 +794,9 @@ export async function workflowCreateAdGroupWithCreatives(
       thumbUrls[creative.tiktok_video_id] = creative.thumbnail_url;
     }
   }
+  const effectiveIdentityId = identityId || direction.tiktok_identity_id || undefined;
   const { identityType: idType, displayName: dName, resolvedIdentityId: resolvedId, identityAuthorizedBcId: bcId, videoPosters: posters } = await resolveIdentityAndPosters(
-    advertiserId, accessToken, identityId, videoIdsForPosters, thumbUrls
+    advertiserId, accessToken, effectiveIdentityId, videoIdsForPosters, thumbUrls
   );
 
   logger.info({

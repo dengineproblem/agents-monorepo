@@ -118,6 +118,18 @@ export function buildTargeting(
     throw new Error('Settings object is required to build targeting');
   }
 
+  log.debug({
+    objective,
+    settingsId: settings.id,
+    gender: settings.gender,
+    citiesCount: settings.cities?.length ?? 0,
+    hasPublisherPlatforms: Array.isArray(settings.publisher_platforms) && settings.publisher_platforms.length > 0,
+    hasFbPlacements: Array.isArray(settings.facebook_placements) && settings.facebook_placements.length > 0,
+    hasIgPlacements: Array.isArray(settings.instagram_placements) && settings.instagram_placements.length > 0,
+    advantageAudience: controls.advantageAudienceEnabled !== false,
+    hasCustomAudience: Boolean(controls.customAudienceId),
+  }, '[buildTargeting] Starting targeting construction');
+
   // Для Advantage+ Audience age_min/age_max игнорируются - хардкодим стандартные
   const targeting: any = {
     age_min: 18,
@@ -127,6 +139,7 @@ export function buildTargeting(
   // Пол
   if (settings.gender && settings.gender !== 'all') {
     targeting.genders = settings.gender === 'male' ? [1] : [2];
+    log.debug({ gender: settings.gender, genders: targeting.genders }, '[buildTargeting] Gender applied');
   }
 
   // Facebook region IDs (districts) — отправляются как geo_locations.regions, НЕ cities
@@ -185,6 +198,53 @@ export function buildTargeting(
     throw new Error('No cities/countries configured in targeting settings. Please add at least one location.');
   }
 
+  // Площадки и плейсменты (ручная настройка вместо Advantage+ Placements)
+  // NULL или пустой массив = Advantage+ Placements (Meta выбирает автоматически)
+  const pubPlatforms = settings.publisher_platforms;
+  const fbPlacements = settings.facebook_placements;
+  const igPlacements = settings.instagram_placements;
+
+  const hasManualPlatforms = Array.isArray(pubPlatforms) && pubPlatforms.length > 0;
+  const hasFbPlacements = Array.isArray(fbPlacements) && fbPlacements.length > 0;
+  const hasIgPlacements = Array.isArray(igPlacements) && igPlacements.length > 0;
+
+  if (hasManualPlatforms || hasFbPlacements || hasIgPlacements) {
+    // Если платформы не выбраны явно но выбраны позиции — используем обе платформы
+    const finalPlatforms: string[] = hasManualPlatforms ? pubPlatforms : ['facebook', 'instagram'];
+    targeting.publisher_platforms = finalPlatforms;
+
+    // Facebook позиции применяем только если Facebook в списке платформ
+    if (hasFbPlacements && finalPlatforms.includes('facebook')) {
+      targeting.facebook_positions = fbPlacements;
+    } else if (hasFbPlacements && !finalPlatforms.includes('facebook')) {
+      log.warn({
+        objective,
+        facebook_placements: fbPlacements,
+        publisher_platforms: finalPlatforms,
+      }, '[buildTargeting] facebook_placements set but facebook not in publisher_platforms — skipping FB positions');
+    }
+
+    // Instagram позиции применяем только если Instagram в списке платформ
+    if (hasIgPlacements && finalPlatforms.includes('instagram')) {
+      targeting.instagram_positions = igPlacements;
+    } else if (hasIgPlacements && !finalPlatforms.includes('instagram')) {
+      log.warn({
+        objective,
+        instagram_placements: igPlacements,
+        publisher_platforms: finalPlatforms,
+      }, '[buildTargeting] instagram_placements set but instagram not in publisher_platforms — skipping IG positions');
+    }
+
+    log.info({
+      objective,
+      publisher_platforms: finalPlatforms,
+      facebook_positions: targeting.facebook_positions || null,
+      instagram_positions: targeting.instagram_positions || null,
+    }, '[buildTargeting] Manual placements applied (overrides Advantage+ Placements)');
+  } else {
+    log.debug({ objective }, '[buildTargeting] No manual placements — using Advantage+ Placements (Meta auto-selects)');
+  }
+
   const finalTargeting = applyDirectionAudienceControls(targeting, controls);
 
   log.info({
@@ -193,7 +253,8 @@ export function buildTargeting(
     regions: finalTargeting.geo_locations?.regions?.length || 0,
     cities: finalTargeting.geo_locations?.cities?.length || 0,
     advantageAudienceEnabled: controls.advantageAudienceEnabled !== false,
-    hasCustomAudience: Boolean(controls.customAudienceId)
+    hasCustomAudience: Boolean(controls.customAudienceId),
+    manualPlacements: hasManualPlatforms || hasFbPlacements || hasIgPlacements,
   }, 'Targeting built successfully');
 
   return finalTargeting;

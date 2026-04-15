@@ -49,6 +49,28 @@ async function resolveAccessToken(userAccountId: string, adAccountId?: string): 
   return user.access_token || null;
 }
 
+async function resolveFbAdAccountId(userAccountId: string, adAccountId?: string): Promise<string | null> {
+  const { data: user } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled, ad_account_id')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!user) return null;
+
+  if (user.multi_account_enabled && adAccountId) {
+    const { data: acc } = await supabase
+      .from('ad_accounts')
+      .select('ad_account_id')
+      .eq('id', adAccountId)
+      .eq('user_account_id', userAccountId)
+      .single();
+    return acc?.ad_account_id || null;
+  }
+
+  return user.ad_account_id || null;
+}
+
 export async function fbProxyRoutes(app: FastifyInstance) {
   /**
    * POST /fb-proxy/lead-forms
@@ -145,6 +167,62 @@ export async function fbProxyRoutes(app: FastifyInstance) {
       }).catch(() => {});
 
       return reply.status(500).send({ error: error.message || 'Facebook API error' });
+    }
+  });
+
+  /**
+   * GET /fb-video-embed?videoId=...&userId=...
+   * Возвращает URL для embed iframe Facebook видео.
+   */
+  app.get('/fb-video-embed', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { videoId, userId, adAccountId } = req.query as {
+      videoId?: string;
+      userId?: string;
+      adAccountId?: string;
+    };
+
+    if (!videoId || !userId) {
+      return reply.status(400).send({ error: 'videoId and userId are required' });
+    }
+
+    try {
+      const accessToken = await resolveAccessToken(userId, adAccountId);
+      if (!accessToken) {
+        return reply.status(401).send({ error: 'No Facebook access token' });
+      }
+
+      const data = await graph('GET', videoId, accessToken, { fields: 'format,permalink_url' });
+
+      // Извлекаем embed URL из format[].embed_html (берём максимальное разрешение)
+      let embedUrl: string | null = null;
+
+      if (Array.isArray(data?.format)) {
+        const best = (data.format as any[])
+          .filter(f => f.embed_html)
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+
+        if (best?.embed_html) {
+          const match = (best.embed_html as string).match(/src="([^"]+)"/);
+          if (match?.[1]) {
+            embedUrl = match[1].replace(/&amp;/g, '&');
+            // autoplay=1 + muted=1 — обязательно для мобильных браузеров (iOS Safari блокирует autoplay без muted)
+            embedUrl += '&autoplay=1&muted=1&show_text=0&allowfullscreen=1';
+          }
+        }
+      }
+
+      if (!embedUrl && data?.permalink_url) {
+        const encoded = encodeURIComponent(data.permalink_url);
+        embedUrl = `https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=0&autoplay=1&muted=1&allowfullscreen=1`;
+      }
+
+      // Ссылка для мобилки — открывает в приложении Facebook или мобильном браузере
+      const watchUrl = data?.permalink_url || `https://www.facebook.com/watch/?v=${videoId}`;
+      log.info({ videoId, gotEmbedUrl: !!embedUrl }, 'FB video embed result');
+      return reply.send({ embedUrl, permalinkUrl: watchUrl });
+    } catch (error: any) {
+      log.error({ error: error.message, videoId }, 'FB video embed error');
+      return reply.status(500).send({ error: error.message });
     }
   });
 

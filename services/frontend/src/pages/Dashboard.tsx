@@ -433,7 +433,11 @@ const Dashboard: React.FC = () => {
 
         {formattedDateRange && (
           <div className="mb-6">
-            <Badge variant="secondary" className="rounded-full px-3 py-1 text-sm font-medium flex items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="rounded-full px-3 py-1 text-sm font-medium flex items-center gap-2 cursor-pointer hover:bg-secondary/60 transition-colors"
+              onClick={() => setDatePickerOpen(true)}
+            >
               <Calendar className="h-4 w-4" />
               <span>{t('dashboard.statsFor')} {formattedDateRange}</span>
             </Badge>

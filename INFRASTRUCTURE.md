@@ -1590,6 +1590,22 @@ docker-compose restart grafana
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
 
+**13 апреля 2026:**
+- ✅ **НОВАЯ ФУНКЦИЯ:** Выбор площадок и плейсментов в настройках направления
+- ✅ Добавлены 3 nullable колонки в `default_ad_settings`: `publisher_platforms`, `facebook_placements`, `instagram_placements` (TEXT[], DEFAULT NULL)
+- ✅ Migration: `migrations/250_add_instagram_placements_to_default_ad_settings.sql`
+- ✅ **Семантика NULL:** NULL = Advantage+ (Meta выбирает площадки автоматически), массив = ручной выбор
+- ✅ **Backward compatibility:** Существующие направления получают NULL → поведение не меняется (Advantage+ Placements)
+- ✅ `buildTargeting()` в `settingsHelpers.ts`: если все 3 поля пустые/null → плейсменты не добавляются в targeting → Meta использует Advantage+ Placements автоматически
+- ✅ Если платформы не выбраны явно, но выбраны позиции → используются обе платформы (facebook + instagram)
+- ✅ Facebook positions → `facebook_positions` (feed, story, reels, marketplace, search, instream_video)
+- ✅ Instagram positions → `instagram_positions` (stream, story, reels, explore)
+- ✅ Добавлены предупреждения при несогласованности (например, facebook_placements выбраны, но facebook не в publisher_platforms)
+- ✅ Frontend: компонент `PlacementsSelector.tsx` (Popover + чекбоксы), константы в `constants/placements.ts`
+- ✅ Критический фикс PATCH: Zod схемы используют `.nullable().optional()`, фронтенд посылает `null` (не `undefined`) для сброса в Advantage+
+- ✅ Добавлено подробное логирование в `buildTargeting()` (debug/info/warn)
+- ✅ Файлы: `services/agent-service/src/lib/settingsHelpers.ts`, `services/agent-service/src/routes/defaultSettings.ts`, `services/frontend/src/components/profile/PlacementsSelector.tsx`, `services/frontend/src/constants/placements.ts`
+
 **18 февраля 2026:**
 - ✅ **АПГРЕЙД:** Автораспределение лидов привязано к конкретному боту (bot-scoped)
 - ✅ Проблема: Автораспределение назначало лидов всем консультантам аккаунта, игнорируя настройки бота

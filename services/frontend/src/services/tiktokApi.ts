@@ -78,7 +78,7 @@ export interface TikTokAd {
   name: string;
   status: 'ENABLE' | 'DISABLE' | 'DELETE';
   adgroup_id: string;
-  thumbnail_url?: string;
+  video_id?: string;
   create_time?: string;
 }
 
@@ -662,7 +662,7 @@ export const tiktokApi = {
       const endpoint = `ad/get/`;
       const params = {
         filtering: { adgroup_ids: [adGroupId] },
-        fields: ['ad_id', 'ad_name', 'operation_status', 'adgroup_id', 'create_time'],
+        fields: ['ad_id', 'ad_name', 'operation_status', 'adgroup_id', 'create_time', 'video_id'],
         page: 1,
         page_size: 100
       };
@@ -684,7 +684,7 @@ export const tiktokApi = {
         name: ad.ad_name,
         status: ad.operation_status === 'ENABLE' ? 'ENABLE' : 'DISABLE',
         adgroup_id: ad.adgroup_id,
-        thumbnail_url: ad.image_ids?.[0] || undefined,
+        video_id: ad.video_id || undefined,
         create_time: ad.create_time
       }));
     } catch (error) {
