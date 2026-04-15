@@ -189,16 +189,18 @@ export async function startOnboarding(
     };
   }
 
-  // Сбрасываем на начало если уже была сессия
-  if (session.current_step > 0) {
-    await updateSession(telegramId, {
-      current_step: 1,
-      answers: {},
-    });
-  } else {
-    // Переходим на шаг 1
-    await updateSession(telegramId, { current_step: 1 });
+  // Если уже есть прогресс — предлагаем продолжить, не сбрасываем ответы
+  if (session.current_step > 1) {
+    const answeredCount = Object.keys(session.answers).length;
+    return {
+      messages: [
+        `Вы уже начали заполнять анкету (отвечено ${answeredCount} из ${ONBOARDING_STEPS.length} вопросов).\n\nОтправьте /status чтобы продолжить с того места, или /restart чтобы начать заново (все ответы будут удалены).`,
+      ],
+    };
   }
+
+  // Новая сессия или шаг 0/1 — начинаем
+  await updateSession(telegramId, { current_step: 1 });
 
   return {
     messages: [WELCOME_MESSAGE],
@@ -447,6 +449,12 @@ async function completeOnboarding(
     log.error({ telegramId, error: result.error }, 'Failed to create user');
 
     if (result.error?.includes('уже зарегистрирован')) {
+      // Помечаем сессию завершённой — пользователь уже есть, дальше нечего делать
+      await updateSession(telegramId, {
+        is_completed: true,
+        user_account_id: result.userId || null,
+        completed_at: new Date().toISOString(),
+      });
       return {
         messages: [
           `Вы уже зарегистрированы в системе!\n\nВаш логин: <code>${result.username}</code>\n\nЕсли забыли пароль, напишите в поддержку.`,

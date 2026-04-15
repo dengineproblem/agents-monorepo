@@ -8,6 +8,8 @@ import { createLogger } from '../logger.js';
 import { sendTelegramNotification } from '../telegramNotifier.js';
 import { supabase } from '../supabase.js';
 import { transcribeVoiceMessage, type TelegramVoice } from './voiceHandler.js';
+import { analyzePhoto } from './photoHandler.js';
+import { getStep } from './steps.js';
 import {
   getSession,
   startOnboarding,
@@ -56,6 +58,8 @@ export interface TelegramMessage {
   date: number;
   text?: string;
   voice?: TelegramVoice;
+  photo?: { file_id: string; width: number; height: number }[];
+  caption?: string;
   chat: {
     id: number;
     type: string;
@@ -85,6 +89,10 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
 
   const telegramId = String(message.from.id);
   const chatId = message.chat.id;
+
+  // Флаг: пользователь точно в процессе онбординга (прошёл проверки сессии)
+  // Используется в catch чтобы не показывать sendStartHint активным пользователям
+  let userInOnboarding = false;
 
   try {
     // ===================================================
@@ -122,6 +130,9 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
     if (!session || session.is_completed) {
       return { handled: false };
     }
+
+    // С этой точки пользователь точно в активном онбординге
+    userInOnboarding = true;
 
     // Обработка команд
     if (message.text) {
@@ -187,6 +198,56 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
       return { handled: true };
     }
 
+    // Обработка фото
+    if (message.photo) {
+      try {
+        await sendTypingAction(chatId);
+
+        const largestPhoto = message.photo[message.photo.length - 1];
+        const currentStep = getStep(session.current_step);
+
+        if (!currentStep) {
+          await sendTelegramNotification(
+            chatId,
+            `📷 Не удалось определить текущий вопрос. Пожалуйста, ответьте текстом или голосом.`,
+            { source: 'onboarding' }
+          );
+          return { handled: true };
+        }
+
+        const analysis = await analyzePhoto(largestPhoto.file_id, currentStep);
+
+        if (!analysis.success || !analysis.text) {
+          await sendTelegramNotification(
+            chatId,
+            `⚠️ ${analysis.error || 'Не удалось обработать фото.'} Пожалуйста, ответьте текстом или голосом.`,
+            { source: 'onboarding' }
+          );
+          return { handled: true };
+        }
+
+        // Показываем что распознали и принимаем как ответ
+        await sendTelegramNotification(
+          chatId,
+          `📷 <i>Распознано из фото:</i> "${analysis.text}"`,
+          { source: 'onboarding' }
+        );
+
+        const response = await processAnswer(telegramId, analysis.text);
+        await sendBotResponse(chatId, response);
+      } catch (photoError) {
+        log.error({ error: String(photoError), telegramId }, 'Unexpected error processing photo');
+        try {
+          await sendTelegramNotification(
+            chatId,
+            `⚠️ Не удалось обработать фото. Пожалуйста, ответьте текстом или голосом — прогресс анкеты сохранён.`,
+            { source: 'onboarding' }
+          );
+        } catch {}
+      }
+      return { handled: true };
+    }
+
     // Обработка голосовых сообщений
     if (message.voice) {
       log.info(
@@ -225,6 +286,18 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
     return { handled: false };
   } catch (error) {
     log.error({ error: String(error), telegramId }, 'Error handling onboarding message');
+    // Если пользователь был в активном онбординге — сообщаем об ошибке и НЕ отдаём
+    // handled: false (иначе telegramWebhook вызовет sendStartHint и /start сбросит сессию)
+    if (userInOnboarding) {
+      try {
+        await sendTelegramNotification(
+          String(chatId),
+          `⚠️ Произошла ошибка при обработке сообщения. Попробуйте ещё раз — прогресс анкеты сохранён.`,
+          { source: 'onboarding' }
+        );
+      } catch {}
+      return { handled: true };
+    }
     return { handled: false, error: String(error) };
   }
 }
