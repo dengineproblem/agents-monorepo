@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { creativesApi, UserCreative, CreativeTestStatus } from '@/services/creativesApi';
+import { facebookApi } from '@/services/facebookApi';
 import { supabase } from '@/integrations/supabase/client';
 
 /**
@@ -27,6 +28,40 @@ export const useUserCreatives = (accountId?: string | null, platform?: 'instagra
     }
 
     setLoading(false);
+
+    // Обновляем протухшие Facebook CDN URL (instagram только)
+    if (platform !== 'tiktok') {
+      // Собираем ad IDs (imported_analysis)
+      const adIds = data.filter(c => c.fb_ad_id).map(c => c.fb_ad_id!);
+      // Собираем creative IDs (uploaded с fb_creative_id_*)
+      const creativeIdMap = new Map<string, string>(); // fb_creative_id → creative.id
+      for (const c of data) {
+        if (c.fb_ad_id) continue; // уже покрыт adIds
+        const fbCreativeId = c.fb_creative_id || c.fb_creative_id_whatsapp || c.fb_creative_id_instagram_traffic || c.fb_creative_id_site_leads;
+        if (fbCreativeId) creativeIdMap.set(fbCreativeId, c.id);
+      }
+      const creativeIds = Array.from(creativeIdMap.keys());
+
+      if (adIds.length > 0 || creativeIds.length > 0) {
+        const freshUrls = await facebookApi.refreshCreativeUrls(adIds, creativeIds, accountId);
+        if (Object.keys(freshUrls).length > 0) {
+          setItems(prev => prev.map(c => {
+            // Попробуем по fb_ad_id
+            const freshByAd = c.fb_ad_id ? freshUrls[c.fb_ad_id] : undefined;
+            // Попробуем по fb_creative_id_*
+            const fbCreativeId = c.fb_creative_id || c.fb_creative_id_whatsapp || c.fb_creative_id_instagram_traffic || c.fb_creative_id_site_leads;
+            const freshByCr = fbCreativeId ? freshUrls[fbCreativeId] : undefined;
+            const fresh = freshByAd || freshByCr;
+            if (!fresh) return c;
+            return {
+              ...c,
+              image_url: fresh.image_url ?? c.image_url,
+              thumbnail_url: fresh.thumbnail_url ?? c.thumbnail_url,
+            };
+          }));
+        }
+      }
+    }
   }, [accountId, platform]);
 
   useEffect(() => { load(); }, [load]);

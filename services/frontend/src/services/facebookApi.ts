@@ -1717,5 +1717,33 @@ export const facebookApi = {
       console.error('[facebookApi] Error submitting manual connection:', error);
       return { success: false, error: 'Не удалось подключиться к серверу' };
     }
-  }
+  },
+
+  /**
+   * Batch-обновление image_url / thumbnail_url для объявлений Facebook.
+   * Используется для обновления протухших CDN URL в списке креативов.
+   */
+  refreshCreativeUrls: async (
+    adIds: string[],
+    creativeIds: string[],
+    adAccountId?: string | null,
+  ): Promise<Record<string, { image_url: string | null; thumbnail_url: string | null }>> => {
+    if (adIds.length === 0 && creativeIds.length === 0) return {};
+    try {
+      const internalAdAccountId = getCurrentInternalAdAccountId();
+      const response = await fetch(`${API_BASE_URL}/fb-refresh-creative-urls`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          adIds: adIds.slice(0, 50),
+          creativeIds: creativeIds.slice(0, 50),
+          adAccountId: adAccountId || internalAdAccountId || undefined,
+        }),
+      });
+      if (!response.ok) return {};
+      return await response.json();
+    } catch {
+      return {};
+    }
+  },
 };

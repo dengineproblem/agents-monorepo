@@ -17,6 +17,7 @@ export type UserCreative = {
   title: string;
   direction_id: string | null;
   fb_video_id: string | null;
+  fb_creative_id?: string | null;
   fb_creative_id_whatsapp: string | null;
   fb_creative_id_instagram_traffic: string | null;
   fb_creative_id_site_leads: string | null;

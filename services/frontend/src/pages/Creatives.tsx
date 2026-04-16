@@ -2067,19 +2067,24 @@ const Creatives: React.FC = () => {
                                 ? (it.carousel_data[0].image_url || it.carousel_data[0].image_url_4k)
                                 : it.image_url;
 
+                            const Icon = it.media_type === 'video' ? Video : it.media_type === 'carousel' ? Images : Image;
+
                             if (previewUrl) {
                               return (
-                                <img
-                                  src={getThumbnailUrl(previewUrl, 80, 80) || previewUrl}
-                                  alt=""
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
-                                />
+                                <div className="relative w-full h-full">
+                                  <Icon className="absolute inset-0 m-auto w-5 h-5 text-muted-foreground" />
+                                  <img
+                                    src={getThumbnailUrl(previewUrl, 80, 80) || previewUrl}
+                                    alt=""
+                                    className="relative w-full h-full object-cover"
+                                    loading="lazy"
+                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                  />
+                                </div>
                               );
                             }
 
                             // Fallback - иконка типа медиа
-                            const Icon = it.media_type === 'video' ? Video : it.media_type === 'carousel' ? Images : Image;
                             return <Icon className="w-5 h-5 text-muted-foreground" />;
                           })()}
                         </div>

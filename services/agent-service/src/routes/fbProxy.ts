@@ -227,6 +227,81 @@ export async function fbProxyRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /fb-refresh-creative-urls
+   * Batch-запрос свежих image_url / thumbnail_url для объявлений Facebook.
+   * Принимает список ad_id и возвращает актуальные CDN URL.
+   */
+  app.post('/fb-refresh-creative-urls', async (
+    req: FastifyRequest,
+    reply: FastifyReply
+  ) => {
+    const userAccountId = req.headers['x-user-id'] as string;
+    if (!userAccountId) {
+      return reply.status(401).send({ error: 'x-user-id header is required' });
+    }
+
+    const bodySchema = z.object({
+      // ad IDs → получаем creative{image_url,thumbnail_url}
+      adIds: z.array(z.string()).max(50).optional().default([]),
+      // creative IDs → получаем image_url,thumbnail_url напрямую
+      creativeIds: z.array(z.string()).max(50).optional().default([]),
+      adAccountId: z.string().uuid().optional(),
+    }).refine(d => d.adIds.length + d.creativeIds.length > 0, {
+      message: 'adIds or creativeIds must not both be empty',
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'Invalid request', details: parsed.error.errors });
+    }
+
+    const { adIds, creativeIds, adAccountId } = parsed.data;
+
+    try {
+      const accessToken = await resolveAccessToken(userAccountId, adAccountId);
+      if (!accessToken) {
+        return reply.status(400).send({ error: 'No Facebook access token found' });
+      }
+
+      const result: Record<string, { image_url: string | null; thumbnail_url: string | null }> = {};
+
+      // Батч по ad IDs: GET /?ids=...&fields=creative{image_url,thumbnail_url}
+      if (adIds.length > 0) {
+        const data = await graph('GET', '', accessToken, {
+          ids: adIds.join(','),
+          fields: 'creative{image_url,thumbnail_url}',
+        });
+        for (const adId of adIds) {
+          const ad = data?.[adId];
+          result[adId] = {
+            image_url: ad?.creative?.image_url ?? null,
+            thumbnail_url: ad?.creative?.thumbnail_url ?? null,
+          };
+        }
+      }
+
+      // Батч по creative IDs: GET /?ids=...&fields=image_url,thumbnail_url
+      if (creativeIds.length > 0) {
+        const data = await graph('GET', '', accessToken, {
+          ids: creativeIds.join(','),
+          fields: 'image_url,thumbnail_url',
+        });
+        for (const creativeId of creativeIds) {
+          const cr = data?.[creativeId];
+          result[creativeId] = {
+            image_url: cr?.image_url ?? null,
+            thumbnail_url: cr?.thumbnail_url ?? null,
+          };
+        }
+      }
+
+      return reply.send(result);
+    } catch (error: any) {
+      log.error({ error: error.message }, 'fb-refresh-creative-urls error');
+      return reply.status(500).send({ error: error.message || 'Facebook API error' });
+    }
+  });
+
+  /**
    * POST /fb-proxy
    * Проксирует запрос к Facebook Graph API
    */
