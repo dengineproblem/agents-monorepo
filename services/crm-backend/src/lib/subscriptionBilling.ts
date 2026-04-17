@@ -180,12 +180,11 @@ export function addMonthsToDateString(dateString: string, months: number): strin
 
 function resolveSubscriptionStartDate(args: {
   currentTarifExpires: string | null;
-  userCreatedAt: string | null;
   explicitStartDate?: string;
   today: string;
   forceStartDate?: boolean;
 }): string {
-  const { currentTarifExpires, userCreatedAt, explicitStartDate, today, forceStartDate } = args;
+  const { currentTarifExpires, explicitStartDate, today, forceStartDate } = args;
 
   if (!forceStartDate && currentTarifExpires) {
     const currentExpiry = toDateString(currentTarifExpires);
@@ -198,10 +197,6 @@ function resolveSubscriptionStartDate(args: {
 
   if (explicitStartDate) {
     return toDateString(explicitStartDate);
-  }
-
-  if (userCreatedAt) {
-    return toDateString(userCreatedAt);
   }
 
   return today;
@@ -450,7 +445,6 @@ export async function applySubscriptionToUserAccount(
   const todayAlmaty = getAlmatyTodayDateString();
   const startDate = resolveSubscriptionStartDate({
     currentTarifExpires: user.tarif_expires,
-    userCreatedAt: user.created_at,
     explicitStartDate: params.startDate,
     today: todayAlmaty,
     forceStartDate: params.forceStartDate

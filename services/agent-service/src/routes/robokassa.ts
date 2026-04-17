@@ -64,17 +64,11 @@ function addMonthsToDateString(dateString: string, months: number): string {
 
 function resolveSubscriptionStartDate(args: {
   currentTarifExpires: string | null;
-  userCreatedAt: string | null;
   today: string;
 }): string {
   const currentExpiry = toDateString(args.currentTarifExpires);
   if (currentExpiry && currentExpiry > args.today) {
     return currentExpiry;
-  }
-
-  const createdAt = toDateString(args.userCreatedAt);
-  if (createdAt) {
-    return createdAt;
   }
 
   return args.today;
@@ -257,7 +251,7 @@ export default async function robokassaRoutes(app: FastifyInstance) {
       return reply.status(400).type('text/plain').send('Invalid payment_id');
     }
 
-    let user: { id: string; created_at: string | null; tarif_expires: string | null };
+    let user: { id: string; tarif_expires: string | null };
 
     if (userId) {
       // Existing user flow (renewal, user_id passed)
@@ -268,9 +262,9 @@ export default async function robokassaRoutes(app: FastifyInstance) {
 
       const { data: existingUser, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, created_at, tarif_expires')
+        .select('id, tarif_expires')
         .eq('id', userParse.data)
-        .maybeSingle<{ id: string; created_at: string | null; tarif_expires: string | null }>();
+        .maybeSingle<{ id: string; tarif_expires: string | null }>();
 
       if (userError || !existingUser) {
         return reply.status(404).type('text/plain').send('User not found');
@@ -281,12 +275,12 @@ export default async function robokassaRoutes(app: FastifyInstance) {
       // Check if already registered
       const { data: existing } = await supabase
         .from('user_accounts')
-        .select('id, created_at, tarif_expires')
+        .select('id, tarif_expires')
         .or(`telegram_id.eq.${telegramId},telegram_id_2.eq.${telegramId},telegram_id_3.eq.${telegramId},telegram_id_4.eq.${telegramId}`)
         .limit(1);
 
       if (existing && existing.length > 0) {
-        user = existing[0] as { id: string; created_at: string | null; tarif_expires: string | null };
+        user = existing[0] as { id: string; tarif_expires: string | null };
       } else {
         // Self-register: create user_accounts
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -303,7 +297,7 @@ export default async function robokassaRoutes(app: FastifyInstance) {
             is_active: false,
             onboarding_stage: 'registered',
           })
-          .select('id, created_at, tarif_expires')
+          .select('id, tarif_expires')
           .single();
 
         if (insertError || !newUser) {
@@ -312,14 +306,13 @@ export default async function robokassaRoutes(app: FastifyInstance) {
         }
 
         logger.info({ telegramId, userId: newUser.id }, 'User created after successful payment');
-        user = newUser as { id: string; created_at: string | null; tarif_expires: string | null };
+        user = newUser as { id: string; tarif_expires: string | null };
       }
     }
 
     const todayAlmaty = getAlmatyTodayDateString();
     const startDate = resolveSubscriptionStartDate({
       currentTarifExpires: user.tarif_expires,
-      userCreatedAt: user.created_at,
       today: todayAlmaty
     });
     const newTarif = getTarifCodeByMonths(plan.months);
