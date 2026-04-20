@@ -220,6 +220,7 @@ export interface LeadDataForBitrix24 {
   utm_content?: string | null;
   utm_term?: string | null;
   source_description?: string | null;
+  fieldData?: Array<{ name: string; values: string[] }>;
 }
 
 /**
@@ -319,6 +320,27 @@ export async function pushLeadToBitrix24Direct(
 
     if (entityType === 'lead') {
       // Create Bitrix24 Lead
+      // Build COMMENTS field with email and form answers
+      let commentsText = '';
+      if (leadData.email) {
+        commentsText += `Email: ${leadData.email}`;
+      }
+      if (leadData.fieldData && leadData.fieldData.length > 0) {
+        const skipFields = new Set(['full_name', 'name', 'first_name', 'phone_number', 'phone', 'email', 'email_address']);
+        const formAnswers = leadData.fieldData
+          .filter(f => !skipFields.has(f.name.toLowerCase()))
+          .map(f => {
+            const label = f.name.replace(/_/g, ' ');
+            const value = f.values?.[0] || '—';
+            return `${label}: ${value}`;
+          });
+
+        if (formAnswers.length > 0) {
+          if (commentsText) commentsText += '\n\n';
+          commentsText += `📋 Ответы из лид-формы:\n${formAnswers.join('\n')}`;
+        }
+      }
+
       const leadFields: Partial<Bitrix24Lead> = {
         TITLE: `Лид: ${displayName}`,
         NAME,
@@ -331,7 +353,7 @@ export async function pushLeadToBitrix24Direct(
         UTM_CAMPAIGN: leadData.utm_campaign || undefined,
         UTM_CONTENT: leadData.utm_content || undefined,
         UTM_TERM: leadData.utm_term || undefined,
-        COMMENTS: leadData.email ? `Email: ${leadData.email}` : undefined
+        COMMENTS: commentsText || undefined
       };
 
       if (defaultStageSettings.leadStatus) {
@@ -388,6 +410,27 @@ export async function pushLeadToBitrix24Direct(
       }
 
       // Create Deal linked to Contact
+      // Build COMMENTS field with email and form answers
+      let dealCommentsText = '';
+      if (leadData.email) {
+        dealCommentsText += `Email: ${leadData.email}`;
+      }
+      if (leadData.fieldData && leadData.fieldData.length > 0) {
+        const skipFields = new Set(['full_name', 'name', 'first_name', 'phone_number', 'phone', 'email', 'email_address']);
+        const formAnswers = leadData.fieldData
+          .filter(f => !skipFields.has(f.name.toLowerCase()))
+          .map(f => {
+            const label = f.name.replace(/_/g, ' ');
+            const value = f.values?.[0] || '—';
+            return `${label}: ${value}`;
+          });
+
+        if (formAnswers.length > 0) {
+          if (dealCommentsText) dealCommentsText += '\n\n';
+          dealCommentsText += `📋 Ответы из лид-формы:\n${formAnswers.join('\n')}`;
+        }
+      }
+
       const dealFields: Partial<Bitrix24Deal> = {
         TITLE: `Сделка: ${displayName}`,
         CONTACT_ID: String(bitrix24ContactId),
@@ -398,7 +441,7 @@ export async function pushLeadToBitrix24Direct(
         UTM_CAMPAIGN: leadData.utm_campaign || undefined,
         UTM_CONTENT: leadData.utm_content || undefined,
         UTM_TERM: leadData.utm_term || undefined,
-        COMMENTS: leadData.email ? `Email: ${leadData.email}` : undefined
+        COMMENTS: dealCommentsText || undefined
       };
 
       if (defaultStageSettings.dealCategory !== null) {

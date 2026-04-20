@@ -317,6 +317,19 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             continue;
           }
 
+          // Get form name for utm_campaign (instead of form_id)
+          let formName: string | null = null;
+          const formIdForName = form_id || leadData.form_id;
+          if (formIdForName && tokenForLeadData) {
+            try {
+              const formRes = await fetch(`https://graph.facebook.com/${FB_API_VERSION}/${formIdForName}?fields=name&access_token=${tokenForLeadData}`);
+              const formData = await formRes.json();
+              formName = formData.name || null;
+            } catch (e) {
+              log.warn({ formIdForName }, 'Failed to fetch form name');
+            }
+          }
+
           // Check for duplicate lead (same leadgen_id)
           const { data: existingLead } = await supabase
             .from('leads')
@@ -407,7 +420,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
             // UTM for analytics compatibility
             utm_source: 'facebook_lead_form',
-            utm_campaign: form_id || null,
+            utm_campaign: formName || null,
 
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
@@ -451,7 +464,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
                     phone,
                     email: email || null,
                     utm_source: 'facebook_lead_form',
-                    utm_campaign: form_id || null
+                    utm_campaign: formName || null,
+                    fieldData
                   },
                   userAccountId,
                   accountId,
@@ -469,7 +483,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
                     phone,
                     email: email || null,
                     utm_source: 'facebook_lead_form',
-                    utm_campaign: form_id || null,
+                    utm_campaign: formName || null,
                     fieldData
                   },
                   userAccountId,
@@ -571,18 +585,6 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
           // Send lead notification to Telegram (per-account)
           if (accountId && LEAD_NOTIFICATIONS[accountId]) {
-            // Get form name from Facebook
-            let formName: string | null = null;
-            const formIdForName = form_id || leadData.form_id;
-            if (formIdForName && tokenForLeadData) {
-              try {
-                const formRes = await fetch(`https://graph.facebook.com/${FB_API_VERSION}/${formIdForName}?fields=name&access_token=${tokenForLeadData}`);
-                const formData = await formRes.json();
-                formName = formData.name || null;
-              } catch (e) {
-                log.warn({ formId: formIdForName }, 'Failed to fetch form name');
-              }
-            }
             sendLeadNotificationToTelegram(accountId, { name, phone, formName, fieldData }).catch(err => {
               log.error({ err, accountId }, 'Failed to send lead TG notification');
             });
