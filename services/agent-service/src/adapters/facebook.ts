@@ -749,10 +749,39 @@ export async function createWhatsAppCreative(
         objectStorySpecWithoutWelcome.instagram_user_id = params.instagramId;
       }
 
-      return await graph('POST', `${adAccountId}/adcreatives`, token, {
-        name: "Video CTWA – WhatsApp",
-        object_story_spec: JSON.stringify(objectStorySpecWithoutWelcome)
-      });
+      try {
+        return await graph('POST', `${adAccountId}/adcreatives`, token, {
+          name: "Video CTWA – WhatsApp",
+          object_story_spec: JSON.stringify(objectStorySpecWithoutWelcome)
+        });
+      } catch (retryError: any) {
+        // Если без page_welcome_message тоже 1487194 — пробуем без instagram_user_id
+        const isPermissionError = retryError?.fb?.error_subcode === 1487194 || retryError?.fb?.error_subcode === 1815166;
+        if (isPermissionError && params.instagramId) {
+          log.warn({
+            adAccountId,
+            instagramId: params.instagramId,
+            msg: 'permission error persists, retrying without instagram_user_id'
+          }, 'WhatsApp creative: убираем instagram_user_id после повторной ошибки прав');
+
+          const videoDataMinimal: any = {
+            video_id: params.videoId,
+            message: params.message,
+            call_to_action: callToAction
+          };
+          if (params.thumbnailHash) {
+            videoDataMinimal.image_hash = params.thumbnailHash;
+          } else if (params.imageUrl) {
+            videoDataMinimal.image_url = params.imageUrl;
+          }
+
+          return await graph('POST', `${adAccountId}/adcreatives`, token, {
+            name: "Video CTWA – WhatsApp",
+            object_story_spec: JSON.stringify({ page_id: params.pageId, video_data: videoDataMinimal })
+          });
+        }
+        throw retryError;
+      }
     }
 
     // Если невалидный instagram_user_id (code 100) — пробуем без него

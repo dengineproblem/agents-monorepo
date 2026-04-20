@@ -21,6 +21,7 @@ import { supabase } from '../lib/supabase.js';
 import { getValidBitrix24Token } from '../lib/bitrix24Tokens.js';
 import { getLead, getDeal, getContact } from '../adapters/bitrix24.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { syncPurchasesToLeadSaleAmount } from '../lib/purchaseSync.js';
 import {
   getDirectionCapiSettings,
   evaluateBitrixCapiLevelsWithDiagnostics,
@@ -380,9 +381,9 @@ async function handleDealEvent(
       });
     }
 
-    // Check if deal is closed/won and create sale record
+    // Check if deal is closed/won and create purchase record for ROI
     if (bitrixDeal.STAGE_SEMANTIC_ID === 'S' && bitrixDeal.CLOSED === 'Y') {
-      await createSaleFromDeal(app, userAccountId, localLead.id, bitrixDeal, dealId);
+      await createPurchaseFromDeal(app, userAccountId, localLead, bitrixDeal, dealId);
     }
 
     app.log.info({
@@ -467,52 +468,76 @@ async function handleContactEvent(
 }
 
 /**
- * Create sale record from closed deal
+ * Create purchase record from closed deal (writes to `purchases` table for ROI calculation)
  */
-async function createSaleFromDeal(
+async function createPurchaseFromDeal(
   app: FastifyInstance,
   userAccountId: string,
-  leadId: string,
+  localLead: any,
   deal: any,
   dealId: string
 ): Promise<void> {
-  // Check if sale already exists for this deal
-  const { data: existingSale } = await supabase
-    .from('sales')
+  const amount = parseFloat(deal.OPPORTUNITY || '0');
+  const parsedDealId = parseInt(dealId, 10);
+
+  // Check if purchase already exists for this deal
+  const { data: existingPurchase } = await supabase
+    .from('purchases')
     .select('id')
-    .eq('bitrix24_deal_id', parseInt(dealId, 10))
-    .single();
+    .eq('bitrix24_deal_id', parsedDealId)
+    .maybeSingle();
 
-  if (existingSale) {
-    app.log.debug({ dealId }, 'Sale already exists for deal');
-    return;
+  // Extract client phone from lead
+  let clientPhone = '';
+  if (localLead.source_type === 'website' || localLead.source_type === 'manual') {
+    clientPhone = localLead.phone || '';
+  } else {
+    clientPhone = localLead.chat_id?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
   }
 
-  // Create sale record
-  const { error: saleError } = await supabase
-    .from('sales')
-    .insert({
-      user_account_id: userAccountId,
-      lead_id: leadId,
-      amount: parseFloat(deal.OPPORTUNITY || '0'),
-      currency: deal.CURRENCY_ID || 'RUB',
-      bitrix24_deal_id: parseInt(dealId, 10),
-      bitrix24_category_id: parseInt(deal.CATEGORY_ID || '0', 10),
-      bitrix24_stage_id: deal.STAGE_ID,
-      sale_date: deal.CLOSEDATE || new Date().toISOString()
-    });
+  const purchaseData = {
+    client_phone: clientPhone,
+    amount,
+    currency: deal.CURRENCY_ID || 'KZT',
+    purchase_date: deal.CLOSEDATE || new Date().toISOString(),
+    bitrix24_deal_id: parsedDealId,
+    user_account_id: userAccountId,
+    account_id: localLead.account_id || null,
+    source: 'bitrix24',
+    updated_at: new Date().toISOString()
+  };
 
-  if (saleError) {
-    app.log.error({ error: saleError, dealId }, 'Failed to create sale from deal');
-    return;
+  if (existingPurchase) {
+    await supabase
+      .from('purchases')
+      .update(purchaseData)
+      .eq('id', existingPurchase.id);
+
+    app.log.info({ purchaseId: existingPurchase.id, dealId }, 'Updated purchase from Bitrix24 deal');
+  } else {
+    if (amount > 0) {
+      const { data: newPurchase } = await supabase
+        .from('purchases')
+        .insert({
+          ...purchaseData,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      app.log.info({ purchaseId: newPurchase?.id, dealId, amount }, 'Created purchase from Bitrix24 deal');
+    }
   }
 
-  app.log.info({
-    userAccountId,
-    leadId,
-    dealId,
-    amount: deal.OPPORTUNITY
-  }, 'Sale created from Bitrix24 deal');
+  // Sync purchase → leads.sale_amount для ROI аналитики
+  if (clientPhone && userAccountId) {
+    try {
+      await syncPurchasesToLeadSaleAmount(clientPhone, userAccountId);
+      app.log.info({ clientPhone, dealId }, 'Synced Bitrix24 purchase to lead sale_amount');
+    } catch (syncError: any) {
+      app.log.error({ error: syncError.message, clientPhone, dealId }, 'Failed to sync Bitrix24 purchase to lead sale_amount');
+    }
+  }
 }
 
 async function syncDirectionCrmCapiForBitrixEntity(params: {
