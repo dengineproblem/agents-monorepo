@@ -28,7 +28,7 @@ RUN if [ "$BUILD_MODE" = "appreview" ]; then \
       echo "VITE_FB_REDIRECT_URI=https://performanteaiagency.com/profile" >> .env.local && \
       echo "VITE_SUPABASE_URL=$VITE_SUPABASE_URL" >> .env.local && \
       echo "VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY" >> .env.local && \
-      if [ -n "$VITE_BRAIN_API_BASE_URL" ]; then echo "VITE_BRAIN_API_BASE_URL=$VITE_BRAIN_API_BASE_URL" >> .env.local; fi; \
+      echo "VITE_BRAIN_API_BASE_URL=${VITE_BRAIN_API_BASE_URL:-https://agents.performanteaiagency.com}" >> .env.local; \
     elif [ "$BUILD_MODE" = "development" ]; then \
       echo "VITE_APP_REVIEW_MODE=false" > .env.local && \
       echo "VITE_API_BASE_URL=http://localhost:8082" >> .env.local && \
@@ -37,7 +37,7 @@ RUN if [ "$BUILD_MODE" = "appreview" ]; then \
       echo "VITE_FB_REDIRECT_URI=http://localhost:8081/profile" >> .env.local && \
       echo "VITE_SUPABASE_URL=$VITE_SUPABASE_URL" >> .env.local && \
       echo "VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY" >> .env.local && \
-      if [ -n "$VITE_BRAIN_API_BASE_URL" ]; then echo "VITE_BRAIN_API_BASE_URL=$VITE_BRAIN_API_BASE_URL" >> .env.local; fi; \
+      echo "VITE_BRAIN_API_BASE_URL=${VITE_BRAIN_API_BASE_URL:-http://localhost:7080}" >> .env.local; \
     else \
       echo "VITE_APP_REVIEW_MODE=false" > .env.local && \
       echo "VITE_API_BASE_URL=https://app.performanteaiagency.com/api" >> .env.local && \
@@ -46,7 +46,7 @@ RUN if [ "$BUILD_MODE" = "appreview" ]; then \
       echo "VITE_FB_REDIRECT_URI=https://app.performanteaiagency.com/profile" >> .env.local && \
       echo "VITE_SUPABASE_URL=$VITE_SUPABASE_URL" >> .env.local && \
       echo "VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY" >> .env.local && \
-      if [ -n "$VITE_BRAIN_API_BASE_URL" ]; then echo "VITE_BRAIN_API_BASE_URL=$VITE_BRAIN_API_BASE_URL" >> .env.local; fi; \
+      echo "VITE_BRAIN_API_BASE_URL=${VITE_BRAIN_API_BASE_URL:-https://agents.performanteaiagency.com}" >> .env.local; \
     fi
 
 # Собираем production build
