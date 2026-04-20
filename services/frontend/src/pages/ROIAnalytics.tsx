@@ -313,12 +313,6 @@ const ROIAnalytics: React.FC = () => {
       { header: 'Затраты', accessor: (c) => formatAmountForExport(c.spend) },
       { header: 'ROI %', accessor: (c) => c.roi.toFixed(1) },
       { header: 'Лиды', accessor: (c) => c.leads },
-      { header: 'Level 1', accessor: (c) => c.capi_events?.interest ?? '' },
-      { header: 'Level 2', accessor: (c) => c.capi_events?.qualified ?? '' },
-      { header: 'Level 3', accessor: (c) => c.capi_events?.scheduled ?? '' },
-      { header: 'Conv 1 %', accessor: (c) => c.leads > 0 && c.capi_events?.interest ? ((c.capi_events.interest / c.leads) * 100).toFixed(1) : '' },
-      { header: 'Conv 2 %', accessor: (c) => c.leads > 0 && c.capi_events?.qualified ? ((c.capi_events.qualified / c.leads) * 100).toFixed(1) : '' },
-      { header: 'Conv 3 %', accessor: (c) => c.leads > 0 && c.capi_events?.scheduled ? ((c.capi_events.scheduled / c.leads) * 100).toFixed(1) : '' },
     ], 'creatives');
   };
 
@@ -1076,6 +1070,7 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('cpl')}>
                               <SortButton label="CPL" columnKey="cpl" />
                             </th>
+                            {/* TEMPORARILY HIDDEN: CEP Level 1/2/3 Columns (optimization levels hidden from directions)
                             <th
                               className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
                               title="CAPI Level 1: Клиент проявил интерес (3+ входящих сообщений)"
@@ -1118,6 +1113,7 @@ const ROIAnalytics: React.FC = () => {
                             >
                               <SortButton label="Conv 3" columnKey="conv3" align="center" />
                             </th>
+                            */}
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
                               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
@@ -1196,7 +1192,7 @@ const ROIAnalytics: React.FC = () => {
                                     : '—'
                                   }
                                 </td>
-                                {/* CAPI события */}
+                                {/* TEMPORARILY HIDDEN: CEP Level 1/2/3 Cells (optimization levels hidden from directions)
                                 <td className="py-2 px-3 text-center text-sm">
                                   {platform === 'tiktok'
                                     ? <span className="text-muted-foreground">—</span>
@@ -1221,7 +1217,6 @@ const ROIAnalytics: React.FC = () => {
                                         : <span className="text-muted-foreground">—</span>)
                                   }
                                 </td>
-                                {/* Конверсии из CAPI событий */}
                                 <td className="py-2 px-3 text-center text-sm">
                                   {platform === 'tiktok'
                                     ? <span className="text-muted-foreground">—</span>
@@ -1246,6 +1241,7 @@ const ROIAnalytics: React.FC = () => {
                                         : <span className="text-muted-foreground">—</span>)
                                   }
                                 </td>
+                                */}
                                 {/* TEMPORARILY HIDDEN: Key Stages Cell
                                 {qualificationStats && qualificationStats.key_stages.length > 0 && (
                                   <td className="py-2 px-3 text-center">
