@@ -864,12 +864,35 @@ export async function workflowCreateAdSetInDirection(
   const batchStartTime = Date.now();
 
   const batchRequests: BatchRequest[] = creative_data.map(creative => {
-    const body = new URLSearchParams({
+    const adBody: any = {
       name: creative.ad_name,
       adset_id: adset_id,
       status: auto_activate ? 'ACTIVE' : 'PAUSED',
       creative: JSON.stringify({ creative_id: creative.fb_creative_id })
-    }).toString();
+    };
+
+    // Для WhatsApp направлений добавляем page_welcome_message с актуальным client_question
+    if ((direction.objective === 'whatsapp' || (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp')) && defaultSettings) {
+      const clientQuestion = defaultSettings.client_questions?.[0] ?? defaultSettings.client_question;
+      if (clientQuestion) {
+        const pageWelcomeMessage = JSON.stringify({
+          type: "VISUAL_EDITOR",
+          version: 2,
+          landing_screen_type: "welcome_message",
+          media_type: "text",
+          text_format: {
+            customer_action_type: "autofill_message",
+            message: {
+              autofill_message: { content: clientQuestion },
+              text: "Здравствуйте! Чем можем помочь?"
+            }
+          }
+        });
+        adBody.page_welcome_message = pageWelcomeMessage;
+      }
+    }
+
+    const body = new URLSearchParams(adBody).toString();
 
     return {
       method: 'POST' as const,
