@@ -265,8 +265,28 @@ export default async function whatsappInstances(app: FastifyInstance) {
         app.log.warn({ error: evolutionError }, 'Evolution API logout failed, continuing with DB cleanup');
       }
 
-      // Обновить статус в базе (с проверкой владельца если передан)
-      let updateQuery = supabase
+      // Обновить instance_name в whatsapp_phone_numbers (для отражения в UI)
+      let phoneUpdateQuery = supabase
+        .from('whatsapp_phone_numbers')
+        .update({
+          instance_name: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('instance_name', instanceName);
+
+      if (userAccountId) {
+        phoneUpdateQuery = phoneUpdateQuery.eq('user_account_id', userAccountId);
+      }
+
+      const { error: phoneError } = await phoneUpdateQuery;
+
+      if (phoneError) {
+        app.log.error({ error: phoneError }, 'Failed to clear instance_name in phone_numbers');
+        return reply.status(500).send({ error: 'Failed to disconnect instance' });
+      }
+
+      // Обновить статус в whatsapp_instances (для истории)
+      let instanceUpdateQuery = supabase
         .from('whatsapp_instances')
         .update({
           status: 'disconnected',
@@ -275,16 +295,14 @@ export default async function whatsappInstances(app: FastifyInstance) {
         })
         .eq('instance_name', instanceName);
 
-      // Проверка владельца
       if (userAccountId) {
-        updateQuery = updateQuery.eq('user_account_id', userAccountId);
+        instanceUpdateQuery = instanceUpdateQuery.eq('user_account_id', userAccountId);
       }
 
-      const { error } = await updateQuery;
+      const { error: instanceError } = await instanceUpdateQuery;
 
-      if (error) {
-        app.log.error({ error }, 'Failed to update instance status');
-        return reply.status(500).send({ error: 'Failed to disconnect instance' });
+      if (instanceError) {
+        app.log.error({ error: instanceError }, 'Failed to update instance status');
       }
 
       return reply.send({ success: true });
