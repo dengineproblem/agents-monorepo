@@ -26,6 +26,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDirections } from "@/hooks/useDirections";
+import { useUploadEligibility } from '@/hooks/useUploadEligibility';
+import { UploadBlockedBanner } from '@/components/creatives/UploadBlockedBanner';
 import { getDirectionObjectiveLabel, OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
@@ -1473,6 +1475,13 @@ const Creatives: React.FC = () => {
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
   // Показываем ВСЕ направления (и Facebook, и TikTok)
   const { directions, labelStats, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
+
+  // Block creative upload/import when Meta ad account has debt (UNSETTLED / IN_GRACE_PERIOD)
+  const { eligibility } = useUploadEligibility(userId, currentAdAccountId, platform);
+  const uploadBlocked = eligibility !== null && !eligibility.canUpload;
+  const uploadBlockedMessage = eligibility?.message ?? '';
+  const uploadBlockedFbAccountId = eligibility?.fbAdAccountId ?? null;
+
   const launchDirection = useMemo(
     () => directions.find(d => d.id === launchDirectionId),
     [directions, launchDirectionId]
@@ -1833,11 +1842,18 @@ const Creatives: React.FC = () => {
                 </div>
               )}
 
+              {uploadBlocked && (
+                <UploadBlockedBanner
+                  message={uploadBlockedMessage}
+                  fbAdAccountId={uploadBlockedFbAccountId}
+                />
+              )}
+
               <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   onClick={() => inputRef.current?.click()}
-                  disabled={isProcessing || directions.length === 0 || !selectedDirectionId}
+                  disabled={isProcessing || directions.length === 0 || !selectedDirectionId || uploadBlocked}
                   className="flex-1 min-w-[140px]"
                 >
                   <Upload className="mr-2 h-4 w-4" />
@@ -1848,7 +1864,7 @@ const Creatives: React.FC = () => {
                   <Button
                     variant="outline"
                     onClick={handleImportTopCreatives}
-                    disabled={(multiAccountEnabled && !currentAdAccountId) || isProcessing}
+                    disabled={(multiAccountEnabled && !currentAdAccountId) || isProcessing || uploadBlocked}
                     className="flex-1 min-w-[140px]"
                     title="Анализировать и импортировать топ-5 креативов по CPL из Facebook"
                   >
@@ -1857,7 +1873,7 @@ const Creatives: React.FC = () => {
                   </Button>
                 )}
                 {!isProcessing ? (
-                  <Button variant="default" onClick={startProcessing} disabled={!queue.some(i => i.status === "queued") || !selectedDirectionId}>
+                  <Button variant="default" onClick={startProcessing} disabled={!queue.some(i => i.status === "queued") || !selectedDirectionId || uploadBlocked}>
                   <PlayCircle className="mr-2 h-4 w-4" />
                   Начать
                 </Button>
@@ -1877,7 +1893,7 @@ const Creatives: React.FC = () => {
                         startProcessing();
                       }
                     }}
-                    disabled={isProcessing}
+                    disabled={isProcessing || uploadBlocked}
                     title="Повторить все неудачные загрузки"
                   >
                     <RefreshCw className="mr-1 h-4 w-4" />
