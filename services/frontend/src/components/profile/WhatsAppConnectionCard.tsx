@@ -8,6 +8,7 @@ import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
 import { whatsappApi } from '@/services/whatsappApi';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
 import { WhatsAppLabelsDialog } from './WhatsAppLabelsDialog';
+import { isUserAdmin } from '@/components/AdminRoute';
 import { API_BASE_URL } from '@/config/api';
 
 interface WhatsAppConnectionCardProps {
@@ -24,6 +25,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [labelsDialogOpen, setLabelsDialogOpen] = useState(false);
   const [wwebjsLabelConfigured, setWwebjsLabelConfigured] = useState(false);
+  const isAdmin = isUserAdmin();
 
   const checkLabelConfig = useCallback(async () => {
     if (!userAccountId) return;
@@ -235,7 +237,36 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                 );
               })}
 
-              {/* Авто-ярлыки — скрыто */}
+              {/* Авто-ярлыки — только для техадминов */}
+              {isAdmin && (
+                <div className="flex items-center justify-between p-3 border border-muted rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 w-5 flex justify-center">
+                      {wwebjsLabelConfigured ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      ) : (
+                        <Tag className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Авто-ярлыки</p>
+                      <p className="text-xs text-muted-foreground">
+                        {wwebjsLabelConfigured
+                          ? 'Ярлыки проставляются каждую ночь в 03:00'
+                          : 'Простановка ярлыков квалифицированным лидам'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLabelsDialogOpen(true)}
+                  >
+                    <Tag className="h-4 w-4 mr-1" />
+                    {wwebjsLabelConfigured ? 'Изменить' : 'Настроить'}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
