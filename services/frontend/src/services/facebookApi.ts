@@ -800,7 +800,33 @@ export const facebookApi = {
       return [];
     }
   },
-  
+
+  /**
+   * Возвращает множество campaign_id, в которых есть хотя бы одно объявление
+   * с effective_status=ACTIVE (то есть реально крутится: объявление ACTIVE,
+   * адсет ACTIVE, кампания ACTIVE, нет ограничений). Один запрос на кабинет.
+   */
+  getTrulyActiveCampaignIds: async (): Promise<Set<string>> => {
+    if (!await hasValidConfig()) return new Set();
+    try {
+      const FB_API_CONFIG = await getCurrentUserConfig();
+      const accountId = FB_API_CONFIG.ad_account_id;
+      const response = await fetchFromFacebookAPI(`${accountId}/ads`, {
+        fields: 'campaign_id',
+        filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE'] }]),
+        limit: '500',
+      });
+      const ids = new Set<string>();
+      for (const ad of (response?.data || [])) {
+        if (ad.campaign_id) ids.add(ad.campaign_id);
+      }
+      return ids;
+    } catch (e) {
+      console.error('getTrulyActiveCampaignIds error', e);
+      return new Set();
+    }
+  },
+
   // Получить статистику кампаний за период
   // campaigns - опциональный параметр, если передан - используем его, иначе загружаем (для избежания дублирования запросов)
   getCampaignStats: async (dateRange: DateRange, includeLeadForms: boolean = false, campaigns?: Campaign[]): Promise<CampaignStat[]> => {

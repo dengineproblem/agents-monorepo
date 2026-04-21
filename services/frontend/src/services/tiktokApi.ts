@@ -246,6 +246,56 @@ export const tiktokApi = {
     }
   },
 
+  /**
+   * Возвращает множество campaign_id, в которых есть хотя бы одно объявление
+   * со всеми тремя уровнями operation_status=ENABLE (кампания + адсет + объявление).
+   * Два запроса на кабинет: включённые адсеты и включённые объявления, затем
+   * intersect по adgroup_id.
+   */
+  getTrulyActiveCampaignIds: async (): Promise<Set<string>> => {
+    if (!hasValidTikTokConfig()) return new Set();
+    try {
+      const [adGroupsResp, adsResp] = await Promise.all([
+        fetchFromTikTokAPI('adgroup/get/', {
+          filtering: { operation_status: 'ENABLE' },
+          fields: ['adgroup_id', 'campaign_id', 'operation_status'],
+          page: 1,
+          page_size: 1000,
+        }, 'GET'),
+        fetchFromTikTokAPI('ad/get/', {
+          filtering: { operation_status: 'ENABLE' },
+          fields: ['adgroup_id', 'campaign_id', 'operation_status'],
+          page: 1,
+          page_size: 1000,
+        }, 'GET'),
+      ]);
+
+      if (adGroupsResp?.code !== 0 || adsResp?.code !== 0) {
+        console.error('[tiktokApi] getTrulyActiveCampaignIds: TikTok API error', {
+          adGroups: adGroupsResp?.message,
+          ads: adsResp?.message,
+        });
+        return new Set();
+      }
+
+      const enabledAdGroupIds = new Set<string>();
+      for (const g of (adGroupsResp?.data?.list || [])) {
+        if (g.operation_status === 'ENABLE' && g.adgroup_id) enabledAdGroupIds.add(g.adgroup_id);
+      }
+
+      const ids = new Set<string>();
+      for (const ad of (adsResp?.data?.list || [])) {
+        if (ad.operation_status !== 'ENABLE') continue;
+        if (!ad.adgroup_id || !enabledAdGroupIds.has(ad.adgroup_id)) continue;
+        if (ad.campaign_id) ids.add(ad.campaign_id);
+      }
+      return ids;
+    } catch (e) {
+      console.error('[tiktokApi] getTrulyActiveCampaignIds error', e);
+      return new Set();
+    }
+  },
+
   // Получить статистику TikTok кампаний за период
   getCampaignStats: async (dateRange: DateRange): Promise<TikTokCampaignStat[]> => {
     console.log('Запрос статистики TikTok кампаний за период:', dateRange);

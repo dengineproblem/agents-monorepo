@@ -45,6 +45,8 @@ export function AdStatusSection() {
   const [videoEmbed, setVideoEmbed] = useState<{ videoUrl: string | null; embedUrl: string | null; permalinkUrl: string | null } | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const [roiByCampaign, setRoiByCampaign] = useState<Map<string, number>>(new Map());
+  const [trulyActiveCampaignIds, setTrulyActiveCampaignIds] = useState<Set<string>>(new Set());
+  const [trulyActiveLoaded, setTrulyActiveLoaded] = useState(false);
 
   // Кэш embed данных чтобы не перегружать при повторном открытии
   const embedCache = useRef<Map<string, { videoUrl: string | null; embedUrl: string | null; permalinkUrl: string | null }>>(new Map());
@@ -97,9 +99,24 @@ export function AdStatusSection() {
       .catch(() => {});
   }, [userAccountId, currentAdAccountId, platform]);
 
+  // Список кампаний, где реально есть крутящееся объявление в активном адсете.
+  // Используется для фильтрации «Активных кампаний» — кампания со статусом ACTIVE,
+  // но без реально работающих объявлений, считаться активной не должна.
+  useEffect(() => {
+    let cancelled = false;
+    setTrulyActiveLoaded(false);
+    const loader = platform === 'tiktok'
+      ? tiktokApi.getTrulyActiveCampaignIds()
+      : facebookApi.getTrulyActiveCampaignIds();
+    loader
+      .then(ids => { if (!cancelled) { setTrulyActiveCampaignIds(ids); setTrulyActiveLoaded(true); } })
+      .catch(() => { if (!cancelled) { setTrulyActiveCampaignIds(new Set()); setTrulyActiveLoaded(true); } });
+    return () => { cancelled = true; };
+  }, [userAccountId, currentAdAccountId, platform]);
+
   const activeCampaigns = useMemo(() => {
     return campaigns
-      .filter(c => c.status === 'ACTIVE')
+      .filter(c => c.status === 'ACTIVE' && (!trulyActiveLoaded || trulyActiveCampaignIds.has(c.id)))
       .map(c => {
         const stats = campaignStats.find(s => s.campaign_id === c.id);
         return {
