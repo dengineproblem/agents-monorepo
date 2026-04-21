@@ -482,14 +482,25 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
           accountStatus: eligibility.accountStatus,
         }, '[TUS] Blocked: ad account not eligible for upload');
 
-        // Update creative record (if one was pre-created) to error state
-        await supabase
-          .from('user_creatives')
-          .update({
-            status: 'error',
-            error_message: eligibility.message || 'Upload blocked',
-          })
-          .eq('tus_upload_id', uploadId);
+        // Persist an error row so the frontend poller surfaces the reason.
+        // We must INSERT (not UPDATE): the Meta path's main creative INSERT happens later,
+        // so no row exists for this uploadId at guard time.
+        try {
+          await supabase
+            .from('user_creatives')
+            .insert({
+              user_id: userId,
+              account_id: accountId ?? null,
+              title: metadata.title || metadata.filename || 'Untitled',
+              status: 'error',
+              direction_id: directionId || null,
+              media_type: 'video',
+              tus_upload_id: uploadId,
+              error_text: eligibility.message || 'Upload blocked',
+            });
+        } catch (insertErr: any) {
+          log.warn({ uploadId, err: insertErr?.message }, '[TUS] Failed to insert error creative row');
+        }
 
         // Clean up the uploaded file
         try {
