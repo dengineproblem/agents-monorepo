@@ -213,6 +213,45 @@ export const supportHandlers = {
       },
     };
   },
+  async getTodayReportStatus(_params, context) {
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const { data, error } = await supabase
+      .from('admin_user_chats')
+      .select('id, message, created_at')
+      .eq('user_account_id', context.userAccountId)
+      .eq('direction', 'to_user')
+      .is('admin_id', null)
+      .gte('created_at', startOfToday.toISOString())
+      .order('created_at', { ascending: true })
+      .limit(20);
+
+    if (error) {
+      return { success: false, error: `db_error: ${error.message}` };
+    }
+
+    const reportMarkers = ['Затраты', 'Лидов', 'CPL', 'Отчёт', 'Качественных'];
+    const report = (data || []).find(m => {
+      const msg = String(m.message || '');
+      if (msg.length < 80) return false;
+      const matches = reportMarkers.filter(k => msg.includes(k)).length;
+      return matches >= 2;
+    });
+
+    if (!report) {
+      return { success: true, data: { sent: false } };
+    }
+
+    return {
+      success: true,
+      data: {
+        sent: true,
+        sent_at: report.created_at,
+        excerpt: String(report.message).slice(0, 300),
+      },
+    };
+  },
 };
 
 export default supportHandlers;

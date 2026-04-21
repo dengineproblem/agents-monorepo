@@ -314,3 +314,58 @@ describe('supportHandlers.getRecentUserErrors', () => {
     expect(chain.limit).toHaveBeenCalledWith(5);
   });
 });
+
+describe('supportHandlers.getTodayReportStatus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('возвращает sent=true если найдено сообщение-отчёт за сегодня', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: 'm-1',
+            message:
+              '📊 Отчёт за 20.04.2026\n\nЗатраты: $15.20\nЛидов: 4\nКачественных: 2\nCPL: $3.80\n\nПосле отчёта текст',
+            created_at: '2026-04-21T06:00:00Z',
+          },
+        ],
+        error: null,
+      }),
+    };
+    supabase.from.mockReturnValue(chain);
+
+    vi.setSystemTime(new Date('2026-04-21T10:00:00Z'));
+
+    const result = await supportHandlers.getTodayReportStatus(
+      {},
+      { userAccountId: 'u-1' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data.sent).toBe(true);
+    expect(result.data.sent_at).toBe('2026-04-21T06:00:00Z');
+    expect(result.data.excerpt).toMatch(/Затраты/);
+  });
+
+  it('возвращает sent=false если отчёта за сегодня нет', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    supabase.from.mockReturnValue(chain);
+
+    const result = await supportHandlers.getTodayReportStatus({}, { userAccountId: 'u-1' });
+    expect(result.data.sent).toBe(false);
+  });
+});

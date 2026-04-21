@@ -83,6 +83,13 @@ export const SupportToolDefs = {
     }),
     meta: { timeout: 4000, retryable: true },
   },
+  getTodayReportStatus: {
+    description:
+      'Проверить, пришёл ли юзеру сегодняшний ежедневный отчёт по рекламе. ' +
+      'Используй когда юзер пишет «отчёт не пришёл», «сегодня отчёта не было».',
+    schema: z.object({}).describe('Нет параметров'),
+    meta: { timeout: 4000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;
