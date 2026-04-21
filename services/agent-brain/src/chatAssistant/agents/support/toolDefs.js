@@ -57,6 +57,14 @@ export const SupportToolDefs = {
     schema: z.object({}).describe('Нет параметров — читает из контекста'),
     meta: { timeout: 3000, retryable: true },
   },
+  getDirectionsAndCreatives: {
+    description:
+      'Получить список направлений юзера с их активностью, бюджетом, целевым CPL и ' +
+      'загруженными креативами (видео/картинки, активные/неактивные). ' +
+      'Используй для вопросов «реклама не запускается», «как поменять бюджет», «креативы не грузятся».',
+    schema: z.object({}).describe('Нет параметров'),
+    meta: { timeout: 6000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;

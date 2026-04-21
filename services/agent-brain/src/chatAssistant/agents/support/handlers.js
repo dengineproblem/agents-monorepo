@@ -5,6 +5,7 @@
  */
 import { escalateToAdminHttp } from './escalation.js';
 import { ESCALATION_REASONS_LIST } from './toolDefs.js';
+import { supabase } from '../../../lib/supabaseClient.js';
 
 export const supportHandlers = {
   /**
@@ -88,6 +89,48 @@ export const supportHandlers = {
         bitrix24: !!i.bitrix24,
         roi: !!i.roi,
         crm: !!i.crm,
+      },
+    };
+  },
+  async getDirectionsAndCreatives(_params, context) {
+    const directions = Array.isArray(context.directions) ? context.directions : [];
+    if (directions.length === 0) {
+      return { success: true, data: { directions: [] } };
+    }
+
+    const directionIds = directions.map(d => d.id);
+    const { data: creatives, error } = await supabase
+      .from('user_creatives')
+      .select('id, direction_id, is_active, media_type, created_at')
+      .in('direction_id', directionIds);
+
+    if (error) {
+      return { success: false, error: `db_error: ${error.message}` };
+    }
+
+    const byDir = new Map();
+    for (const c of (creatives || [])) {
+      if (!byDir.has(c.direction_id)) byDir.set(c.direction_id, []);
+      byDir.get(c.direction_id).push({
+        id: c.id,
+        is_active: !!c.is_active,
+        media_type: c.media_type,
+        created_at: c.created_at,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        directions: directions.map(d => ({
+          id: d.id,
+          name: d.name,
+          is_active: !!d.is_active,
+          daily_budget_cents: d.daily_budget_cents ?? null,
+          target_cpl_cents: d.target_cpl_cents ?? null,
+          whatsapp_number: d.whatsapp_number || null,
+          creatives: byDir.get(d.id) || [],
+        })),
       },
     };
   },
