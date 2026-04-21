@@ -1782,7 +1782,7 @@ const Creatives: React.FC = () => {
                 multiple
                 className="hidden"
                 onChange={(e) => handleFilesSelected(e.currentTarget.files)}
-                disabled={isProcessing}
+                disabled={isProcessing || uploadBlocked}
               />
 
               {/* Выбор направления */}
