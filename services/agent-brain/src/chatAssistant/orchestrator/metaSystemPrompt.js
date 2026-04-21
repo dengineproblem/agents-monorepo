@@ -16,7 +16,7 @@ import { formatAdAccountStatus } from '../shared/memoryFormat.js';
  * @returns {string} System prompt
  */
 export function buildMetaSystemPrompt(context = {}, options = {}) {
-  const { mode, dangerousPolicy } = options;
+  const { mode, dangerousPolicy, excludedDomains = [] } = options;
   const today = new Date();
   const currentDate = today.toLocaleDateString('ru-RU', {
     weekday: 'long',
@@ -35,6 +35,7 @@ export function buildMetaSystemPrompt(context = {}, options = {}) {
   const directionsSection = formatDirections(context.directions);
   const manualModeSection = formatManualModeContext(context);
   const businessInstructionsSection = formatBusinessInstructions(context.businessInstructions);
+  const supportEnabled = !excludedDomains.includes('support');
 
   return `# AI-ассистент для управления бизнесом
 
@@ -82,7 +83,7 @@ ${businessInstructionsSection}
 - Креатив (creative) → запроси CRM для конверсии воронки
 - Лиды (crm) → можешь запросить ads для источника (какой креатив привёл)
 
-## Тех.поддержка (когда юзер просит помощь, а не анализ)
+${supportEnabled ? `## Тех.поддержка (когда юзер просит помощь, а не анализ)
 
 Наряду с доменами ads/creative/crm/whatsapp у тебя есть домен **support** —
 агент-специалист, обученный отвечать на вопросы по работе сервиса Performante
@@ -123,8 +124,7 @@ ${businessInstructionsSection}
   support (решить тех.проблему), потом ads/crm (дать анализ).
 - Если юзер требует возврат / «больше не буду пользоваться» / жалоба —
   сразу support, без попыток анализа.
-
-## Как работать с tools
+` : ''}## Как работать с tools
 
 У тебя есть 4 meta-tools:
 

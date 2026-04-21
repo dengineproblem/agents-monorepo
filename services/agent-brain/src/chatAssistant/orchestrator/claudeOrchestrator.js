@@ -86,7 +86,7 @@ export async function* processWithClaudeSDK({
   onToolEvent = null
 }) {
   const startTime = Date.now();
-  const { layerLogger, mode } = toolContext;
+  const { layerLogger, mode, excludedDomains = [] } = toolContext;
   const requestId = `claude-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   // Detailed startup logging
@@ -131,7 +131,7 @@ export async function* processWithClaudeSDK({
   }, 'Claude MCP session created');
 
   // Build system prompt
-  const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy });
+  const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy, excludedDomains });
 
   // Generate conversation ID
   const conversationId = toolContext.conversationId || `claude-${Date.now()}`;

@@ -38,7 +38,7 @@ export async function processWithMetaTools({
   onToolEvent = null
 }) {
   const startTime = Date.now();
-  const { layerLogger, mode } = toolContext;
+  const { layerLogger, mode, excludedDomains = [] } = toolContext;
 
   // Layer 3: Meta Orchestrator start
   layerLogger?.start(3, { model: MODEL, maxIterations: MAX_ITERATIONS, mode });
@@ -64,6 +64,7 @@ export async function processWithMetaTools({
     ...toolContext,
     sessionId,
     dangerousPolicy,
+    excludedDomains,
     layerLogger, // Pass logger to downstream
     onToolEvent // Pass tool event callback for streaming
   };
@@ -72,7 +73,7 @@ export async function processWithMetaTools({
   logger.debug({ sessionId: sessionId.substring(0, 8), mode, dangerousPolicy }, 'MCP session created for meta orchestrator');
 
   // Build system prompt with context and mode
-  const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy });
+  const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy, excludedDomains });
 
   // Prepare messages
   const messages = [

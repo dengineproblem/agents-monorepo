@@ -88,7 +88,7 @@ export class Orchestrator {
    * @param {Array} params.conversationHistory - Previous messages
    * @returns {Promise<Object>} Response
    */
-  async processRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
+  async processRequest({ message, context, mode, toolContext, conversationHistory = [], excludedDomains = [] }) {
     const startTime = Date.now();
     const { layerLogger } = toolContext;
 
@@ -182,7 +182,7 @@ export class Orchestrator {
             message,
             context: enrichedContext,
             conversationHistory,
-            toolContext: { ...toolContext, mode }
+            toolContext: { ...toolContext, mode, excludedDomains }
           })) {
             if (event.type === 'text') {
               accumulatedContent = event.accumulated || accumulatedContent + event.content;
@@ -211,7 +211,7 @@ export class Orchestrator {
               message,
               context: enrichedContext,
               conversationHistory,
-              toolContext: { ...toolContext, mode }
+              toolContext: { ...toolContext, mode, excludedDomains }
             });
           } else {
             throw claudeError;
@@ -223,7 +223,7 @@ export class Orchestrator {
           message,
           context: enrichedContext,
           conversationHistory,
-          toolContext: { ...toolContext, mode }
+          toolContext: { ...toolContext, mode, excludedDomains }
         });
       }
 
@@ -379,7 +379,7 @@ export class Orchestrator {
    * Process request with streaming
    * @yields {Object} Stream events
    */
-  async *processStreamRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
+  async *processStreamRequest({ message, context, mode, toolContext, conversationHistory = [], excludedDomains = [] }) {
     const startTime = Date.now();
     const { layerLogger } = toolContext;
 
@@ -509,7 +509,7 @@ export class Orchestrator {
               message,
               context: enrichedContext,
               conversationHistory,
-              toolContext: { ...toolContext, mode }
+              toolContext: { ...toolContext, mode, excludedDomains }
             });
 
             yield {
@@ -532,7 +532,7 @@ export class Orchestrator {
             message,
             context: enrichedContext,
             conversationHistory,
-            toolContext: { ...toolContext, mode },
+            toolContext: { ...toolContext, mode, excludedDomains },
             onToolEvent: toolContext.onToolEvent
           })) {
             // Forward events (except done, we'll create our own)
@@ -572,7 +572,7 @@ export class Orchestrator {
               message,
               context: enrichedContext,
               conversationHistory,
-              toolContext: { ...toolContext, mode },
+              toolContext: { ...toolContext, mode, excludedDomains },
               onToolEvent: toolContext.onToolEvent
             });
 
@@ -592,7 +592,7 @@ export class Orchestrator {
           message,
           context: enrichedContext,
           conversationHistory,
-          toolContext: { ...toolContext, mode },
+          toolContext: { ...toolContext, mode, excludedDomains },
           onToolEvent: toolContext.onToolEvent
         });
 

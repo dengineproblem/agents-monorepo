@@ -51,8 +51,8 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
     }
   }
 
-  // 1. Group tool calls by domain
-  const byDomain = groupByDomain(toolCalls);
+  // 1. Group tool calls by domain (respecting excluded domains)
+  const byDomain = groupByDomain(toolCalls, context.excludedDomains || []);
 
   // Layer 5: Domain Router start
   layerLogger?.start(5, {
@@ -162,8 +162,10 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
 
 /**
  * Group tool calls by their domain
+ * @param {Array} toolCalls
+ * @param {string[]} [excludedDomains=[]] - Domains to exclude from routing
  */
-function groupByDomain(toolCalls) {
+function groupByDomain(toolCalls, excludedDomains = []) {
   const grouped = {};
 
   for (const call of toolCalls) {
@@ -171,6 +173,11 @@ function groupByDomain(toolCalls) {
 
     if (!domain) {
       logger.warn({ tool: call.name }, 'Domain router: unknown tool domain');
+      continue;
+    }
+
+    if (excludedDomains.includes(domain)) {
+      logger.warn({ tool: call.name, domain }, 'Domain router: tool domain is excluded, skipping');
       continue;
     }
 

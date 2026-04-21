@@ -110,13 +110,24 @@ export async function processChat({ message, conversationId, mode = 'auto', user
       conversationId: conversation.id
     };
 
+    // 6.5. Resolve per-user feature flags
+    const { data: userFlags } = await supabase
+      .from('user_accounts')
+      .select('support_agent_enabled')
+      .eq('id', userAccountId)
+      .single();
+
+    const supportEnabled = !!userFlags?.support_agent_enabled;
+    const excludedDomains = supportEnabled ? [] : ['support'];
+
     // 7. Process via orchestrator (Meta-Tools architecture)
     const response = await orchestrator.processRequest({
       message,
       context,
       mode,
       toolContext,
-      conversationHistory
+      conversationHistory,
+      excludedDomains
     });
 
     // 7.5. Shadow mode: log support-agent response without saving or delivering it
@@ -607,6 +618,16 @@ export function registerChatRoutes(fastify) {
         layerLogger // Pass logger to downstream layers
       };
 
+      // Resolve per-user feature flags
+      const { data: streamUserFlags } = await supabase
+        .from('user_accounts')
+        .select('support_agent_enabled')
+        .eq('id', userAccountId)
+        .single();
+
+      const streamSupportEnabled = !!streamUserFlags?.support_agent_enabled;
+      const streamExcludedDomains = streamSupportEnabled ? [] : ['support'];
+
       layerLogger.end(1, { conversationId: conversation.id });
 
       // Send init event
@@ -634,7 +655,8 @@ export function registerChatRoutes(fastify) {
         context,
         mode: mode || 'auto',
         toolContext: toolContextWithEvents,
-        conversationHistory
+        conversationHistory,
+        excludedDomains: streamExcludedDomains
       })) {
         sendEvent(event);
 
