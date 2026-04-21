@@ -394,11 +394,14 @@ export function AdStatusSection() {
                   ))}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div
+                  className="grid gap-4 items-start"
+                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
+                >
                   {Array.from(creativeGroups.entries()).map(([directionName, groupCreatives]) => (
                     <div key={directionName}>
                       <p className="text-xs text-muted-foreground font-medium mb-2">{directionName}</p>
-                      <div className="flex gap-2 overflow-x-auto pb-1">
+                      <div className="flex flex-wrap gap-2 pb-1">
                         {groupCreatives.map((creative, index) => {
                           const roi = roiByCampaign.get(creative.campaign_id);
                           return (
