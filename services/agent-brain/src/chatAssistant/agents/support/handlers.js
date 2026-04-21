@@ -3,9 +3,53 @@
  * Handlers for Support domain tools.
  * Sig: async (params, context) => ({ success, data/error })
  */
+import { escalateToAdminHttp } from './escalation.js';
+import { ESCALATION_REASONS_LIST } from './toolDefs.js';
 
 export const supportHandlers = {
-  // handlers добавляются в следующих задачах
+  /**
+   * @param {{ reason: string, summary: string, category?: string }} params
+   * @param {{ userAccountId: string, conversationId?: string,
+   *           businessName?: string, recentMessages?: Array }} context
+   */
+  async escalateToAdmin(params, context) {
+    const { reason, summary, category } = params;
+
+    if (!ESCALATION_REASONS_LIST.includes(reason)) {
+      return {
+        success: false,
+        error: `invalid_reason: ${reason}`,
+      };
+    }
+
+    const contextMessages = (context.recentMessages || [])
+      .slice(-5)
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: String(m.content).slice(0, 500) }));
+
+    const res = await escalateToAdminHttp({
+      userAccountId: context.userAccountId,
+      conversationId: context.conversationId,
+      reason,
+      category,
+      summary,
+      businessName: context.businessName,
+      contextMessages,
+    });
+
+    if (!res.success) {
+      return { success: false, error: res.error || 'escalation_failed' };
+    }
+
+    return {
+      success: true,
+      data: {
+        escalated: true,
+        escalation_id: res.escalation_id,
+        notified: res.notified,
+      },
+    };
+  },
 };
 
 export default supportHandlers;
