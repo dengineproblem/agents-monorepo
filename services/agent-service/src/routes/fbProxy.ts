@@ -191,11 +191,13 @@ export async function fbProxyRoutes(app: FastifyInstance) {
         return reply.status(401).send({ error: 'No Facebook access token' });
       }
 
-      const data = await graph('GET', videoId, accessToken, { fields: 'format,permalink_url' });
+      const data = await graph('GET', videoId, accessToken, { fields: 'format,permalink_url,source' });
 
-      // Извлекаем embed URL из format[].embed_html (берём максимальное разрешение)
+      // Direct MP4 source — plays natively via <video> on all devices (no iframe/cookie issues)
+      const videoUrl: string | null = data?.source || null;
+
+      // Fallback FB plugin iframe (extracted from embed_html in max-resolution format)
       let embedUrl: string | null = null;
-
       if (Array.isArray(data?.format)) {
         const best = (data.format as any[])
           .filter(f => f.embed_html)
@@ -205,7 +207,6 @@ export async function fbProxyRoutes(app: FastifyInstance) {
           const match = (best.embed_html as string).match(/src="([^"]+)"/);
           if (match?.[1]) {
             embedUrl = match[1].replace(/&amp;/g, '&');
-            // autoplay=1 + muted=1 — обязательно для мобильных браузеров (iOS Safari блокирует autoplay без muted)
             embedUrl += '&autoplay=1&muted=1&show_text=0&allowfullscreen=1';
           }
         }
@@ -216,10 +217,9 @@ export async function fbProxyRoutes(app: FastifyInstance) {
         embedUrl = `https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=0&autoplay=1&muted=1&allowfullscreen=1`;
       }
 
-      // Ссылка для мобилки — открывает в приложении Facebook или мобильном браузере
       const watchUrl = data?.permalink_url || `https://www.facebook.com/watch/?v=${videoId}`;
-      log.info({ videoId, gotEmbedUrl: !!embedUrl }, 'FB video embed result');
-      return reply.send({ embedUrl, permalinkUrl: watchUrl });
+      log.info({ videoId, gotVideoUrl: !!videoUrl, gotEmbedUrl: !!embedUrl }, 'FB video embed result');
+      return reply.send({ videoUrl, embedUrl, permalinkUrl: watchUrl });
     } catch (error: any) {
       log.error({ error: error.message, videoId }, 'FB video embed error');
       return reply.status(500).send({ error: error.message });

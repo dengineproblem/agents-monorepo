@@ -1231,10 +1231,10 @@ export const facebookApi = {
   },
 
   /**
-   * Получить embed URL для показа FB видео через iframe.
-   * FB не отдаёт source URL — только embed plugin.
+   * Получить данные для проигрывания FB/IG видео.
+   * videoUrl — прямой MP4 (play via <video>). embedUrl — iframe fallback.
    */
-  getVideoEmbedUrl: async (videoId: string): Promise<{ embedUrl: string; permalinkUrl: string | null } | null> => {
+  getVideoEmbedUrl: async (videoId: string): Promise<{ videoUrl: string | null; embedUrl: string | null; permalinkUrl: string | null } | null> => {
     const userId = getUserId();
     if (!userId || !videoId) return null;
     const adAccountId = getCurrentInternalAdAccountId();
@@ -1246,8 +1246,12 @@ export const facebookApi = {
       });
       if (!res.ok) return null;
       const data = await res.json();
-      if (!data.embedUrl) return null;
-      return { embedUrl: data.embedUrl, permalinkUrl: data.permalinkUrl || null };
+      if (!data.videoUrl && !data.embedUrl) return null;
+      return {
+        videoUrl: data.videoUrl || null,
+        embedUrl: data.embedUrl || null,
+        permalinkUrl: data.permalinkUrl || null,
+      };
     } catch {
       return null;
     }

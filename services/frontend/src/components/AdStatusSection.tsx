@@ -41,12 +41,12 @@ export function AdStatusSection() {
   const [creativesLoading, setCreativesLoading] = useState(false);
   const [stoppingAll, setStoppingAll] = useState(false);
   const [modal, setModal] = useState<ActiveCreative | null>(null);
-  const [videoEmbed, setVideoEmbed] = useState<{ embedUrl: string; permalinkUrl: string | null } | null>(null);
+  const [videoEmbed, setVideoEmbed] = useState<{ videoUrl: string | null; embedUrl: string | null; permalinkUrl: string | null } | null>(null);
   const [videoLoading, setVideoLoading] = useState(false);
   const [roiByCampaign, setRoiByCampaign] = useState<Map<string, number>>(new Map());
 
   // Кэш embed данных чтобы не перегружать при повторном открытии
-  const embedCache = useRef<Map<string, { embedUrl: string; permalinkUrl: string | null }>>(new Map());
+  const embedCache = useRef<Map<string, { videoUrl: string | null; embedUrl: string | null; permalinkUrl: string | null }>>(new Map());
 
   // AmoCRM
   const [amocrmQualifiedLeads, setAmocrmQualifiedLeads] = useState<number | null>(null);
@@ -495,11 +495,11 @@ export function AdStatusSection() {
         </CardContent>
       </Card>
 
-      {/* Creative modal — fullscreen on mobile, centered on desktop */}
+      {/* Creative modal — centered on all screens */}
       {modal && (
         <Dialog open onOpenChange={closeModal}>
           {/* [&>button]:hidden — скрывает встроенный крестик DialogContent, используем свой */}
-          <DialogContent className="p-0 overflow-hidden bg-black gap-0 w-full max-w-full sm:max-w-lg sm:rounded-lg rounded-none border-0 sm:border translate-y-0 top-0 sm:top-[50%] sm:translate-y-[-50%] h-screen sm:h-auto [&>button]:hidden">
+          <DialogContent className="p-0 overflow-hidden bg-black gap-0 w-[calc(100vw-1rem)] max-w-[400px] sm:max-w-lg max-h-[95vh] rounded-lg border-0 sm:border [&>button]:hidden flex flex-col">
             {/* Close button */}
             <button
               className="absolute top-3 right-3 z-20 text-white/80 hover:text-white bg-black/50 rounded-full p-1.5"
@@ -508,57 +508,43 @@ export function AdStatusSection() {
               <X className="h-5 w-5" />
             </button>
 
-            {/* Media area */}
-            <div className="flex items-center justify-center bg-black" style={{ minHeight: modal.video_id ? undefined : '200px' }}>
+            {/* Media area — flex-1 fills remaining height, min-h-0 lets it shrink below content */}
+            <div className="flex-1 min-h-0 flex items-center justify-center bg-black" style={{ minHeight: modal.video_id ? undefined : '200px' }}>
               {modal.video_id ? (
                 videoLoading ? (
                   <div className="flex items-center justify-center py-16">
                     <Loader2 className="h-8 w-8 text-white animate-spin" />
                   </div>
-                ) : videoEmbed ? (
-                  // iOS Safari блокирует third-party cookies в iframe → на мобиле открываем в новой вкладке
-                  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? (
-                    <div className="flex flex-col items-center gap-4 py-10 px-6 w-full">
-                      {modal.thumbnail_url && (
-                        <img
-                          src={modal.thumbnail_url}
-                          alt={modal.name}
-                          className="w-full rounded-lg object-cover"
-                          style={{ maxHeight: '50vh' }}
-                        />
-                      )}
-                      <a
-                        href={videoEmbed.permalinkUrl || videoEmbed.embedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 bg-white text-black font-medium text-sm px-5 py-2.5 rounded-full"
-                      >
-                        <Play className="h-4 w-4 fill-black" />
-                        Смотреть видео
-                      </a>
-                    </div>
-                  ) : (
-                    // Десктоп — iframe работает
-                    <div className="w-full" style={{ aspectRatio: '9/16', maxHeight: 'calc(100vh - 80px)' }}>
-                      <iframe
-                        key={modal.id}
-                        src={videoEmbed.embedUrl}
-                        className="w-full h-full"
-                        style={{ border: 'none' }}
-                        allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
-                        allowFullScreen
-                        scrolling="no"
-                      />
-                    </div>
-                  )
+                ) : videoEmbed?.videoUrl ? (
+                  <video
+                    key={modal.id}
+                    src={videoEmbed.videoUrl}
+                    className="max-w-full max-h-full object-contain bg-black"
+                    controls
+                    autoPlay
+                    playsInline
+                    poster={modal.thumbnail_url || undefined}
+                  />
+                ) : videoEmbed?.embedUrl ? (
+                  <div className="w-full h-full" style={{ aspectRatio: '9/16', maxHeight: '100%' }}>
+                    <iframe
+                      key={modal.id}
+                      src={videoEmbed.embedUrl}
+                      className="w-full h-full"
+                      style={{ border: 'none' }}
+                      allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media"
+                      allowFullScreen
+                      scrolling="no"
+                    />
+                  </div>
                 ) : (
-                  <img src={modal.thumbnail_url || ''} alt={modal.name} className="max-w-full max-h-[60vh] object-contain" />
+                  <img src={modal.thumbnail_url || ''} alt={modal.name} className="max-w-full max-h-full object-contain" />
                 )
               ) : (
                 <img
                   src={modal.image_url || modal.thumbnail_url || ''}
                   alt={modal.name}
-                  className="max-w-full max-h-[70vh] sm:max-h-[60vh] object-contain"
+                  className="max-w-full max-h-full object-contain"
                 />
               )}
             </div>
