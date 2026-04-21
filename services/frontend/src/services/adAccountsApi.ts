@@ -7,6 +7,22 @@ import type {
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
 
+export type UploadEligibilityReason =
+  | 'ok'
+  | 'account_unsettled'
+  | 'account_grace_period'
+  | 'account_not_found'
+  | 'credentials_missing'
+  | 'status_unknown';
+
+export interface UploadEligibilityResponse {
+  canUpload: boolean;
+  reason: UploadEligibilityReason;
+  message: string | null;
+  accountStatus: number | null;
+  fbAdAccountId: string | null;
+}
+
 export const adAccountsApi = {
   /**
    * Получить все рекламные аккаунты пользователя
@@ -51,6 +67,41 @@ export const adAccountsApi = {
     } catch (error) {
       console.error('[adAccountsApi.get] Исключение:', error);
       return null;
+    }
+  },
+
+  /**
+   * Получить eligibility для загрузки креативов в выбранный Meta-кабинет.
+   * Pass `adAccountId = 'legacy'` for single-account users.
+   * Returns fail-open on network errors (canUpload: true, reason: 'status_unknown').
+   */
+  async getUploadEligibility(
+    userAccountId: string,
+    adAccountId: string
+  ): Promise<UploadEligibilityResponse> {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/ad-accounts/${userAccountId}/${adAccountId}/upload-eligibility`
+      );
+      if (!response.ok) {
+        return {
+          canUpload: true,
+          reason: 'status_unknown',
+          message: null,
+          accountStatus: null,
+          fbAdAccountId: null,
+        };
+      }
+      return await response.json();
+    } catch (err) {
+      console.error('[adAccountsApi.getUploadEligibility] Ошибка:', err);
+      return {
+        canUpload: true,
+        reason: 'status_unknown',
+        message: null,
+        accountStatus: null,
+        fbAdAccountId: null,
+      };
     }
   },
 
