@@ -108,3 +108,37 @@ describe('supportHandlers.getAdAccountStatus', () => {
     expect(result.data.is_connected).toBe(false);
   });
 });
+
+describe('supportHandlers.getIntegrationsStatus', () => {
+  it('возвращает статусы всех интеграций из context', async () => {
+    const context = {
+      userAccountId: 'u-1',
+      integrations: {
+        fb: true,
+        whatsapp: false,
+        amocrm: true,
+        bitrix24: false,
+        roi: false,
+        crm: true,
+      },
+    };
+
+    const result = await supportHandlers.getIntegrationsStatus({}, context);
+
+    expect(result.success).toBe(true);
+    expect(result.data.fb).toBe(true);
+    expect(result.data.whatsapp).toBe(false);
+    expect(result.data.amocrm).toBe(true);
+    expect(result.data.bitrix24).toBe(false);
+  });
+
+  it('возвращает all=false если integrations отсутствуют в context', async () => {
+    const result = await supportHandlers.getIntegrationsStatus(
+      {},
+      { userAccountId: 'u-1' }
+    );
+    expect(result.success).toBe(true);
+    expect(result.data.fb).toBe(false);
+    expect(result.data.whatsapp).toBe(false);
+  });
+});

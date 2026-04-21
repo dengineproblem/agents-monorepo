@@ -73,6 +73,24 @@ export const supportHandlers = {
       },
     };
   },
+  /**
+   * @param {{}} params (empty)
+   * @param {{ integrations?: Object }} context
+   */
+  async getIntegrationsStatus(_params, context) {
+    const i = context.integrations || {};
+    return {
+      success: true,
+      data: {
+        fb: !!i.fb,
+        whatsapp: !!i.whatsapp,
+        amocrm: !!i.amocrm,
+        bitrix24: !!i.bitrix24,
+        roi: !!i.roi,
+        crm: !!i.crm,
+      },
+    };
+  },
 };
 
 export default supportHandlers;

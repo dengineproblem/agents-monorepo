@@ -50,6 +50,13 @@ export const SupportToolDefs = {
     schema: z.object({}).describe('Нет параметров — читает из контекста'),
     meta: { timeout: 5000, retryable: true },
   },
+  getIntegrationsStatus: {
+    description:
+      'Получить статус интеграций юзера: Facebook, WhatsApp, AmoCRM, Bitrix24, ROI. ' +
+      'Используй для вопросов «как подключить вацап», «как подключить срм», «куда падают лиды».',
+    schema: z.object({}).describe('Нет параметров — читает из контекста'),
+    meta: { timeout: 3000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;
