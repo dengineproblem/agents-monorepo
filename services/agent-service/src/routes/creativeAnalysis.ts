@@ -18,6 +18,7 @@ import {
   createAppInstallsVideoCreative
 } from '../adapters/facebook.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { checkUploadEligibility } from '../lib/uploadEligibility.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const MIN_LEADS = 5;
@@ -1519,6 +1520,23 @@ export const creativeAnalysisRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const body = ImportSchema.parse(request.body);
+
+      // Guard: block import if Meta ad account has debt
+      const eligibility = await checkUploadEligibility(body.user_id, body.account_id ?? null, request.log);
+      if (!eligibility.canUpload) {
+        request.log.warn({
+          requestId,
+          userId: body.user_id,
+          accountId: body.account_id,
+          reason: eligibility.reason,
+        }, '[import] Blocked: ad account not eligible for upload');
+        return reply.code(402).send({
+          success: false,
+          error_code: eligibility.reason,
+          error: eligibility.message || 'Import blocked for this ad account',
+          account_status: eligibility.accountStatus,
+        });
+      }
 
       request.log.info({
         requestId,
