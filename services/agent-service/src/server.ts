@@ -49,6 +49,7 @@ import robokassaRoutes from './routes/robokassa.js';
 import brainProposalsRoutes from './routes/brainProposals.js';
 import impersonationRoutes from './routes/impersonation.js';
 import telegramWebhook from './routes/telegramWebhook.js';
+import { setupLegacyBotCommands } from './lib/telegramBotSetup.js';
 import supportBotWebhook from './routes/supportBotWebhook.js';
 import adminChatRoutes from './routes/adminChat.js';
 import adminMoltbotRoutes from './routes/adminMoltbot.js';
@@ -294,3 +295,7 @@ app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);
   process.exit(1);
 });
+
+// Синхронизируем команды бургер-меню legacy-бота с реально обрабатываемыми
+// командами (/start, /help, /skip). Чистит старые мусорные команды.
+setupLegacyBotCommands().catch((e) => app.log.error(e, 'setupLegacyBotCommands failed'));
