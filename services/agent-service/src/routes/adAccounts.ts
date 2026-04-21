@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getPageAccessToken } from '../lib/facebookHelpers.js';
+import { checkUploadEligibility } from '../lib/uploadEligibility.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -517,6 +518,38 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         severity: 'warning'
       }).catch(() => {});
 
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /ad-accounts/:userAccountId/:adAccountId/upload-eligibility
+   * Returns whether the user may upload/import creatives to the selected Meta ad account.
+   *
+   * Path param `adAccountId` accepts either an ad_accounts.id UUID (multi-account mode)
+   * or the literal string "legacy" (single-account mode, uses user_accounts credentials).
+   */
+  app.get('/ad-accounts/:userAccountId/:adAccountId/upload-eligibility', async (
+    req: FastifyRequest<{ Params: { userAccountId: string; adAccountId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { userAccountId, adAccountId } = req.params;
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(userAccountId)) {
+      return reply.status(400).send({ error: 'Invalid userAccountId format' });
+    }
+
+    const resolvedAccountId = adAccountId === 'legacy' ? null : adAccountId;
+    if (resolvedAccountId !== null && !uuidRegex.test(resolvedAccountId)) {
+      return reply.status(400).send({ error: 'Invalid adAccountId format' });
+    }
+
+    try {
+      const result = await checkUploadEligibility(userAccountId, resolvedAccountId, req.log);
+      return reply.send(result);
+    } catch (err: any) {
+      req.log.error({ err: err?.message }, '[upload-eligibility] unexpected error');
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
