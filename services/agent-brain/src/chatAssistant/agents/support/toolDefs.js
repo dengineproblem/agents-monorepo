@@ -42,6 +42,14 @@ export const SupportToolDefs = {
     }),
     meta: { timeout: 10000, retryable: false },
   },
+  getAdAccountStatus: {
+    description:
+      'Получить статус рекламного кабинета юзера: подключён ли FB, баланс, задолженность, ' +
+      'часовой пояс, активные ограничения (EU privacy и пр.). Используй для вопросов про ' +
+      'подключение FB, списания, задолженность, часовой пояс, блокировки.',
+    schema: z.object({}).describe('Нет параметров — читает из контекста'),
+    meta: { timeout: 5000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;

@@ -50,6 +50,29 @@ export const supportHandlers = {
       },
     };
   },
+  /**
+   * @param {{}} params (empty)
+   * @param {{ adAccountStatus?: Object }} context
+   */
+  async getAdAccountStatus(_params, context) {
+    const s = context.adAccountStatus;
+    if (!s) {
+      return { success: true, data: { is_connected: false } };
+    }
+    return {
+      success: true,
+      data: {
+        is_connected: !!s.is_connected,
+        ad_account_id: s.ad_account_id || null,
+        balance_cents: s.balance_cents ?? null,
+        currency: s.currency || null,
+        timezone_name: s.timezone_name || null,
+        has_debt: !!s.has_debt,
+        restrictions: Array.isArray(s.restrictions) ? s.restrictions : [],
+        last_sync_at: s.last_sync_at || null,
+      },
+    };
+  },
 };
 
 export default supportHandlers;

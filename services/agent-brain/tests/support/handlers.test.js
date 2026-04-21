@@ -74,3 +74,37 @@ describe('supportHandlers.escalateToAdmin', () => {
     expect(result.error).toMatch(/invalid_reason/i);
   });
 });
+
+describe('supportHandlers.getAdAccountStatus', () => {
+  it('возвращает данные из context.adAccountStatus', async () => {
+    const context = {
+      userAccountId: 'u-1',
+      adAccountStatus: {
+        is_connected: true,
+        ad_account_id: 'act_123',
+        balance_cents: -1500,
+        currency: 'USD',
+        timezone_name: 'America/Los_Angeles',
+        has_debt: true,
+        restrictions: ['EU_PRIVACY'],
+      },
+    };
+
+    const result = await supportHandlers.getAdAccountStatus({}, context);
+
+    expect(result.success).toBe(true);
+    expect(result.data.is_connected).toBe(true);
+    expect(result.data.has_debt).toBe(true);
+    expect(result.data.timezone_name).toBe('America/Los_Angeles');
+    expect(result.data.restrictions).toEqual(['EU_PRIVACY']);
+  });
+
+  it('возвращает is_connected=false если adAccountStatus пустой', async () => {
+    const result = await supportHandlers.getAdAccountStatus(
+      {},
+      { userAccountId: 'u-1' }
+    );
+    expect(result.success).toBe(true);
+    expect(result.data.is_connected).toBe(false);
+  });
+});
