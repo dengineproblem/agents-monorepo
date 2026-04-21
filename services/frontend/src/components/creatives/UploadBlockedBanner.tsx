@@ -21,7 +21,7 @@ export function UploadBlockedBanner({ message, fbAdAccountId }: UploadBlockedBan
       <AlertDescription className="space-y-2">
         <p>{message}</p>
         <Button asChild variant="outline" size="sm">
-          <a href={buildBillingUrl(fbAdAccountId)} target="_blank" rel="noreferrer">
+          <a href={buildBillingUrl(fbAdAccountId)} target="_blank" rel="noopener noreferrer">
             Открыть биллинг в Ads Manager
             <ExternalLink className="ml-2 h-3 w-3" />
           </a>
