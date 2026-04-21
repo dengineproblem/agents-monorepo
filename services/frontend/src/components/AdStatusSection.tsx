@@ -31,6 +31,7 @@ interface ActiveCreative {
   leads: number;
   cpl: number;
   cpql: number;
+  qualityLeads: number;
 }
 
 export function AdStatusSection() {
@@ -152,7 +153,10 @@ export function AdStatusSection() {
             // Маппинг ad_id → stat для агрегации
             const statsMap = new Map(stats.map(s => [s.ad_id, s]));
             for (const cr of creatives) {
-              // Суммируем статистику по всем объявлениям одного креатива
+              // Показываем карточку только если креатив крутится в активном объявлении,
+              // но статистику суммируем по всем ad_id (включая выключенные адсеты),
+              // где этот креатив был задействован за период.
+              if (!cr.is_active) continue;
               let spend = 0, leads = 0, qualityLeads = 0;
               for (const adId of cr.ad_ids) {
                 const s = statsMap.get(adId);
@@ -171,6 +175,7 @@ export function AdStatusSection() {
                 leads,
                 cpl: leads > 0 ? spend / leads : 0,
                 cpql: qualityLeads > 0 ? spend / qualityLeads : 0,
+                qualityLeads,
               });
             }
           } catch { /* skip */ }
@@ -203,6 +208,7 @@ export function AdStatusSection() {
                       leads: stat?.leads || 0,
                       cpl: stat?.cpl || 0,
                       cpql: 0,
+                      qualityLeads: 0,
                     });
                   }
                 }
@@ -271,15 +277,35 @@ export function AdStatusSection() {
 
   const fmt = (val: number) => platform === 'tiktok' ? formatCurrencyKZT(val) : formatCurrency(val);
 
+  // Пересчитываем CPQL по той же логике, что для кампаний (см. cpqlByCampaign):
+  // если AmoCRM настроен — распределяем amocrmQualifiedLeads пропорционально
+  // qualityLeads креатива относительно всех quality leads активных кампаний.
+  // Иначе — fallback на Meta quality leads креатива (WhatsApp-направления).
+  const creativesWithCpql = useMemo(() => {
+    if (platform === 'tiktok') return creatives;
+    const totalFbQualityLeads = activeCampaigns.reduce((sum, c) => sum + (c.qualityLeads || 0), 0);
+    const useAmocrm = amocrmConfigured && amocrmQualifiedLeads != null && amocrmQualifiedLeads > 0 && totalFbQualityLeads > 0;
+    return creatives.map(c => {
+      let cpql = 0;
+      if (useAmocrm) {
+        const amocrmLeadsForCreative = amocrmQualifiedLeads! * (c.qualityLeads / totalFbQualityLeads);
+        cpql = amocrmLeadsForCreative > 0 ? c.spend / amocrmLeadsForCreative : 0;
+      } else if (hasWhatsAppDirections) {
+        cpql = c.qualityLeads > 0 ? c.spend / c.qualityLeads : 0;
+      }
+      return { ...c, cpql };
+    });
+  }, [creatives, platform, activeCampaigns, amocrmConfigured, amocrmQualifiedLeads, hasWhatsAppDirections]);
+
   const creativeGroups = useMemo(() => {
     const groups = new Map<string, ActiveCreative[]>();
-    for (const c of creatives) {
+    for (const c of creativesWithCpql) {
       const key = c.direction_name || 'Без направления';
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(c);
     }
     return groups;
-  }, [creatives]);
+  }, [creativesWithCpql]);
 
   return (
     <>

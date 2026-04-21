@@ -1126,11 +1126,16 @@ export const facebookApi = {
    */
   /**
    * Возвращает уникальные креативы кампании с маппингом creative_id → ad_ids[].
+   * ad_ids включают объявления из выключенных адсетов/кампаний (ACTIVE, PAUSED,
+   * ADSET_PAUSED, CAMPAIGN_PAUSED, ARCHIVED) — чтобы агрегировать статистику за
+   * период по всем объявлениям, где крутился креатив.
+   * Флаг is_active = true, если хотя бы одно объявление этого креатива сейчас ACTIVE.
    * Статистику нужно агрегировать по всем ad_ids одного креатива.
    */
   getAdsByCampaign: async (campaignId: string): Promise<Array<{
     creative_id: string;
     ad_ids: string[];
+    is_active: boolean;
     name: string;
     thumbnail_url: string | null;
     image_url: string | null;
@@ -1139,12 +1144,16 @@ export const facebookApi = {
     if (!await hasValidConfig()) return [];
     try {
       const data = await fetchFromFacebookAPI(`${campaignId}/ads`, {
-        fields: 'id,name,status,creative{id,name,thumbnail_url,image_url,video_id}',
-        filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE'] }]),
+        fields: 'id,name,status,effective_status,creative{id,name,thumbnail_url,image_url,video_id}',
+        filtering: JSON.stringify([{
+          field: 'effective_status',
+          operator: 'IN',
+          value: ['ACTIVE', 'PAUSED', 'ADSET_PAUSED', 'CAMPAIGN_PAUSED', 'ARCHIVED'],
+        }]),
         limit: '200',
       });
-      // Маппинг creative_id → { meta, ad_ids[] }
-      const creativeMap = new Map<string, { name: string; thumbnail_url: string | null; image_url: string | null; video_id: string | null; ad_ids: string[] }>();
+      // Маппинг creative_id → { meta, ad_ids[], is_active }
+      const creativeMap = new Map<string, { name: string; thumbnail_url: string | null; image_url: string | null; video_id: string | null; ad_ids: string[]; is_active: boolean }>();
       for (const ad of (data?.data || [])) {
         const cid = ad.creative?.id;
         if (!cid) continue;
@@ -1155,9 +1164,12 @@ export const facebookApi = {
             image_url: ad.creative?.image_url || null,
             video_id: ad.creative?.video_id || null,
             ad_ids: [],
+            is_active: false,
           });
         }
-        creativeMap.get(cid)!.ad_ids.push(ad.id);
+        const entry = creativeMap.get(cid)!;
+        entry.ad_ids.push(ad.id);
+        if (ad.effective_status === 'ACTIVE') entry.is_active = true;
       }
       return Array.from(creativeMap.entries()).map(([creative_id, v]) => ({ creative_id, ...v }));
     } catch (e) {
