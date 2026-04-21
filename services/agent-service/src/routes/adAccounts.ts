@@ -546,10 +546,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     }
 
     try {
-      const result = await checkUploadEligibility(userAccountId, resolvedAccountId, req.log);
+      const result = await checkUploadEligibility(userAccountId, resolvedAccountId, log);
       return reply.send(result);
     } catch (err: any) {
-      req.log.error({ err: err?.message }, '[upload-eligibility] unexpected error');
+      log.error({ err: err?.message }, '[upload-eligibility] unexpected error');
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: err?.message || String(err),
+        stack_trace: err?.stack,
+        action: 'get_upload_eligibility',
+        endpoint: '/ad-accounts/:userAccountId/:adAccountId/upload-eligibility',
+        severity: 'warning'
+      }).catch(() => {});
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
