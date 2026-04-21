@@ -134,6 +134,47 @@ export const supportHandlers = {
       },
     };
   },
+  async getSubscriptionStatus(_params, context) {
+    const { userAccountId } = context;
+
+    const { data: acc, error: accErr } = await supabase
+      .from('user_accounts')
+      .select('tarif, tarif_expires')
+      .eq('id', userAccountId)
+      .single();
+
+    if (accErr) {
+      return { success: false, error: `db_error_user_accounts: ${accErr.message}` };
+    }
+
+    const endsAt = acc?.tarif_expires || null;
+    const daysLeft = endsAt
+      ? Math.floor((new Date(endsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+      : null;
+
+    let status = 'unknown';
+    if (daysLeft !== null) {
+      if (daysLeft < 0) status = 'expired';
+      else if (daysLeft <= 7) status = 'expiring_soon';
+      else status = 'active';
+    }
+
+    return {
+      success: true,
+      data: {
+        tarif: acc?.tarif || null,
+        ends_at: endsAt,
+        days_left: daysLeft,
+        status,
+        kaspi_link: process.env.KASPI_PAY_LINK || 'https://pay.kaspi.kz/pay/performante',
+        robokassa_link: process.env.ROBOKASSA_LINK || null,
+        prices: {
+          '1m': '49 000 тг',
+          '3m': '99 000 тг',
+        },
+      },
+    };
+  },
 };
 
 export default supportHandlers;

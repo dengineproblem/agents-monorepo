@@ -65,6 +65,13 @@ export const SupportToolDefs = {
     schema: z.object({}).describe('Нет параметров'),
     meta: { timeout: 6000, retryable: true },
   },
+  getSubscriptionStatus: {
+    description:
+      'Получить статус подписки юзера: тариф, дата окончания, дней до окончания, ' +
+      'ссылки для оплаты. Используй для вопросов про продление, оплату, тариф.',
+    schema: z.object({}).describe('Нет параметров'),
+    meta: { timeout: 4000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;

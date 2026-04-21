@@ -200,3 +200,57 @@ describe('supportHandlers.getDirectionsAndCreatives', () => {
     expect(result.data.directions).toEqual([]);
   });
 });
+
+describe('supportHandlers.getSubscriptionStatus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('возвращает тариф и дату окончания из user_accounts', async () => {
+    const userAccChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { tarif: 'subscription_3m', tarif_expires: '2026-07-01' },
+        error: null,
+      }),
+    };
+    supabase.from.mockImplementation((table) => {
+      if (table === 'user_accounts') return userAccChain;
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    vi.setSystemTime(new Date('2026-04-21T00:00:00Z'));
+
+    const result = await supportHandlers.getSubscriptionStatus(
+      {},
+      { userAccountId: 'u-1' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data.tarif).toBe('subscription_3m');
+    expect(result.data.ends_at).toBe('2026-07-01');
+    expect(result.data.days_left).toBeGreaterThan(60);
+    expect(result.data.status).toBe('active');
+    expect(result.data.kaspi_link).toMatch(/kaspi/i);
+  });
+
+  it('возвращает status=expired если дата прошла', async () => {
+    const userAccChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({
+        data: { tarif: 'subscription_1m', tarif_expires: '2026-01-01' },
+        error: null,
+      }),
+    };
+    supabase.from.mockImplementation((t) =>
+      t === 'user_accounts' ? userAccChain : (() => { throw new Error(`unexpected table ${t}`); })()
+    );
+    vi.setSystemTime(new Date('2026-04-21T00:00:00Z'));
+
+    const result = await supportHandlers.getSubscriptionStatus({}, { userAccountId: 'u-1' });
+    expect(result.data.status).toBe('expired');
+    expect(result.data.days_left).toBeLessThan(0);
+  });
+});
