@@ -119,6 +119,39 @@ export async function processChat({ message, conversationId, mode = 'auto', user
       conversationHistory
     });
 
+    // 7.5. Shadow mode: log support-agent response without saving or delivering it
+    const SHADOW_MODE = process.env.SUPPORT_AGENT_SHADOW === 'true';
+    const supportToolNames = new Set([
+      'escalateToAdmin',
+      'getAdAccountStatus',
+      'getSubscriptionStatus',
+      'getDirectionsAndCreatives',
+      'getTodayReportStatus',
+      'getIntegrationsStatus',
+      'getRecentUserErrors',
+    ]);
+
+    const usedSupportDomain = Array.isArray(response.executedActions)
+      ? response.executedActions.some(tc => supportToolNames.has(tc.tool))
+      : false;
+
+    if (SHADOW_MODE && usedSupportDomain) {
+      logger.info({
+        shadow: true,
+        userAccountId,
+        conversationId: conversation.id,
+        message,
+        shadowResponse: response.content,
+        shadowToolCalls: response.executedActions,
+      }, 'SUPPORT_AGENT_SHADOW — response not delivered to user');
+
+      return {
+        conversationId: conversation.id,
+        content: '',
+        shadow: true,
+      };
+    }
+
     // 8. Save assistant response
     await saveMessage({
       conversationId: conversation.id,
