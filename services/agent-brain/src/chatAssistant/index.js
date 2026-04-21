@@ -22,6 +22,8 @@ import {
   handleModeCommand,
   handleStatusCommand
 } from './telegramHandler.js';
+import { TelegramCtxAdapter } from './telegramCtxAdapter.js';
+import { checkUserLimit, formatLimitExceededMessage } from '../lib/usageLimits.js';
 import { LayerLogger, createNoOpLogger } from './shared/layerLogger.js';
 import { ORCHESTRATOR_CONFIG } from './config.js';
 import { adsHandlers } from './agents/ads/handlers.js';
@@ -979,6 +981,166 @@ export function registerChatRoutes(fastify) {
     }
 
     reply.raw.end();
+  });
+
+  // ============================================================
+  // LEGACY AI CHAT — Telegram → AI bridge for legacy users
+  //
+  // Called by agent-service/telegramWebhook when:
+  //   - user found in user_accounts by telegram_id
+  //   - user.ai_disabled = false
+  //   - ENABLE_LEGACY_AI_CHAT env is on
+  //
+  // Pipeline:
+  //   1. Auth (X-Internal-Secret == INTERNAL_API_SECRET)
+  //   2. Daily limit check (fail-closed: refuse with friendly message)
+  //   3. handleTelegramMessage with defaultMode='ask' + mirrorHook
+  //   4. Mirror assistant response into admin_user_chats (admin visibility)
+  //
+  // Bot token: read from TELEGRAM_BOT_TOKEN env, NOT from request body.
+  // ============================================================
+  fastify.post('/api/brain/telegram/legacy-message', async (request, reply) => {
+    const startTime = Date.now();
+    const { telegramChatId, message, telegramMessageId, from } = request.body || {};
+
+    // Truncate for safe logging (PII / token leak protection)
+    const msgPreview = typeof message === 'string' ? message.slice(0, 80) : null;
+    const log = fastify.log.child({ where: 'legacy_ai_chat', telegramChatId, msgPreview });
+
+    log.info({ phase: 'received', telegramMessageId, hasFrom: !!from }, 'Legacy AI message received');
+
+    // 1. Internal auth (defence in depth — endpoint should also be network-isolated)
+    const expectedSecret = process.env.INTERNAL_API_SECRET;
+    if (expectedSecret) {
+      const provided = request.headers['x-internal-secret'];
+      if (provided !== expectedSecret) {
+        log.warn({ phase: 'auth_failed', hasHeader: !!provided }, 'Invalid X-Internal-Secret');
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+    } else {
+      log.warn({ phase: 'auth_skipped' }, 'INTERNAL_API_SECRET not set — endpoint is unauthenticated');
+    }
+
+    // 2. Validate input
+    if (!telegramChatId || !message) {
+      log.warn({ phase: 'validation_failed' }, 'Missing telegramChatId or message');
+      return reply.code(400).send({ error: 'telegramChatId and message are required' });
+    }
+
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+      log.error({ phase: 'config_error' }, 'TELEGRAM_BOT_TOKEN not configured');
+      return reply.code(500).send({ error: 'bot token not configured' });
+    }
+
+    try {
+      const ctx = new TelegramCtxAdapter({
+        telegramChatId,
+        botToken,
+        from: from || null,
+        messageId: telegramMessageId || null
+      });
+
+      // 3. Daily limit check — fail-closed (refuse if over limit)
+      log.debug({ phase: 'limit_check_start' }, 'Checking daily AI limit');
+      const limitCheck = await checkUserLimit(String(telegramChatId));
+      log.info({
+        phase: 'limit_check_done',
+        allowed: limitCheck.allowed,
+        spent: limitCheck.spent,
+        limit: limitCheck.limit,
+        remaining: limitCheck.remaining,
+        unlimited: !!limitCheck.unlimited,
+        failOpen: !!limitCheck.failOpen
+      }, 'Daily limit check result');
+
+      if (!limitCheck.allowed) {
+        const limitMsg = formatLimitExceededMessage(limitCheck);
+        await ctx.reply(limitMsg).catch((err) => {
+          log.warn({ phase: 'limit_reply_failed', error: err.message }, 'Failed to send limit message');
+        });
+        return reply.send({ success: false, error: 'daily_limit_exceeded', limit: limitCheck });
+      }
+
+      // 4. mirrorHook: write AI assistant responses into admin_user_chats so admins see the dialog.
+      // User messages are already saved by agent-service/telegramWebhook before forwarding here.
+      const mirrorHook = async ({ role, content }) => {
+        if (role !== 'assistant') return;
+
+        const chatIdStr = String(telegramChatId);
+        try {
+          const { data: ua } = await supabase
+            .from('user_accounts')
+            .select('id')
+            .or(`telegram_id.eq.${chatIdStr},telegram_id_2.eq.${chatIdStr},telegram_id_3.eq.${chatIdStr},telegram_id_4.eq.${chatIdStr}`)
+            .limit(1)
+            .single();
+
+          if (!ua) {
+            log.warn({ phase: 'mirror_no_user' }, 'mirrorHook: no user_account found');
+            return;
+          }
+
+          const { error: insertErr } = await supabase.from('admin_user_chats').insert({
+            user_account_id: ua.id,
+            telegram_id: chatIdStr,
+            direction: 'to_user',
+            source: 'ai',
+            message: content,
+            delivered: true
+          });
+
+          if (insertErr) {
+            log.warn({ phase: 'mirror_insert_error', error: insertErr.message }, 'Failed to mirror assistant message');
+          } else {
+            log.debug({ phase: 'mirror_ok', userAccountId: ua.id }, 'Assistant message mirrored to admin_user_chats');
+          }
+        } catch (err) {
+          log.warn({ phase: 'mirror_exception', error: err.message }, 'mirrorHook threw');
+        }
+      };
+
+      log.info({ phase: 'handler_start' }, 'Invoking handleTelegramMessage');
+      const result = await handleTelegramMessage({
+        ctx,
+        message,
+        telegramChatId: String(telegramChatId),
+        defaultMode: 'ask',
+        mirrorHook
+      });
+      const duration = Date.now() - startTime;
+      log.info({
+        phase: 'handler_done',
+        success: result?.success,
+        agent: result?.agent,
+        pendingApprovals: result?.pendingApprovals?.length || 0,
+        duration
+      }, 'handleTelegramMessage completed');
+
+      return reply.send(result);
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      log.error({ phase: 'handler_failed', error: error.message, stack: error.stack, duration }, 'Legacy AI handler failed');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'telegram_legacy_message',
+        endpoint: '/api/brain/telegram/legacy-message',
+        severity: 'warning'
+      }).catch(() => {});
+
+      // Best-effort: notify the user that AI is temporarily unavailable so they aren't left in silence
+      try {
+        const ctx = new TelegramCtxAdapter({ telegramChatId, botToken });
+        await ctx.reply('⚠️ Извините, AI временно недоступен. Админ скоро ответит.');
+      } catch (replyErr) {
+        log.warn({ phase: 'fallback_reply_failed', error: replyErr.message }, 'Failed to send fallback message');
+      }
+
+      return reply.code(500).send({ error: error.message });
+    }
   });
 
   fastify.log.info('Chat Assistant routes registered');

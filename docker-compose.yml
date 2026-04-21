@@ -36,6 +36,8 @@ services:
       - CLAUDE_MAX_TURNS=10
       - CLAUDE_TIMEOUT_MS=120000
       - MCP_ENABLED=true
+      # Legacy AI chat: shared secret для проверки запросов от agent-service
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       # Moltbot Gateway - НЕ используется agent-brain (только для Telegram)
       # - MOLTBOT_GATEWAY_URL=ws://moltbot:18789
       # - MOLTBOT_TOKEN=moltbot-dev-token-2026
@@ -78,12 +80,17 @@ services:
       - CREATIVE_GENERATION_SERVICE_URL=http://creative-generation-service:8085
       # Вернуть легаси онбординг (Moltbot не работает на production)
       - ENABLE_LEGACY_ONBOARDING=true
+      # Legacy AI chat: forward Telegram messages to agent-brain (gpt + ask mode)
+      - ENABLE_LEGACY_AI_CHAT=true
+      - AGENT_BRAIN_URL=http://agent-brain:7080
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
     ports:
       - "8082:8082"
     restart: unless-stopped
     depends_on:
       - chatbot-service
       - creative-generation-service
+      - agent-brain
 
   # Creative Generation Service (AI-powered creative generation with Gemini 3 Pro)
   creative-generation-service:

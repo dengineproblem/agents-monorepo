@@ -22,6 +22,10 @@ const log = createLogger({ module: 'telegramWebhook' });
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 const ENABLE_LEGACY_ONBOARDING = process.env.ENABLE_LEGACY_ONBOARDING === 'true';
+const ENABLE_LEGACY_AI_CHAT = process.env.ENABLE_LEGACY_AI_CHAT !== 'false';
+const AGENT_BRAIN_URL = process.env.AGENT_BRAIN_URL || 'http://agent-brain:7080';
+const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
+const AGENT_BRAIN_FORWARD_TIMEOUT_MS = Number(process.env.AGENT_BRAIN_FORWARD_TIMEOUT_MS || 60000);
 
 // =====================================================
 // Типы Telegram API
@@ -119,7 +123,7 @@ export default async function telegramWebhook(app: FastifyInstance) {
       // ===================================================
       const { data: users } = await supabase
         .from('user_accounts')
-        .select('id, username')
+        .select('id, username, ai_disabled')
         .eq('telegram_id', telegramId);
 
       const user = users?.[0];
@@ -251,6 +255,77 @@ export default async function telegramWebhook(app: FastifyInstance) {
       if (!user) {
         log.debug({ telegramId }, 'Message from unknown user');
         sendStartHint(message.chat.id).catch(() => {});
+        return res.send({ ok: true });
+      }
+
+      // ===================================================
+      // 2.5. Legacy AI chat — forward TEXT messages to agent-brain
+      // (только текст; voice/photo пока обрабатываем как раньше — только в admin_user_chats)
+      // ===================================================
+      const aiEnabled = ENABLE_LEGACY_AI_CHAT && !user.ai_disabled && !!message.text && !!TELEGRAM_BOT_TOKEN;
+
+      if (aiEnabled) {
+        // Огонь-и-забудь: agent-brain сам стримит ответ через TelegramCtxAdapter,
+        // мы только инициируем обработку и отвечаем 200 Telegram'у сразу.
+        const forwardStartedAt = Date.now();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (INTERNAL_API_SECRET) headers['X-Internal-Secret'] = INTERNAL_API_SECRET;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), AGENT_BRAIN_FORWARD_TIMEOUT_MS);
+
+        log.info({
+          phase: 'forward_start',
+          telegramId,
+          userId: user.id,
+          agentBrainUrl: AGENT_BRAIN_URL,
+          hasSecret: !!INTERNAL_API_SECRET,
+          msgLen: message.text!.length
+        }, 'Forwarding to agent-brain (legacy AI chat)');
+
+        fetch(`${AGENT_BRAIN_URL}/api/brain/telegram/legacy-message`, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            telegramChatId: telegramId,
+            message: message.text,
+            telegramMessageId,
+            from: message.from
+          })
+        })
+          .then(async (response) => {
+            const elapsedMs = Date.now() - forwardStartedAt;
+            if (!response.ok) {
+              const bodyText = await response.text().catch(() => '');
+              log.error({
+                phase: 'forward_failed',
+                telegramId,
+                status: response.status,
+                elapsedMs,
+                body: bodyText.slice(0, 300)
+              }, 'agent-brain returned non-OK');
+            } else {
+              log.info({
+                phase: 'forward_done',
+                telegramId,
+                status: response.status,
+                elapsedMs
+              }, 'agent-brain forwarded successfully');
+            }
+          })
+          .catch((err) => {
+            const elapsedMs = Date.now() - forwardStartedAt;
+            const aborted = (err && (err.name === 'AbortError' || /aborted/i.test(String(err))));
+            log.error({
+              phase: aborted ? 'forward_timeout' : 'forward_error',
+              telegramId,
+              elapsedMs,
+              error: String(err)
+            }, aborted ? 'agent-brain forward timed out' : 'Failed to forward to agent-brain');
+          })
+          .finally(() => clearTimeout(timeout));
+
         return res.send({ ok: true });
       }
 

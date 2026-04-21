@@ -10,16 +10,33 @@ import { sendApprovalButtons, handleTextApproval } from './telegram/approvalHand
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import {
+  gatherContext,
+  getIntegrations,
+  formatIntegrationsForPrompt,
+  getIntegrationStack
+} from './contextGatherer.js';
 
 /**
  * Process a Telegram message with streaming
  * @param {Object} params
- * @param {Object} params.ctx - Telegram context (grammY/telegraf)
+ * @param {Object} params.ctx - Telegram context (grammY/telegraf or TelegramCtxAdapter)
  * @param {string} params.message - User message text
  * @param {string} params.telegramChatId - Telegram chat ID
+ * @param {string} [params.defaultMode] - Default mode for NEW conversations ('auto' | 'plan' | 'ask')
+ *                                        Legacy AI uses 'ask' to require approval before write actions
+ * @param {Function} [params.mirrorHook] - Optional callback({ role, content, telegramChatId }) called
+ *                                          after user message + after assistant response.
+ *                                          Used to mirror messages into admin_user_chats for admin visibility.
  * @returns {Promise<Object>} Final result
  */
-export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
+export async function handleTelegramMessage({
+  ctx,
+  message,
+  telegramChatId,
+  defaultMode = null,
+  mirrorHook = null
+}) {
   const startTime = Date.now();
 
   try {
@@ -60,6 +77,17 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
       // 5. Load conversation history
       const history = await unifiedStore.loadMessages(conversation.id);
 
+      // 5.5 Apply defaultMode on truly new conversations (no history yet)
+      // Legacy AI uses 'ask' to require approval before write actions
+      if (defaultMode && history.length === 0 && conversation.mode !== defaultMode) {
+        try {
+          await unifiedStore.setMode(conversation.id, defaultMode);
+          conversation.mode = defaultMode;
+        } catch (err) {
+          logger.warn({ error: err.message, conversationId: conversation.id, defaultMode }, 'Failed to set default mode');
+        }
+      }
+
       // Add rolling summary if exists
       const messagesForLLM = conversation.rolling_summary
         ? [{ role: 'system', content: `Предыдущий контекст диалога: ${conversation.rolling_summary}` }, ...history]
@@ -70,6 +98,13 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
         role: 'user',
         content: message
       });
+
+      // 6.5 Mirror user message to admin_user_chats (for AdminChats UI visibility)
+      if (mirrorHook) {
+        mirrorHook({ role: 'user', content: message, telegramChatId }).catch(err =>
+          logger.warn({ error: err.message }, 'mirrorHook failed for user message')
+        );
+      }
 
       // 7. Get tool context
       // Use dbId for database operations, fbId for Facebook API calls
@@ -83,8 +118,19 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
         conversationId: conversation.id  // For usage tracking
       };
 
-      // 8. Get business context (uses dbId for database queries)
-      const businessContext = await getBusinessContext(userAccount, dbId);
+      // 8. Get full business context (same as web AI chat — 6 parallel sources with token budget)
+      const businessContext = await gatherContext({
+        userAccountId: userAccount.id,
+        adAccountId: dbId,
+        conversationId: conversation.id
+      });
+      try {
+        const integrations = await getIntegrations(userAccount.id, dbId, !!accessToken);
+        businessContext.integrationsBlock = formatIntegrationsForPrompt(integrations);
+        businessContext.integrationStack = getIntegrationStack(integrations);
+      } catch (err) {
+        logger.warn({ error: err.message }, 'Failed to load integrations block');
+      }
 
       // 9. Start streaming response
       const streamer = await new TelegramStreamer(ctx).start();
@@ -131,6 +177,13 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
           lastAgent: finalResult.agent,
           lastDomain: finalResult.domain
         });
+
+        // Mirror assistant response to admin_user_chats
+        if (mirrorHook && finalResult.content) {
+          mirrorHook({ role: 'assistant', content: finalResult.content, telegramChatId }).catch(err =>
+            logger.warn({ error: err.message }, 'mirrorHook failed for assistant message')
+          );
+        }
       }
 
       // 12. Handle pending approvals with inline keyboard

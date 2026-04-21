@@ -29,6 +29,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders } from '@/lib/apiAuth';
@@ -43,6 +45,7 @@ interface ChatUser {
   last_message_time?: string;
   unread_count: number;
   is_online: boolean;
+  ai_disabled?: boolean;
 }
 
 interface ChatMessage {
@@ -707,13 +710,50 @@ const AdminChats: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => fetchMessages(selectedUser.id)}
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="ai-toggle"
+                    checked={!selectedUser.ai_disabled}
+                    onCheckedChange={async (checked) => {
+                      const next = !checked;
+                      const prev = selectedUser;
+                      setSelectedUser({ ...selectedUser, ai_disabled: next });
+                      setUsers((list) =>
+                        list.map((u) => (u.id === selectedUser.id ? { ...u, ai_disabled: next } : u))
+                      );
+                      try {
+                        const res = await fetch(
+                          `${API_BASE_URL}/admin/chats/${selectedUser.id}/ai-toggle`,
+                          {
+                            method: 'PATCH',
+                            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ai_disabled: next }),
+                          }
+                        );
+                        if (!res.ok) throw new Error('toggle failed');
+                      } catch {
+                        setSelectedUser(prev);
+                        setUsers((list) =>
+                          list.map((u) =>
+                            u.id === prev.id ? { ...u, ai_disabled: prev.ai_disabled } : u
+                          )
+                        );
+                      }
+                    }}
+                  />
+                  <Label htmlFor="ai-toggle" className="text-xs cursor-pointer">
+                    AI
+                  </Label>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fetchMessages(selectedUser.id)}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             {/* Messages */}

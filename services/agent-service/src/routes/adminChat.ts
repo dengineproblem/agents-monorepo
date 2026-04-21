@@ -483,6 +483,47 @@ export default async function adminChatRoutes(app: FastifyInstance) {
   });
 
   /**
+   * PATCH /admin/chats/:userId/ai-toggle
+   * Переключает флаг ai_disabled для legacy AI чата.
+   * Body: { ai_disabled: boolean }
+   */
+  app.patch('/admin/chats/:userId/ai-toggle', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+      const { ai_disabled } = (req.body || {}) as { ai_disabled?: boolean };
+
+      if (typeof ai_disabled !== 'boolean') {
+        return res.status(400).send({ error: 'ai_disabled (boolean) is required' });
+      }
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ ai_disabled })
+        .eq('id', userId);
+
+      if (error) {
+        log.error({ error: error.message, userId }, 'Failed to toggle ai_disabled');
+        return res.status(500).send({ error: 'Failed to toggle AI' });
+      }
+
+      return res.send({ success: true, ai_disabled });
+    } catch (err: any) {
+      log.error({ error: String(err) }, 'Error toggling AI');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_toggle_ai',
+        endpoint: '/admin/chats/:userId/ai-toggle',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
    * GET /admin/chats/users-with-messages
    * Получает список пользователей, с которыми есть переписка
    * ОПТИМИЗИРОВАНО: Один проход по данным вместо O(n²)
@@ -509,7 +550,22 @@ export default async function adminChatRoutes(app: FastifyInstance) {
 
       const totalUsers = (data as any)?.[0]?.total_users || 0;
 
-      const users = ((data as any[]) || []).map((row) => ({
+      const rows = (data as any[]) || [];
+      const userIds = rows.map((r) => r.user_id).filter(Boolean);
+
+      // Fetch ai_disabled flags in a single batch query
+      const aiDisabledMap = new Map<string, boolean>();
+      if (userIds.length > 0) {
+        const { data: flagRows } = await supabase
+          .from('user_accounts')
+          .select('id, ai_disabled')
+          .in('id', userIds);
+        for (const r of (flagRows as any[]) || []) {
+          aiDisabledMap.set(r.id, !!r.ai_disabled);
+        }
+      }
+
+      const users = rows.map((row) => ({
         id: row.user_id,
         username: row.username || 'Unknown',
         telegram_id: row.telegram_id || null,
@@ -517,6 +573,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         last_message_time: row.last_message_time,
         unread_count: Number(row.unread_count),
         is_online: false,
+        ai_disabled: aiDisabledMap.get(row.user_id) ?? false,
       }));
 
       return res.send({
