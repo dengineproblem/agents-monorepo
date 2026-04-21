@@ -21,6 +21,7 @@ import {
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { checkUploadEligibility } from '../lib/uploadEligibility.js';
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
@@ -95,6 +96,23 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       app.log.info({ fileHash }, 'File hash computed');
 
       const body = ProcessVideoSchema.parse(bodyData);
+
+      // Guard: reject upload if Meta ad account has debt (account_status 3 or 9)
+      const eligibility = await checkUploadEligibility(body.user_id, body.account_id ?? null, app.log);
+      if (!eligibility.canUpload) {
+        app.log.warn({
+          userId: body.user_id,
+          accountId: body.account_id,
+          reason: eligibility.reason,
+          accountStatus: eligibility.accountStatus
+        }, '[process-video] Blocked: ad account not eligible for upload');
+        return reply.status(402).send({
+          success: false,
+          error_code: eligibility.reason,
+          error: eligibility.message || 'Upload blocked for this ad account',
+          account_status: eligibility.accountStatus,
+        });
+      }
 
       app.log.info(`Processing video for user_id: ${body.user_id}, account_id: ${body.account_id || 'null'}, direction_id: ${body.direction_id || 'null'}`);
 
