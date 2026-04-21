@@ -8,6 +8,7 @@ import { AdsToolDefs } from '../agents/ads/toolDefs.js';
 import { CreativeToolDefs } from '../agents/creative/toolDefs.js';
 import { CrmToolDefs } from '../agents/crm/toolDefs.js';
 import { WhatsappToolDefs } from '../agents/whatsapp/toolDefs.js';
+import { SupportToolDefs } from '../agents/support/toolDefs.js';
 
 /**
  * Domain tool definitions mapping
@@ -16,7 +17,8 @@ const DOMAIN_TOOLS = {
   ads: AdsToolDefs,
   creative: CreativeToolDefs,
   crm: CrmToolDefs,
-  whatsapp: WhatsappToolDefs
+  whatsapp: WhatsappToolDefs,
+  support: SupportToolDefs
 };
 
 /**
@@ -26,7 +28,13 @@ const DOMAIN_DESCRIPTIONS = {
   ads: 'Управление Facebook рекламой: кампании, адсеты, бюджеты, расходы, CPL, ROI, направления, Brain Agent',
   creative: 'Креативы: анализ метрик, retention, risk scores, топ/худшие креативы, запуск, A/B тесты, генерация',
   crm: 'CRM и лиды: воронка продаж, этапы, квалификация, детали лидов, качество продаж',
-  whatsapp: 'WhatsApp диалоги: история сообщений, AI-анализ переписок, поиск по диалогам'
+  whatsapp: 'WhatsApp диалоги: история сообщений, AI-анализ переписок, поиск по диалогам',
+  support:
+    'Тех.поддержка: помощь пользователю по работе сервиса Performante. ' +
+    'Вопросы про вход, подключение FB, оплату подписки, отчёты, ' +
+    'интеграции (AmoCRM/Bitrix24/WhatsApp), ошибки в приложении. ' +
+    'НЕ для анализа рекламы (это ads/crm/creative). ' +
+    'Агент сам знает, когда эскалировать на живого админа.'
 };
 
 /**

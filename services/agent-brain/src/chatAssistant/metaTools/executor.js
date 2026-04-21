@@ -8,6 +8,7 @@ import { adsHandlers } from '../agents/ads/handlers.js';
 import { creativeHandlers } from '../agents/creative/handlers.js';
 import { crmHandlers } from '../agents/crm/handlers.js';
 import { whatsappHandlers } from '../agents/whatsapp/handlers.js';
+import { supportHandlers } from '../agents/support/handlers.js';
 import { toolRegistry } from '../shared/toolRegistry.js';
 import { withTimeout } from '../shared/retryUtils.js';
 import { executeWithIdempotency } from '../shared/idempotentExecutor.js';
@@ -21,7 +22,8 @@ const DOMAIN_HANDLERS = {
   ads: adsHandlers,
   creative: creativeHandlers,
   crm: crmHandlers,
-  whatsapp: whatsappHandlers
+  whatsapp: whatsappHandlers,
+  support: supportHandlers
 };
 
 /**
