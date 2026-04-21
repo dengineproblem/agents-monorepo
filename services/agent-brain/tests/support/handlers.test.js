@@ -254,3 +254,63 @@ describe('supportHandlers.getSubscriptionStatus', () => {
     expect(result.data.days_left).toBeLessThan(0);
   });
 });
+
+describe('supportHandlers.getRecentUserErrors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('возвращает последние ошибки юзера из error_logs', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({
+        data: [
+          {
+            id: 'e-1',
+            error_type: 'api',
+            error_code: 'FB_TOKEN_EXPIRED',
+            raw_error: 'OAuthException',
+            llm_explanation: 'Токен Facebook истёк',
+            llm_solution: 'Переподключите кабинет через Профиль',
+            action: 'fetch_metrics',
+            endpoint: '/graph/v19/act_123',
+            severity: 'warning',
+            created_at: '2026-04-21T10:00:00Z',
+          },
+        ],
+        error: null,
+      }),
+    };
+    supabase.from.mockReturnValue(chain);
+
+    const result = await supportHandlers.getRecentUserErrors(
+      { limit: 5, since_hours: 48 },
+      { userAccountId: 'u-1' }
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data.errors).toHaveLength(1);
+    expect(result.data.errors[0].llm_explanation).toBe('Токен Facebook истёк');
+    expect(result.data.errors[0].llm_solution).toBe('Переподключите кабинет через Профиль');
+    expect(chain.eq).toHaveBeenCalledWith('user_account_id', 'u-1');
+    expect(chain.gte).toHaveBeenCalledWith('created_at', expect.any(String));
+    expect(chain.limit).toHaveBeenCalledWith(5);
+  });
+
+  it('использует дефолтные limit=5 и since_hours=48', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    supabase.from.mockReturnValue(chain);
+
+    await supportHandlers.getRecentUserErrors({}, { userAccountId: 'u-1' });
+    expect(chain.limit).toHaveBeenCalledWith(5);
+  });
+});

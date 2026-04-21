@@ -175,6 +175,44 @@ export const supportHandlers = {
       },
     };
   },
+  async getRecentUserErrors(params, context) {
+    const limit = params.limit ?? 5;
+    const sinceHours = params.since_hours ?? 48;
+    const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from('error_logs')
+      .select(
+        'id, error_type, error_code, raw_error, llm_explanation, llm_solution, action, endpoint, severity, created_at'
+      )
+      .eq('user_account_id', context.userAccountId)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      return { success: false, error: `db_error: ${error.message}` };
+    }
+
+    return {
+      success: true,
+      data: {
+        errors: (data || []).map(e => ({
+          id: e.id,
+          error_type: e.error_type,
+          error_code: e.error_code,
+          llm_explanation: e.llm_explanation,
+          llm_solution: e.llm_solution,
+          action: e.action,
+          endpoint: e.endpoint,
+          severity: e.severity,
+          created_at: e.created_at,
+          raw_error_excerpt: String(e.raw_error || '').slice(0, 200),
+        })),
+        total: (data || []).length,
+      },
+    };
+  },
 };
 
 export default supportHandlers;

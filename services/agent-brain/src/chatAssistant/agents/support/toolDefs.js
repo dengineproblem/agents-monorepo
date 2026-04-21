@@ -72,6 +72,17 @@ export const SupportToolDefs = {
     schema: z.object({}).describe('Нет параметров'),
     meta: { timeout: 4000, retryable: true },
   },
+  getRecentUserErrors: {
+    description:
+      'Получить последние ошибки юзера из админ-лога с готовым LLM-объяснением и решением. ' +
+      'Используй при ЛЮБОЙ жалобе юзера «не работает», «выдаёт ошибку», «не загружается». ' +
+      'llm_explanation и llm_solution уже сгенерированы — переиспользуй их в ответе.',
+    schema: z.object({
+      limit: z.number().int().min(1).max(20).default(5).describe('Сколько ошибок вернуть'),
+      since_hours: z.number().int().min(1).max(168).default(48).describe('За сколько часов'),
+    }),
+    meta: { timeout: 4000, retryable: true },
+  },
 };
 
 export const ESCALATION_REASONS_LIST = ESCALATION_REASONS;
