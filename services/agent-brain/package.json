@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "start:analyzer": "node src/analyzerService.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:support-scripts": "node scripts/build-support-scripts.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.23",
