@@ -32,6 +32,7 @@ import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createLogger } from '../lib/logger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { checkUploadEligibility } from '../lib/uploadEligibility.js';
 
 const log = createLogger({ module: 'tusUpload' });
 
@@ -465,6 +466,37 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       // Для TikTok направлений используем отдельный обработчик
       if (direction?.platform === 'tiktok') {
         return await processTikTokUpload(uploadId, metadata, videoPath, language);
+      }
+    }
+
+    // Guard: block Meta upload if ad account has debt.
+    // Note: TikTok branch returned above, so we're Meta-only here.
+    {
+      const eligibility = await checkUploadEligibility(userId, accountId ?? null, log);
+      if (!eligibility.canUpload) {
+        log.warn({
+          uploadId,
+          userId,
+          accountId,
+          reason: eligibility.reason,
+          accountStatus: eligibility.accountStatus,
+        }, '[TUS] Blocked: ad account not eligible for upload');
+
+        // Update creative record (if one was pre-created) to error state
+        await supabase
+          .from('user_creatives')
+          .update({
+            status: 'error',
+            error_message: eligibility.message || 'Upload blocked',
+          })
+          .eq('tus_upload_id', uploadId);
+
+        // Clean up the uploaded file
+        try {
+          await fs.unlink(videoPath);
+        } catch { /* ignore */ }
+
+        throw new Error(`upload_blocked:${eligibility.reason}`);
       }
     }
 
