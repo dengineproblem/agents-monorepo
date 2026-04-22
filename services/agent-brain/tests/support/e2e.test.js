@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../../src/lib/supabaseClient.js', () => ({
+  supabase: { from: vi.fn() },
+}));
 
 import { supportHandlers } from '../../src/chatAssistant/agents/support/handlers.js';
 import { SupportToolDefs } from '../../src/chatAssistant/agents/support/toolDefs.js';
