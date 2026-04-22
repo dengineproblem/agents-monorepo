@@ -9,6 +9,7 @@ import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
 import { getTikTokCredentials, getTikTokObjectiveConfig } from '../lib/tiktokSettings.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { checkUploadEligibility } from '../lib/uploadEligibility.js';
 import { tt } from '../adapters/tiktok.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
@@ -1757,6 +1758,32 @@ export async function directionsRoutes(app: FastifyInstance) {
             });
           }
         } else if (existingDirection.fb_campaign_id) {
+          // Если юзер пытается поставить направление на паузу, а в рекламном кабинете задолженность —
+          // FB откажет в pause. Возвращаем понятное сообщение о долге вместо generic 500.
+          if (!input.is_active) {
+            const eligibility = await checkUploadEligibility(
+              existingDirection.user_account_id,
+              existingDirection.account_id || null,
+              log
+            );
+            if (
+              !eligibility.canUpload &&
+              (eligibility.reason === 'account_unsettled' || eligibility.reason === 'account_grace_period')
+            ) {
+              log.warn({
+                directionId: id,
+                accountStatus: eligibility.accountStatus,
+                reason: eligibility.reason,
+              }, 'Blocked direction pause: ad account has debt');
+              return reply.code(402).send({
+                success: false,
+                error_code: eligibility.reason,
+                error: eligibility.message || 'Невозможно отключить направление: в рекламном кабинете задолженность. Погасите долг в Ads Manager и попробуйте снова.',
+                account_status: eligibility.accountStatus,
+              });
+            }
+          }
+
           try {
             log.info({
               directionId: id,
@@ -1925,6 +1952,33 @@ export async function directionsRoutes(app: FastifyInstance) {
         } else {
           // Legacy режим: токен в user_accounts
           accessToken = (direction.user_accounts as any).access_token;
+        }
+
+        // Если в рекламном кабинете задолженность, Facebook не даст архивировать кампанию,
+        // поэтому блокируем удаление направления до погашения долга — иначе direction
+        // исчезнет из БД, а кампания в FB останется активной и будет тратить бюджет.
+        if (direction.fb_campaign_id) {
+          const eligibility = await checkUploadEligibility(
+            direction.user_account_id,
+            direction.account_id || null,
+            log
+          );
+          if (
+            !eligibility.canUpload &&
+            (eligibility.reason === 'account_unsettled' || eligibility.reason === 'account_grace_period')
+          ) {
+            log.warn({
+              directionId: id,
+              accountStatus: eligibility.accountStatus,
+              reason: eligibility.reason,
+            }, 'Blocked direction deletion: ad account has debt');
+            return reply.code(402).send({
+              success: false,
+              error_code: eligibility.reason,
+              error: eligibility.message || 'Невозможно отключить направление: в рекламном кабинете задолженность. Погасите долг в Ads Manager и попробуйте снова.',
+              account_status: eligibility.accountStatus,
+            });
+          }
         }
 
         // Архивируем кампанию в Facebook
