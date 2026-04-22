@@ -19,7 +19,6 @@ import {
   Clock,
   Activity,
   FileText,
-  Eye,
   Brain
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -153,7 +152,6 @@ export function AutopilotSection({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [selectedExecution, setSelectedExecution] = useState<BrainExecution | null>(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
-  const [actionsDialogOpen, setActionsDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!userAccountId) return;
@@ -219,11 +217,6 @@ export function AutopilotSection({
   const openReport = (exec: BrainExecution) => {
     setSelectedExecution(exec);
     setReportDialogOpen(true);
-  };
-
-  const openActions = (exec: BrainExecution) => {
-    setSelectedExecution(exec);
-    setActionsDialogOpen(true);
   };
 
 
@@ -338,7 +331,7 @@ export function AutopilotSection({
                           Рассмотреть ({exec.plan_json.proposals.length})
                         </Button>
                       )}
-                      {exec.report_text && exec.status !== 'pending' && (
+                      {(exec.report_text || (exec.actions_json && exec.actions_json.length > 0)) && exec.status !== 'pending' && (
                         <div className="flex items-center gap-0.5">
                           <Button
                             variant="ghost"
@@ -347,23 +340,11 @@ export function AutopilotSection({
                             onClick={() => openReport(exec)}
                           >
                             <FileText className="h-3.5 w-3.5 md:mr-1" />
-                            <span className="hidden md:inline">Отчёт</span>
+                            <span className="hidden md:inline">
+                              Отчёт{exec.actions_json && exec.actions_json.length > 0 ? ` (${exec.actions_json.length})` : ''}
+                            </span>
                           </Button>
                           <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_REPORT} iconSize="sm" className="hidden md:flex" />
-                        </div>
-                      )}
-                      {exec.actions_json && exec.actions_json.length > 0 && (
-                        <div className="flex items-center gap-0.5">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-1 md:px-2 text-xs"
-                            onClick={() => openActions(exec)}
-                          >
-                            <Eye className="h-3.5 w-3.5 md:mr-1" />
-                            <span className="hidden md:inline">Действия ({exec.actions_json.length})</span>
-                          </Button>
-                          <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_ACTIONS} iconSize="sm" className="hidden md:flex" />
                         </div>
                       )}
                     </div>
