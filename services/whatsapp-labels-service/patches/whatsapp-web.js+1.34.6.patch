@@ -1,0 +1,26 @@
+diff --git a/node_modules/whatsapp-web.js/src/structures/Channel.js b/node_modules/whatsapp-web.js/src/structures/Channel.js
+index 0000000..1111111 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Channel.js
++++ b/node_modules/whatsapp-web.js/src/structures/Channel.js
+@@ -303,7 +303,7 @@ class Channel extends Base {
+
+             if (searchOptions && searchOptions.limit > 0) {
+                 while (msgs.length < searchOptions.limit) {
+-                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs(channel);
++                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs({chat: channel});
+                     if (!loadedMessages || !loadedMessages.length) break;
+                     msgs = [...loadedMessages.filter(msgFilter), ...msgs];
+                 }
+diff --git a/node_modules/whatsapp-web.js/src/structures/Chat.js b/node_modules/whatsapp-web.js/src/structures/Chat.js
+index 0000000..1111111 100644
+--- a/node_modules/whatsapp-web.js/src/structures/Chat.js
++++ b/node_modules/whatsapp-web.js/src/structures/Chat.js
+@@ -206,7 +206,7 @@ class Chat extends Base {
+
+             if (searchOptions && searchOptions.limit > 0) {
+                 while (msgs.length < searchOptions.limit) {
+-                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs(chat,chat.msgs);
++                    const loadedMessages = await window.Store.ConversationMsgs.loadEarlierMsgs({chat});
+                     if (!loadedMessages || !loadedMessages.length) break;
+                     msgs = [...loadedMessages.filter(msgFilter), ...msgs];
+                 }
