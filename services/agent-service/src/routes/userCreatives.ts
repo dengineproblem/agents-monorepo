@@ -657,4 +657,68 @@ export default async function userCreativesRoutes(app: FastifyInstance) {
       return reply.status(500).send({ error: error.message || 'Internal server error' });
     }
   });
+
+  // ----------------------------------------
+  // POST /ad-creative-mapping/resolve
+  // Резолв пакета fb_ad_id → user_creative_id (+ метаданные креатива).
+  // Используется фронтом для группировки статистики объявлений по физическому
+  // креативу: когда автопилот дублирует ad в другом адсете, Facebook присваивает
+  // новый fb_creative_id, но user_creative_id остаётся прежним.
+  // ----------------------------------------
+  app.post('/ad-creative-mapping/resolve', async (req: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      if (!userId) {
+        return reply.status(401).send({ error: 'Missing x-user-id header' });
+      }
+
+      const body = (req.body || {}) as { ad_ids?: unknown; accountId?: string };
+      const adIdsRaw = Array.isArray(body.ad_ids) ? body.ad_ids : [];
+      const adIds = adIdsRaw
+        .filter((v): v is string => typeof v === 'string' && v.length > 0)
+        .slice(0, 500);
+
+      if (adIds.length === 0) return {};
+
+      let query = supabase
+        .from('ad_creative_mapping')
+        .select('ad_id, user_creative_id, user_creatives(id, title, thumbnail_url, fb_video_id, fb_image_hash)')
+        .eq('user_id', userId)
+        .in('ad_id', adIds);
+
+      if (body.accountId && await shouldFilterByAccountId(supabase, userId, body.accountId)) {
+        query = query.eq('account_id', body.accountId);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        log.error({ error, userId }, 'Failed to resolve ad_creative_mapping');
+        return reply.status(500).send({ error: 'Failed to resolve mapping' });
+      }
+
+      const result: Record<string, {
+        user_creative_id: string;
+        title: string | null;
+        thumbnail_url: string | null;
+        fb_video_id: string | null;
+        fb_image_hash: string | null;
+      }> = {};
+
+      for (const row of (data || []) as any[]) {
+        const uc = Array.isArray(row.user_creatives) ? row.user_creatives[0] : row.user_creatives;
+        result[row.ad_id] = {
+          user_creative_id: row.user_creative_id,
+          title: uc?.title ?? null,
+          thumbnail_url: uc?.thumbnail_url ?? null,
+          fb_video_id: uc?.fb_video_id ?? null,
+          fb_image_hash: uc?.fb_image_hash ?? null,
+        };
+      }
+
+      return result;
+    } catch (error: any) {
+      log.error({ error }, 'Error resolving ad_creative_mapping');
+      return reply.status(500).send({ error: 'internal_error', message: error.message });
+    }
+  });
 }

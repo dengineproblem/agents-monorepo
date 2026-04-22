@@ -14,6 +14,7 @@ import { facebookApi } from '@/services/facebookApi';
 import { tiktokApi } from '@/services/tiktokApi';
 import { getQualifiedLeadsTotal } from '@/services/amocrmApi';
 import { salesApi } from '@/services/salesApi';
+import { creativesApi } from '@/services/creativesApi';
 import SummaryStats from '@/components/SummaryStats';
 import { useDirections } from '@/hooks/useDirections';
 import { formatCurrency, formatCurrencyKZT, formatNumber } from '@/utils/formatters';
@@ -163,39 +164,92 @@ export function AdStatusSection() {
       if (platform === 'instagram') {
         await Promise.all(campaignsToFetch.map(async (campaign) => {
           try {
-            const [creatives, stats] = await Promise.all([
+            const [ads, stats] = await Promise.all([
               facebookApi.getAdsByCampaign(campaign.id),
               facebookApi.getAdStatsByCampaign(campaign.id, dateRange),
             ]);
-            // Маппинг ad_id → stat для агрегации
+            if (ads.length === 0) return;
+
+            // Резолвим ad_id → user_creative_id через наш backend. Для ads без
+            // маппинга (созданных вручную в Ads Manager) получим пустой ответ —
+            // fallback сделаем по fb_video_id / fb_image_hash / creative_id.
+            const mapping = await creativesApi.resolveAdCreativeMapping(
+              ads.map(a => a.ad_id),
+              currentAdAccountId
+            );
+
             const statsMap = new Map(stats.map(s => [s.ad_id, s]));
-            for (const cr of creatives) {
-              // Показываем карточку только если креатив крутится в активном объявлении,
-              // но статистику суммируем по всем ad_id (включая выключенные адсеты),
-              // где этот креатив был задействован за период.
-              if (!cr.is_active) continue;
-              let spend = 0, leads = 0, qualityLeads = 0;
-              for (const adId of cr.ad_ids) {
-                const s = statsMap.get(adId);
-                if (s) { spend += s.spend; leads += s.leads; qualityLeads += s.qualityLeads; }
+
+            // Группируем по стабильному ключу физического креатива.
+            type Group = {
+              key: string;
+              user_creative_id: string | null;
+              fb_creative_id: string | null;
+              name: string;
+              thumbnail_url: string | null;
+              image_url: string | null;
+              video_id: string | null;
+              is_active: boolean;
+              spend: number;
+              leads: number;
+              qualityLeads: number;
+            };
+            const groups = new Map<string, Group>();
+
+            for (const ad of ads) {
+              const m = mapping[ad.ad_id];
+              const key =
+                (m?.user_creative_id && `u:${m.user_creative_id}`) ||
+                (ad.fb_video_id && `v:${ad.fb_video_id}`) ||
+                (ad.fb_image_hash && `h:${ad.fb_image_hash}`) ||
+                (ad.creative_id && `c:${ad.creative_id}`) ||
+                `a:${ad.ad_id}`;
+
+              let g = groups.get(key);
+              if (!g) {
+                g = {
+                  key,
+                  user_creative_id: m?.user_creative_id || null,
+                  fb_creative_id: ad.creative_id,
+                  // Предпочитаем title/thumbnail из нашей БД (стабильно между
+                  // дубликатами), fallback — из Facebook API текущего ad.
+                  name: m?.title || ad.name,
+                  thumbnail_url: m?.thumbnail_url || ad.thumbnail_url,
+                  image_url: ad.image_url,
+                  video_id: m?.fb_video_id || ad.fb_video_id,
+                  is_active: false,
+                  spend: 0,
+                  leads: 0,
+                  qualityLeads: 0,
+                };
+                groups.set(key, g);
               }
+              if (ad.effective_status === 'ACTIVE') g.is_active = true;
+              const s = statsMap.get(ad.ad_id);
+              if (s) { g.spend += s.spend; g.leads += s.leads; g.qualityLeads += s.qualityLeads; }
+            }
+
+            for (const g of groups.values()) {
+              // Карточка — только для креативов с хотя бы одним активным ad.
+              // Статистика уже суммирована по всем ad в группе, включая выключенные.
+              if (!g.is_active) continue;
               collected.push({
-                id: cr.creative_id,
-                name: cr.name,
-                thumbnail_url: cr.thumbnail_url,
-                image_url: cr.image_url,
-                video_id: cr.video_id,
+                id: g.key,
+                name: g.name,
+                thumbnail_url: g.thumbnail_url,
+                image_url: g.image_url,
+                video_id: g.video_id,
                 campaign_id: campaign.id,
                 campaign_name: campaign.name,
                 direction_name: directionByCampaign.get(campaign.id) || null,
-                spend,
-                leads,
-                cpl: leads > 0 ? spend / leads : 0,
-                cpql: qualityLeads > 0 ? spend / qualityLeads : 0,
-                qualityLeads,
+                spend: g.spend,
+                leads: g.leads,
+                cpl: g.leads > 0 ? g.spend / g.leads : 0,
+                cpql: g.qualityLeads > 0 ? g.spend / g.qualityLeads : 0,
+                qualityLeads: g.qualityLeads,
               });
             }
-          } catch { /* skip */ }
+          } catch (e) { console.error('fetchCreatives instagram error', e); }
         }));
       } else {
         await Promise.all(campaignsToFetch.map(async (campaign) => {
@@ -248,7 +302,7 @@ export function AdStatusSection() {
       setCreativesLoading(false);
     }
   // roiByCampaign намеренно исключён — берётся при рендере, не вызывает повторный fetch
-  }, [activeCampaigns, platform, dateRange, directionByCampaign]);
+  }, [activeCampaigns, platform, dateRange, directionByCampaign, currentAdAccountId]);
 
   useEffect(() => { fetchCreatives(); }, [fetchCreatives]);
 

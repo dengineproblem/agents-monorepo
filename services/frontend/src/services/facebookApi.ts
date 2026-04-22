@@ -1151,53 +1151,49 @@ export const facebookApi = {
    * Быстрее на 1 round-trip по сравнению с campaign→adsets→ads.
    */
   /**
-   * Возвращает уникальные креативы кампании с маппингом creative_id → ad_ids[].
-   * ad_ids включают объявления из выключенных адсетов/кампаний (ACTIVE, PAUSED,
-   * ADSET_PAUSED, CAMPAIGN_PAUSED, ARCHIVED) — чтобы агрегировать статистику за
-   * период по всем объявлениям, где крутился креатив.
-   * Флаг is_active = true, если хотя бы одно объявление этого креатива сейчас ACTIVE.
-   * Статистику нужно агрегировать по всем ad_ids одного креатива.
+   * Возвращает плоский список объявлений кампании (включая выключенные) с
+   * метаданными креатива: creative_id, fb_video_id, fb_image_hash, thumbnail.
+   *
+   * Группировка НЕ делается здесь: для корректного объединения ads, где Facebook
+   * продублировал creative с новым creative_id (типичный кейс после автопилота),
+   * клиент должен разрезолвить ad_id → user_creative_id через наш backend
+   * (см. creativesApi.resolveAdCreativeMapping), и группировать по ключу
+   * user_creative_id || fb_video_id || fb_image_hash || fb_creative_id.
+   *
+   * Включаются статусы ACTIVE, PAUSED, ADSET_PAUSED, CAMPAIGN_PAUSED, ARCHIVED —
+   * чтобы суммировать spend/leads за период и с выключенных адсетов тоже.
    */
   getAdsByCampaign: async (campaignId: string): Promise<Array<{
-    creative_id: string;
-    ad_ids: string[];
-    is_active: boolean;
+    ad_id: string;
+    effective_status: string;
+    creative_id: string | null;
     name: string;
     thumbnail_url: string | null;
     image_url: string | null;
-    video_id: string | null;
+    fb_video_id: string | null;
+    fb_image_hash: string | null;
   }>> => {
     if (!await hasValidConfig()) return [];
     try {
       const data = await fetchFromFacebookAPI(`${campaignId}/ads`, {
-        fields: 'id,name,status,effective_status,creative{id,name,thumbnail_url,image_url,video_id}',
+        fields: 'id,name,status,effective_status,creative{id,name,thumbnail_url,image_url,video_id,image_hash}',
         filtering: JSON.stringify([{
           field: 'effective_status',
           operator: 'IN',
           value: ['ACTIVE', 'PAUSED', 'ADSET_PAUSED', 'CAMPAIGN_PAUSED', 'ARCHIVED'],
         }]),
-        limit: '200',
+        limit: '500',
       });
-      // Маппинг creative_id → { meta, ad_ids[], is_active }
-      const creativeMap = new Map<string, { name: string; thumbnail_url: string | null; image_url: string | null; video_id: string | null; ad_ids: string[]; is_active: boolean }>();
-      for (const ad of (data?.data || [])) {
-        const cid = ad.creative?.id;
-        if (!cid) continue;
-        if (!creativeMap.has(cid)) {
-          creativeMap.set(cid, {
-            name: ad.creative?.name || ad.name,
-            thumbnail_url: ad.creative?.thumbnail_url || null,
-            image_url: ad.creative?.image_url || null,
-            video_id: ad.creative?.video_id || null,
-            ad_ids: [],
-            is_active: false,
-          });
-        }
-        const entry = creativeMap.get(cid)!;
-        entry.ad_ids.push(ad.id);
-        if (ad.effective_status === 'ACTIVE') entry.is_active = true;
-      }
-      return Array.from(creativeMap.entries()).map(([creative_id, v]) => ({ creative_id, ...v }));
+      return (data?.data || []).map((ad: any) => ({
+        ad_id: ad.id,
+        effective_status: ad.effective_status || ad.status || '',
+        creative_id: ad.creative?.id || null,
+        name: ad.creative?.name || ad.name || '',
+        thumbnail_url: ad.creative?.thumbnail_url || null,
+        image_url: ad.creative?.image_url || null,
+        fb_video_id: ad.creative?.video_id || null,
+        fb_image_hash: ad.creative?.image_hash || null,
+      }));
     } catch (e) {
       console.error('getAdsByCampaign error', e);
       return [];

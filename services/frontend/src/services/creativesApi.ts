@@ -802,6 +802,43 @@ export const creativesApi = {
       return { hasImported: false, count: 0, creatives: [] };
     }
   },
+
+  /**
+   * Резолвит пакет fb_ad_id → user_creative_id (через ad_creative_mapping).
+   * Нужен для группировки статистики по физическому креативу: если Facebook
+   * продублировал creative с новым fb_creative_id, user_creative_id остаётся один.
+   * Для ad_id без маппинга (созданных вручную) возвращает пустой объект —
+   * клиент делает fallback на fb_video_id / fb_image_hash.
+   */
+  async resolveAdCreativeMapping(
+    adIds: string[],
+    accountId?: string | null
+  ): Promise<Record<string, {
+    user_creative_id: string;
+    title: string | null;
+    thumbnail_url: string | null;
+    fb_video_id: string | null;
+    fb_image_hash: string | null;
+  }>> {
+    if (!adIds.length) return {};
+    try {
+      const body: { ad_ids: string[]; accountId?: string } = { ad_ids: adIds };
+      if (shouldFilterByAccountId(accountId)) body.accountId = accountId!;
+      const res = await fetch(`${API_BASE_URL}/ad-creative-mapping/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        console.error('creativesApi.resolveAdCreativeMapping error:', await res.text().catch(() => ''));
+        return {};
+      }
+      return await res.json();
+    } catch (error) {
+      console.error('creativesApi.resolveAdCreativeMapping error:', error);
+      return {};
+    }
+  },
 };
 
 // Типы для превью креатива
