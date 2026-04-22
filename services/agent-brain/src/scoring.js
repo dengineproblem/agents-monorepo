@@ -1318,11 +1318,11 @@ function analyzeAdsForEaters(adsInsights, options = {}) {
       reasons.push(`Потрачено $${spend.toFixed(2)}, но 0 лидов`);
       priority = 'high';
 
-      // Если занимает >50% бюджета адсета — критично
+      // Если занимает >50% spend'а адсета (по активным ads за 7д) — критично
       const adsetSpend = adsetSpendMap?.get(ad.adset_id) || 0;
       if (adsetSpend > 0 && spend / adsetSpend >= thresholds.SPEND_SHARE_CRITICAL) {
         const sharePercent = Math.round(spend / adsetSpend * 100);
-        reasons.push(`Занимает ${sharePercent}% бюджета адсета`);
+        reasons.push(`Занимает ${sharePercent}% расхода адсета за 7д`);
         priority = 'critical';
         isCritical = true;
       }
@@ -4091,10 +4091,15 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     let adEaters = [];
     if (adsInsightsData && adsInsightsData.length > 0) {
-      // Собираем spend по адсетам для расчёта доли бюджета
+      // Суммируем spend ACTIVE ads за тот же период, что и insights (last_7d).
+      // Раньше знаменатель брался из todayData (сегодня, все ads включая disabled),
+      // из-за чего доля получалась занижённой (напр. 57% для единственного
+      // активного ada в адсете) — spend уже отключённых ads раздувал total.
       const adsetSpendMap = new Map();
-      for (const adset of todayData) {
-        adsetSpendMap.set(adset.adset_id, parseFloat(adset.spend || 0));
+      for (const ad of adsInsightsData) {
+        if (!ad.adset_id) continue;
+        const current = adsetSpendMap.get(ad.adset_id) || 0;
+        adsetSpendMap.set(ad.adset_id, current + parseFloat(ad.spend || 0));
       }
 
       // Целевой CPL из настроек аккаунта
@@ -4650,6 +4655,37 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             llmSummary = llmResult.parsed.summary || null;
             llmPlanNote = llmResult.parsed.planNote || null;
             llmUsed = true;
+
+            // Guard: снимаем pauseAd для пожирателей, отключение которых оставит
+            // адсет без активных объявлений. Промпт это запрещает, но LLM иногда
+            // игнорирует флаг will_adset_be_empty — здесь детерминированная страховка.
+            if (adsetsWillBeEmpty && adsetsWillBeEmpty.length > 0) {
+              const willBeEmptySet = new Set(adsetsWillBeEmpty);
+              const blockedPauseAds = [];
+              llmProposals = llmProposals.filter(p => {
+                if (p.action !== 'pauseAd') return true;
+                const adsetId = p.adset_id || p.suggested_action_params?.adset_id;
+                if (adsetId && willBeEmptySet.has(adsetId)) {
+                  blockedPauseAds.push({
+                    ad_id: p.entity_id || p.ad_id || p.suggested_action_params?.ad_id,
+                    adset_id: adsetId,
+                    priority: p.priority,
+                    reason_preview: typeof p.reason === 'string' ? p.reason.substring(0, 120) : null
+                  });
+                  return false;
+                }
+                return true;
+              });
+              if (blockedPauseAds.length > 0) {
+                log.warn({
+                  where: 'interactive_brain',
+                  phase: 'pauseAd_guard_triggered',
+                  blocked_count: blockedPauseAds.length,
+                  blocked: blockedPauseAds,
+                  message: `LLM предложила pauseAd для ${blockedPauseAds.length} объявлений, которые оставили бы адсет без активных ads. Заблокировано автоматически — для этих адсетов нужен pauseAdSet или перераспределение.`
+                });
+              }
+            }
 
             // Сохраняем детерминированные proposals на случай если нужно сравнить
             const deterministicProposalsCount = proposals.length;
