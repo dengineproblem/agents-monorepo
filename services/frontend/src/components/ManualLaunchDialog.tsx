@@ -146,20 +146,6 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
     setStartMode('now');
   }, [open]);
 
-  // When creatives load in standalone mode, auto-select all into first adset
-  useEffect(() => {
-    if (props.mode !== 'standalone' || loadedCreatives.length === 0) return;
-    setAdsets(prev => {
-      if (prev.length === 1 && prev[0].creative_ids.size === 0) {
-        return [{
-          ...prev[0],
-          creative_ids: new Set(loadedCreatives.map(c => c.id)),
-        }];
-      }
-      return prev;
-    });
-  }, [loadedCreatives]);
-
   const totalBudget = useMemo(
     () => adsets.reduce((sum, a) => sum + a.daily_budget, 0),
     [adsets]
