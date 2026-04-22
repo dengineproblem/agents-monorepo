@@ -35,7 +35,11 @@ interface ActiveCreative {
   qualityLeads: number;
 }
 
-export function AdStatusSection() {
+interface AdStatusSectionProps {
+  dateBadge?: React.ReactNode;
+}
+
+export function AdStatusSection({ dateBadge }: AdStatusSectionProps = {}) {
   const { campaigns, campaignStats, platform, toggleCampaignStatus, dateRange, currentAdAccountId } = useAppContext();
 
   const [activeTab, setActiveTab] = useState<'campaigns' | 'metrics'>('campaigns');
@@ -384,35 +388,38 @@ export function AdStatusSection() {
         <CardContent className="p-0">
 
           {/* Tabs */}
-          <div className="flex border-b px-4 pt-3 gap-1">
-            <button
-              onClick={() => setActiveTab('campaigns')}
-              className={cn(
-                'pb-2.5 px-1 text-sm font-medium border-b-2 transition-colors',
-                activeTab === 'campaigns'
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              Активные кампании
-              {activeCampaigns.length > 0 && (
-                <span className={cn(
-                  'ml-1.5 text-xs px-1.5 py-0.5 rounded-full',
-                  activeTab === 'campaigns' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-                )}>{activeCampaigns.length}</span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('metrics')}
-              className={cn(
-                'pb-2.5 px-1 text-sm font-medium border-b-2 transition-colors',
-                activeTab === 'metrics'
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              Метрики
-            </button>
+          <div className="flex items-end justify-between gap-2 flex-wrap border-b px-4 pt-3">
+            <div className="flex gap-1">
+              <button
+                onClick={() => setActiveTab('campaigns')}
+                className={cn(
+                  'pb-2.5 px-1 text-sm font-medium border-b-2 transition-colors',
+                  activeTab === 'campaigns'
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Активные кампании
+                {activeCampaigns.length > 0 && (
+                  <span className={cn(
+                    'ml-1.5 text-xs px-1.5 py-0.5 rounded-full',
+                    activeTab === 'campaigns' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                  )}>{activeCampaigns.length}</span>
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab('metrics')}
+                className={cn(
+                  'pb-2.5 px-1 text-sm font-medium border-b-2 transition-colors',
+                  activeTab === 'metrics'
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Метрики
+              </button>
+            </div>
+            {dateBadge && <div className="pb-2">{dateBadge}</div>}
           </div>
 
           {/* Metrics tab */}

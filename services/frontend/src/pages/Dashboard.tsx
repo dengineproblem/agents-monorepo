@@ -431,7 +431,7 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {formattedDateRange && (
+        {formattedDateRange && userTarif === 'target' && (
           <div className="mb-6">
             <Badge
               variant="secondary"
@@ -480,7 +480,18 @@ const Dashboard: React.FC = () => {
         ) : (
           <>
             {/* Активные кампании, креативы, быстрая остановка */}
-            <AdStatusSection />
+            <AdStatusSection
+              dateBadge={formattedDateRange ? (
+                <Badge
+                  variant="secondary"
+                  className="rounded-full px-3 py-1 text-xs font-medium flex items-center gap-1.5 cursor-pointer hover:bg-secondary/60 transition-colors"
+                  onClick={() => setDatePickerOpen(true)}
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>{t('dashboard.statsFor')} {formattedDateRange}</span>
+                </Badge>
+              ) : undefined}
+            />
 
             {/* AI автопилот - для Instagram */}
             {platform === 'instagram' && FEATURES.SHOW_AI_AUTOPILOT && userAccountId && (
