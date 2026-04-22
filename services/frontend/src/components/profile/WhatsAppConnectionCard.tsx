@@ -195,9 +195,11 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {isWaba ? 'Meta Cloud API' : number.label || 'Evolution API'}
-                        </p>
+                        {(isWaba || number.label) && (
+                          <p className="text-xs text-muted-foreground">
+                            {isWaba ? 'Meta Cloud API' : number.label}
+                          </p>
+                        )}
                       </div>
                     </div>
 
