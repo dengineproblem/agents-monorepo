@@ -932,7 +932,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      const maxDirections = userAccountCheck.multi_account_enabled ? 10 : 10;
+      const maxDirections = userAccountCheck.multi_account_enabled ? 20 : 20;
       if ((activeCount || 0) + directionsNeeded > maxDirections) {
         return reply.code(400).send({
           success: false,
