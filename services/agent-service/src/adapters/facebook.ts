@@ -671,7 +671,7 @@ export async function createWhatsAppCreative(
     text_format: {
       customer_action_type: "autofill_message",
       message: {
-        autofill_message: params.clientQuestions.map(q => ({ content: q })),
+        autofill_message: { content: params.clientQuestions[0] || '' },
         text: "Здравствуйте! Чем можем помочь?"
       }
     }
@@ -883,7 +883,7 @@ export async function createInstagramDMCreative(
       text_format: {
         customer_action_type: "autofill_message",
         message: {
-          autofill_message: [{ content: params.clientQuestion }],
+          autofill_message: { content: params.clientQuestion },
           text: "Здравствуйте! Чем можем помочь?"
         }
       }
@@ -1220,7 +1220,7 @@ export async function createWhatsAppImageCreative(
     text_format: {
       customer_action_type: "autofill_message",
       message: {
-        autofill_message: params.clientQuestions.map(q => ({ content: q })),
+        autofill_message: { content: params.clientQuestions[0] || '' },
         text: "Здравствуйте! Чем можем помочь?"
       }
     }
@@ -1428,7 +1428,7 @@ export async function createInstagramDMImageCreative(
       text_format: {
         customer_action_type: "autofill_message",
         message: {
-          autofill_message: [{ content: params.clientQuestion }],
+          autofill_message: { content: params.clientQuestion },
           text: "Здравствуйте! Чем можем помочь?"
         }
       }
@@ -2062,7 +2062,7 @@ export async function createInstagramDMCarouselCreative(
       text_format: {
         customer_action_type: "autofill_message",
         message: {
-          autofill_message: [{ content: params.clientQuestion }],
+          autofill_message: { content: params.clientQuestion },
           text: "Здравствуйте! Чем можем помочь?"
         }
       }
