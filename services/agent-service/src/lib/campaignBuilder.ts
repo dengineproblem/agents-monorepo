@@ -13,6 +13,7 @@ import { saveAdCreativeMapping } from './adCreativeMapping.js';
 import { shouldFilterByAccountId } from './multiAccountHelper.js';
 import { applyDirectionAudienceControls } from './settingsHelpers.js';
 import { graphBatch, parseBatchBody, type BatchRequest } from '../adapters/facebook.js';
+import { buildAdCreative } from './buildAdCreative.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const log = createLogger({ module: 'campaignBuilder' });
@@ -2541,43 +2542,42 @@ export async function createAdsInAdSet(params: {
     adAccountId: normalizedAdAccountId
   }, '[createAdsInAdSet] Starting batch ad creation');
 
-  // Для WhatsApp направлений загружаем client_question
-  let clientQuestion: string | null = null;
-  if ((objective === 'whatsapp' || objective === 'conversions') && directionId) {
-    const { data: defaultSettings } = await supabase
-      .from('default_ad_settings')
-      .select('client_questions, client_question')
-      .eq('direction_id', directionId)
-      .maybeSingle();
-
-    if (defaultSettings) {
-      clientQuestion = defaultSettings.client_questions?.[0] ?? defaultSettings.client_question ?? null;
-    }
+  if (!userId || !directionId) {
+    throw new Error('[createAdsInAdSet] userId and directionId are required — нужны для пересборки AdCreative на лету');
   }
 
-  // Подготовим креативы с их FB ID
+  // Пересобираем AdCreative для КАЖДОГО креатива с актуальными настройками направления.
+  // FB AdCreative иммутабелен → кэшированные fb_creative_id_* содержат старые client_question /
+  // lead_form_id / site_url / cta_type и не подходят для запуска.
   const validCreatives: Array<{ creative: AvailableCreative; fbCreativeId: string }> = [];
+  const failedFromBuild: Array<{
+    user_creative_id: string;
+    title: string;
+    errorMessage: string;
+  }> = [];
 
   for (const creative of creatives) {
-    const creativeId = getCreativeIdForObjective(creative, objective);
-
-    if (!creativeId) {
+    try {
+      const built = await buildAdCreative({
+        user_creative_id: creative.user_creative_id,
+        direction_id: directionId,
+        user_account_id: userId,
+        account_id: accountId || null,
+      });
+      validCreatives.push({ creative, fbCreativeId: built.fb_creative_id });
+    } catch (err: any) {
       log.warn({
         userCreativeId: creative.user_creative_id,
         creativeTitle: creative.title,
         objective,
-        availableCreativeIds: {
-          unified: creative.fb_creative_id || null,
-          whatsapp: creative.fb_creative_id_whatsapp,
-          instagram_traffic: creative.fb_creative_id_instagram_traffic,
-          site_leads: creative.fb_creative_id_site_leads,
-          lead_forms: creative.fb_creative_id_lead_forms
-        }
-      }, '[createAdsInAdSet] No Facebook creative ID for creative');
-      continue;
+        error: err?.message,
+      }, '[createAdsInAdSet] buildAdCreative failed for creative');
+      failedFromBuild.push({
+        user_creative_id: creative.user_creative_id,
+        title: creative.title,
+        errorMessage: err?.message || 'buildAdCreative failed',
+      });
     }
-
-    validCreatives.push({ creative, fbCreativeId: creativeId });
   }
 
   if (validCreatives.length === 0) {
@@ -2586,43 +2586,28 @@ export async function createAdsInAdSet(params: {
       totalCreatives: creatives.length,
       objective,
       durationMs: Date.now() - startTime
-    }, '[createAdsInAdSet] No valid creatives to create ads');
-    return { ads: [], failedAds: creatives.map(c => ({
-      user_creative_id: c.user_creative_id,
-      title: c.title,
-      errorCode: undefined as number | undefined,
-      errorSubcode: undefined as number | undefined,
-      errorMessage: `No Facebook creative ID for objective: ${objective}`,
-    })) };
+    }, '[createAdsInAdSet] No valid creatives after on-the-fly rebuild');
+    return {
+      ads: [],
+      failedAds: failedFromBuild.map(f => ({
+        user_creative_id: f.user_creative_id,
+        title: f.title,
+        errorCode: undefined as number | undefined,
+        errorSubcode: undefined as number | undefined,
+        errorMessage: f.errorMessage,
+      })),
+    };
   }
 
   // Формируем batch запросы
   const batchRequests: BatchRequest[] = validCreatives.map(({ creative, fbCreativeId }) => {
     const adName = `Ad - ${creative.title}`;
-    const adBody: any = {
+    const adBody: Record<string, string> = {
       name: adName,
       adset_id: adsetId,
       creative: JSON.stringify({ creative_id: fbCreativeId }),
       status: 'ACTIVE'
     };
-
-    // Для WhatsApp направлений добавляем page_welcome_message с актуальным client_question
-    if ((objective === 'whatsapp' || objective === 'conversions') && clientQuestion) {
-      const pageWelcomeMessage = JSON.stringify({
-        type: "VISUAL_EDITOR",
-        version: 2,
-        landing_screen_type: "welcome_message",
-        media_type: "text",
-        text_format: {
-          customer_action_type: "autofill_message",
-          message: {
-            autofill_message: { content: clientQuestion },
-            text: "Здравствуйте! Чем можем помочь?"
-          }
-        }
-      });
-      adBody.page_welcome_message = pageWelcomeMessage;
-    }
 
     const body = new URLSearchParams(adBody).toString();
 

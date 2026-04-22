@@ -6,6 +6,7 @@ import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
 import { getCustomEventType } from '../lib/campaignBuilder.js';
 import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
+import { buildAdCreative } from '../lib/buildAdCreative.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
 
@@ -123,58 +124,9 @@ export async function workflowStartCreativeTest(
     throw new Error(`Direction not found for creative: ${creative.direction_id}`);
   }
 
-  // Получаем fb_creative_id - новый стандарт: один креатив = один objective
-  // Сначала проверяем новое поле fb_creative_id, потом старые для обратной совместимости
-  let fb_creative_id: string | null = creative.fb_creative_id;
-
-  if (!fb_creative_id) {
-    // Фолбэк на старые поля (deprecated)
-    switch (direction.objective) {
-      case 'whatsapp':
-        fb_creative_id = creative.fb_creative_id_whatsapp;
-        break;
-      case 'conversions': {
-        // Выбираем fb_creative_id по conversion_channel
-        const channel = direction.conversion_channel || 'whatsapp';
-        if (channel === 'whatsapp') {
-          fb_creative_id = creative.fb_creative_id_whatsapp;
-        } else if (channel === 'lead_form') {
-          fb_creative_id = creative.fb_creative_id_lead_forms;
-        } else if (channel === 'site') {
-          fb_creative_id = creative.fb_creative_id_site_leads;
-        }
-        break;
-      }
-      case 'instagram_traffic':
-        fb_creative_id = creative.fb_creative_id_instagram_traffic;
-        break;
-      case 'site_leads':
-        fb_creative_id = creative.fb_creative_id_site_leads;
-        break;
-      case 'lead_forms':
-        fb_creative_id = creative.fb_creative_id_lead_forms;
-        break;
-      case 'instagram_dm':
-        fb_creative_id = creative.fb_creative_id_whatsapp;
-        break;
-      default:
-        throw new Error(`Unknown objective: ${direction.objective}`);
-    }
-  }
-
-  if (!fb_creative_id) {
-    log.error({
-      creative_id: creative.id,
-      objective: direction.objective,
-      has_unified_fb_creative_id: Boolean(creative.fb_creative_id),
-      has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads),
-    }, 'Creative is missing required fb_creative_id for objective');
-    throw new Error(
-      `Creative does not have Facebook creative ID. ` +
-      `Please create a creative for ${direction.objective} objective first.`
-    );
-  }
-
+  // fb_creative_id пересобираем на лету (AdCreative иммутабелен — любое
+  // изменение direction-editable полей требует свежего creative). Делаем это
+  // после создания AdSet в STEP 7.5.
   log.info({
     creative_id: creative.id,
     title: creative.title,
@@ -183,7 +135,6 @@ export async function workflowStartCreativeTest(
     direction_id: direction.id,
     direction_name: direction.name,
     direction_objective: direction.objective,
-    fb_creative_id
   }, 'Creative and direction loaded for test');
 
   // Нормализуем ad_account_id
@@ -514,6 +465,18 @@ export async function workflowStartCreativeTest(
   }
 
   log.info({ adset_id }, 'Creative test ad set created');
+
+  // ===================================================
+  // STEP 7.5: Пересобираем AdCreative на лету
+  // ===================================================
+  const built = await buildAdCreative({
+    user_creative_id,
+    direction_id: direction.id,
+    user_account_id: user_id,
+    account_id: db_ad_account_id || null,
+    logger: log,
+  });
+  const fb_creative_id = built.fb_creative_id;
 
   // ===================================================
   // STEP 8: Создаем Ad

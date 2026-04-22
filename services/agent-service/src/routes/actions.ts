@@ -15,6 +15,7 @@ import { pauseAdSetsForCampaign } from '../lib/campaignBuilder.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
 import { getTikTokCredentials } from '../lib/tiktokSettings.js';
+import { buildAdCreative } from '../lib/buildAdCreative.js';
 
 /**
  * Helper: конвертирует объекты в параметры для Facebook API
@@ -792,63 +793,58 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       for (let i = 0; i < p.user_creative_ids.length; i++) {
         const creativeId = p.user_creative_ids[i];
         console.log(`🎨 [ACTION] Processing creative ${i + 1}/${p.user_creative_ids.length}:`, { creativeId });
-        
+
         const { data: creative } = await supabase
           .from('user_creatives')
-          .select('*')
+          .select('id, title')
           .eq('id', creativeId)
           .single();
-        
+
         if (!creative) {
           console.warn(`⚠️ [ACTION] Creative not found, skipping:`, { creativeId });
           continue;
         }
-        
-        // Определить fb_creative_id по objective направления
-        let fb_creative_id = creative.fb_creative_id;
-        if (!fb_creative_id) {
-          if (direction.objective === 'whatsapp' || (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp')) fb_creative_id = creative.fb_creative_id_whatsapp;
-          else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
-          else if (direction.objective === 'site_leads' || (direction.objective === 'conversions' && direction.conversion_channel === 'site')) fb_creative_id = creative.fb_creative_id_site_leads;
-          else if (direction.objective === 'lead_forms' || (direction.objective === 'conversions' && direction.conversion_channel === 'lead_form')) fb_creative_id = creative.fb_creative_id_lead_forms;
-        }
 
-        if (!fb_creative_id) {
-          if (direction.objective === 'app_installs') {
-            console.warn('⚠️ [ACTION] app_installs creative missing unified fb_creative_id', {
-              creativeId,
-              direction_id: direction.id,
-              has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads)
-            });
-          }
-          console.warn(`⚠️ [ACTION] No fb_creative_id for objective ${direction.objective}, skipping:`, { 
+        // Пересобираем AdCreative на лету с актуальными настройками направления
+        let fb_creative_id: string;
+        try {
+          const built = await buildAdCreative({
+            user_creative_id: creativeId,
+            direction_id: direction.id,
+            user_account_id: ctx!.userAccountId!,
+            account_id: ctx?.accountId || null,
+          });
+          fb_creative_id = built.fb_creative_id;
+        } catch (err: any) {
+          console.warn(`⚠️ [ACTION] buildAdCreative failed, skipping:`, {
             creativeId,
-            objective: direction.objective
+            objective: direction.objective,
+            error: err?.message,
           });
           continue;
         }
-        
+
         const adBody = {
           name: `${creative.title} - ${new Date().toISOString().split('T')[0]}`,
           adset_id: availableAdSet.fb_adset_id,
           status: p.auto_activate !== false ? 'ACTIVE' : 'PAUSED',
           creative: { creative_id: fb_creative_id }
         };
-        
+
         console.log(`🔧 [ACTION] Creating ad ${i + 1}/${p.user_creative_ids.length} in Facebook...`, {
           ad_name: adBody.name,
           adset_id: availableAdSet.fb_adset_id,
           fb_creative_id,
           status: adBody.status
         });
-        
+
         const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, toParams(adBody));
-        
+
         console.log(`✅ [ACTION] Ad ${i + 1}/${p.user_creative_ids.length} created:`, {
           ad_id: adResult.id,
           creative_id: creativeId
         });
-        
+
         created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
       }
       
@@ -953,30 +949,37 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         for (const creativeId of adsetConfig.user_creative_ids) {
           const { data: creative } = await supabase
             .from('user_creatives')
-            .select('*')
+            .select('id, title')
             .eq('id', creativeId)
             .single();
-          
+
           if (!creative) continue;
-          
-          // Определить fb_creative_id по objective направления
-          let fb_creative_id = creative.fb_creative_id;
-          if (!fb_creative_id) {
-            if (direction.objective === 'whatsapp' || (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp')) fb_creative_id = creative.fb_creative_id_whatsapp;
-            else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
-            else if (direction.objective === 'site_leads' || (direction.objective === 'conversions' && direction.conversion_channel === 'site')) fb_creative_id = creative.fb_creative_id_site_leads;
-            else if (direction.objective === 'lead_forms' || (direction.objective === 'conversions' && direction.conversion_channel === 'lead_form')) fb_creative_id = creative.fb_creative_id_lead_forms;
+
+          let fb_creative_id: string;
+          try {
+            const built = await buildAdCreative({
+              user_creative_id: creativeId,
+              direction_id: direction.id,
+              user_account_id: ctx!.userAccountId!,
+              account_id: ctx?.accountId || null,
+            });
+            fb_creative_id = built.fb_creative_id;
+          } catch (err: any) {
+            console.warn('[ACTION] UseMultipleExistingAdSets: buildAdCreative failed, skipping', {
+              creativeId,
+              objective: direction.objective,
+              error: err?.message,
+            });
+            continue;
           }
-          
-          if (!fb_creative_id) continue;
-          
+
           const adBody = {
             name: `${creative.title} - ${new Date().toISOString().split('T')[0]}`,
             adset_id: availableAdSet.fb_adset_id,
             status: p.auto_activate !== false ? 'ACTIVE' : 'PAUSED',
             creative: { creative_id: fb_creative_id }
           };
-          
+
           const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, toParams(adBody));
           created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
         }

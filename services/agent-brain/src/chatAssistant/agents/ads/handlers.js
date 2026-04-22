@@ -930,12 +930,16 @@ export const adsHandlers = {
 
   /**
    * Create single Ad in existing AdSet
+   *
+   * AdCreative всегда пересобирается на лету на стороне agent-service
+   * (см. /campaign-builder/add-ad-to-adset и feedback_dynamic_adcreative):
+   * FB AdCreative иммутабелен, direction-editable поля обязаны быть свежими.
    */
-  async createAd({ adset_id, creative_id, ad_name, dry_run }, { accessToken, adAccountId, userAccountId }) {
-    // 1. Get creative
+  async createAd({ adset_id, creative_id, ad_name, dry_run }, { accessToken, adAccountId, userAccountId, adAccountDbId }) {
+    // 1. Load creative + its direction (нужен direction_id для buildAdCreative)
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms')
+      .select('id, title, direction_id')
       .eq('id', creative_id)
       .eq('user_id', userAccountId)
       .eq('status', 'ready')
@@ -944,38 +948,16 @@ export const adsHandlers = {
     if (creativeError || !creative) {
       return { success: false, error: `Креатив не найден или не готов: ${creativeError?.message || 'not found'}` };
     }
+    if (!creative.direction_id) {
+      return { success: false, error: 'Креатив не привязан к направлению — нельзя пересобрать AdCreative' };
+    }
 
-    // 2. Get adset to determine objective
+    // 2. Load adset (to show name in dry-run preview, verify existence)
     let adsetInfo;
     try {
       adsetInfo = await fbGraph('GET', adset_id, accessToken, { fields: 'id,name,campaign_id,optimization_goal,destination_type' });
     } catch (fbError) {
       return { success: false, error: `Адсет не найден: ${fbError.message}` };
-    }
-
-    // Determine objective from optimization_goal + destination_type
-    let objective;
-    if (adsetInfo.optimization_goal === 'CONVERSATIONS' && adsetInfo.destination_type === 'INSTAGRAM_DIRECT') {
-      objective = 'instagram_dm';
-    } else {
-      const goalToObjective = {
-        'CONVERSATIONS': 'whatsapp',
-        'LINK_CLICKS': 'instagram_traffic',
-        'OFFSITE_CONVERSIONS': 'site_leads',
-        'LEAD_GENERATION': 'lead_forms'
-      };
-      objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
-    }
-
-    // Get appropriate FB creative ID
-    const creativeIdField = (objective === 'whatsapp' || objective === 'instagram_dm') ? 'fb_creative_id_whatsapp'
-      : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
-      : objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
-      : 'fb_creative_id_site_leads';
-
-    const fbCreativeId = creative[creativeIdField];
-    if (!fbCreativeId) {
-      return { success: false, error: `У креатива нет FB creative ID для objective "${objective}"` };
     }
 
     const finalName = ad_name || `Ad - ${creative.title}`;
@@ -991,46 +973,46 @@ export const adsHandlers = {
           ad_name: finalName,
           creative_id: creative.id,
           creative_title: creative.title,
-          fb_creative_id: fbCreativeId,
-          objective
         },
-        message: `Будет создано объявление "${finalName}" в адсете "${adsetInfo.name}"`
+        message: `Будет создано объявление "${finalName}" в адсете "${adsetInfo.name}" (AdCreative будет пересобран на лету)`
       };
     }
 
-    // 3. Create Ad
-    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
-
-    let adResult;
+    // 3. Proxy to agent-service — там buildAdCreative + создание Ad
+    let adId;
     try {
-      adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
-        name: finalName,
-        adset_id,
-        creative: { creative_id: fbCreativeId },
-        status: 'ACTIVE'
-      });
+      const { data: adResult } = await axios.post(
+        `${AGENT_SERVICE_URL}/campaign-builder/add-ad-to-adset`,
+        {
+          user_account_id: userAccountId,
+          account_id: adAccountDbId || null,
+          adset_id,
+          user_creative_id: creative.id,
+          direction_id: creative.direction_id,
+          ad_name: finalName,
+          status: 'ACTIVE',
+        },
+        { timeout: 120_000 }
+      );
+
+      if (!adResult?.success || !adResult?.ad_id) {
+        return { success: false, error: adResult?.error || 'agent-service add-ad-to-adset не вернул ad_id' };
+      }
+      adId = adResult.ad_id;
     } catch (fbError) {
-      logger.error({ err: fbError, adset_id, creative_id }, 'createAd: FB API error');
-      return { success: false, error: `Ошибка создания объявления: ${fbError.message}` };
+      const errMsg = fbError.response?.data?.error || fbError.response?.data?.message || fbError.message;
+      logger.error({ err: errMsg, adset_id, creative_id }, 'createAd: proxy to agent-service failed');
+      return { success: false, error: `Ошибка создания объявления: ${errMsg}` };
     }
 
-    // Save mapping
-    await supabase.from('ad_creative_mapping').insert({
-      ad_id: adResult.id,
-      user_creative_id: creative.id,
-      direction_id: creative.direction_id,
-      user_id: userAccountId,
-      adset_id,
-      campaign_id: adsetInfo.campaign_id
-    }).catch(() => {});
-
-    // Log action
+    // Маппинг ad→creative уже сохранён agent-service'ом (saveAdCreativeMapping).
+    // Здесь только лог действия для агента.
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
       message: `Ad created: ${finalName} in AdSet ${adsetInfo.name}`,
       context: {
-        ad_id: adResult.id,
+        ad_id: adId,
         adset_id,
         creative_id: creative.id,
         creative_title: creative.title,
@@ -1042,7 +1024,7 @@ export const adsHandlers = {
     return {
       success: true,
       message: `Создано объявление "${finalName}" в адсете "${adsetInfo.name}"`,
-      ad_id: adResult.id,
+      ad_id: adId,
       ad_name: finalName,
       adset_id,
       adset_name: adsetInfo.name,

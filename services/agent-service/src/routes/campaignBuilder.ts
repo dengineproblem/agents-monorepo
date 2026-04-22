@@ -41,6 +41,9 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
+import { buildAdCreative } from '../lib/buildAdCreative.js';
+import { graph as fbGraph } from '../adapters/facebook.js';
+import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -2049,6 +2052,115 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to fetch budget constraints',
+      });
+    }
+  });
+
+  /**
+   * POST /campaign-builder/add-ad-to-adset
+   *
+   * Внутренний endpoint для agent-brain (createAd). Создаёт одно объявление
+   * в существующем AdSet, обязательно пересобирая AdCreative на лету
+   * через buildAdCreative (AdCreative иммутабелен, см. feedback_dynamic_adcreative).
+   */
+  fastify.post('/add-ad-to-adset', async (request, reply) => {
+    const log = getWorkflowLogger(request as FastifyRequest, 'addAdToAdset');
+    const body = request.body as {
+      user_account_id: string;
+      account_id?: string | null;
+      adset_id: string;
+      user_creative_id: string;
+      direction_id: string;
+      ad_name?: string;
+      status?: 'ACTIVE' | 'PAUSED';
+    };
+
+    if (!body?.user_account_id || !body?.adset_id || !body?.user_creative_id || !body?.direction_id) {
+      return reply.status(400).send({
+        success: false,
+        error: 'user_account_id, adset_id, user_creative_id, direction_id are required',
+      });
+    }
+
+    try {
+      const credentials = await getCredentials(
+        body.user_account_id,
+        body.account_id || undefined,
+      );
+
+      if (!credentials.fbAccessToken || !credentials.fbAdAccountId) {
+        return reply.status(400).send({ success: false, error: 'ad account credentials missing' });
+      }
+
+      const built = await buildAdCreative({
+        user_creative_id: body.user_creative_id,
+        direction_id: body.direction_id,
+        user_account_id: body.user_account_id,
+        account_id: body.account_id || null,
+        logger: log,
+      });
+
+      const actId = credentials.fbAdAccountId.startsWith('act_')
+        ? credentials.fbAdAccountId
+        : `act_${credentials.fbAdAccountId}`;
+
+      const { data: creative } = await supabase
+        .from('user_creatives')
+        .select('title')
+        .eq('id', body.user_creative_id)
+        .single();
+
+      const finalName = body.ad_name || `Ad - ${creative?.title || body.user_creative_id.slice(0, 8)}`;
+
+      const adResult = await fbGraph('POST', `${actId}/ads`, credentials.fbAccessToken, {
+        name: finalName,
+        adset_id: body.adset_id,
+        creative: JSON.stringify({ creative_id: built.fb_creative_id }),
+        status: body.status || 'ACTIVE',
+      });
+
+      const ad_id = adResult?.id;
+      if (!ad_id) {
+        return reply.status(502).send({ success: false, error: 'Facebook did not return ad id' });
+      }
+
+      const { data: adsetRow } = await supabase
+        .from('direction_adsets')
+        .select('campaign_id')
+        .eq('adset_id', body.adset_id)
+        .maybeSingle();
+
+      await saveAdCreativeMapping({
+        ad_id: String(ad_id),
+        user_creative_id: body.user_creative_id,
+        direction_id: body.direction_id,
+        user_id: body.user_account_id,
+        account_id: body.account_id || null,
+        adset_id: body.adset_id,
+        campaign_id: adsetRow?.campaign_id ? String(adsetRow.campaign_id) : '',
+        fb_creative_id: built.fb_creative_id,
+        source: 'campaign_builder',
+      });
+
+      log.info({
+        ad_id,
+        adset_id: body.adset_id,
+        user_creative_id: body.user_creative_id,
+        fb_creative_id: built.fb_creative_id,
+        objective: built.objective,
+      }, '[add-ad-to-adset] Ad created with fresh AdCreative');
+
+      return reply.send({
+        success: true,
+        ad_id,
+        fb_creative_id: built.fb_creative_id,
+        objective: built.objective,
+      });
+    } catch (err: any) {
+      log.error({ err }, '[add-ad-to-adset] Failed');
+      return reply.status(500).send({
+        success: false,
+        error: err?.message || 'Failed to add ad to adset',
       });
     }
   });

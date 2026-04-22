@@ -13,6 +13,7 @@ import {
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { generateAdsetName, type AdsetSource } from '../lib/adsetNaming.js';
 import { requireAppInstallsConfig } from '../lib/appInstallsConfig.js';
+import { buildAdCreative } from '../lib/buildAdCreative.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -242,67 +243,43 @@ export async function workflowCreateAdSetInDirection(
     }, 'optimization_goal_override ignored: only supported for whatsapp objective');
   }
 
-  // Для каждого креатива извлекаем fb_creative_id
-  // Для objective-specific креативов (lead_forms, site_leads и т.д.) сначала проверяем
-  // специализированное поле, т.к. unified fb_creative_id может не содержать нужных параметров
-  const creative_data = creatives.map((creative, index) => {
-    let fb_creative_id: string | null = null;
-
-    // Сначала пробуем objective-specific поле
-    switch (direction.objective) {
-      case 'whatsapp':
-        fb_creative_id = creative.fb_creative_id_whatsapp;
-        break;
-      case 'conversions': {
-        const channel = direction.conversion_channel || 'whatsapp';
-        if (channel === 'whatsapp') {
-          fb_creative_id = creative.fb_creative_id_whatsapp;
-        } else if (channel === 'lead_form') {
-          fb_creative_id = creative.fb_creative_id_lead_forms;
-        } else if (channel === 'site') {
-          fb_creative_id = creative.fb_creative_id_site_leads;
-        }
-        break;
-      }
-      case 'instagram_traffic':
-        fb_creative_id = creative.fb_creative_id_instagram_traffic;
-        break;
-      case 'site_leads':
-        fb_creative_id = creative.fb_creative_id_site_leads;
-        break;
-      case 'lead_forms':
-        fb_creative_id = creative.fb_creative_id_lead_forms;
-        break;
-      case 'instagram_dm':
-        fb_creative_id = creative.fb_creative_id_whatsapp;
-        break;
-    }
-
-    // Фолбэк на unified fb_creative_id
-    if (!fb_creative_id) {
-      fb_creative_id = creative.fb_creative_id;
-    }
-
-    if (!fb_creative_id) {
+  // Пересобираем AdCreative на лету для каждого креатива с актуальными настройками
+  // направления (client_question / lead_form_id / site_url / cta_type и т.д.).
+  // Старые кэшированные fb_creative_id_* не используются — FB AdCreative иммутабелен.
+  const creative_data: Array<{
+    user_creative_id: string;
+    fb_creative_id: string;
+    title: string;
+    media_type: string;
+    ad_name: string;
+  }> = [];
+  for (let index = 0; index < creatives.length; index++) {
+    const creative = creatives[index];
+    try {
+      const built = await buildAdCreative({
+        user_creative_id: creative.id,
+        direction_id,
+        user_account_id,
+        account_id: context_account_id || null,
+        logger: log,
+      });
+      creative_data.push({
+        user_creative_id: creative.id,
+        fb_creative_id: built.fb_creative_id,
+        title: creative.title,
+        media_type: creative.media_type,
+        ad_name: `${direction.name} - ${creative.title || 'Ad'} ${index + 1}`,
+      });
+    } catch (err: any) {
       log.error({
         direction_id,
         objective: direction.objective,
         creative_id: creative.id,
-        has_unified_fb_creative_id: Boolean(creative.fb_creative_id),
-        has_lead_forms_id: Boolean(creative.fb_creative_id_lead_forms),
-        has_legacy_site_leads_id: Boolean(creative.fb_creative_id_site_leads),
-      }, 'Creative does not have required fb_creative_id for objective');
-      throw new Error(`Креатив "${creative.title || creative.id}" не имеет версии для "${direction.objective}". Перезагрузите креатив в направление с правильным objective.`);
+        error: err?.message,
+      }, 'buildAdCreative failed for creative');
+      throw new Error(`Не удалось пересобрать креатив "${creative.title || creative.id}" для направления "${direction.objective}": ${err?.message || err}`);
     }
-
-    return {
-      user_creative_id: creative.id,
-      fb_creative_id,
-      title: creative.title,
-      media_type: creative.media_type,
-      ad_name: `${direction.name} - ${creative.title || 'Ad'} ${index + 1}`
-    };
-  });
+  }
 
   log.info({
     count: creative_data.length,
@@ -864,33 +841,12 @@ export async function workflowCreateAdSetInDirection(
   const batchStartTime = Date.now();
 
   const batchRequests: BatchRequest[] = creative_data.map(creative => {
-    const adBody: any = {
+    const adBody: Record<string, string> = {
       name: creative.ad_name,
       adset_id: adset_id,
       status: auto_activate ? 'ACTIVE' : 'PAUSED',
       creative: JSON.stringify({ creative_id: creative.fb_creative_id })
     };
-
-    // Для WhatsApp направлений добавляем page_welcome_message с актуальным client_question
-    if ((direction.objective === 'whatsapp' || (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp')) && defaultSettings) {
-      const clientQuestion = defaultSettings.client_questions?.[0] ?? defaultSettings.client_question;
-      if (clientQuestion) {
-        const pageWelcomeMessage = JSON.stringify({
-          type: "VISUAL_EDITOR",
-          version: 2,
-          landing_screen_type: "welcome_message",
-          media_type: "text",
-          text_format: {
-            customer_action_type: "autofill_message",
-            message: {
-              autofill_message: { content: clientQuestion },
-              text: "Здравствуйте! Чем можем помочь?"
-            }
-          }
-        });
-        adBody.page_welcome_message = pageWelcomeMessage;
-      }
-    }
 
     const body = new URLSearchParams(adBody).toString();
 
