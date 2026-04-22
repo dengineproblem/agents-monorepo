@@ -1,3 +1,16 @@
+FROM node:18-bullseye AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY patches ./patches
+COPY tsconfig.json ./
+RUN npm ci
+
+COPY src ./src
+RUN npm run build
+
+
 FROM node:18-bullseye
 
 RUN apt-get update && apt-get install -y \
@@ -14,7 +27,7 @@ COPY package*.json ./
 COPY patches ./patches
 RUN npm ci --omit=dev
 
-COPY dist/ ./dist/
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 8089
 

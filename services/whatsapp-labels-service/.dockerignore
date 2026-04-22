@@ -1,5 +1,3 @@
 node_modules
-src
+dist
 .wwebjs_auth
-*.ts
-!dist/**/*.js
