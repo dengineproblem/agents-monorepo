@@ -485,30 +485,127 @@ export function AdStatusSection() {
               </div>
 
               {creativesLoading ? (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {[1, 2, 3, 4, 5].map(i => (
-                    <div key={i} className="flex-shrink-0 w-[88px] rounded-lg bg-muted animate-pulse h-[140px]" />
-                  ))}
-                </div>
+                <>
+                  {/* Mobile skeleton */}
+                  <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                    {[1, 2, 3, 4, 5].map(i => (
+                      <div key={i} className="flex-shrink-0 w-[88px] rounded-lg bg-muted animate-pulse h-[140px]" />
+                    ))}
+                  </div>
+                  {/* Desktop skeleton */}
+                  <div className="hidden lg:flex lg:flex-col lg:gap-1">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="h-10 rounded-md bg-muted animate-pulse" />
+                    ))}
+                  </div>
+                </>
               ) : (
-                <div
-                  className="grid gap-4 items-start"
-                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
-                >
-                  {Array.from(creativeGroups.entries()).map(([directionName, groupCreatives]) => (
-                    <div key={directionName}>
-                      <p className="text-xs text-muted-foreground font-medium mb-2">{directionName}</p>
-                      <div className="flex flex-wrap gap-2 pb-1">
-                        {groupCreatives.map((creative, index) => {
-                          const roi = roiByCampaign.get(creative.campaign_id);
-                          return (
-                            <div
-                              key={creative.id}
-                              className="flex-shrink-0 w-[88px] rounded-lg overflow-hidden bg-muted border border-border flex flex-col cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
-                              onClick={() => openModal(creative)}
-                            >
-                              <div className="relative">
-                                <div className="w-full h-[80px] overflow-hidden bg-muted">
+                <>
+                  {/* Mobile / tablet: compact cards */}
+                  <div
+                    className="grid gap-4 items-start lg:hidden"
+                    style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
+                  >
+                    {Array.from(creativeGroups.entries()).map(([directionName, groupCreatives]) => (
+                      <div key={directionName}>
+                        <p className="text-xs text-muted-foreground font-medium mb-2">{directionName}</p>
+                        <div className="flex flex-wrap gap-2 pb-1">
+                          {groupCreatives.map((creative, index) => {
+                            const roi = roiByCampaign.get(creative.campaign_id);
+                            return (
+                              <div
+                                key={creative.id}
+                                className="flex-shrink-0 w-[88px] rounded-lg overflow-hidden bg-muted border border-border flex flex-col cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
+                                onClick={() => openModal(creative)}
+                              >
+                                <div className="relative">
+                                  <div className="w-full h-[80px] overflow-hidden bg-muted">
+                                    {creative.thumbnail_url ? (
+                                      <img
+                                        src={creative.thumbnail_url}
+                                        alt={creative.name}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center">
+                                        <Image className="h-6 w-6 text-muted-foreground/40" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  {creative.video_id && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                      <div className="bg-black/50 rounded-full p-1">
+                                        <Play className="h-3.5 w-3.5 text-white fill-white" />
+                                      </div>
+                                    </div>
+                                  )}
+                                  {index < 3 && creative.leads > 0 && (
+                                    <span className={`absolute top-1 left-1 text-[10px] font-bold px-1 py-0.5 rounded ${
+                                      index === 0 ? 'bg-yellow-400 text-yellow-900'
+                                      : index === 1 ? 'bg-gray-300 text-gray-700'
+                                      : 'bg-amber-600 text-amber-100'
+                                    }`}>#{index + 1}</span>
+                                  )}
+                                </div>
+
+                                <div className="p-1.5 space-y-0.5">
+                                  <div className="text-[10px] font-medium text-foreground leading-tight truncate" title={creative.name}>
+                                    {creative.name}
+                                  </div>
+                                  <div className="text-[10px] font-semibold text-foreground leading-tight">
+                                    {fmt(creative.spend)}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground leading-tight">
+                                    {formatNumber(creative.leads)} лидов
+                                  </div>
+                                  {creative.cpl > 0 && (
+                                    <div className="text-[10px] text-muted-foreground leading-tight">CPL {fmt(creative.cpl)}</div>
+                                  )}
+                                  {creative.cpql > 0 && (
+                                    <div className="text-[10px] text-purple-600 dark:text-purple-400 leading-tight">CPQL {fmt(creative.cpql)}</div>
+                                  )}
+                                  {roi != null && roi !== 0 && (
+                                    <div className={`text-[10px] leading-tight flex items-center gap-0.5 ${roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                                      <TrendingUp className="h-2.5 w-2.5" />
+                                      {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop: rows grouped by direction */}
+                  <div className="hidden lg:flex lg:flex-col lg:gap-4">
+                    {Array.from(creativeGroups.entries()).map(([directionName, groupCreatives]) => (
+                      <div key={directionName}>
+                        <p className="text-xs text-muted-foreground font-medium mb-2">{directionName}</p>
+                        <div className="flex flex-col gap-0.5">
+                          {groupCreatives.map((creative, index) => {
+                            const roi = roiByCampaign.get(creative.campaign_id);
+                            const isTop = index < 3 && creative.leads > 0;
+                            return (
+                              <div
+                                key={creative.id}
+                                onClick={() => openModal(creative)}
+                                className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
+                              >
+                                <span className="w-6 flex-shrink-0 flex justify-center">
+                                  {isTop && (
+                                    <span className={`text-[10px] font-bold px-1 py-0.5 rounded leading-none ${
+                                      index === 0 ? 'bg-yellow-400 text-yellow-900'
+                                      : index === 1 ? 'bg-gray-300 text-gray-700'
+                                      : 'bg-amber-600 text-amber-100'
+                                    }`}>#{index + 1}</span>
+                                  )}
+                                </span>
+                                <div className="relative w-8 h-8 flex-shrink-0 rounded overflow-hidden bg-muted border border-border">
                                   {creative.thumbnail_url ? (
                                     <img
                                       src={creative.thumbnail_url}
@@ -519,56 +616,40 @@ export function AdStatusSection() {
                                     />
                                   ) : (
                                     <div className="w-full h-full flex items-center justify-center">
-                                      <Image className="h-6 w-6 text-muted-foreground/40" />
+                                      <Image className="h-4 w-4 text-muted-foreground/40" />
+                                    </div>
+                                  )}
+                                  {creative.video_id && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                      <div className="bg-black/50 rounded-full p-0.5">
+                                        <Play className="h-2.5 w-2.5 text-white fill-white" />
+                                      </div>
                                     </div>
                                   )}
                                 </div>
-                                {creative.video_id && (
-                                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <div className="bg-black/50 rounded-full p-1">
-                                      <Play className="h-3.5 w-3.5 text-white fill-white" />
-                                    </div>
-                                  </div>
-                                )}
-                                {index < 3 && creative.leads > 0 && (
-                                  <span className={`absolute top-1 left-1 text-[10px] font-bold px-1 py-0.5 rounded ${
-                                    index === 0 ? 'bg-yellow-400 text-yellow-900'
-                                    : index === 1 ? 'bg-gray-300 text-gray-700'
-                                    : 'bg-amber-600 text-amber-100'
-                                  }`}>#{index + 1}</span>
-                                )}
+                                <span className="text-sm truncate min-w-0 flex-1" title={creative.name}>{creative.name}</span>
+                                <div className="flex items-center gap-3 ml-3 flex-shrink-0 text-xs text-muted-foreground">
+                                  <span className="font-medium text-foreground">{fmt(creative.spend)}</span>
+                                  <span>{formatNumber(creative.leads)} лидов</span>
+                                  {creative.cpl > 0 && <span>CPL {fmt(creative.cpl)}</span>}
+                                  {creative.cpql > 0 && (
+                                    <span className="text-purple-600 dark:text-purple-400">CPQL {fmt(creative.cpql)}</span>
+                                  )}
+                                  {roi != null && roi !== 0 && (
+                                    <span className={`flex items-center gap-0.5 ${roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                                      <TrendingUp className="h-3 w-3" />
+                                      ROI {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-
-                              <div className="p-1.5 space-y-0.5">
-                                <div className="text-[10px] font-medium text-foreground leading-tight truncate" title={creative.name}>
-                                  {creative.name}
-                                </div>
-                                <div className="text-[10px] font-semibold text-foreground leading-tight">
-                                  {fmt(creative.spend)}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground leading-tight">
-                                  {formatNumber(creative.leads)} лидов
-                                </div>
-                                {creative.cpl > 0 && (
-                                  <div className="text-[10px] text-muted-foreground leading-tight">CPL {fmt(creative.cpl)}</div>
-                                )}
-                                {creative.cpql > 0 && (
-                                  <div className="text-[10px] text-purple-600 dark:text-purple-400 leading-tight">CPQL {fmt(creative.cpql)}</div>
-                                )}
-                                {roi != null && roi !== 0 && (
-                                  <div className={`text-[10px] leading-tight flex items-center gap-0.5 ${roi >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
-                                    <TrendingUp className="h-2.5 w-2.5" />
-                                    {roi > 0 ? '+' : ''}{roi.toFixed(0)}%
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}
