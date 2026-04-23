@@ -35,7 +35,10 @@ export async function autopilotRoutes(app: FastifyInstance) {
       let query = supabase
         .from('brain_executions')
         .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at, execution_mode, platform')
-        .eq('user_account_id', userAccountId);
+        .eq('user_account_id', userAccountId)
+        // Скрываем отклонённые пользователем рекомендации (Brain Mini), они должны
+        // исчезать из списка. Прошедшие success/failed остаются всегда.
+        .neq('status', 'dismissed');
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
@@ -321,6 +324,73 @@ export async function autopilotRoutes(app: FastifyInstance) {
         success: false,
         error: error.message,
       });
+    }
+  });
+
+  /**
+   * POST /api/autopilot/executions/:id/dismiss
+   * Скрыть pending Brain Mini рекомендацию из списка (status → 'dismissed').
+   * Применимо только к pending записям; success/failed остаются неизменными.
+   */
+  app.post('/autopilot/executions/:id/dismiss', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId } = request.body as { userAccountId?: string } || {};
+
+      if (!id) {
+        return reply.code(400).send({ success: false, error: 'execution id is required' });
+      }
+      if (!userAccountId) {
+        return reply.code(400).send({ success: false, error: 'userAccountId is required' });
+      }
+
+      const { data: existing, error: fetchError } = await supabase
+        .from('brain_executions')
+        .select('id, status, user_account_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (fetchError) {
+        log.error({ err: fetchError, id }, 'Error fetching execution for dismiss');
+        return reply.code(500).send({ success: false, error: fetchError.message });
+      }
+      if (!existing) {
+        return reply.code(404).send({ success: false, error: 'execution not found' });
+      }
+      if (existing.user_account_id !== userAccountId) {
+        return reply.code(403).send({ success: false, error: 'forbidden' });
+      }
+      if (existing.status !== 'pending') {
+        return reply.code(409).send({
+          success: false,
+          error: `cannot dismiss execution with status '${existing.status}' (only 'pending' allowed)`,
+        });
+      }
+
+      const { error: updateError } = await supabase
+        .from('brain_executions')
+        .update({ status: 'dismissed' })
+        .eq('id', id);
+
+      if (updateError) {
+        log.error({ err: updateError, id }, 'Error dismissing execution');
+        return reply.code(500).send({ success: false, error: updateError.message });
+      }
+
+      log.info({ id, userAccountId }, 'Execution dismissed');
+      return reply.send({ success: true });
+    } catch (error: any) {
+      log.error({ err: error }, 'Error dismissing execution');
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'autopilot_dismiss_execution',
+        endpoint: '/autopilot/executions/:id/dismiss',
+        severity: 'warning'
+      }).catch(() => {});
+      return reply.code(500).send({ success: false, error: error.message });
     }
   });
 }

@@ -19,7 +19,8 @@ import {
   Clock,
   Activity,
   FileText,
-  Brain
+  Brain,
+  X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -219,6 +220,28 @@ export function AutopilotSection({
     setReportDialogOpen(true);
   };
 
+  const dismissPending = async (exec: BrainExecution) => {
+    if (!userAccountId) return;
+    // Оптимистичное удаление из списка — иначе UI кажется зависшим до 5-минутного poll.
+    setExecutions((prev) => prev.filter((e) => e.id !== exec.id));
+    try {
+      const res = await fetch(`${API_BASE_URL}/autopilot/executions/${exec.id}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userAccountId }),
+      });
+      if (!res.ok) {
+        // Откатываем при ошибке.
+        const data = await res.json().catch(() => ({}));
+        console.error('[AutopilotSection] dismiss failed:', res.status, data);
+        setExecutions((prev) => [exec, ...prev].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)));
+      }
+    } catch (error) {
+      console.error('[AutopilotSection] dismiss error:', error);
+      setExecutions((prev) => [exec, ...prev].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)));
+    }
+  };
+
 
   return (
     <>
@@ -321,15 +344,26 @@ export function AutopilotSection({
                     <div className="flex items-center gap-1">
                       {/* Кнопка "Рассмотреть" для pending Brain Mini */}
                       {exec.status === 'pending' && exec.execution_mode === 'manual_trigger' && onReopenPending && exec.plan_json?.proposals?.length > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-yellow-600 border-yellow-400 hover:bg-yellow-50"
-                          onClick={() => onReopenPending(exec)}
-                        >
-                          <Brain className="h-3.5 w-3.5 mr-1" />
-                          Рассмотреть ({exec.plan_json.proposals.length})
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-yellow-600 border-yellow-400 hover:bg-yellow-50"
+                            onClick={() => onReopenPending(exec)}
+                          >
+                            <Brain className="h-3.5 w-3.5 mr-1" />
+                            Рассмотреть ({exec.plan_json.proposals.length})
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                            onClick={() => dismissPending(exec)}
+                            title="Скрыть рекомендацию"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
                       )}
                       {(exec.report_text || (exec.actions_json && exec.actions_json.length > 0)) && exec.status !== 'pending' && (
                         <div className="flex items-center gap-0.5">
