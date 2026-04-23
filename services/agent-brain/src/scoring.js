@@ -820,11 +820,22 @@ function buildHumanReadableReason(hsBreakdown, metrics = {}) {
 
   // Группируем факторы по типу
   const cplGap = hsBreakdown.find(f => f.factor === 'cpl_gap' || f.factor === 'cpc_gap');
+  const zeroLeads = hsBreakdown.find(f => f.factor === 'zero_leads_over_2x');
   const trend = hsBreakdown.find(f => f.factor === 'trend_cpl' || f.factor === 'trend_cpc');
   const diagnostics = hsBreakdown.filter(f => ['ctr_low', 'cpm_high', 'frequency_high'].includes(f.factor));
 
-  // CPL/CPC к target
-  if (cplGap && targetCPL) {
+  // CPL/CPC к target.
+  // Используем reason из самого фактора (он формируется в hsCalculation на основе
+  // yesterday-метрик — там корректный знак: положительный value = ниже target,
+  // отрицательный = выше). Раньше сравнивали todayCPL с targetCPL напрямую — это
+  // ломалось при 0 лидов сегодня (todayCPL=0 интерпретировалось как "ниже цели —
+  // отлично", хотя на самом деле просто конверсий нет).
+  if (zeroLeads?.reason) {
+    reasons.push(zeroLeads.reason);
+  } else if (cplGap?.reason) {
+    reasons.push(cplGap.reason);
+  } else if (cplGap && targetCPL && todayCPL > 0) {
+    // Fallback на старую логику только когда есть фактический CPL > 0
     const gap = todayCPL - targetCPL;
     const gapPercent = Math.round((gap / targetCPL) * 100);
     if (gap > 0) {
@@ -832,7 +843,7 @@ function buildHumanReadableReason(hsBreakdown, metrics = {}) {
     } else if (gap < 0) {
       reasons.push(`${metricName} $${Math.round(todayCPL)} ниже цели $${Math.round(targetCPL)} — отлично!`);
     }
-  } else if (todayCPL && !targetCPL) {
+  } else if (todayCPL > 0 && !targetCPL) {
     reasons.push(`${metricName} $${Math.round(todayCPL)} (цель не задана)`);
   }
 
@@ -1247,26 +1258,53 @@ async function fetchAdsInsights(adAccountId, accessToken, maxRetries = 2) {
  * Анализирует ads для поиска "пожирателей" — объявлений,
  * которые тратят бюджет без результата
  *
+ * Правила (синхронизированы с adset-scoring — даём шанс покрутиться):
+ *  - Порог spend для "0 лидов" динамический: max(MIN_SPEND_FOR_ANALYSIS, 3 × target_cpl).
+ *    При target $2 порог станет $6 — мало потраченные крео не будут критиковаться.
+ *  - Early-stage адсеты (нет 7d истории / данные только за сегодня) полностью пропускаются:
+ *    без достаточных данных решения по отдельным объявлениям не принимаем.
+ *  - Share-критерий (>50% расхода адсета) применяется только если в адсете ≥3 активных
+ *    объявлений. Иначе доля всегда ≈100% — артефакт, а не сигнал.
+ *  - Priority=critical присваивается только при подтверждённом паттерне (spend ≥ 3×target
+ *    И share-критерий прошёл). Иначе — medium (наблюдаем, не останавливаем).
+ *
  * @param {Array} adsInsights - Массив ads с метриками из fetchAdsInsights
  * @param {Object} options - Опции анализа
  * @param {number} options.targetCPL - Целевой CPL (в долларах)
  * @param {Map} options.adsetSpendMap - Map<adset_id, total_spend> для расчёта доли
+ * @param {Set} options.earlyStageAdsetIds - Set adset_id, для которых рано выносить вердикты
+ * @param {Map} options.adsetActiveAdsCount - Map<adset_id, count активных ads за 7д>
  * @param {Object} options.thresholds - Пороги из AD_EATER_THRESHOLDS
  * @returns {Array} Массив "пожирателей" с причинами и приоритетом
  */
 function analyzeAdsForEaters(adsInsights, options = {}) {
-  const { targetCPL, adsetSpendMap, thresholds = AD_EATER_THRESHOLDS } = options;
+  const {
+    targetCPL,
+    adsetSpendMap,
+    earlyStageAdsetIds,
+    adsetActiveAdsCount,
+    thresholds = AD_EATER_THRESHOLDS
+  } = options;
   const eaters = [];
+
+  // Динамический порог spend для критерия "0 лидов": не менее 3× target_cpl.
+  // Объявление не оценивается как пожиратель, пока не потратило минимум 3 target-CPL.
+  const dynamicMinSpend = targetCPL && targetCPL > 0
+    ? Math.max(thresholds.MIN_SPEND_FOR_ANALYSIS, targetCPL * thresholds.CPL_CRITICAL_MULTIPLIER)
+    : thresholds.MIN_SPEND_FOR_ANALYSIS;
 
   // Статистика для логирования
   let skippedLowSpend = 0;
   let skippedLowImpressions = 0;
+  let skippedEarlyStage = 0;
   let analyzedCount = 0;
 
   logger.debug({
     where: 'analyzeAdsForEaters',
     total_ads: adsInsights.length,
     target_cpl: targetCPL,
+    dynamic_min_spend: dynamicMinSpend,
+    early_stage_adsets: earlyStageAdsetIds ? earlyStageAdsetIds.size : 0,
     thresholds: {
       min_spend: thresholds.MIN_SPEND_FOR_ANALYSIS,
       min_impressions: thresholds.MIN_IMPRESSIONS,
@@ -1291,13 +1329,23 @@ function analyzeAdsForEaters(adsInsights, options = {}) {
       spend,
       leads,
       impressions,
-      will_skip_spend: spend < thresholds.MIN_SPEND_FOR_ANALYSIS,
+      dynamic_min_spend: dynamicMinSpend,
+      will_skip_early_stage: earlyStageAdsetIds?.has(ad.adset_id) || false,
+      will_skip_spend: spend < dynamicMinSpend,
       will_skip_impressions: impressions < thresholds.MIN_IMPRESSIONS,
       raw_actions: rawActions.length > 0 ? rawActions : 'none'
     }, `[analyzeAdsForEaters] Checking ad: ${ad.ad_name?.substring(0, 30)} - $${spend.toFixed(2)}, ${leads} leads, ${impressions} impr`);
 
-    // Пропускаем ads с малым расходом — недостаточно данных для выводов
-    if (spend < thresholds.MIN_SPEND_FOR_ANALYSIS) {
+    // Пропускаем ads из адсетов в "early stage" — пока нет достаточных данных
+    // (hist7d отсутствует либо метрики только за сегодня), решения по отдельным
+    // объявлениям преждевременны. Такой же принцип применён в adset-scoring.
+    if (earlyStageAdsetIds?.has(ad.adset_id)) {
+      skippedEarlyStage++;
+      continue;
+    }
+
+    // Пропускаем ads с малым расходом относительно target_cpl — недостаточно данных.
+    if (spend < dynamicMinSpend) {
       skippedLowSpend++;
       continue;
     }
@@ -1313,16 +1361,21 @@ function analyzeAdsForEaters(adsInsights, options = {}) {
     let priority = 'medium';
     let isCritical = false;
 
-    // Критерий 1: Потратил $X, но 0 лидов (главный критерий пожирателя)
+    // Критерий 1: Потратил ≥ 3×target_cpl, но 0 лидов (главный критерий пожирателя).
+    // Порог spend уже отфильтрован dynamicMinSpend выше, значит сюда попадают
+    // объявления с подтверждённой растратой. Priority=high по умолчанию.
     if (leads === 0) {
       reasons.push(`Потрачено $${spend.toFixed(2)}, но 0 лидов`);
       priority = 'high';
 
-      // Если занимает >50% spend'а адсета (по активным ads за 7д) — критично
+      // Share-критерий применяется только если в адсете ≥3 активных объявлений.
+      // В адсетах с 1-2 ads доля всегда раздута до ~100% — это артефакт размера,
+      // а не реальный сигнал, что объявление "выжирает" больше справедливой доли.
+      const adsActiveInAdset = adsetActiveAdsCount?.get(ad.adset_id) || 0;
       const adsetSpend = adsetSpendMap?.get(ad.adset_id) || 0;
-      if (adsetSpend > 0 && spend / adsetSpend >= thresholds.SPEND_SHARE_CRITICAL) {
+      if (adsActiveInAdset >= 3 && adsetSpend > 0 && spend / adsetSpend >= thresholds.SPEND_SHARE_CRITICAL) {
         const sharePercent = Math.round(spend / adsetSpend * 100);
-        reasons.push(`Занимает ${sharePercent}% расхода адсета за 7д`);
+        reasons.push(`Занимает ${sharePercent}% расхода адсета за 7д (${adsActiveInAdset} активных объявлений)`);
         priority = 'critical';
         isCritical = true;
       }
@@ -1386,13 +1439,15 @@ function analyzeAdsForEaters(adsInsights, options = {}) {
   logger.info({
     where: 'analyzeAdsForEaters',
     total_ads: adsInsights.length,
+    skipped_early_stage: skippedEarlyStage,
     skipped_low_spend: skippedLowSpend,
     skipped_low_impressions: skippedLowImpressions,
     analyzed: analyzedCount,
     eaters_found: sortedEaters.length,
     critical_count: sortedEaters.filter(e => e.is_critical).length,
     high_count: sortedEaters.filter(e => e.priority === 'high').length,
-    total_wasted_spend: totalWastedSpend.toFixed(2)
+    total_wasted_spend: totalWastedSpend.toFixed(2),
+    dynamic_min_spend: dynamicMinSpend
   }, `[analyzeAdsForEaters] Analysis complete: ${sortedEaters.length} eaters found, $${totalWastedSpend.toFixed(2)} wasted`);
 
   return sortedEaters;
@@ -4096,10 +4151,29 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       // из-за чего доля получалась занижённой (напр. 57% для единственного
       // активного ada в адсете) — spend уже отключённых ads раздувал total.
       const adsetSpendMap = new Map();
+      const adsetActiveAdsCount = new Map();
+      const adsetActiveAdIds = new Map(); // для подсчёта уникальных ads
       for (const ad of adsInsightsData) {
         if (!ad.adset_id) continue;
-        const current = adsetSpendMap.get(ad.adset_id) || 0;
-        adsetSpendMap.set(ad.adset_id, current + parseFloat(ad.spend || 0));
+        const currentSpend = adsetSpendMap.get(ad.adset_id) || 0;
+        adsetSpendMap.set(ad.adset_id, currentSpend + parseFloat(ad.spend || 0));
+        if (ad.ad_id) {
+          if (!adsetActiveAdIds.has(ad.adset_id)) adsetActiveAdIds.set(ad.adset_id, new Set());
+          adsetActiveAdIds.get(ad.adset_id).add(ad.ad_id);
+        }
+      }
+      for (const [adsetId, idsSet] of adsetActiveAdIds) {
+        adsetActiveAdsCount.set(adsetId, idsSet.size);
+      }
+
+      // Early-stage адсеты — недостаточно данных для ad-level вердиктов.
+      // Синхронизировано с adset-scoring: пока нет 7d истории и метрики только
+      // за сегодня, решения по отдельным объявлениям преждевременны.
+      const earlyStageAdsetIds = new Set();
+      for (const a of adsetAnalysis) {
+        const noHist = !a.hist7d_source || a.hist7d_source === 'none';
+        const todayOnly = a.metrics_source === 'today';
+        if (noHist || todayOnly) earlyStageAdsetIds.add(a.adset_id);
       }
 
       // Целевой CPL из настроек аккаунта
@@ -4110,7 +4184,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       // Анализируем ads на наличие пожирателей
       adEaters = analyzeAdsForEaters(adsInsightsData, {
         targetCPL: effectiveTargetCPL,
-        adsetSpendMap
+        adsetSpendMap,
+        adsetActiveAdsCount,
+        earlyStageAdsetIds
       });
 
       log.info({
@@ -4120,11 +4196,47 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         eaters_found: adEaters.length,
         critical_count: adEaters.filter(e => e.is_critical).length,
         target_cpl_used: effectiveTargetCPL,
+        early_stage_adsets_count: earlyStageAdsetIds.size,
+        early_stage_adset_ids: Array.from(earlyStageAdsetIds).slice(0, 10),
         message: `Найдено ${adEaters.length} объявлений-пожирателей`
       });
 
+      // Предрасчёт: какие adsets останутся пустыми, если отключить всех
+      // пожирателей. Нужен до генерации pauseAd proposals, чтобы не создавать
+      // предложение, которое оставит адсет без активных объявлений.
+      const detAdIdsByAdset = new Map();
+      for (const ad of adsInsightsData) {
+        if (!ad.adset_id || !ad.ad_id) continue;
+        if (!detAdIdsByAdset.has(ad.adset_id)) detAdIdsByAdset.set(ad.adset_id, new Set());
+        detAdIdsByAdset.get(ad.adset_id).add(ad.ad_id);
+      }
+      const detEaterIdsByAdset = new Map();
+      for (const e of adEaters) {
+        if (!detEaterIdsByAdset.has(e.adset_id)) detEaterIdsByAdset.set(e.adset_id, new Set());
+        detEaterIdsByAdset.get(e.adset_id).add(e.ad_id);
+      }
+      const detWillBeEmpty = new Set();
+      for (const [adsetId, eaterIds] of detEaterIdsByAdset) {
+        const total = detAdIdsByAdset.get(adsetId)?.size || 0;
+        if (total > 0 && total === eaterIds.size) detWillBeEmpty.add(adsetId);
+      }
+
       // Генерируем proposals для pauseAd
+      const skippedPauseAdForEmptyAdset = [];
       for (const eater of adEaters) {
+        // Guard: если отключение этого пожирателя оставит адсет без активных
+        // объявлений — не создаём pauseAd. Решение по такому адсету (pauseAdSet
+        // или оставить) дальше принимает LLM на основе will_adset_be_empty.
+        if (detWillBeEmpty.has(eater.adset_id)) {
+          skippedPauseAdForEmptyAdset.push({
+            ad_id: eater.ad_id,
+            ad_name: eater.ad_name?.substring(0, 50),
+            adset_id: eater.adset_id,
+            priority: eater.priority
+          });
+          continue;
+        }
+
         // Находим информацию о direction для этого adset
         const adsetAnalysisEntry = adsetAnalysis.find(a => a.adset_id === eater.adset_id);
         const isExternalCampaign = !adsetAnalysisEntry?.direction_id;
@@ -4160,6 +4272,16 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             target_cpl: effectiveTargetCPL,
             metrics_source: 'last_7d'
           }
+        });
+      }
+
+      if (skippedPauseAdForEmptyAdset.length > 0) {
+        log.warn({
+          where: 'interactive_brain',
+          phase: 'pauseAd_skipped_empty_adset',
+          skipped_count: skippedPauseAdForEmptyAdset.length,
+          skipped: skippedPauseAdForEmptyAdset,
+          message: `Пропущено ${skippedPauseAdForEmptyAdset.length} детерминированных pauseAd: их отключение оставило бы адсет без активных объявлений`
         });
       }
     }
