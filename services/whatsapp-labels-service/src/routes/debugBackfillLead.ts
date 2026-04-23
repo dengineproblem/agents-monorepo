@@ -94,11 +94,22 @@ export function registerDebugBackfillLeadRoutes(app: FastifyInstance): void {
           attribution,
           messages: incoming.map((m: any) => ({
             type: m.type,
+            subtype: m._data?.subtype,
             timestamp: m.timestamp,
             fromMe: m.fromMe,
-            body: m.body?.slice(0, 100) || null,
+            body: m.body?.slice(0, 200) || null,
             hasMedia: m.hasMedia,
-            caption: (m._data?.caption || m.caption)?.slice(0, 100) || null,
+            caption: (m._data?.caption || m.caption)?.slice(0, 200) || null,
+            rawKeys: m._data ? Object.keys(m._data) : [],
+            rawData: {
+              conversation: m._data?.conversation?.slice(0, 200),
+              stubType: m._data?.stubType,
+              stubParameters: m._data?.stubParameters,
+              notifyName: m._data?.notifyName,
+              pushName: m._data?.pushName,
+              quotedMsg: !!m._data?.quotedMsg,
+              ciphertext: m._data?.ciphertext ? 'present' : null,
+            },
           })),
         };
       } catch (err: any) {
