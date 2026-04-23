@@ -5,6 +5,7 @@ import { initSession, destroySession, getSession, checkSessionAlive } from './se
 const log = pino({ name: 'label-sync' });
 
 const SYNC_DELAY_MS = parseInt(process.env.WWEBJS_SYNC_DELAY_MS || '15000', 10);
+const FLUSH_DELAY_MS = parseInt(process.env.WWEBJS_FLUSH_DELAY_MS || '45000', 10);
 
 let supabase: SupabaseClient;
 
@@ -149,40 +150,31 @@ async function markPaidSynced(leadId: number): Promise<void> {
 }
 
 /**
- * Apply a WhatsApp label to a chat. Returns true only if label is verified present.
+ * Queue a WhatsApp label onto a chat.
+ * Note: this only submits the action to wwebjs's local app-state queue.
+ * The actual server propagation happens asynchronously; verification must be
+ * done at the end of the sync via getChatsByLabelId (see syncAccountLabels).
  */
-async function applyLabel(session: any, lead: LeadToSync, labelId: string): Promise<boolean> {
+async function queueLabel(session: any, lead: LeadToSync, labelId: string): Promise<{ status: 'queued' | 'already' | 'not_found'; chatId: string }> {
   const chatId = toChatId(lead.chat_id);
   const chat = await session.client.getChatById(chatId);
 
   if (!chat) {
     log.warn({ leadId: lead.id, chatId }, 'Chat not found');
-    return false;
+    return { status: 'not_found', chatId };
   }
 
   const currentLabels = await chat.getLabels();
   const currentLabelIds = currentLabels.map((l: any) => l.id);
 
-  if (!currentLabelIds.includes(labelId)) {
-    const newLabelIds = [...currentLabelIds, labelId];
-    log.info({ leadId: lead.id, chatId, newLabelIds }, 'Calling changeLabels');
-    const result = await chat.changeLabels(newLabelIds);
-    log.info({ leadId: lead.id, chatId, labelId, result: JSON.stringify(result) }, 'changeLabels response');
-
-    // Verify label was actually applied by re-reading labels
-    await new Promise(r => setTimeout(r, 500));
-    const verifyLabels = await chat.getLabels();
-    const verifyLabelIds = verifyLabels.map((l: any) => l.id);
-    if (!verifyLabelIds.includes(labelId)) {
-      log.error({ leadId: lead.id, chatId, labelId, verifyLabelIds }, 'Label NOT verified after changeLabels — session may be stale');
-      return false;
-    }
-    log.info({ leadId: lead.id, chatId, labelId }, 'Label verified present');
-  } else {
-    log.info({ leadId: lead.id, chatId, labelId }, 'Label already present');
+  if (currentLabelIds.includes(labelId)) {
+    return { status: 'already', chatId };
   }
 
-  return true;
+  const newLabelIds = [...currentLabelIds, labelId];
+  await chat.changeLabels(newLabelIds);
+  log.info({ leadId: lead.id, chatId, labelId }, 'changeLabels queued');
+  return { status: 'queued', chatId };
 }
 
 /**
@@ -257,43 +249,94 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
     return 0;
   }
 
-  let syncedCount = 0;
+  // Map: chatId → { leadId, isPaid } for post-flush verification.
+  const queuedLead: Map<string, { leadId: number; isPaid: boolean }> = new Map();
+  const queuedPaid: Map<string, { leadId: number }> = new Map();
 
-  // Pass 1: qualified leads → lead label
+  // Pass 1: qualified leads → lead label (queue only)
   if (account.label_mapping_label_id && qualifiedLeads.length > 0) {
     const labelId = account.label_mapping_label_id;
-    log.info({ userAccountId: account.id, labelId, count: qualifiedLeads.length }, 'Pass 1: syncing qualified lead labels');
+    log.info({ userAccountId: account.id, labelId, count: qualifiedLeads.length }, 'Pass 1: queuing qualified lead labels');
 
     for (const lead of qualifiedLeads) {
       try {
-        const ok = await applyLabel(session, lead, labelId);
-        if (ok) {
-          await markSynced(lead.id);
-          syncedCount++;
+        const res = await queueLabel(session, lead, labelId);
+        if (res.status === 'queued' || res.status === 'already') {
+          queuedLead.set(res.chatId, { leadId: lead.id, isPaid: false });
         }
         await new Promise(r => setTimeout(r, 1000));
       } catch (err: any) {
-        log.error({ leadId: lead.id, err: err.message }, 'Failed to label qualified lead');
+        log.error({ leadId: lead.id, err: err.message }, 'Failed to queue qualified lead');
       }
     }
   }
 
-  // Pass 2: paid leads → paid label
+  // Pass 2: paid leads → paid label (queue only)
   if (account.label_mapping_paid_label_id && paidLeads.length > 0) {
     const paidLabelId = account.label_mapping_paid_label_id;
-    log.info({ userAccountId: account.id, paidLabelId, count: paidLeads.length }, 'Pass 2: syncing paid lead labels');
+    log.info({ userAccountId: account.id, paidLabelId, count: paidLeads.length }, 'Pass 2: queuing paid lead labels');
 
     for (const lead of paidLeads) {
       try {
-        const ok = await applyLabel(session, lead, paidLabelId);
-        if (ok) {
-          await markPaidSynced(lead.id);
-          syncedCount++;
+        const res = await queueLabel(session, lead, paidLabelId);
+        if (res.status === 'queued' || res.status === 'already') {
+          queuedPaid.set(res.chatId, { leadId: lead.id });
         }
         await new Promise(r => setTimeout(r, 1000));
       } catch (err: any) {
-        log.error({ leadId: lead.id, err: err.message }, 'Failed to label paid lead');
+        log.error({ leadId: lead.id, err: err.message }, 'Failed to queue paid lead');
       }
+    }
+  }
+
+  // Wait for wwebjs to flush queued app-state mutations to WhatsApp servers.
+  // Without this delay, changeLabels stays pending in local IndexedDB and never propagates
+  // — labels become visible only after next QR rescan (which triggers a sync replay).
+  log.info({ userAccountId: account.id, flushDelayMs: FLUSH_DELAY_MS }, 'Waiting for app-state flush');
+  await new Promise(r => setTimeout(r, FLUSH_DELAY_MS));
+
+  let syncedCount = 0;
+
+  // Server-side verify: getChatsByLabelId returns chats that WhatsApp server confirms have the label.
+  if (account.label_mapping_label_id && queuedLead.size > 0) {
+    const labelId = account.label_mapping_label_id;
+    try {
+      const chatsOnServer = await session.client.getChatsByLabelId(labelId);
+      const serverChatIds = new Set(chatsOnServer.map((c: any) => c.id._serialized));
+      let confirmed = 0;
+      for (const [chatId, { leadId }] of queuedLead) {
+        if (serverChatIds.has(chatId)) {
+          await markSynced(leadId);
+          syncedCount++;
+          confirmed++;
+        } else {
+          log.warn({ leadId, chatId, labelId }, 'Lead label NOT confirmed on server after flush');
+        }
+      }
+      log.info({ userAccountId: account.id, labelId, queued: queuedLead.size, confirmed }, 'Lead label server-side verification');
+    } catch (err: any) {
+      log.error({ userAccountId: account.id, labelId, err: err.message }, 'getChatsByLabelId failed for lead label');
+    }
+  }
+
+  if (account.label_mapping_paid_label_id && queuedPaid.size > 0) {
+    const paidLabelId = account.label_mapping_paid_label_id;
+    try {
+      const chatsOnServer = await session.client.getChatsByLabelId(paidLabelId);
+      const serverChatIds = new Set(chatsOnServer.map((c: any) => c.id._serialized));
+      let confirmed = 0;
+      for (const [chatId, { leadId }] of queuedPaid) {
+        if (serverChatIds.has(chatId)) {
+          await markPaidSynced(leadId);
+          syncedCount++;
+          confirmed++;
+        } else {
+          log.warn({ leadId, chatId, paidLabelId }, 'Paid label NOT confirmed on server after flush');
+        }
+      }
+      log.info({ userAccountId: account.id, paidLabelId, queued: queuedPaid.size, confirmed }, 'Paid label server-side verification');
+    } catch (err: any) {
+      log.error({ userAccountId: account.id, paidLabelId, err: err.message }, 'getChatsByLabelId failed for paid label');
     }
   }
 
