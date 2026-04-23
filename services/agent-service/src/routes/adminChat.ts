@@ -234,11 +234,13 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .eq('id', userId)
         .single();
 
-      // Ищем сообщения по user_account_id ИЛИ telegram_id (только source='bot' или 'admin')
+      // Ищем сообщения по user_account_id ИЛИ telegram_id.
+      // source='ai' — ответы Legacy AI чата (пишет agent-brain через mirrorHook + TelegramCtxAdapter.onReply),
+      // нужны, чтобы админ видел контекст диалога бота с клиентом.
       let query = supabase
         .from('admin_user_chats')
         .select('*')
-        .in('source', ['bot', 'admin'])
+        .in('source', ['bot', 'admin', 'ai'])
         .order('created_at', { ascending: true });
 
       if (user?.telegram_id) {
