@@ -16,6 +16,13 @@ import { notifyAdminGroup, APP_BASE_URL } from '../lib/notificationService.js';
 import { handleOnboardingMessage, type TelegramMessage as OnboardingMessage } from '../lib/telegramOnboarding/index.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { uploadTelegramMediaToStorage } from '../lib/chatMediaHandler.js';
+import {
+  showMainMenu,
+  handleMenuCallback,
+  buildManualLaunchContext,
+  isMenuTrigger,
+  type TelegramCallbackQuery,
+} from '../lib/telegramMenu/index.js';
 
 const log = createLogger({ module: 'telegramWebhook' });
 
@@ -73,6 +80,7 @@ interface TelegramMessage {
 interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 // =====================================================
@@ -94,6 +102,34 @@ export default async function telegramWebhook(app: FastifyInstance) {
   app.post('/telegram/webhook', async (req, res) => {
     try {
       const update = req.body as TelegramUpdate;
+
+      // ===================================================
+      // CALLBACK_QUERY (нажатие inline-кнопки меню)
+      // ===================================================
+      if (update.callback_query) {
+        const cq = update.callback_query;
+        if (!cq.from?.id || !cq.message || cq.message.chat.type !== 'private') {
+          return res.send({ ok: true });
+        }
+
+        const cbTelegramId = String(cq.from.id);
+        const { data: cbUsers } = await supabase
+          .from('user_accounts')
+          .select('id')
+          .eq('telegram_id', cbTelegramId);
+        const cbUser = cbUsers?.[0];
+
+        if (!cbUser) {
+          log.debug({ telegramId: cbTelegramId }, 'callback_query from unknown user');
+          return res.send({ ok: true });
+        }
+
+        // Огонь-и-забудь: меню само отвечает на callback и редактирует сообщение
+        handleMenuCallback(cq, { userAccountId: cbUser.id }).catch(err =>
+          log.error({ error: String(err), telegramId: cbTelegramId }, 'handleMenuCallback failed'),
+        );
+        return res.send({ ok: true });
+      }
 
       // Игнорируем если нет сообщения или отправителя
       if (!update.message?.from?.id) {
@@ -259,12 +295,29 @@ export default async function telegramWebhook(app: FastifyInstance) {
       }
 
       // ===================================================
+      // 2.4. MENU intercept: /menu, "меню", "menu", "главное меню"
+      // — перехватываем до AI-форварда, чтобы не тратить токены на команду
+      // ===================================================
+      if (message.text && isMenuTrigger(message.text)) {
+        log.info({ telegramId, userId: user.id, text: message.text }, 'Menu trigger — showing main menu');
+        showMainMenu(message.chat.id, { userAccountId: user.id }).catch(err =>
+          log.error({ error: String(err), telegramId }, 'showMainMenu failed'),
+        );
+        return res.send({ ok: true });
+      }
+
+      // ===================================================
       // 2.5. Legacy AI chat — forward TEXT messages to agent-brain
       // (только текст; voice/photo пока обрабатываем как раньше — только в admin_user_chats)
       // ===================================================
       const aiEnabled = ENABLE_LEGACY_AI_CHAT && !user.ai_disabled && !!message.text && !!TELEGRAM_BOT_TOKEN;
 
       if (aiEnabled) {
+        // Если активен flow "Ручной запуск" (step=await_input) — инжектим контекст для AI.
+        // Контекст дописывается к message.text (а не в system prompt), чтобы не менять контракт
+        // agent-brain /legacy-message. Пользователь текст не видит (идёт только в agent-brain).
+        const manualCtx = buildManualLaunchContext(telegramId);
+        const effectiveMessage: string = manualCtx ? `${message.text!}${manualCtx}` : message.text!;
         // Огонь-и-забудь: agent-brain сам стримит ответ через TelegramCtxAdapter,
         // мы только инициируем обработку и отвечаем 200 Telegram'у сразу.
         const forwardStartedAt = Date.now();
@@ -280,7 +333,8 @@ export default async function telegramWebhook(app: FastifyInstance) {
           userId: user.id,
           agentBrainUrl: AGENT_BRAIN_URL,
           hasSecret: !!INTERNAL_API_SECRET,
-          msgLen: message.text!.length
+          msgLen: effectiveMessage.length,
+          manualContextInjected: !!manualCtx,
         }, 'Forwarding to agent-brain (legacy AI chat)');
 
         fetch(`${AGENT_BRAIN_URL}/api/brain/telegram/legacy-message`, {
@@ -289,7 +343,7 @@ export default async function telegramWebhook(app: FastifyInstance) {
           signal: controller.signal,
           body: JSON.stringify({
             telegramChatId: telegramId,
-            message: message.text,
+            message: effectiveMessage,
             telegramMessageId,
             from: message.from
           })
@@ -408,7 +462,7 @@ export default async function telegramWebhook(app: FastifyInstance) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url,
-          allowed_updates: ['message']
+          allowed_updates: ['message', 'callback_query']
         })
       });
 
@@ -416,6 +470,28 @@ export default async function telegramWebhook(app: FastifyInstance) {
 
       if (result.ok) {
         log.info({ result }, 'Telegram webhook set successfully');
+
+        // Регистрируем /menu в списке команд бота (best-effort)
+        try {
+          const cmdRes = await fetch(`${TELEGRAM_API_URL}/setMyCommands`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              commands: [
+                { command: 'menu', description: 'Главное меню' },
+              ],
+            }),
+          });
+          const cmdJson = await cmdRes.json();
+          if (!cmdJson.ok) {
+            log.warn({ cmdJson }, 'setMyCommands returned non-OK (non-fatal)');
+          } else {
+            log.info('setMyCommands: /menu registered');
+          }
+        } catch (cmdErr: any) {
+          log.warn({ error: String(cmdErr) }, 'setMyCommands failed (non-fatal)');
+        }
+
         return res.send({ success: true, result });
       } else {
         log.error({ result }, 'Failed to set Telegram webhook');
