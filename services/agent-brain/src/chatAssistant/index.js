@@ -1088,12 +1088,53 @@ export function registerChatRoutes(fastify) {
       return reply.code(500).send({ error: 'bot token not configured' });
     }
 
+    // Shared helper: write any bot-to-user message into admin_user_chats so admins
+    // see the full dialog (not just the final AI answer). Used by:
+    //   - mirrorHook (role='assistant', final AI reply from orchestrator)
+    //   - ctx.onReply (every raw ctx.reply: ⏳ locks, ❌ errors, approval buttons, /clear, /mode, fallbacks)
+    // Suppressed via options.__skipMirror for the streaming placeholder in TelegramStreamer.
+    const saveBotMessageToAdmin = async (content) => {
+      if (!content || typeof content !== 'string' || !content.trim()) return;
+      const chatIdStr = String(telegramChatId);
+      try {
+        const { data: ua } = await supabase
+          .from('user_accounts')
+          .select('id')
+          .or(`telegram_id.eq.${chatIdStr},telegram_id_2.eq.${chatIdStr},telegram_id_3.eq.${chatIdStr},telegram_id_4.eq.${chatIdStr}`)
+          .limit(1)
+          .single();
+
+        if (!ua) {
+          log.warn({ phase: 'mirror_no_user' }, 'saveBotMessageToAdmin: no user_account found');
+          return;
+        }
+
+        const { error: insertErr } = await supabase.from('admin_user_chats').insert({
+          user_account_id: ua.id,
+          telegram_id: chatIdStr,
+          direction: 'to_user',
+          source: 'ai',
+          message: content,
+          delivered: true
+        });
+
+        if (insertErr) {
+          log.warn({ phase: 'mirror_insert_error', error: insertErr.message }, 'Failed to mirror bot message');
+        } else {
+          log.debug({ phase: 'mirror_ok', userAccountId: ua.id }, 'Bot message mirrored to admin_user_chats');
+        }
+      } catch (err) {
+        log.warn({ phase: 'mirror_exception', error: err.message }, 'saveBotMessageToAdmin threw');
+      }
+    };
+
     try {
       const ctx = new TelegramCtxAdapter({
         telegramChatId,
         botToken,
         from: from || null,
-        messageId: telegramMessageId || null
+        messageId: telegramMessageId || null,
+        onReply: ({ text }) => saveBotMessageToAdmin(text)
       });
 
       // 3. Daily limit check — fail-closed (refuse if over limit)
@@ -1121,38 +1162,7 @@ export function registerChatRoutes(fastify) {
       // User messages are already saved by agent-service/telegramWebhook before forwarding here.
       const mirrorHook = async ({ role, content }) => {
         if (role !== 'assistant') return;
-
-        const chatIdStr = String(telegramChatId);
-        try {
-          const { data: ua } = await supabase
-            .from('user_accounts')
-            .select('id')
-            .or(`telegram_id.eq.${chatIdStr},telegram_id_2.eq.${chatIdStr},telegram_id_3.eq.${chatIdStr},telegram_id_4.eq.${chatIdStr}`)
-            .limit(1)
-            .single();
-
-          if (!ua) {
-            log.warn({ phase: 'mirror_no_user' }, 'mirrorHook: no user_account found');
-            return;
-          }
-
-          const { error: insertErr } = await supabase.from('admin_user_chats').insert({
-            user_account_id: ua.id,
-            telegram_id: chatIdStr,
-            direction: 'to_user',
-            source: 'ai',
-            message: content,
-            delivered: true
-          });
-
-          if (insertErr) {
-            log.warn({ phase: 'mirror_insert_error', error: insertErr.message }, 'Failed to mirror assistant message');
-          } else {
-            log.debug({ phase: 'mirror_ok', userAccountId: ua.id }, 'Assistant message mirrored to admin_user_chats');
-          }
-        } catch (err) {
-          log.warn({ phase: 'mirror_exception', error: err.message }, 'mirrorHook threw');
-        }
+        await saveBotMessageToAdmin(content);
       };
 
       log.info({ phase: 'handler_start' }, 'Invoking handleTelegramMessage');
@@ -1188,7 +1198,11 @@ export function registerChatRoutes(fastify) {
 
       // Best-effort: notify the user that AI is temporarily unavailable so they aren't left in silence
       try {
-        const ctx = new TelegramCtxAdapter({ telegramChatId, botToken });
+        const ctx = new TelegramCtxAdapter({
+          telegramChatId,
+          botToken,
+          onReply: ({ text }) => saveBotMessageToAdmin(text)
+        });
         await ctx.reply('⚠️ Извините, AI временно недоступен. Админ скоро ответит.');
       } catch (replyErr) {
         log.warn({ phase: 'fallback_reply_failed', error: replyErr.message }, 'Failed to send fallback message');

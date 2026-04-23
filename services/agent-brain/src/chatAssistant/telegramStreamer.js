@@ -70,7 +70,9 @@ export class TelegramStreamer {
    */
   async start() {
     try {
-      const msg = await this.ctx.reply('⏳ Обрабатываю запрос...');
+      // __skipMirror: placeholder is replaced by streaming edits; final content is mirrored
+      // via the mirrorHook('assistant', finalResult.content) call in telegramHandler.js
+      const msg = await this.ctx.reply('⏳ Обрабатываю запрос...', { __skipMirror: true });
       this.messageId = msg.message_id;
       return this;
     } catch (error) {

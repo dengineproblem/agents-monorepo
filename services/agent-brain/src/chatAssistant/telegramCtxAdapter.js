@@ -81,8 +81,12 @@ export class TelegramCtxAdapter {
    * @param {string} params.botToken - Bot token (from BOT_FATHER)
    * @param {Object} [params.from] - Optional Telegram user object
    * @param {string|number} [params.messageId] - ID of incoming message (for replies)
+   * @param {Function} [params.onReply] - Optional async callback({ text, options, messageId })
+   *                                       fired after every successful ctx.reply(). Used to mirror
+   *                                       bot replies into admin_user_chats. Pass options.__skipMirror=true
+   *                                       to suppress it for a specific reply (e.g. streaming placeholder).
    */
-  constructor({ telegramChatId, botToken, from = null, messageId = null }) {
+  constructor({ telegramChatId, botToken, from = null, messageId = null, onReply = null }) {
     if (!botToken) {
       throw new Error('TelegramCtxAdapter: botToken is required');
     }
@@ -95,17 +99,25 @@ export class TelegramCtxAdapter {
     this.chat = { id: this._chatId };
     this.from = from;
     this.message = messageId ? { message_id: Number(messageId) } : null;
+    this._onReply = typeof onReply === 'function' ? onReply : null;
   }
 
   /**
    * grammY-style ctx.reply — отправляет в текущий чат
    * @param {string} text
-   * @param {Object} [options] - parse_mode, reply_markup, etc.
+   * @param {Object} [options] - parse_mode, reply_markup, etc. Pass __skipMirror:true to opt out of onReply hook.
    * @returns {Promise<{message_id: number}>}
    */
   async reply(text, options = {}) {
+    const { __skipMirror, ...tgOptions } = options;
     try {
-      return await this.api.sendMessage(this._chatId, text, options);
+      const result = await this.api.sendMessage(this._chatId, text, tgOptions);
+      if (this._onReply && !__skipMirror) {
+        Promise.resolve(this._onReply({ text, options: tgOptions, messageId: result?.message_id })).catch(err =>
+          logger.warn({ error: err.message, chatId: this._chatId }, 'TelegramCtxAdapter onReply hook failed')
+        );
+      }
+      return result;
     } catch (error) {
       logger.warn({ error: error.message, chatId: this._chatId }, 'TelegramCtxAdapter.reply failed');
       throw error;
