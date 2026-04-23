@@ -14,6 +14,7 @@ export interface AdAttribution {
   sourceUrl: string | null;
   mediaUrl: string | null;
   sourceApp: string | null;
+  ctwaClid: string | null;
   pattern: 'ctwa_context' | 'url_match' | 'unattributed' | 'none';
 }
 
@@ -22,6 +23,7 @@ const EMPTY: AdAttribution = {
   sourceUrl: null,
   mediaUrl: null,
   sourceApp: null,
+  ctwaClid: null,
   pattern: 'none',
 };
 
@@ -33,6 +35,30 @@ export function extractAdAttribution(messages: any[]): AdAttribution {
   for (const msg of messages) {
     const rd = msg.rawData || msg._data;
 
+    const contextInfo = rd?.contextInfo ||
+                        rd?.message?.contextInfo ||
+                        rd?.message?.extendedTextMessage?.contextInfo;
+    const externalAd = contextInfo?.externalAdReply;
+    const referral = contextInfo?.referral || rd?.referral;
+    const conversationContext = rd?.conversationContext;
+    const referredProductPromotion = contextInfo?.referredProductPromotion || rd?.referredProductPromotion;
+
+    const ctwaClid = normalizeValue(
+      rd?.ctwaContext?.ctwaClid ??
+      rd?.ctwaContext?.ctwa_clid ??
+      externalAd?.ctwaClid ??
+      externalAd?.ctwa_clid ??
+      referral?.ctwaClid ??
+      referral?.ctwa_clid ??
+      conversationContext?.ctwaClid ??
+      conversationContext?.ctwa_clid ??
+      referredProductPromotion?.ctwaClid ??
+      referredProductPromotion?.ctwa_clid ??
+      rd?.ctwaClid ??
+      rd?.ctwa_clid ??
+      null
+    );
+
     // Паттерн 1: ctwaContext (основной для wwebjs)
     const ctwa = rd?.ctwaContext;
     if (ctwa?.sourceId) {
@@ -41,33 +67,31 @@ export function extractAdAttribution(messages: any[]): AdAttribution {
         sourceUrl: normalizeValue(ctwa.sourceUrl),
         mediaUrl: normalizeValue(ctwa.mediaUrl),
         sourceApp: normalizeValue(ctwa.sourceApp),
+        ctwaClid,
         pattern: 'ctwa_context',
       };
     }
 
     // Паттерн 1b: contextInfo.externalAdReply (fallback, формат Evolution)
-    const contextInfo = rd?.contextInfo ||
-                        rd?.message?.contextInfo ||
-                        rd?.message?.extendedTextMessage?.contextInfo;
-    const externalAd = contextInfo?.externalAdReply;
     if (externalAd?.sourceId) {
       return {
         sourceId: normalizeValue(externalAd.sourceId),
         sourceUrl: normalizeValue(externalAd.sourceUrl),
         mediaUrl: normalizeValue(externalAd.mediaUrl),
         sourceApp: null,
+        ctwaClid,
         pattern: 'ctwa_context',
       };
     }
 
     // Паттерн 1c: referral
-    const referral = contextInfo?.referral || rd?.referral;
     if (referral?.sourceId || referral?.source_id) {
       return {
         sourceId: normalizeValue(referral.sourceId || referral.source_id),
         sourceUrl: normalizeValue(referral.sourceUrl || referral.source_url),
         mediaUrl: normalizeValue(referral.mediaUrl || referral.image_url || referral.video_url),
         sourceApp: null,
+        ctwaClid,
         pattern: 'ctwa_context',
       };
     }
@@ -83,6 +107,7 @@ export function extractAdAttribution(messages: any[]): AdAttribution {
           sourceUrl: l.link,
           mediaUrl: null,
           sourceApp: l.link.includes('instagram.com') ? 'instagram' : 'facebook',
+          ctwaClid: null,
           pattern: 'url_match',
         };
       }
@@ -97,6 +122,7 @@ export function extractAdAttribution(messages: any[]): AdAttribution {
         sourceUrl: urlMatch[0],
         mediaUrl: null,
         sourceApp: urlMatch[0].includes('instagram.com') ? 'instagram' : 'facebook',
+        ctwaClid: null,
         pattern: 'url_match',
       };
     }

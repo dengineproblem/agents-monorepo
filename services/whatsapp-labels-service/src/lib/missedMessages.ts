@@ -366,7 +366,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
           if (pushed) {
             recoveredCount++;
             // Обновляем атрибуцию лида (async, не блокирует recovery)
-            updateLeadAttribution(resolvedPhone, account.id, attribution).catch((err: any) => {
+            updateLeadAttribution(resolvedPhone, account.id, instanceName, attribution).catch((err: any) => {
               log.error({ contactPhone: resolvedPhone, err: err.message }, 'Failed to update lead attribution');
             });
           }
@@ -427,7 +427,7 @@ async function recoverAccountMessages(account: WwebjsAccount): Promise<number> {
           recoveredCount++;
           // Обновляем атрибуцию если найдены ad-метаданные (не unattributed для dialog_miss)
           if (dialogAttribution.pattern !== 'none') {
-            updateLeadAttribution(resolvedPhone, account.id, dialogAttribution).catch((err: any) => {
+            updateLeadAttribution(resolvedPhone, account.id, instanceName, dialogAttribution).catch((err: any) => {
               log.error({ contactPhone: resolvedPhone, err: err.message }, 'Failed to update lead attribution (dialog_miss)');
             });
           }
