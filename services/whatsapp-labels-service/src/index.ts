@@ -8,6 +8,7 @@ import { registerSyncRoutes } from './routes/sync.js';
 import { registerRecoveryRoutes } from './routes/recovery.js';
 import { registerQualificationRoutes } from './routes/qualification.js';
 import { registerDebugLabelsRoutes } from './routes/debugLabels.js';
+import { registerDebugBackfillLeadRoutes } from './routes/debugBackfillLead.js';
 
 const log = pino({ name: 'whatsapp-labels-service' });
 
@@ -21,6 +22,7 @@ registerSyncRoutes(app);
 registerRecoveryRoutes(app);
 registerQualificationRoutes(app);
 registerDebugLabelsRoutes(app);
+registerDebugBackfillLeadRoutes(app);
 
 // Start server
 const port = parseInt(process.env.PORT || '8089');
