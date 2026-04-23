@@ -108,9 +108,7 @@ async function applyAttribution(
     return;
   }
 
-  const update: Record<string, any> = {
-    ad_attribution_source: getAttributionSource(attribution.pattern),
-  };
+  const update: Record<string, any> = {};
 
   if (attribution.sourceId) update.source_id = attribution.sourceId;
   if (attribution.ctwaClid) update.ctwa_clid = attribution.ctwaClid;
@@ -186,7 +184,6 @@ async function createLead(
     direction_id: directionId,
     whatsapp_phone_number_id: whatsappPhoneNumberId,
     ctwa_clid: attribution.ctwaClid,
-    ad_attribution_source: getAttributionSource(attribution.pattern),
     funnel_stage: 'new_lead',
     status: 'active',
     created_at: now,
@@ -209,15 +206,6 @@ async function createLead(
     creativeId,
     directionId,
   }, 'Lead created from wwebjs recovery');
-}
-
-function getAttributionSource(pattern: AdAttribution['pattern']): string {
-  switch (pattern) {
-    case 'ctwa_context': return 'wwebjs_recovery';
-    case 'url_match': return 'wwebjs_url_match';
-    case 'unattributed': return 'wwebjs_unattributed';
-    default: return 'wwebjs_unknown';
-  }
 }
 
 async function resolveCreative(
