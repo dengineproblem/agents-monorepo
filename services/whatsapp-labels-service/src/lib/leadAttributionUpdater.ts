@@ -186,6 +186,7 @@ async function createLead(
     ctwa_clid: attribution.ctwaClid,
     funnel_stage: 'new_lead',
     status: 'active',
+    needs_manual_match: !creativeId,
     created_at: now,
     updated_at: now,
   };
