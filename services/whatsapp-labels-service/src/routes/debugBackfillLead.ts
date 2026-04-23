@@ -92,6 +92,14 @@ export function registerDebugBackfillLeadRoutes(app: FastifyInstance): void {
           chatId: chat.id._serialized,
           messageCount: incoming.length,
           attribution,
+          messages: incoming.map((m: any) => ({
+            type: m.type,
+            timestamp: m.timestamp,
+            fromMe: m.fromMe,
+            body: m.body?.slice(0, 100) || null,
+            hasMedia: m.hasMedia,
+            caption: (m._data?.caption || m.caption)?.slice(0, 100) || null,
+          })),
         };
       } catch (err: any) {
         await destroySession(userAccountId);
