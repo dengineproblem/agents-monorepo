@@ -19,10 +19,12 @@ import { uploadTelegramMediaToStorage } from '../lib/chatMediaHandler.js';
 import {
   showMainMenu,
   handleMenuCallback,
-  buildManualLaunchContext,
+  isManualLaunchAwaiting,
+  handleManualLaunchInput,
   isMenuTrigger,
   type TelegramCallbackQuery,
 } from '../lib/telegramMenu/index.js';
+import { clearMenuFlow } from '../lib/telegramMenu/session.js';
 
 const log = createLogger({ module: 'telegramWebhook' });
 
@@ -296,12 +298,27 @@ export default async function telegramWebhook(app: FastifyInstance) {
 
       // ===================================================
       // 2.4. MENU intercept: /menu, "меню", "menu", "главное меню"
-      // — перехватываем до AI-форварда, чтобы не тратить токены на команду
+      // — перехватываем до AI-форварда, чтобы не тратить токены на команду.
+      // Заодно сбрасываем активный flow "Ручного запуска" (если был).
       // ===================================================
       if (message.text && isMenuTrigger(message.text)) {
         log.info({ telegramId, userId: user.id, text: message.text }, 'Menu trigger — showing main menu');
+        clearMenuFlow(telegramId);
         showMainMenu(message.chat.id, { userAccountId: user.id }).catch(err =>
           log.error({ error: String(err), telegramId }, 'showMainMenu failed'),
+        );
+        return res.send({ ok: true });
+      }
+
+      // ===================================================
+      // 2.4b. MANUAL LAUNCH intercept: если юзер в flow await_input —
+      // парсим "1, 3 бюджет $10" локально и вызываем createAdSet напрямую (без AI).
+      // Работает независимо от Toggle AI.
+      // ===================================================
+      if (message.text && isManualLaunchAwaiting(telegramId)) {
+        log.info({ telegramId, userId: user.id }, 'Manual launch input — handling autonomously');
+        handleManualLaunchInput(telegramId, message.text, message.chat.id, { userAccountId: user.id }).catch(err =>
+          log.error({ error: String(err), telegramId }, 'handleManualLaunchInput failed'),
         );
         return res.send({ ok: true });
       }
@@ -313,11 +330,7 @@ export default async function telegramWebhook(app: FastifyInstance) {
       const aiEnabled = ENABLE_LEGACY_AI_CHAT && !user.ai_disabled && !!message.text && !!TELEGRAM_BOT_TOKEN;
 
       if (aiEnabled) {
-        // Если активен flow "Ручной запуск" (step=await_input) — инжектим контекст для AI.
-        // Контекст дописывается к message.text (а не в system prompt), чтобы не менять контракт
-        // agent-brain /legacy-message. Пользователь текст не видит (идёт только в agent-brain).
-        const manualCtx = buildManualLaunchContext(telegramId);
-        const effectiveMessage: string = manualCtx ? `${message.text!}${manualCtx}` : message.text!;
+        const effectiveMessage: string = message.text!;
         // Огонь-и-забудь: agent-brain сам стримит ответ через TelegramCtxAdapter,
         // мы только инициируем обработку и отвечаем 200 Telegram'у сразу.
         const forwardStartedAt = Date.now();
@@ -334,7 +347,6 @@ export default async function telegramWebhook(app: FastifyInstance) {
           agentBrainUrl: AGENT_BRAIN_URL,
           hasSecret: !!INTERNAL_API_SECRET,
           msgLen: effectiveMessage.length,
-          manualContextInjected: !!manualCtx,
         }, 'Forwarding to agent-brain (legacy AI chat)');
 
         fetch(`${AGENT_BRAIN_URL}/api/brain/telegram/legacy-message`, {

@@ -42,6 +42,7 @@ import {
   type ManualLaunchCreative,
 } from './session.js';
 import { mirrorMenuReply } from './mirror.js';
+import { parseManualLaunchInput } from './parser.js';
 
 const log = createLogger({ module: 'telegramMenu' });
 
@@ -149,39 +150,114 @@ export async function handleMenuCallback(
 }
 
 /**
- * Проверяет: если у юзера активен flow "Ручной запуск" на шаге await_input —
- * возвращает блок контекста для инжекта в AI-запрос (и сбрасывает flow).
- * Возвращает '' если flow неактивен.
- *
- * Важно: context НЕ меняет message.text пользователя — он дописывается в системную инструкцию
- * через поле `extra_system` при форварде в agent-brain.
+ * Проверяет, находится ли пользователь в активном шаге "Ручного запуска"
+ * (ожидает ввод номеров креативов и бюджета).
+ * Используется в webhook'е чтобы перехватить текст ДО AI-форварда.
  */
-export function buildManualLaunchContext(telegramId: string): string {
+export function isManualLaunchAwaiting(telegramId: string): boolean {
   const flow = getMenuFlow(telegramId);
-  if (!flow) return '';
-  if (flow.flow !== 'manual_launch' || flow.step !== 'await_input') return '';
-  if (!flow.data.selectedDirectionId) return '';
+  return !!(
+    flow &&
+    flow.flow === 'manual_launch' &&
+    flow.step === 'await_input' &&
+    flow.data.selectedDirectionId &&
+    flow.data.creatives
+  );
+}
 
-  const dirName = flow.data.selectedDirectionName || 'N/A';
-  const dirId = flow.data.selectedDirectionId;
-  const creatives = flow.data.creatives || [];
-  const creativesList = creatives
-    .map(c => `  ${c.index}. ${c.name} (ID: ${c.id})`)
-    .join('\n');
+/**
+ * Автономный обработчик ввода "1, 3 бюджет $10" без AI:
+ * парсит строку, маппит индексы → creative UUIDs и вызывает tool `createAdSet` напрямую.
+ * Возвращает true если сообщение было обработано (включая ошибки парсинга — ошибка отправляется юзеру).
+ */
+export async function handleManualLaunchInput(
+  telegramId: string,
+  text: string,
+  chatId: number,
+  ctx: MenuContext,
+): Promise<boolean> {
+  const flow = getMenuFlow(telegramId);
+  if (
+    !flow ||
+    flow.flow !== 'manual_launch' ||
+    flow.step !== 'await_input' ||
+    !flow.data.selectedDirectionId ||
+    !flow.data.creatives
+  ) {
+    return false;
+  }
+
+  const mirror = (t: string) => mirrorMenuReply(ctx.userAccountId, chatId, t);
+  const parsed = parseManualLaunchInput(text, flow.data.creatives);
+
+  if (!parsed.ok) {
+    // flow не сбрасываем — даём юзеру возможность повторить ввод
+    const errText = `❌ ${parsed.error}`;
+    await sendMessage(chatId, errText);
+    await mirror(errText);
+    return true;
+  }
 
   clearMenuFlow(telegramId);
 
-  log.info({ telegramId, dirId, dirName, creativesCount: creatives.length }, 'Manual launch context injected');
+  const dirName = flow.data.selectedDirectionName || 'направление';
+  const budgetLabel = parsed.dailyBudgetCents
+    ? ` на $${(parsed.dailyBudgetCents / 100).toFixed(2)}/день`
+    : '';
+  const loadText = `⏳ Создаю адсет с ${parsed.creativeIds.length} креативом(ами)${budgetLabel}...`;
+  await sendMessage(chatId, loadText);
 
-  return [
-    '',
-    '[КОНТЕКСТ: Пользователь в режиме "Ручной запуск".',
-    `Направление: "${dirName}" (direction_id: ${dirId}).`,
-    creatives.length ? `Доступные креативы:\n${creativesList}` : 'Креативов в направлении нет.',
-    'Пользователь выбирает номера креативов и бюджет для создания адсета.',
-    'Используй tool createAdSet с creative_ids (UUID креативов по номерам) и direction_id.',
-    'НЕ меняй бюджет направления — создай новый адсет.]',
-  ].join('\n');
+  const toolInput: Record<string, any> = {
+    direction_id: flow.data.selectedDirectionId,
+    creative_ids: parsed.creativeIds,
+    start_mode: 'now',
+  };
+  if (parsed.dailyBudgetCents) toolInput.daily_budget_cents = parsed.dailyBudgetCents;
+
+  log.info(
+    {
+      telegramId,
+      userAccountId: ctx.userAccountId,
+      direction_id: flow.data.selectedDirectionId,
+      creativeIndices: parsed.creativeIndices,
+      dailyBudgetCents: parsed.dailyBudgetCents,
+    },
+    'AUDIT: Manual launch createAdSet',
+  );
+
+  const result = await executeTool('createAdSet', buildToolInput(ctx, toolInput));
+  const ex = extractToolResult(result);
+
+  let reply: string;
+  let useMarkdown = true;
+  if (!ex.ok) {
+    reply = `❌ Не удалось создать адсет: ${ex.error}`;
+    useMarkdown = false;
+  } else {
+    const d = ex.data || {};
+    const adsetName = d.adset_name || 'Новый адсет';
+    const adsetId = d.adset_id;
+    const adsCreated = d.ads_created ?? parsed.creativeIds.length;
+    const lines: string[] = [
+      `✅ *Адсет создан в направлении "${escapeMd(dirName)}"*`,
+      '',
+      `📌 ${escapeMd(adsetName)}`,
+    ];
+    if (adsetId) lines.push(`🆔 \`${adsetId}\``);
+    lines.push(`🎨 Креативов: *${adsCreated}*`);
+    if (parsed.dailyBudgetCents) {
+      lines.push(`💰 Бюджет: *$${(parsed.dailyBudgetCents / 100).toFixed(2)}/день*`);
+    }
+    reply = lines.join('\n');
+  }
+
+  try {
+    await sendMessage(chatId, reply, useMarkdown ? { parse_mode: 'Markdown' } : undefined);
+  } catch {
+    await sendMessage(chatId, reply);
+  }
+  await mirror(reply);
+  return true;
 }
 
 // =====================================================
