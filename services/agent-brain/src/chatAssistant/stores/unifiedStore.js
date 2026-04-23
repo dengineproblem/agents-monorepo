@@ -139,23 +139,29 @@ export class UnifiedConversationStore {
     // Also check for stale locks (older than LOCK_TIMEOUT_MINUTES)
     const staleThreshold = new Date(Date.now() - LOCK_TIMEOUT_MINUTES * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    // NB: do NOT chain .select() here — combining Prefer: return=representation
+    // with .or(...) on an RLS-enabled table triggers a PostgREST bug that returns
+    // 42703 "column does not exist" for any column referenced in the or filter.
+    // Using { count: 'exact' } keeps the update atomic and tells us whether the
+    // row was actually locked by this call (count === 1) or already held (count === 0).
+    const { error, count } = await supabase
       .from('ai_conversations')
-      .update({
-        is_processing: true,
-        processing_started_at: new Date().toISOString()
-      })
+      .update(
+        {
+          is_processing: true,
+          processing_started_at: new Date().toISOString()
+        },
+        { count: 'exact' }
+      )
       .eq('id', conversationId)
-      .or(`is_processing.eq.false,processing_started_at.lt.${staleThreshold}`)
-      .select('id')
-      .single();
+      .or(`is_processing.eq.false,processing_started_at.lt.${staleThreshold}`);
 
-    if (error && error.code !== 'PGRST116') {
+    if (error) {
       logger.error({ error, conversationId }, 'Error acquiring lock');
       return false;
     }
 
-    return !!data;
+    return count === 1;
   }
 
   /**
