@@ -42,8 +42,8 @@ import { generateAdsetName } from '../lib/adsetNaming.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 import { buildAdCreative } from '../lib/buildAdCreative.js';
-import { graph as fbGraph } from '../adapters/facebook.js';
-import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
+import { graph as fbGraph, graphBatch, parseBatchBody, type BatchRequest } from '../adapters/facebook.js';
+import { saveAdCreativeMapping, saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -2164,4 +2164,437 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   });
+
+  /**
+   * GET /api/campaign-builder/direction/:direction_id/active-adsets
+   *
+   * Возвращает список активных (effective_status=ACTIVE) ad sets кампании направления
+   * напрямую из Facebook, обогащая ads_count из direction_adsets (если запись есть).
+   * Используется в Manual Launch для режима "добавить креативы в существующие адсеты".
+   */
+  fastify.get<{
+    Params: { direction_id: string };
+    Querystring: { account_id?: string };
+  }>(
+    '/direction/:direction_id/active-adsets',
+    async (request, reply) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'getActiveAdsets');
+      const { direction_id } = request.params;
+      const account_id = request.query.account_id;
+
+      try {
+        const { data: direction, error: directionError } = await supabase
+          .from('account_directions')
+          .select('id, name, user_account_id, fb_campaign_id, account_id, is_active')
+          .eq('id', direction_id)
+          .single();
+
+        if (directionError || !direction) {
+          return reply.status(404).send({ success: false, error: 'Direction not found' });
+        }
+        if (!direction.fb_campaign_id) {
+          return reply.status(400).send({ success: false, error: 'Direction has no Facebook campaign' });
+        }
+
+        const credentials = await getCredentials(
+          direction.user_account_id,
+          account_id || direction.account_id || undefined,
+        );
+
+        if (!credentials.fbAccessToken) {
+          return reply.status(400).send({ success: false, error: 'Missing Facebook access token' });
+        }
+
+        // Достаём активные адсеты прямо из FB (учитывает изменения через Ads Manager).
+        const fbResponse = await fbGraph(
+          'GET',
+          `${direction.fb_campaign_id}/adsets`,
+          credentials.fbAccessToken,
+          {
+            effective_status: JSON.stringify(['ACTIVE']),
+            fields: 'id,name,daily_budget,optimization_goal,effective_status',
+            limit: '100',
+          }
+        );
+
+        const fbAdsets: Array<any> = fbResponse?.data || [];
+
+        if (fbAdsets.length === 0) {
+          return reply.send({ success: true, adsets: [] });
+        }
+
+        // Подтягиваем ads_count из БД (для адсетов которых там нет — 0).
+        const fbIds = fbAdsets.map(a => String(a.id));
+        const { data: dbRows } = await supabase
+          .from('direction_adsets')
+          .select('fb_adset_id, ads_count')
+          .eq('direction_id', direction_id)
+          .in('fb_adset_id', fbIds);
+
+        const adsCountMap = new Map<string, number>(
+          (dbRows || []).map((r: any) => [String(r.fb_adset_id), Number(r.ads_count) || 0])
+        );
+
+        const adsets = fbAdsets.map(a => ({
+          fb_adset_id: String(a.id),
+          name: a.name as string,
+          daily_budget: a.daily_budget ? Number(a.daily_budget) : null, // в центах
+          optimization_goal: a.optimization_goal || null,
+          ads_count: adsCountMap.get(String(a.id)) ?? 0,
+        }));
+
+        log.info({ direction_id, count: adsets.length }, 'Active adsets fetched');
+        return reply.send({ success: true, adsets });
+      } catch (err: any) {
+        log.error({ err, direction_id }, 'Failed to fetch active adsets');
+        return reply.status(500).send({
+          success: false,
+          error: err?.message || 'Failed to fetch active adsets',
+        });
+      }
+    }
+  );
+
+  /**
+   * POST /api/campaign-builder/manual-launch-existing
+   *
+   * Добавляет креативы как новые Ads в УЖЕ существующие активные адсеты направления.
+   * Настройки самих адсетов (бюджет/таргетинг/optimization_goal) НЕ меняются.
+   * Каждый креатив × каждый выбранный адсет = одно объявление (декартово произведение).
+   */
+  fastify.post(
+    '/manual-launch-existing',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['user_account_id', 'direction_id', 'creative_ids', 'target_adset_ids'],
+          properties: {
+            user_account_id: { type: 'string', format: 'uuid' },
+            account_id: {
+              oneOf: [
+                { type: 'string', format: 'uuid' },
+                { type: 'null' }
+              ]
+            },
+            direction_id: { type: 'string', format: 'uuid' },
+            creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
+            target_adset_ids: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          },
+        },
+      },
+    },
+    async (request: any, reply: any) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'manualLaunchExisting');
+      const { user_account_id, account_id, direction_id, creative_ids, target_adset_ids } = request.body as {
+        user_account_id: string;
+        account_id?: string | null;
+        direction_id: string;
+        creative_ids: string[];
+        target_adset_ids: string[];
+      };
+
+      log.info({
+        userAccountId: user_account_id,
+        directionId: direction_id,
+        creativeCount: creative_ids.length,
+        targetAdsetCount: target_adset_ids.length,
+      }, 'Manual launch into existing adsets request');
+
+      try {
+        const credentials = await getCredentials(user_account_id, account_id || undefined);
+        if (!credentials.fbAccessToken || !credentials.fbAdAccountId) {
+          return reply.status(400).send({ success: false, error: 'Missing Facebook credentials' });
+        }
+
+        const { data: direction, error: directionError } = await supabase
+          .from('account_directions')
+          .select('id, name, fb_campaign_id, account_id, is_active')
+          .eq('id', direction_id)
+          .eq('user_account_id', user_account_id)
+          .single();
+
+        if (directionError || !direction) {
+          return reply.status(404).send({ success: false, error: 'Direction not found' });
+        }
+        if (!direction.fb_campaign_id) {
+          return reply.status(400).send({ success: false, error: 'Direction has no Facebook campaign' });
+        }
+
+        const { data: creatives, error: creativesError } = await supabase
+          .from('user_creatives')
+          .select('id, title, status, direction_id')
+          .in('id', creative_ids)
+          .eq('user_id', user_account_id)
+          .eq('status', 'ready');
+
+        if (creativesError || !creatives || creatives.length === 0) {
+          return reply.status(400).send({ success: false, error: 'No valid creatives found' });
+        }
+
+        // Тянем актуальное состояние выбранных адсетов из FB одним batch
+        // (имя, daily_budget, ads.summary для лимита 50).
+        const adsetInfoBatch: BatchRequest[] = target_adset_ids.map(id => ({
+          method: 'GET' as const,
+          relative_url: `${id}?fields=id,name,daily_budget,effective_status,ads.summary(true).limit(0)`,
+        }));
+        const adsetInfoResponses = await graphBatch(credentials.fbAccessToken, adsetInfoBatch);
+
+        type AdsetInfo = {
+          id: string;
+          name: string;
+          daily_budget?: string;
+          effective_status?: string;
+          ads?: { summary?: { total_count?: number } };
+        };
+
+        const adsetInfos = new Map<string, AdsetInfo>();
+        for (let i = 0; i < adsetInfoResponses.length; i++) {
+          const parsed = parseBatchBody<AdsetInfo>(adsetInfoResponses[i]);
+          if (parsed.success && parsed.data?.id) {
+            adsetInfos.set(String(parsed.data.id), parsed.data);
+          } else {
+            log.warn({ adset_id: target_adset_ids[i], error: parsed.error }, 'Failed to fetch adset info');
+          }
+        }
+
+        // Лимит 50 ads на адсет — валидация перед вызовом FB.
+        const willCreatePerAdset = creatives.length;
+        const overLimit: Array<{ adset_id: string; current: number; will_add: number }> = [];
+        for (const adsetId of target_adset_ids) {
+          const info = adsetInfos.get(adsetId);
+          const currentCount = info?.ads?.summary?.total_count ?? 0;
+          if (currentCount + willCreatePerAdset > 50) {
+            overLimit.push({ adset_id: adsetId, current: currentCount, will_add: willCreatePerAdset });
+          }
+        }
+        if (overLimit.length > 0) {
+          return reply.status(400).send({
+            success: false,
+            error: `Превышение лимита 50 объявлений в адсете(ах): ${overLimit.map(o => `${o.adset_id} (${o.current}+${o.will_add})`).join(', ')}`,
+            over_limit: overLimit,
+          });
+        }
+
+        // Пересобираем AdCreative для каждого user_creative один раз
+        // (используется во всех адсетах, FB AdCreative не привязан к адсету).
+        const builtCreatives: Array<{
+          user_creative_id: string;
+          fb_creative_id: string;
+          title: string;
+        }> = [];
+        for (const c of creatives) {
+          if (c.direction_id !== direction_id) {
+            log.warn({ creative_id: c.id, direction_id }, 'Creative not linked to direction (proceeding)');
+          }
+          try {
+            const built = await buildAdCreative({
+              user_creative_id: c.id,
+              direction_id,
+              user_account_id,
+              account_id: account_id || null,
+              logger: log,
+            });
+            builtCreatives.push({
+              user_creative_id: c.id,
+              fb_creative_id: built.fb_creative_id,
+              title: c.title || c.id.slice(0, 8),
+            });
+          } catch (err: any) {
+            log.error({ err, creative_id: c.id }, 'buildAdCreative failed');
+            return reply.status(500).send({
+              success: false,
+              error: `Не удалось пересобрать креатив "${c.title || c.id}": ${err?.message || err}`,
+            });
+          }
+        }
+
+        const normalizedAdAccountId = credentials.fbAdAccountId.startsWith('act_')
+          ? credentials.fbAdAccountId
+          : `act_${credentials.fbAdAccountId}`;
+
+        // Готовим один общий batch на все (adset × creative).
+        type AdPlan = { adset_id: string; user_creative_id: string; fb_creative_id: string; ad_name: string };
+        const plans: AdPlan[] = [];
+        for (const adsetId of target_adset_ids) {
+          for (let i = 0; i < builtCreatives.length; i++) {
+            const c = builtCreatives[i];
+            plans.push({
+              adset_id: adsetId,
+              user_creative_id: c.user_creative_id,
+              fb_creative_id: c.fb_creative_id,
+              ad_name: `${direction.name} - ${c.title} ${i + 1}`,
+            });
+          }
+        }
+
+        const adBatch: BatchRequest[] = plans.map(p => {
+          const body = new URLSearchParams({
+            name: p.ad_name,
+            adset_id: p.adset_id,
+            status: 'ACTIVE',
+            creative: JSON.stringify({ creative_id: p.fb_creative_id }),
+          }).toString();
+          return {
+            method: 'POST' as const,
+            relative_url: `${normalizedAdAccountId}/ads`,
+            body,
+          };
+        });
+
+        const adResponses = await graphBatch(credentials.fbAccessToken, adBatch);
+
+        type AdResult = { ad_id: string; user_creative_id: string; fb_creative_id: string; adset_id: string };
+        const created: AdResult[] = [];
+        const failed: Array<{ adset_id: string; user_creative_id: string; error?: any }> = [];
+
+        for (let i = 0; i < adResponses.length; i++) {
+          const parsed = parseBatchBody<{ id: string }>(adResponses[i]);
+          const plan = plans[i];
+          if (parsed.success && parsed.data?.id) {
+            created.push({
+              ad_id: String(parsed.data.id),
+              user_creative_id: plan.user_creative_id,
+              fb_creative_id: plan.fb_creative_id,
+              adset_id: plan.adset_id,
+            });
+          } else {
+            failed.push({
+              adset_id: plan.adset_id,
+              user_creative_id: plan.user_creative_id,
+              error: parsed.error,
+            });
+            log.error({ plan, error: parsed.error }, 'Failed to create ad');
+          }
+        }
+
+        if (created.length === 0) {
+          return reply.status(502).send({
+            success: false,
+            error: 'Не удалось создать ни одного объявления',
+            failed,
+          });
+        }
+
+        // Сохраняем mapping (по одной записи на каждое созданное Ad)
+        await saveAdCreativeMappingBatch(
+          created.map(ad => ({
+            ad_id: ad.ad_id,
+            user_creative_id: ad.user_creative_id,
+            direction_id,
+            user_id: user_account_id,
+            account_id: direction.account_id || null,
+            adset_id: ad.adset_id,
+            campaign_id: direction.fb_campaign_id,
+            fb_creative_id: ad.fb_creative_id,
+            source: 'direction_launch' as const,
+          }))
+        );
+
+        // Группируем по адсету для UPSERT в direction_adsets.
+        const perAdset = new Map<string, number>();
+        for (const ad of created) {
+          perAdset.set(ad.adset_id, (perAdset.get(ad.adset_id) || 0) + 1);
+        }
+
+        // Какие адсеты уже есть в БД?
+        const { data: existingRows } = await supabase
+          .from('direction_adsets')
+          .select('fb_adset_id')
+          .eq('direction_id', direction_id)
+          .in('fb_adset_id', Array.from(perAdset.keys()));
+        const existingSet = new Set((existingRows || []).map((r: any) => String(r.fb_adset_id)));
+
+        for (const [fbAdsetId, addedCount] of perAdset.entries()) {
+          if (existingSet.has(fbAdsetId)) {
+            // Атомарный инкремент через RPC (уже используется в use_existing).
+            const { error: rpcErr } = await supabase.rpc('increment_ads_count', {
+              p_fb_adset_id: fbAdsetId,
+              p_count: addedCount,
+            });
+            if (rpcErr) log.warn({ err: rpcErr, fbAdsetId }, 'Failed to increment ads_count');
+          } else {
+            // Адсет создан напрямую в Ads Manager — заводим запись для трекинга.
+            const info = adsetInfos.get(fbAdsetId);
+            const { error: insertErr } = await supabase
+              .from('direction_adsets')
+              .insert({
+                direction_id,
+                fb_adset_id: fbAdsetId,
+                adset_name: info?.name || null,
+                daily_budget_cents: info?.daily_budget ? Number(info.daily_budget) : null,
+                status: 'ACTIVE',
+                ads_count: addedCount,
+              });
+            if (insertErr) log.warn({ err: insertErr, fbAdsetId }, 'Failed to insert direction_adsets row');
+          }
+        }
+
+        // Бизнес-событие — как в manual-launch-multi
+        await eventLogger.logBusinessEvent(
+          user_account_id,
+          'creative_launched',
+          {
+            directionId: direction.id,
+            directionName: direction.name,
+            adsetsCount: perAdset.size,
+            totalAds: created.length,
+            mode: 'manual_existing',
+          },
+          account_id || undefined
+        );
+
+        onAdsLaunched(user_account_id).catch(err => {
+          log.warn({ err, userId: user_account_id }, 'Failed to update onboarding stage');
+        });
+
+        // Группированный результат для UI
+        const results = Array.from(perAdset.entries()).map(([fbAdsetId, count]) => ({
+          fb_adset_id: fbAdsetId,
+          adset_name: adsetInfos.get(fbAdsetId)?.name || null,
+          ads_created: count,
+          ads: created
+            .filter(a => a.adset_id === fbAdsetId)
+            .map(a => ({ ad_id: a.ad_id, user_creative_id: a.user_creative_id })),
+        }));
+
+        log.info({
+          direction_id,
+          adsets_used: perAdset.size,
+          total_ads: created.length,
+          failed_count: failed.length,
+        }, 'Manual launch into existing adsets completed');
+
+        return reply.send({
+          success: true,
+          message: `Добавлено ${created.length} объявлений в ${perAdset.size} адсет(ов)`,
+          direction_id,
+          direction_name: direction.name,
+          campaign_id: direction.fb_campaign_id,
+          adsets_used: perAdset.size,
+          total_ads: created.length,
+          failed_count: failed.length,
+          results,
+          failed: failed.length > 0 ? failed : undefined,
+        });
+      } catch (err: any) {
+        log.error({ err }, 'Manual launch existing failed');
+        logErrorToAdmin({
+          user_account_id,
+          error_type: err?.fb ? 'facebook' : 'api',
+          error_code: err?.fb ? `${err.fb.code}:${err.fb.error_subcode || 0}` : undefined,
+          raw_error: err.message || String(err),
+          stack_trace: err.stack,
+          action: 'manual_launch_existing',
+          endpoint: '/manual-launch-existing',
+          request_data: { direction_id, creative_count: creative_ids?.length, adset_count: target_adset_ids?.length },
+          severity: 'warning',
+        }).catch(() => {});
+        return reply.status(500).send({
+          success: false,
+          error: err?.message || 'Manual launch existing failed',
+        });
+      }
+    }
+  );
 };

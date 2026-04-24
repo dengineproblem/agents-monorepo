@@ -8,7 +8,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Plus, Rocket, Trash2, Video, Image, Images } from "lucide-react";
 import { toast } from "sonner";
-import { manualLaunchMultiAdSets, type MultiAdSetLaunchResponse } from "@/services/manualLaunchApi";
+import {
+  manualLaunchMultiAdSets,
+  manualLaunchExisting,
+  getDirectionActiveAdsets,
+  type MultiAdSetLaunchResponse,
+  type ActiveAdsetInfo,
+} from "@/services/manualLaunchApi";
 import { type UserCreative } from "@/services/creativesApi";
 import { type LabelStats } from "@/services/directionsApi";
 import { type Direction, getDirectionObjectiveLabel } from "@/types/direction";
@@ -79,6 +85,15 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
   const [startMode, setStartMode] = useState<'now' | 'midnight_almaty'>('now');
   const [isLaunching, setIsLaunching] = useState(false);
 
+  // === Existing-adsets mode (только Facebook) ===
+  // 'create' = текущее поведение (создаём новые адсеты),
+  // 'existing' = добавить креативы в живые адсеты направления.
+  const [launchMode, setLaunchMode] = useState<'create' | 'existing'>('create');
+  const [activeAdsets, setActiveAdsets] = useState<ActiveAdsetInfo[]>([]);
+  const [loadingActiveAdsets, setLoadingActiveAdsets] = useState(false);
+  const [selectedAdsetIds, setSelectedAdsetIds] = useState<Set<string>>(new Set());
+  const [selectedExistingCreativeIds, setSelectedExistingCreativeIds] = useState<Set<string>>(new Set());
+
   // Resolve direction + creatives based on mode
   const direction = props.mode === 'preselected'
     ? props.direction
@@ -134,6 +149,7 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
         creative_ids: new Set(props.selectedCreativeIds),
         daily_budget: minBudget,
       }]);
+      setSelectedExistingCreativeIds(new Set(props.selectedCreativeIds));
     } else {
       setSelectedDirectionId('');
       setLoadedCreatives([]);
@@ -142,9 +158,39 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
         creative_ids: new Set<string>(),
         daily_budget: minBudget,
       }]);
+      setSelectedExistingCreativeIds(new Set<string>());
     }
     setStartMode('now');
+    setLaunchMode('create');
+    setActiveAdsets([]);
+    setSelectedAdsetIds(new Set());
   }, [open]);
+
+  // Загружаем активные адсеты при включении режима 'existing' и наличии направления
+  useEffect(() => {
+    if (isTikTok) return; // TikTok пока только в режиме создания
+    if (launchMode !== 'existing') return;
+    if (!direction?.id) return;
+
+    let cancelled = false;
+    const load = async () => {
+      setLoadingActiveAdsets(true);
+      try {
+        const res = await getDirectionActiveAdsets(direction.id, currentAdAccountId || undefined);
+        if (cancelled) return;
+        if (res.success) {
+          setActiveAdsets(res.adsets);
+        } else {
+          setActiveAdsets([]);
+          toast.error(res.error || 'Не удалось загрузить адсеты');
+        }
+      } finally {
+        if (!cancelled) setLoadingActiveAdsets(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [launchMode, direction?.id, currentAdAccountId, isTikTok]);
 
   const totalBudget = useMemo(
     () => adsets.reduce((sum, a) => sum + a.daily_budget, 0),
@@ -185,7 +231,85 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
     ));
   }, []);
 
+  const toggleExistingCreative = useCallback((creativeId: string) => {
+    setSelectedExistingCreativeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(creativeId)) next.delete(creativeId);
+      else next.add(creativeId);
+      return next;
+    });
+  }, []);
+
+  const toggleAdset = useCallback((adsetId: string) => {
+    setSelectedAdsetIds(prev => {
+      const next = new Set(prev);
+      if (next.has(adsetId)) next.delete(adsetId);
+      else next.add(adsetId);
+      return next;
+    });
+  }, []);
+
+  const handleLaunchExisting = async () => {
+    if (!direction || !direction.user_account_id) {
+      toast.error('Выберите направление');
+      return;
+    }
+    if (selectedExistingCreativeIds.size === 0) {
+      toast.error('Выберите креативы для добавления');
+      return;
+    }
+    if (selectedAdsetIds.size === 0) {
+      toast.error('Выберите адсеты');
+      return;
+    }
+
+    setIsLaunching(true);
+    try {
+      const result = await manualLaunchExisting({
+        user_account_id: direction.user_account_id,
+        account_id: currentAdAccountId || undefined,
+        direction_id: direction.id,
+        creative_ids: Array.from(selectedExistingCreativeIds),
+        target_adset_ids: Array.from(selectedAdsetIds),
+      });
+      if (result.success) {
+        onOpenChange(false);
+        // Адаптируем ответ к существующему MultiAdSetLaunchResponse-обработчику
+        onSuccess({
+          success: true,
+          message: result.message,
+          direction_id: result.direction_id,
+          direction_name: result.direction_name,
+          campaign_id: result.campaign_id,
+          total_adsets: result.adsets_used || 0,
+          total_ads: result.total_ads || 0,
+          success_count: result.adsets_used || 0,
+          failed_count: result.failed_count || 0,
+          adsets: (result.results || []).map(r => ({
+            success: true,
+            adset_id: r.fb_adset_id,
+            adset_name: r.adset_name || undefined,
+            ads_created: r.ads_created,
+            ads: r.ads.map(a => ({ ad_id: a.ad_id, name: '' })),
+          })),
+        });
+        toast.success(result.message || 'Объявления добавлены');
+      } else {
+        toast.error(result.error || 'Ошибка добавления объявлений', { duration: 8000 });
+      }
+    } catch (error: any) {
+      console.error('Launch existing error:', error);
+      toast.error(error.message || 'Не удалось добавить объявления');
+    } finally {
+      setIsLaunching(false);
+    }
+  };
+
   const handleLaunch = async () => {
+    if (launchMode === 'existing' && !isTikTok) {
+      return handleLaunchExisting();
+    }
+
     if (!direction) {
       toast.error('Выберите направление');
       return;
@@ -296,8 +420,29 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
             </div>
           )}
 
-          {/* Время запуска (Facebook only) */}
+          {/* Режим запуска (Facebook only) */}
           {!isTikTok && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Режим</Label>
+              <RadioGroup
+                value={launchMode}
+                onValueChange={(v: 'create' | 'existing') => setLaunchMode(v)}
+                className="flex gap-4"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="create" id="ml-mode-create" />
+                  <Label htmlFor="ml-mode-create" className="cursor-pointer text-sm">Создать новые адсеты</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="existing" id="ml-mode-existing" />
+                  <Label htmlFor="ml-mode-existing" className="cursor-pointer text-sm">Добавить в существующие</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          )}
+
+          {/* Время запуска (Facebook only, только для режима 'create') */}
+          {!isTikTok && launchMode === 'create' && (
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Время запуска</Label>
               <RadioGroup
@@ -331,8 +476,8 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
             </div>
           )}
 
-          {/* Список адсетов */}
-          {hasCreatives && (
+          {/* Список адсетов (режим: создать новые) */}
+          {hasCreatives && (launchMode === 'create' || isTikTok) && (
             <div className="space-y-3">
               {adsets.map((adset, idx) => (
                 <div key={adset.id} className="border rounded-lg p-4 space-y-3 bg-muted/20">
@@ -413,12 +558,128 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
           )}
 
           {/* Итого */}
-          {adsets.length > 1 && hasCreatives && (
+          {adsets.length > 1 && hasCreatives && (launchMode === 'create' || isTikTok) && (
             <div className="flex items-center justify-between px-1 text-sm">
               <span className="text-muted-foreground">Итого бюджет:</span>
               <span className="font-medium">
                 {budgetSymbol}{isTikTok ? totalBudget.toLocaleString('ru-RU') : totalBudget} {budgetLabel}/день
               </span>
+            </div>
+          )}
+
+          {/* Режим: добавить в существующие адсеты (Facebook only) */}
+          {!isTikTok && launchMode === 'existing' && hasCreatives && (
+            <div className="space-y-4">
+              {/* Блок: общий пул креативов */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Креативы для добавления</Label>
+                  <Badge variant="secondary" className="text-xs">
+                    {selectedExistingCreativeIds.size} выбрано
+                  </Badge>
+                </div>
+                <div className="space-y-1 max-h-[180px] overflow-y-auto border rounded-md p-2 bg-muted/20">
+                  {allCreatives.map(creative => (
+                    <label
+                      key={creative.id}
+                      className="flex items-center gap-2.5 p-1.5 rounded hover:bg-muted/40 cursor-pointer"
+                    >
+                      <Checkbox
+                        checked={selectedExistingCreativeIds.has(creative.id)}
+                        onCheckedChange={() => toggleExistingCreative(creative.id)}
+                        disabled={isLaunching}
+                      />
+                      <div className="shrink-0 w-6 h-6 rounded overflow-hidden bg-muted flex items-center justify-center">
+                        <MediaIcon type={creative.media_type} />
+                      </div>
+                      <span className="text-sm truncate">{creative.title}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Блок: выбор активных адсетов */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Активные адсеты направления</Label>
+                  {activeAdsets.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => {
+                        const eligible = activeAdsets.filter(a => a.ads_count + selectedExistingCreativeIds.size <= 50);
+                        if (selectedAdsetIds.size === eligible.length) {
+                          setSelectedAdsetIds(new Set());
+                        } else {
+                          setSelectedAdsetIds(new Set(eligible.map(a => a.fb_adset_id)));
+                        }
+                      }}
+                      disabled={isLaunching}
+                    >
+                      {selectedAdsetIds.size > 0 ? 'Снять все' : 'Выбрать все'}
+                    </button>
+                  )}
+                </div>
+
+                {loadingActiveAdsets ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : activeAdsets.length === 0 ? (
+                  <div className="p-4 border border-dashed rounded-lg text-center text-sm text-muted-foreground space-y-2">
+                    <div>В этом направлении нет активных адсетов</div>
+                    <Button variant="outline" size="sm" onClick={() => setLaunchMode('create')}>
+                      Создать новый адсет
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-[260px] overflow-y-auto border rounded-md p-2">
+                    {activeAdsets.map(adset => {
+                      const willAdd = selectedExistingCreativeIds.size;
+                      const remaining = 50 - adset.ads_count;
+                      const isOverLimit = willAdd > 0 && willAdd > remaining;
+                      const disabled = isLaunching || isOverLimit;
+                      const checked = selectedAdsetIds.has(adset.fb_adset_id);
+                      const budgetUsd = adset.daily_budget != null ? (adset.daily_budget / 100).toFixed(0) : '—';
+                      return (
+                        <label
+                          key={adset.fb_adset_id}
+                          className={`flex items-center gap-2.5 p-2 rounded ${disabled && !checked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-muted/40'}`}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleAdset(adset.fb_adset_id)}
+                            disabled={disabled && !checked}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium truncate">{adset.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              ${budgetUsd}/день · {adset.ads_count} объявлений
+                              {isOverLimit && (
+                                <span className="text-destructive ml-2">
+                                  осталось {Math.max(0, remaining)} слот(ов)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {selectedAdsetIds.size > 0 && selectedExistingCreativeIds.size > 0 && (
+                <div className="flex items-center justify-between px-1 text-sm">
+                  <span className="text-muted-foreground">Будет создано объявлений:</span>
+                  <span className="font-medium">
+                    {selectedAdsetIds.size * selectedExistingCreativeIds.size}
+                    <span className="text-muted-foreground font-normal ml-1">
+                      ({selectedExistingCreativeIds.size} × {selectedAdsetIds.size})
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -434,13 +695,23 @@ export function ManualLaunchDialog(props: ManualLaunchDialogProps) {
           </Button>
           <Button
             onClick={handleLaunch}
-            disabled={isLaunching || !hasCreatives || !direction}
+            disabled={
+              isLaunching ||
+              !hasCreatives ||
+              !direction ||
+              (launchMode === 'existing' && !isTikTok && (selectedAdsetIds.size === 0 || selectedExistingCreativeIds.size === 0))
+            }
             className="dark:bg-gray-700 dark:hover:bg-gray-800"
           >
             {isLaunching ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 Запуск...
+              </>
+            ) : launchMode === 'existing' && !isTikTok ? (
+              <>
+                <Rocket className="h-4 w-4 mr-2" />
+                Добавить{selectedAdsetIds.size > 0 ? ` (${selectedAdsetIds.size * selectedExistingCreativeIds.size})` : ''}
               </>
             ) : (
               <>

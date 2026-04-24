@@ -152,6 +152,108 @@ export async function manualLaunchMultiAdSets(
   }
 }
 
+// === Existing AdSets Mode (добавление креативов в живые адсеты) ===
+
+export interface ActiveAdsetInfo {
+  fb_adset_id: string;
+  name: string;
+  daily_budget: number | null; // в центах (FB возвращает строкой — мы парсим в number)
+  optimization_goal: string | null;
+  ads_count: number; // сколько ads уже учтено в direction_adsets (0 если адсета нет в БД)
+}
+
+export interface ActiveAdsetsResponse {
+  success: boolean;
+  adsets: ActiveAdsetInfo[];
+  error?: string;
+}
+
+/**
+ * Возвращает live-список активных адсетов кампании направления (effective_status=ACTIVE).
+ * Обогащается ads_count из direction_adsets (0 если запись отсутствует).
+ */
+export async function getDirectionActiveAdsets(
+  directionId: string,
+  accountId?: string | null
+): Promise<ActiveAdsetsResponse> {
+  try {
+    const params = new URLSearchParams();
+    if (accountId) params.set('account_id', accountId);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    const response = await fetch(
+      `${API_BASE_URL}/campaign-builder/direction/${directionId}/active-adsets${qs}`,
+      { method: 'GET' }
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      return { success: false, adsets: [], error: data?.error || 'Failed to fetch active adsets' };
+    }
+    return data;
+  } catch (error: any) {
+    console.error('Failed to fetch active adsets:', error);
+    return { success: false, adsets: [], error: error.message || 'Failed to fetch active adsets' };
+  }
+}
+
+export interface LaunchExistingRequest {
+  user_account_id: string;
+  account_id?: string | null;
+  direction_id: string;
+  creative_ids: string[];
+  target_adset_ids: string[];
+}
+
+export interface LaunchExistingResponse {
+  success: boolean;
+  message?: string;
+  direction_id?: string;
+  direction_name?: string;
+  campaign_id?: string;
+  adsets_used?: number;
+  total_ads?: number;
+  failed_count?: number;
+  results?: Array<{
+    fb_adset_id: string;
+    adset_name: string | null;
+    ads_created: number;
+    ads: Array<{ ad_id: string; user_creative_id: string }>;
+  }>;
+  error?: string;
+}
+
+/**
+ * Добавляет выбранные креативы как новые Ads в уже существующие активные адсеты.
+ * Настройки самих адсетов (бюджет/таргетинг) НЕ меняются.
+ */
+export async function manualLaunchExisting(
+  request: LaunchExistingRequest
+): Promise<LaunchExistingResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/campaign-builder/manual-launch-existing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_account_id: request.user_account_id,
+        account_id: request.account_id ?? null,
+        direction_id: request.direction_id,
+        creative_ids: request.creative_ids,
+        target_adset_ids: request.target_adset_ids,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      if (data && typeof data === 'object' && data.error) {
+        return { success: false, ...data };
+      }
+      throw new Error(data.error || 'Failed to launch ads in existing adsets');
+    }
+    return data;
+  } catch (error: any) {
+    console.error('Manual launch existing error:', error);
+    return { success: false, error: error.message || 'Ошибка запуска рекламы в существующих адсетах' };
+  }
+}
+
 /**
  * Запуск рекламы с выбранными креативами в рамках направления (одиночный адсет)
  */
