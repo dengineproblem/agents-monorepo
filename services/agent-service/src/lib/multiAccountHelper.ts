@@ -83,6 +83,27 @@ export async function shouldFilterByAccountId(
 }
 
 /**
+ * Нормализует account_id для записи в таблицу, привязанную к пользователю.
+ *
+ * Если multi_account_enabled = false — возвращает null, даже если клиент
+ * прислал UUID (защита от залипшего стейта на фронте при переключении
+ * legacy <-> multi). Если multi_account_enabled = true — возвращает
+ * accountId как есть (или null, если не передан).
+ *
+ * Используй на всех INSERT/UPSERT в таблицы вида user_creatives,
+ * account_directions и пр., где account_id — это FK в ad_accounts.
+ */
+export async function resolveAccountIdForWrite(
+  supabase: SupabaseClient,
+  userAccountId: string,
+  accountId?: string | null
+): Promise<string | null> {
+  const multiEnabled = await isMultiAccountEnabled(supabase, userAccountId);
+  if (!multiEnabled) return null;
+  return accountId || null;
+}
+
+/**
  * Очищает кэш multi_account_enabled для пользователя.
  * Вызывать при изменении флага multi_account_enabled.
  */

@@ -17,6 +17,7 @@ import {
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { resolveAccountIdForWrite } from '../lib/multiAccountHelper.js';
 
 const ProcessImageSchema = z.object({
   user_id: z.string().uuid(),
@@ -186,11 +187,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       app.log.info('Creating creative record in database...');
 
       // Создаем запись креатива в БД со статусом 'processing'
+      const effectiveAccountId = await resolveAccountIdForWrite(supabase, body.user_id, body.account_id);
       const { data: creative, error: createError } = await supabase
         .from('user_creatives')
         .insert({
           user_id: body.user_id,
-          account_id: body.account_id || null, // UUID FK для мультиаккаунтности
+          account_id: effectiveAccountId,
           direction_id: body.direction_id || null,
           title: body.title || 'Untitled Image Creative',
           status: 'processing',
@@ -816,11 +818,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       app.log.info({ fbCreativeId, objective }, 'Creative created in Facebook');
 
       // 8. Создаём запись в user_creatives
+      const effectiveAccountIdForGen = await resolveAccountIdForWrite(supabase, user_id, account_id);
       const { data: userCreative, error: insertError } = await supabase
         .from('user_creatives')
         .insert({
           user_id,
-          account_id: account_id || null, // UUID FK для мультиаккаунтности
+          account_id: effectiveAccountIdForGen,
           direction_id,
           title: creative.offer || 'Image Creative',
           status: 'ready',

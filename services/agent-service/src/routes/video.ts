@@ -22,6 +22,7 @@ import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { checkUploadEligibility } from '../lib/uploadEligibility.js';
+import { resolveAccountIdForWrite } from '../lib/multiAccountHelper.js';
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
@@ -228,11 +229,12 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         is_new_group: !body.creative_group_id
       }, 'Creating creative with group ID');
 
+      const effectiveAccountId = await resolveAccountIdForWrite(supabase, body.user_id, body.account_id);
       const { data: creative, error: creativeError } = await supabase
         .from('user_creatives')
         .insert({
           user_id: body.user_id,
-          account_id: body.account_id || null, // UUID FK для мультиаккаунтности
+          account_id: effectiveAccountId,
           title: body.title || 'Untitled Creative',
           status: 'processing',
           direction_id: body.direction_id || null, // Сохраняем direction_id (null для legacy)
@@ -259,8 +261,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         .not('fb_video_id', 'is', null)
         .neq('id', creative.id);
 
-      if (body.account_id) {
-        deduplicateQuery = deduplicateQuery.eq('account_id', body.account_id);
+      if (effectiveAccountId) {
+        deduplicateQuery = deduplicateQuery.eq('account_id', effectiveAccountId);
       }
 
       const { data: existingVideoCreative } = await deduplicateQuery.maybeSingle();

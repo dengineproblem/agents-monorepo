@@ -33,6 +33,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createLogger } from '../lib/logger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
 import { checkUploadEligibility } from '../lib/uploadEligibility.js';
+import { resolveAccountIdForWrite } from '../lib/multiAccountHelper.js';
 
 const log = createLogger({ module: 'tusUpload' });
 
@@ -190,11 +191,12 @@ async function processTikTokUpload(
     }, '[TUS-TikTok] Got TikTok credentials');
 
     // 2. Создать запись креатива в БД (до транскрипции, чтобы polling мог найти запись)
+    const effectiveAccountId = await resolveAccountIdForWrite(supabase, userId, accountId);
     const { data: creative, error: insertError } = await supabase
       .from('user_creatives')
       .insert({
         user_id: userId,
-        account_id: accountId || null,
+        account_id: effectiveAccountId,
         title,
         status: 'processing',
         media_type: 'video',
@@ -486,11 +488,12 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
         // We must INSERT (not UPDATE): the Meta path's main creative INSERT happens later,
         // so no row exists for this uploadId at guard time.
         try {
+          const effectiveAccountId = await resolveAccountIdForWrite(supabase, userId, accountId);
           await supabase
             .from('user_creatives')
             .insert({
               user_id: userId,
-              account_id: accountId ?? null,
+              account_id: effectiveAccountId,
               title: metadata.title || metadata.filename || 'Untitled',
               status: 'error',
               direction_id: directionId || null,
@@ -592,11 +595,12 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
 
     // Создаём запись креатива (до транскрипции, чтобы polling мог найти запись сразу)
     log.info({ uploadId, userId, title }, '[TUS] Creating creative record...');
+    const effectiveAccountId = userAccount.multi_account_enabled ? (accountId || null) : null;
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
       .insert({
         user_id: userId,
-        account_id: accountId || null,
+        account_id: effectiveAccountId,
         title: title,
         status: 'processing',
         direction_id: directionId || null,

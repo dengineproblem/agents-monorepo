@@ -616,11 +616,12 @@ export default async function userCreativesRoutes(app: FastifyInstance) {
       }
 
       // 6. Создаём новую запись креатива
+      const writeAccountId = userAccount.multi_account_enabled ? (effectiveAccountId || null) : null;
       const { data: newCreative, error: insertError } = await supabase
         .from('user_creatives')
         .insert({
           user_id: userId,
-          account_id: effectiveAccountId || null,
+          account_id: writeAccountId,
           title: source.title,
           status: 'ready',
           direction_id: body.target_direction_id,

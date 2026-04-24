@@ -1,6 +1,6 @@
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
-import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
+import { shouldFilterByAccountId, getEffectiveAccountId } from '@/utils/multiAccountHelper';
 import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
@@ -414,7 +414,8 @@ export const creativesApi = {
       if (!recordId) form.append('client_request_id', genId());
       if (description) form.append('description', description);
       if (directionId) form.append('direction_id', directionId);
-      if (adAccountId) form.append('account_id', adAccountId);
+      const effectiveAdAccountId = getEffectiveAccountId(adAccountId);
+      if (effectiveAdAccountId) form.append('account_id', effectiveAdAccountId);
 
       try {
         await new Promise<void>((resolve, reject) => {
@@ -458,7 +459,7 @@ export const creativesApi = {
             title: title || file.name,
             language: 'ru',
             ...(directionId && { direction_id: directionId }),
-            ...(adAccountId && { account_id: adAccountId }),
+            ...(getEffectiveAccountId(adAccountId) && { account_id: getEffectiveAccountId(adAccountId)! }),
           },
           chunkSize: 6 * 1024 * 1024,
           storeFingerprintForResuming: false,
@@ -572,7 +573,7 @@ export const creativesApi = {
           title: title || file.name,
           language: 'ru',
           ...(directionId && { direction_id: directionId }),
-          ...(adAccountId && { account_id: adAccountId }),
+          ...(getEffectiveAccountId(adAccountId) && { account_id: getEffectiveAccountId(adAccountId) }),
         }),
       });
       if (!res.ok) {

@@ -13,6 +13,7 @@ import {
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getAppInstallsConfig, getAppInstallsConfigEnvHints } from '../lib/appInstallsConfig.js';
+import { resolveAccountIdForWrite } from '../lib/multiAccountHelper.js';
 
 const CreateCarouselCreativeSchema = z.object({
   user_id: z.string().uuid(),
@@ -366,11 +367,12 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       app.log.info({ fbCreativeId, objective }, 'Carousel creative created in Facebook');
 
       // 7. Создаём запись в user_creatives
+      const effectiveAccountId = await resolveAccountIdForWrite(supabase, user_id, account_id);
       const { data: userCreative, error: insertError } = await supabase
         .from('user_creatives')
         .insert({
           user_id,
-          account_id: account_id || null, // UUID FK для мультиаккаунтности
+          account_id: effectiveAccountId,
           direction_id,
           title: `Carousel - ${carouselData.length} cards`,
           status: 'ready',

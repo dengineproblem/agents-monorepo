@@ -20,6 +20,7 @@ import { onCreativeCreated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createLogger } from '../lib/logger.js';
 import { getAppInstallsConfig } from '../lib/appInstallsConfig.js';
+import { resolveAccountIdForWrite } from '../lib/multiAccountHelper.js';
 
 const log = createLogger({ module: 'videoFromStorage' });
 
@@ -89,11 +90,12 @@ export const videoFromStorageRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Create creative record immediately so frontend can poll
+    const effectiveAccountId = await resolveAccountIdForWrite(supabase, user_id, account_id);
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
       .insert({
         user_id,
-        account_id: account_id || null,
+        account_id: effectiveAccountId,
         title: title || 'Untitled',
         status: 'processing',
         direction_id: direction_id || null,
