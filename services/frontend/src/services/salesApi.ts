@@ -1396,7 +1396,7 @@ class SalesApiService {
     try {
       const res = await fetch(`${API_BASE_URL}/leads/${leadId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           creative_id: creativeId,
           needs_manual_match: false

@@ -697,7 +697,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
       const body = request.body as Record<string, unknown>;
 
       // Allow only specific fields to be updated
-      const allowedFields = ['creative_id', 'sale_amount', 'is_qualified', 'direction_id'];
+      const allowedFields = ['creative_id', 'sale_amount', 'is_qualified', 'direction_id', 'needs_manual_match'];
       const updateData: Record<string, unknown> = {};
       for (const field of allowedFields) {
         if (body[field] !== undefined) {
