@@ -81,3 +81,6 @@ password_reset_results.json
 # Git worktrees
 .worktrees/
 .claude/worktrees/
+
+# Local research tools (not for monorepo)
+tools/
