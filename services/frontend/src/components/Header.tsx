@@ -451,6 +451,22 @@ const Header: React.FC<HeaderProps> = ({
                     {accountStatus.balance !== undefined ? `$${(Number(accountStatus.balance) / 100).toFixed(2)}` : '—'}
                   </span>
                 </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="text-sm text-muted-foreground">{t('budget.lastBilling')}</span>
+                  <span className="font-semibold">
+                    {accountStatus.last_billing_date
+                      ? (() => {
+                          const amount = accountStatus.last_billing_amount_cents != null
+                            ? `$${(Number(accountStatus.last_billing_amount_cents) / 100).toFixed(2)}`
+                            : null;
+                          const date = new Date(accountStatus.last_billing_date).toLocaleDateString();
+                          const count = Number(accountStatus.last_billing_count) || 0;
+                          const countSuffix = count > 1 ? ` (×${count})` : '';
+                          return amount ? `${amount}${countSuffix} · ${date}` : `${date}${countSuffix}`;
+                        })()
+                      : '—'}
+                  </span>
+                </div>
               </>
             ) : (
               <div className="text-center p-4 text-muted-foreground">

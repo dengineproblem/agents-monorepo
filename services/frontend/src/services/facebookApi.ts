@@ -509,47 +509,73 @@ const getAccountStatus = async () => {
   const params = { fields: 'spend_cap,amount_spent,balance,account_status,disable_reason' };
   const data = await fetchFromFacebookAPI(endpoint, params);
 
-  // Пагинация по activities для поиска последнего ad_account_billing_charge (через proxy)
-  let threshold_amount = null;
-  let last_billing_date = null;
-  let after: string | undefined = undefined;
-  let found = false;
-  let debug_activities: any[] = [];
+  // Ищем последний день со списаниями ad_account_billing_charge за 60 дней.
+  // FB не отдаёт billing-события с category=ACCOUNT, поэтому фильтра нет.
+  // Порога списания в публичном API нет — из extra_data достаём new_value (сумма списания в центах).
+  // Логика:
+  //   - Если в соседнем дне (±1) тоже были списания → это активный расход, показываем одно
+  //     последнее списание.
+  //   - Если соседних дней нет → это один биллинг, возможно разбитый на части, суммируем
+  //     все события последнего дня.
+  let last_billing_amount_cents: number | null = null;
+  let last_billing_date: string | null = null;
+  let last_billing_count = 0;
+  let last_billing_mode: 'threshold' | 'active' | null = null;
   try {
-    while (!found) {
-      const actParams: Record<string, string> = {
-        fields: 'event_time,event_type,extra_data',
-        category: 'ACCOUNT',
-        limit: '100',
-      };
-      if (after) actParams.after = after;
-      const activitiesData = await fetchFromFacebookAPI(`${endpoint}/activities`, actParams);
-      const activities = activitiesData.data || [];
-      debug_activities.push(...activities.slice(0, 20).map((a: any) => ({ event_type: a.event_type, extra_data: a.extra_data, event_time: a.event_time })));
-      const billingEvent = activities.find((a: any) => a.event_type === 'ad_account_billing_charge' && a.extra_data);
-      if (billingEvent) {
-        const extra = JSON.parse(billingEvent.extra_data);
-        if (extra.threshold_amount) {
-          threshold_amount = extra.threshold_amount;
-        }
-        if (billingEvent.event_time) {
-          last_billing_date = billingEvent.event_time;
-        }
-        found = true;
-        break;
+    const since = Math.floor(Date.now() / 1000) - 60 * 86400;
+    const activitiesData = await fetchFromFacebookAPI(`${endpoint}/activities`, {
+      fields: 'event_time,event_type,extra_data',
+      limit: '500',
+      since: String(since),
+    });
+    const activities: any[] = activitiesData.data || [];
+    // Activities приходят от свежих к старым.
+    const billingEvents = activities
+      .filter((a: any) => a.event_type === 'ad_account_billing_charge' && a.extra_data && a.event_time);
+    if (billingEvents.length > 0) {
+      const byDay = new Map<string, any[]>();
+      for (const ev of billingEvents) {
+        const day = ev.event_time.slice(0, 10);
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day)!.push(ev);
       }
-      if (activitiesData.paging?.cursors?.after) {
-        after = activitiesData.paging.cursors.after;
+      const days = Array.from(byDay.keys()).sort().reverse();
+      const latestDay = days[0];
+      const latestEvents = byDay.get(latestDay)!;
+      const prevDay = days[1];
+      let isActive = false;
+      if (prevDay) {
+        const diff = Math.round((Date.parse(latestDay) - Date.parse(prevDay)) / 86400000);
+        if (diff <= 1) isActive = true;
+      }
+      const parse = (e: any) => {
+        try {
+          const extra = JSON.parse(e.extra_data);
+          return typeof extra?.new_value === 'number' ? extra.new_value : 0;
+        } catch { return 0; }
+      };
+      if (isActive) {
+        const ev = latestEvents[0];
+        last_billing_amount_cents = parse(ev) || null;
+        last_billing_date = ev.event_time;
+        last_billing_count = 1;
+        last_billing_mode = 'active';
       } else {
-        break;
+        const sum = latestEvents.reduce((s, e) => s + parse(e), 0);
+        last_billing_amount_cents = sum > 0 ? sum : null;
+        last_billing_date = latestEvents[0].event_time;
+        last_billing_count = latestEvents.length;
+        last_billing_mode = 'threshold';
       }
     }
   } catch (e) {
-    threshold_amount = null;
+    last_billing_amount_cents = null;
     last_billing_date = null;
+    last_billing_count = 0;
+    last_billing_mode = null;
   }
 
-  return { ...data, threshold_amount, last_billing_date, debug_activities: debug_activities.slice(0, 20) };
+  return { ...data, last_billing_amount_cents, last_billing_date, last_billing_count, last_billing_mode };
 };
 
 // Получить текущий расход в сутки (сумма daily_budget всех активных adset-ов)
