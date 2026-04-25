@@ -1654,3 +1654,115 @@ TTL: 10 минут — если пользователь не продолжил
 - TTL > 10 мин → сбросить
 - `step === 'await_input'` → inject context → сбросить
 - Иначе → сбросить
+
+---
+
+## 21. Портирование меню в @prfmntai_bot (agent-service)
+
+Меню из nanoclaw портировано в **@prfmntai_bot** (production legacy-бот в `services/agent-service`). Архитектурный паттерн (inline-кнопки + прямой вызов tools без AI + multi-step flow для ручного запуска) сохранён, но реализация адаптирована под legacy-стек и не зависит от `node-telegram-bot-api`.
+
+### 21.1 Расположение
+
+```
+services/agent-service/src/lib/telegramMenu/
+├── index.ts        — public API: showMainMenu, handleMenuCallback,
+│                     handleManualLaunchInput, isManualLaunchAwaiting,
+│                     isMenuTrigger
+├── keyboards.ts    — InlineKeyboardMarkup builders
+├── formatters.ts   — formatSpendReport / formatDirections / ...
+├── tools.ts        — executeTool() через POST /brain/tools/:name
+│                     (X-Service-Auth: BRAIN_SERVICE_SECRET)
+├── tgApi.ts        — тонкие fetch-обёртки над Telegram Bot API
+│                     (sendMessage / editMessageText / answerCallbackQuery /
+│                      safeEditOrSend), без node-telegram-bot-api
+├── session.ts      — In-memory Map<telegramId, MenuFlow>, TTL 10 мин
+├── parser.ts       — автономный парсер ввода "1, 3 бюджет $10"
+└── mirror.ts       — mirrorMenuReply() в admin_user_chats (source='bot')
+```
+
+Точка интеграции: `services/agent-service/src/routes/telegramWebhook.ts` (Fastify webhook, не long polling).
+
+### 21.2 Ключевые отличия от nanoclaw
+
+| Аспект | nanoclaw (`telegram-claude-bot`) | @prfmntai_bot (`agent-service`) |
+|--------|----------------------------------|--------------------------------|
+| Транспорт | `node-telegram-bot-api`, long polling | Fastify webhook + `fetch` к Telegram Bot API |
+| Стек юзеров | Multi-account (`user_accounts.multi_account_enabled = true`) + legacy | **Только legacy** (один ad-account через `user_accounts.id`) |
+| Кнопок в главном меню | 7 (включая ✨ Генерация креативов) | **6** — `menu:generate` исключён |
+| Кнопка техподдержки | Есть (текстом в общем флоу) | **Отдельная url-кнопка** в главном меню (`MENU_SUPPORT_URL`, default `https://t.me/Moltbot_prfmnt_bot`) |
+| Slash-команды | `/accounts` + `/menu` | Только `/menu` (legacy не имеет multi-account) |
+| Tool input | `{ userAccountId, accountId, ... }` | `{ userAccountId, ... }` — `accountId` не передаётся (agent-brain `getCredentials()` сам ветвится по `multi_account_enabled` и для legacy возвращает `dbAccountId: null`) |
+| Ручной запуск (await_input) | **Context injection в Claude** — текст пользователя дополняется блоком `[КОНТЕКСТ: ...]`, Claude вызывает `createAdSet` | **Автономный парсер** — `parseManualLaunchInput()` локально извлекает индексы и бюджет, `executeTool('createAdSet', ...)` вызывается напрямую. Работает при выключенном Toggle AI |
+| Сессия | `UserSession.menuFlow` в общем in-memory store с TTL 30 мин | Отдельный `Map<telegramId, MenuFlow>` в `session.ts`, TTL 10 мин, cleanup-interval 5 мин |
+| Подтверждение в админ-чате | `storeMessage()` в SQLite (для conversation memory Claude) | `mirrorMenuReply()` пишет в Supabase `admin_user_chats` с `source='bot'`, `direction='to_user'`, чтобы оператор видел вывод меню в веб-чате |
+| Onboarding/account selection | Через `/accounts` flow с inline-кнопками | Не нужен (legacy = один аккаунт) |
+
+### 21.3 Парсер ручного запуска (`parser.ts`)
+
+Принимает свободный текст и список креативов, возвращает массив UUID + опциональный `daily_budget_cents`:
+
+| Ввод | Результат |
+|------|-----------|
+| `1, 3, 5 бюджет $10` | indices `[1,3,5]`, budget `1000` cents |
+| `1 3 5 budget 15` | indices `[1,3,5]`, budget `1500` cents |
+| `$10 1, 3` | indices `[1,3]`, budget `1000` cents |
+| `1, 2` | indices `[1,2]`, budget не задан (берётся из direction) |
+| `1 1 2` | indices `[1,2]` (dedup) |
+| `7` (когда max=5) | ошибка "Неверные номера: 7. Доступны 1–5." |
+| `1 бюджет $1` | ошибка "Бюджет $1 слишком маленький. Минимум $3." |
+| `привет` | ошибка с подсказкой формата + "Для выхода нажмите /menu" |
+
+При ошибке парсинга `MenuFlow` **не сбрасывается** — пользователь может повторить ввод. Сброс происходит на:
+- успешный `createAdSet`,
+- `/menu` / "меню" / "menu" / "главное меню" (явный выход),
+- TTL 10 мин.
+
+### 21.4 Webhook-перехваты (`telegramWebhook.ts`)
+
+Порядок проверок входящего сообщения от зарегистрированного юзера:
+
+1. `update.callback_query` → `handleMenuCallback()` (огонь-и-забудь, ответ Telegram'у сразу)
+2. `isMenuTrigger(text)` → `clearMenuFlow()` + `showMainMenu()`
+3. `isManualLaunchAwaiting(telegramId)` → `handleManualLaunchInput()` (без AI)
+4. `aiEnabled = ENABLE_LEGACY_AI_CHAT && !user.ai_disabled && !!text` → форвард в agent-brain `/api/brain/telegram/legacy-message`
+5. Иначе → уведомление админ-группы
+
+Меню (шаги 1–3) **не гейтится** по `ai_disabled` и работает у всех зарегистрированных юзеров; AI-чат (шаг 4) — гейтится.
+
+### 21.5 Mirror в admin_user_chats
+
+Все финальные ответы меню зеркалируются вызовом `mirrorMenuReply(userAccountId, chatId, content)`:
+
+```ts
+{
+  user_account_id: userAccountId,
+  telegram_id: String(chatId),
+  direction: 'to_user',
+  source: 'bot',         // отличается от 'ai' (AI-ответы) и 'admin' (оператор)
+  message: content,
+  delivered: true,
+}
+```
+
+Промежуточные `⏳ Загружаю...` НЕ зеркалируются — они затем перезаписываются через `editMessageText` и в админ-чате имели бы смысл только как финальный итог.
+
+### 21.6 ENV
+
+| Переменная | Назначение | Default |
+|------------|-----------|---------|
+| `TELEGRAM_BOT_TOKEN` | Токен @prfmntai_bot | — |
+| `AGENT_BRAIN_URL` | Базовый URL agent-brain | `http://agent-brain:7080` |
+| `BRAIN_SERVICE_SECRET` | Заголовок `X-Service-Auth` для `/brain/tools/:name` | (опц.) |
+| `MENU_SUPPORT_URL` | URL-кнопки техподдержки в главном меню | `https://t.me/Moltbot_prfmnt_bot` |
+| `INTERNAL_API_SECRET` | Заголовок `X-Internal-Secret` при форварде в agent-brain `/legacy-message` | (опц.) |
+| `ENABLE_LEGACY_AI_CHAT` | Глобальный выключатель AI-форварда | `true` |
+
+### 21.7 Деплой
+
+После выкатки контейнера `agent-service` на прод:
+
+```bash
+curl -X POST https://api.performanteaiagency.com/telegram/setup-webhook
+```
+
+Эндпоинт регистрирует webhook с `allowed_updates: ['message','callback_query']` и вызывает `setMyCommands` с `[{command:'menu', description:'Главное меню'}]`. Для тестирования нужен прод (бот не отвечает локально).
