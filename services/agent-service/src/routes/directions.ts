@@ -23,6 +23,7 @@ const TikTokObjectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation
 const TikTokAdGroupModeSchema = z.enum(['use_existing', 'create_new']);
 const DefaultSettingsSchema = z.object({
   cities: z.array(z.string()).optional(),
+  locales: z.array(z.number().int().positive()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
   gender: z.enum(['all', 'male', 'female']).optional(),
@@ -1262,6 +1263,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             direction_id: directionId,
             campaign_goal: campaignGoal,
             cities: settingsInput.cities,
+            locales: settingsInput.locales ?? null,
             age_min: settingsInput.age_min,
             age_max: settingsInput.age_max,
             gender: settingsInput.gender || 'all',

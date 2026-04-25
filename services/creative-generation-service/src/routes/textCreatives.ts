@@ -10,6 +10,7 @@ interface GenerateTextCreativeRequest {
   text_type: TextCreativeType;
   user_prompt: string;
   account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
+  minimal_context?: boolean; // Если true - не подтягивать транскрипции/историю и не сохранять генерацию
 }
 
 interface GenerateTextCreativeResponse {
@@ -39,13 +40,14 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: GenerateTextCreativeRequest; Reply: GenerateTextCreativeResponse }>(
     '/generate-text-creative',
     async (request, reply) => {
-      const { user_id, text_type, user_prompt, account_id, openai_api_key } = request.body as any;
+      const { user_id, text_type, user_prompt, account_id, openai_api_key, minimal_context } = request.body as any;
+      const minimalContext = minimal_context === true;
 
       try {
-        app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
+        app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}, minimal_context: ${minimalContext}`);
 
         // Валидация типа текста
-        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
+        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference', 'whatsapp_question', 'video_caption'];
         if (!validTypes.includes(text_type)) {
           return reply.status(400).send({
             success: false,
@@ -95,52 +97,60 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         app.log.info(`[Generate Text Creative] prompt1 length: ${prompt1.length}`);
 
         // 2. Получаем 10 лучших транскрибаций (по score или по дате)
-        app.log.info(`[Generate Text Creative] Fetching top transcriptions...`);
-        const { data: transcriptions, error: transcriptionsError } = await supabase
-          .from('creative_transcripts')
-          .select(`
-            id,
-            text,
-            creative_id,
-            user_creatives!inner(user_id),
-            creative_analysis(score)
-          `)
-          .eq('status', 'ready')
-          .eq('user_creatives.user_id', user_id)
-          .order('created_at', { ascending: false })
-          .limit(20); // Берём больше, отсортируем в коде
-
         let topTranscriptions: Array<{ text: string; score: number | null }> = [];
+        let transcriptions: any[] | null = null;
+        let prevGens: Array<{ generated_text: string }> = [];
 
-        if (transcriptions && transcriptions.length > 0) {
-          // Сортируем: сначала с score (по убыванию), потом без score (по дате)
-          const sorted = transcriptions.sort((a: any, b: any) => {
-            const scoreA = a.creative_analysis?.[0]?.score ?? -1;
-            const scoreB = b.creative_analysis?.[0]?.score ?? -1;
-            return scoreB - scoreA;
-          });
-
-          topTranscriptions = sorted.slice(0, 10).map((t: any) => ({
-            text: t.text,
-            score: t.creative_analysis?.[0]?.score ?? null
-          }));
-
-          app.log.info(`[Generate Text Creative] Found ${topTranscriptions.length} transcriptions`);
+        if (minimalContext) {
+          app.log.info(`[Generate Text Creative] Minimal context mode: skipping transcriptions/history`);
         } else {
-          app.log.info(`[Generate Text Creative] No transcriptions found`);
+          app.log.info(`[Generate Text Creative] Fetching top transcriptions...`);
+          const { data: transcriptionsData } = await supabase
+            .from('creative_transcripts')
+            .select(`
+              id,
+              text,
+              creative_id,
+              user_creatives!inner(user_id),
+              creative_analysis(score)
+            `)
+            .eq('status', 'ready')
+            .eq('user_creatives.user_id', user_id)
+            .order('created_at', { ascending: false })
+            .limit(20); // Берём больше, отсортируем в коде
+
+          transcriptions = transcriptionsData;
+
+          if (transcriptions && transcriptions.length > 0) {
+            // Сортируем: сначала с score (по убыванию), потом без score (по дате)
+            const sorted = transcriptions.sort((a: any, b: any) => {
+              const scoreA = a.creative_analysis?.[0]?.score ?? -1;
+              const scoreB = b.creative_analysis?.[0]?.score ?? -1;
+              return scoreB - scoreA;
+            });
+
+            topTranscriptions = sorted.slice(0, 10).map((t: any) => ({
+              text: t.text,
+              score: t.creative_analysis?.[0]?.score ?? null
+            }));
+
+            app.log.info(`[Generate Text Creative] Found ${topTranscriptions.length} transcriptions`);
+          } else {
+            app.log.info(`[Generate Text Creative] No transcriptions found`);
+          }
+
+          // 3. Получаем 5 последних генераций этого пользователя
+          app.log.info(`[Generate Text Creative] Fetching previous generations...`);
+          const { data: previousGenerations } = await supabase
+            .from('text_generation_history')
+            .select('generated_text')
+            .eq('user_id', user_id)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          prevGens = previousGenerations || [];
+          app.log.info(`[Generate Text Creative] Found ${prevGens.length} previous generations`);
         }
-
-        // 3. Получаем 5 последних генераций этого пользователя
-        app.log.info(`[Generate Text Creative] Fetching previous generations...`);
-        const { data: previousGenerations, error: prevError } = await supabase
-          .from('text_generation_history')
-          .select('generated_text')
-          .eq('user_id', user_id)
-          .order('created_at', { ascending: false })
-          .limit(5);
-
-        const prevGens = previousGenerations || [];
-        app.log.info(`[Generate Text Creative] Found ${prevGens.length} previous generations`);
 
         // 4. Собираем полный промпт
         const fullPrompt = buildTextCreativePrompt(
@@ -173,39 +183,46 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
 
         app.log.info(`[Generate Text Creative] Generated text length: ${trimmedText.length}`);
 
-        // 6. Сохраняем в историю
-        const transcriptIds = topTranscriptions.length > 0
-          ? topTranscriptions.map((_, i) => transcriptions?.[i]?.id).filter(Boolean)
-          : [];
+        // 6. Сохраняем в историю (пропускаем в minimal_context режиме)
+        let savedGenerationId: string | undefined;
 
-        const { data: savedGeneration, error: saveError } = await supabase
-          .from('text_generation_history')
-          .insert({
-            user_id,
-            text_type,
-            user_prompt: safeUserPrompt,
-            generated_text: trimmedText,
-            context_transcript_ids: transcriptIds
-          })
-          .select('id')
-          .single();
+        if (!minimalContext) {
+          const transcriptIds = topTranscriptions.length > 0
+            ? topTranscriptions.map((_, i) => transcriptions?.[i]?.id).filter(Boolean)
+            : [];
 
-        if (saveError) {
-          app.log.warn(`[Generate Text Creative] Failed to save to history: ${saveError.message}`);
-          // Не прерываем - генерация успешна, просто не сохранили в историю
+          const { data: savedGeneration, error: saveError } = await supabase
+            .from('text_generation_history')
+            .insert({
+              user_id,
+              text_type,
+              user_prompt: safeUserPrompt,
+              generated_text: trimmedText,
+              context_transcript_ids: transcriptIds
+            })
+            .select('id')
+            .single();
+
+          if (saveError) {
+            app.log.warn(`[Generate Text Creative] Failed to save to history: ${saveError.message}`);
+            // Не прерываем - генерация успешна, просто не сохранили в историю
+          }
+          savedGenerationId = savedGeneration?.id;
+
+          // Добавляем тег онбординга: сгенерировал текст
+          addOnboardingTag(user_id, 'generated_text').catch(err => {
+            app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag generated_text');
+          });
+        } else {
+          app.log.info(`[Generate Text Creative] Minimal context mode: skipping history save and onboarding tag`);
         }
 
         app.log.info(`[Generate Text Creative] Successfully generated ${TEXT_TYPE_LABELS[text_type as TextCreativeType]}`);
 
-        // Добавляем тег онбординга: сгенерировал текст
-        addOnboardingTag(user_id, 'generated_text').catch(err => {
-          app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag generated_text');
-        });
-
         return {
           success: true,
           text: trimmedText,
-          generation_id: savedGeneration?.id
+          generation_id: savedGenerationId
         };
 
       } catch (error: any) {
@@ -232,7 +249,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         app.log.info(`[Edit Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
 
         // Валидация
-        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
+        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference', 'whatsapp_question', 'video_caption'];
         if (!validTypes.includes(text_type)) {
           return reply.status(400).send({
             success: false,

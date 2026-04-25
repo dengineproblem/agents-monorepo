@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { ChevronDown, QrCode, Cloud } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ChevronDown, ChevronRight, Settings2, QrCode, Cloud } from 'lucide-react';
 import { PlacementsSelector } from '@/components/profile/PlacementsSelector';
 import type {
   DirectionObjective,
@@ -27,12 +28,14 @@ import type {
 import { OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
 import { DEFAULT_UTM } from '@/constants/cities';
 import { GeoLocationSearch } from '@/components/GeoLocationSearch';
+import { LocaleSearch } from '@/components/LocaleSearch';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
 // tiktokApi убран - Instant Page ID вводится вручную
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { AIGenerateButton } from './AIGenerateButton';
 
 export type ConnectionType = 'evolution' | 'waba';
 
@@ -114,6 +117,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [selectedLocales, setSelectedLocales] = useState<number[]>([]);
   const [ageMin, setAgeMin] = useState<number>(18);
   const [ageMax, setAgeMax] = useState<number>(65);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
@@ -154,6 +158,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const needsFacebook = directionPlatform === 'facebook' || directionPlatform === 'both';
   const needsTikTok = directionPlatform === 'tiktok' || directionPlatform === 'both';
@@ -352,12 +357,16 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
       // Валидация WhatsApp полей для TikTok
       if (tiktokObjective === 'whatsapp') {
-        if (clientQuestions.filter(q => q.trim()).length === 0) {
-          setError('Введите хотя бы один вопрос клиента для WhatsApp');
+        if (!whatsappPhoneNumber.trim()) {
+          setError('Введите номер WhatsApp');
           return;
         }
-        if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+        if (!whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
           setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+          return;
+        }
+        if (clientQuestions.filter(q => q.trim()).length === 0) {
+          setError('Введите хотя бы один вопрос клиента для WhatsApp');
           return;
         }
       }
@@ -406,20 +415,20 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       const needsSiteFields = objective === 'site_leads' || (objective === 'conversions' && conversionChannel === 'site');
 
       if (needsWhatsAppFields) {
+        if (!whatsappPhoneNumber.trim()) {
+          setError('Введите номер WhatsApp');
+          return;
+        }
+        if (!whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+          setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+          return;
+        }
         if (clientQuestions.filter(q => q.trim()).length === 0) {
           setError('Введите хотя бы один вопрос клиента для WhatsApp');
           return;
         }
-
-        // Валидация номера WhatsApp (если указан)
-        if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
-          setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
-          return;
-        }
-
-        // Валидация WABA Phone ID (обязательно для WABA типа подключения)
-        if (whatsappPhoneNumber.trim() && whatsappConnectionType === 'waba' && !whatsappWabaPhoneId.trim()) {
-          setError('Введите WABA Phone Number ID для подключения через Meta Cloud API');
+        if (whatsappConnectionType === 'waba' && !whatsappWabaPhoneId.trim()) {
+          setError('Введите Phone Number ID для WABA');
           return;
         }
       }
@@ -460,6 +469,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             direction_id: '', // Будет установлен после создания направления
             campaign_goal: objective,
             cities: selectedCities,
+            locales: selectedLocales.length > 0 ? selectedLocales : undefined,
             age_min: ageMin,
             age_max: ageMax,
             gender,
@@ -585,6 +595,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setWhatsappConnectionType('evolution');
     setWhatsappWabaPhoneId('');
     setWhatsappWabaAccessToken('');
+    setWhatsappWabaAppSecret('');
     setSelectedCities([]);
     setAgeMin(18);
     setAgeMax(65);
@@ -1049,89 +1060,21 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
 
             {!separateTikTokSettings && (
-              <>
-                {/* География */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label>
-                      География <span className="text-red-500">*</span>
-                    </Label>
-                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
-                  </div>
-                  <GeoLocationSearch
-                    selectedCities={selectedCities}
-                    onSelectionChange={setSelectedCities}
-                    disabled={isSubmitting}
-                    portalContainer={dialogContentRef.current}
-                    platform={needsFacebook ? 'facebook' : 'tiktok'}
-                  />
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label>
+                    География <span className="text-red-500">*</span>
+                  </Label>
+                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
                 </div>
-
-                {/* Возраст */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label>
-                      Возраст <span className="text-red-500">*</span>
-                    </Label>
-                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min="13"
-                      max="65"
-                      value={ageMin}
-                      onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
-                      disabled={isSubmitting}
-                      className="w-24"
-                    />
-                    <span className="text-muted-foreground">—</span>
-                    <Input
-                      type="number"
-                      min="13"
-                      max="65"
-                      value={ageMax}
-                      onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
-                      disabled={isSubmitting}
-                      className="w-24"
-                    />
-                    <span className="text-sm text-muted-foreground">лет</span>
-                  </div>
-                </div>
-
-                {/* Пол */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label>Пол</Label>
-                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
-                  </div>
-                  <RadioGroup
-                    value={gender}
-                    onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
-                    disabled={isSubmitting}
-                    className="flex gap-4"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="all" id="gender-all" />
-                      <Label htmlFor="gender-all" className="font-normal cursor-pointer">
-                        Все
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="male" id="gender-male" />
-                      <Label htmlFor="gender-male" className="font-normal cursor-pointer">
-                        Мужчины
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="female" id="gender-female" />
-                      <Label htmlFor="gender-female" className="font-normal cursor-pointer">
-                        Женщины
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-              </>
+                <GeoLocationSearch
+                  selectedCities={selectedCities}
+                  onSelectionChange={setSelectedCities}
+                  disabled={isSubmitting}
+                  portalContainer={dialogContentRef.current}
+                  platform={needsFacebook ? 'facebook' : 'tiktok'}
+                />
+              </div>
             )}
 
             {separateTikTokSettings && needsFacebook && needsTikTok && (
@@ -1307,85 +1250,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </>
             )}
 
-            {needsFacebook && (
-              <div className="space-y-3 rounded-md border p-3 bg-muted/20">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="space-y-0.5">
-                    <Label>Advantage+ Audience</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Можно отключить, если нужен строго фиксированный таргетинг.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={advantageAudienceEnabled}
-                    onCheckedChange={setAdvantageAudienceEnabled}
-                    disabled={isSubmitting}
-                  />
-                </div>
-              </div>
-            )}
-
-            {needsFacebook && (
-              <div className="space-y-2 rounded-md border p-3 bg-muted/20">
-                <Label htmlFor="direction-custom-audience">Custom Audience (опционально)</Label>
-                <Select
-                  value={customAudienceId || 'none'}
-                  onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
-                  disabled={isSubmitting || isLoadingCustomAudiences}
-                >
-                  <SelectTrigger id="direction-custom-audience">
-                    <SelectValue placeholder={
-                      isLoadingCustomAudiences
-                        ? 'Загрузка...'
-                        : customAudiences.length === 0
-                          ? 'Аудитории не найдены'
-                          : 'Выберите аудиторию'
-                    } />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Без Custom Audience</SelectItem>
-                    {customAudiences.length === 0 && !isLoadingCustomAudiences && (
-                      <SelectItem value="no-audiences" disabled>
-                        Нет доступных Custom Audience
-                      </SelectItem>
-                    )}
-                    {customAudiences.map((audience) => (
-                      <SelectItem key={audience.id} value={audience.id}>
-                        {audience.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Список подтягивается из текущего рекламного кабинета Meta.
-                </p>
-              </div>
-            )}
-
-            {needsFacebook && <PlacementsSelector
-              publisherPlatforms={publisherPlatforms}
-              facebookPlacements={facebookPlacements}
-              instagramPlacements={instagramPlacements}
-              open={placementsOpen}
-              onOpenChange={setPlacementsOpen}
-              disabled={isSubmitting}
-              onReset={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
-              onTogglePlatform={(val) => {
-                setPublisherPlatforms(prev => {
-                  const next = prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val];
-                  // Очищаем плейсменты удалённой платформы чтобы не было stale данных
-                  if (!next.includes('facebook')) setFacebookPlacements([]);
-                  if (!next.includes('instagram')) setInstagramPlacements([]);
-                  return next;
-                });
-              }}
-              onToggleFb={(val) => setFacebookPlacements(prev =>
-                prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
-              )}
-              onToggleIg={(val) => setInstagramPlacements(prev =>
-                prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
-              )}
-            />}
           </div>
 
           <Separator />
@@ -1396,9 +1260,20 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {!separateTikTokSettings && (
               <div className="space-y-2">
-                <Label htmlFor="description">
-                  Текст под видео <span className="text-red-500">*</span>
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="description">
+                    Текст под видео <span className="text-red-500">*</span>
+                  </Label>
+                  <AIGenerateButton
+                    userId={userAccountId}
+                    accountId={accountId}
+                    textType="video_caption"
+                    minimalContext
+                    contextHint={`Напиши короткий текст под видео для рекламного направления "${name}". Это текст рядом с видео в Instagram/TikTok ленте, который мотивирует совершить целевое действие. 2-4 коротких предложения.`}
+                    onGenerated={setDescription}
+                    disabled={isSubmitting}
+                  />
+                </div>
                 <Textarea
                   id="description"
                   placeholder="Напишите нам, чтобы узнать подробности"
@@ -1413,9 +1288,20 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             {separateTikTokSettings && needsFacebook && needsTikTok && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="description">
-                    Текст под видео (Instagram) <span className="text-red-500">*</span>
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="description">
+                      Текст под видео (Instagram) <span className="text-red-500">*</span>
+                    </Label>
+                    <AIGenerateButton
+                      userId={userAccountId}
+                      accountId={accountId}
+                      textType="video_caption"
+                      minimalContext
+                      contextHint={`Напиши короткий текст под видео для рекламного направления "${name}" (Instagram). 2-4 коротких предложения.`}
+                      onGenerated={setDescription}
+                      disabled={isSubmitting}
+                    />
+                  </div>
                   <Textarea
                     id="description"
                     placeholder="Напишите нам, чтобы узнать подробности"
@@ -1427,9 +1313,20 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="tiktok-description">
-                    Текст под видео (TikTok) <span className="text-red-500">*</span>
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tiktok-description">
+                      Текст под видео (TikTok) <span className="text-red-500">*</span>
+                    </Label>
+                    <AIGenerateButton
+                      userId={userAccountId}
+                      accountId={accountId}
+                      textType="video_caption"
+                      minimalContext
+                      contextHint={`Напиши короткий текст под видео для рекламного направления "${name}" (TikTok). 2-4 коротких предложения.`}
+                      onGenerated={setTikTokDescription}
+                      disabled={isSubmitting}
+                    />
+                  </div>
                   <Textarea
                     id="tiktok-description"
                     placeholder="Напишите нам, чтобы узнать подробности"
@@ -1453,10 +1350,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
               <div className="space-y-2">
                 <Label htmlFor="tt-whatsapp-number">
-                  WhatsApp номер (опционально)
+                  Номер WhatsApp <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="tt-whatsapp-number"
+                  type="tel"
                   value={whatsappPhoneNumber}
                   onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
                   placeholder="+77001234567"
@@ -1472,14 +1370,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
                 {clientQuestions.map((q, index) => (
                   <div key={index} className="flex gap-2 items-start">
-                    <Textarea
-                      value={q}
-                      onChange={(e) => updateQuestion(index, e.target.value)}
-                      placeholder="Введите вопрос клиента..."
-                      className="flex-1"
-                      rows={2}
-                      disabled={isSubmitting}
-                    />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex justify-end">
+                        <AIGenerateButton
+                          userId={userAccountId}
+                          accountId={accountId}
+                          textType="whatsapp_question"
+                          minimalContext
+                          contextHint={`Сгенерируй короткий вопрос клиента для WhatsApp по направлению "${name}". Это первое сообщение, которое клиент отправляет в WhatsApp при переходе по рекламе. От первого лица, 1-2 предложения, разговорный стиль, без CTA, без рекламы.`}
+                          onGenerated={(text) => updateQuestion(index, text)}
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                      <Textarea
+                        value={q}
+                        onChange={(e) => updateQuestion(index, e.target.value)}
+                        placeholder="Введите вопрос клиента..."
+                        rows={2}
+                        disabled={isSubmitting}
+                      />
+                    </div>
                     {clientQuestions.length > 1 && (
                       <button
                         type="button"
@@ -1513,13 +1423,13 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
 
-              {/* Ввод WhatsApp номера */}
               <div className="space-y-2">
                 <Label htmlFor="whatsapp-number">
-                  WhatsApp номер (опционально)
+                  Номер WhatsApp <span className="text-red-500">*</span>
                 </Label>
                 <Input
                   id="whatsapp-number"
+                  type="tel"
                   value={whatsappPhoneNumber}
                   onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
                   placeholder="+77001234567"
@@ -1527,108 +1437,104 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   className="font-mono"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
+                  Международный формат: +[код страны][номер].
                 </p>
               </div>
 
-              {/* Тип подключения WhatsApp (показываем только если номер указан) */}
-              {whatsappPhoneNumber.trim() && (
+              {/* Тип подключения WhatsApp */}
+              <div className="space-y-2">
+                <Label>Тип подключения</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWhatsappConnectionType('evolution');
+                      setWhatsappWabaPhoneId('');
+                      setWhatsappWabaAccessToken('');
+                      setWhatsappWabaAppSecret('');
+                    }}
+                    disabled={isSubmitting}
+                    className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                      whatsappConnectionType === 'evolution'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-muted hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <QrCode className="w-5 h-5" />
+                    <div className="text-left">
+                      <div className="font-medium text-sm">QR-код</div>
+                      <div className="text-xs text-muted-foreground">Whatsapp Business</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWhatsappConnectionType('waba')}
+                    disabled={isSubmitting}
+                    className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+                      whatsappConnectionType === 'waba'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-muted hover:border-muted-foreground/50'
+                    }`}
+                  >
+                    <Cloud className="w-5 h-5" />
+                    <div className="text-left">
+                      <div className="font-medium text-sm">WABA</div>
+                      <div className="text-xs text-muted-foreground">Meta Cloud API</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {whatsappConnectionType === 'waba' && (
                 <>
                   <div className="space-y-2">
-                    <Label>Тип подключения</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setWhatsappConnectionType('evolution');
-                          setWhatsappWabaPhoneId('');
-                          setWhatsappWabaAccessToken('');
-                        }}
-                        disabled={isSubmitting}
-                        className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
-                          whatsappConnectionType === 'evolution'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-muted hover:border-muted-foreground/50'
-                        }`}
-                      >
-                        <QrCode className="w-5 h-5" />
-                        <div className="text-left">
-                          <div className="font-medium text-sm">QR-код</div>
-                          <div className="text-xs text-muted-foreground">Whatsapp Business</div>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setWhatsappConnectionType('waba')}
-                        disabled={isSubmitting}
-                        className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
-                          whatsappConnectionType === 'waba'
-                            ? 'border-primary bg-primary/5'
-                            : 'border-muted hover:border-muted-foreground/50'
-                        }`}
-                      >
-                        <Cloud className="w-5 h-5" />
-                        <div className="text-left">
-                          <div className="font-medium text-sm">WABA</div>
-                          <div className="text-xs text-muted-foreground">Meta Cloud API</div>
-                        </div>
-                      </button>
-                    </div>
+                    <Label htmlFor="waba-phone-id">
+                      WABA Phone Number ID <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="waba-phone-id"
+                      value={whatsappWabaPhoneId}
+                      onChange={(e) => setWhatsappWabaPhoneId(e.target.value)}
+                      placeholder="123456789012345"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
+                    </p>
                   </div>
 
-                  {/* WABA Phone ID - только для WABA */}
-                  {whatsappConnectionType === 'waba' && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="waba-phone-id">
-                          WABA Phone Number ID <span className="text-red-500">*</span>
-                        </Label>
-                        <Input
-                          id="waba-phone-id"
-                          value={whatsappWabaPhoneId}
-                          onChange={(e) => setWhatsappWabaPhoneId(e.target.value)}
-                          placeholder="123456789012345"
-                          disabled={isSubmitting}
-                          className="font-mono"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Найти в Meta Business Suite → WhatsApp Manager → Phone Numbers
-                        </p>
-                      </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="waba-access-token">WABA Access Token</Label>
+                    <Input
+                      id="waba-access-token"
+                      type="password"
+                      value={whatsappWabaAccessToken}
+                      onChange={(e) => setWhatsappWabaAccessToken(e.target.value)}
+                      placeholder="System User Token"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
+                    </p>
+                  </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="waba-access-token">WABA Access Token</Label>
-                        <Input
-                          id="waba-access-token"
-                          type="password"
-                          value={whatsappWabaAccessToken}
-                          onChange={(e) => setWhatsappWabaAccessToken(e.target.value)}
-                          placeholder="System User Token"
-                          disabled={isSubmitting}
-                          className="font-mono"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          System User Token с правами whatsapp_business_messaging. Если не указан — используется токен из рекламного аккаунта.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="waba-app-secret">WABA App Secret</Label>
-                        <Input
-                          id="waba-app-secret"
-                          type="password"
-                          value={whatsappWabaAppSecret}
-                          onChange={(e) => setWhatsappWabaAppSecret(e.target.value)}
-                          placeholder="App Secret из Meta Developer Console"
-                          disabled={isSubmitting}
-                          className="font-mono"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Settings → Basic → App Secret. Используется для верификации входящих webhook.
-                        </p>
-                      </div>
-                    </>
-                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="waba-app-secret">WABA App Secret</Label>
+                    <Input
+                      id="waba-app-secret"
+                      type="password"
+                      value={whatsappWabaAppSecret}
+                      onChange={(e) => setWhatsappWabaAppSecret(e.target.value)}
+                      placeholder="App Secret из Meta Developer Console"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Settings → Basic → App Secret. Используется для верификации входящих webhook.
+                    </p>
+                  </div>
                 </>
               )}
 
@@ -1636,14 +1542,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
                 {clientQuestions.map((q, index) => (
                   <div key={index} className="flex gap-2 items-start">
-                    <Textarea
-                      value={q}
-                      onChange={(e) => updateQuestion(index, e.target.value)}
-                      placeholder="Введите вопрос клиента..."
-                      className="flex-1"
-                      rows={2}
-                      disabled={isSubmitting}
-                    />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex justify-end">
+                        <AIGenerateButton
+                          userId={userAccountId}
+                          accountId={accountId}
+                          textType="whatsapp_question"
+                          minimalContext
+                          contextHint={`Сгенерируй короткий вопрос клиента для WhatsApp по направлению "${name}". Это первое сообщение, которое клиент отправляет в WhatsApp при переходе по рекламе. От первого лица, 1-2 предложения, разговорный стиль, без CTA, без рекламы.`}
+                          onGenerated={(text) => updateQuestion(index, text)}
+                          disabled={isSubmitting}
+                        />
+                      </div>
+                      <Textarea
+                        value={q}
+                        onChange={(e) => updateQuestion(index, e.target.value)}
+                        placeholder="Введите вопрос клиента..."
+                        rows={2}
+                        disabled={isSubmitting}
+                      />
+                    </div>
                     {clientQuestions.length > 1 && (
                       <button
                         type="button"
@@ -1766,25 +1684,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="cta-type-site">Кнопка действия</Label>
-                <Select
-                  value={ctaType || 'SIGN_UP'}
-                  onValueChange={(value) => setCtaType(value)}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CTA_OPTIONS_SITE.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
           )}
 
@@ -1856,25 +1755,6 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="cta-type-lead">Кнопка действия</Label>
-                <Select
-                  value={ctaType || 'LEARN_MORE'}
-                  onValueChange={(value) => setCtaType(value)}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CTA_OPTIONS_LEAD_FORM.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
           )}
 
@@ -1910,6 +1790,222 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </p>
             </div>
           )}
+
+          {/* Дополнительные настройки */}
+          {needsFacebook && (() => {
+            const showCta = objective === 'site_leads' ||
+              objective === 'lead_forms' ||
+              (objective === 'conversions' &&
+                (conversionChannel === 'site' || conversionChannel === 'lead_form'));
+            const ctaOptions = (objective === 'site_leads' ||
+              (objective === 'conversions' && conversionChannel === 'site'))
+              ? CTA_OPTIONS_SITE
+              : CTA_OPTIONS_LEAD_FORM;
+            return (
+              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="space-y-3">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between"
+                    disabled={isSubmitting}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Settings2 className="h-4 w-4" />
+                      Дополнительные настройки
+                    </span>
+                    {advancedOpen ? <ChevronDown className="h-4 w-4 opacity-60" /> : <ChevronRight className="h-4 w-4 opacity-60" />}
+                  </Button>
+                </CollapsibleTrigger>
+
+                <CollapsibleContent className="space-y-3">
+                  {/* Возраст (только если shared targeting; в separate-режиме возраст уже выше) */}
+                  {!separateTikTokSettings && (
+                    <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                      <div className="flex items-center gap-1.5">
+                        <Label>
+                          Возраст <span className="text-red-500">*</span>
+                        </Label>
+                        <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="13"
+                          max="65"
+                          value={ageMin}
+                          onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
+                          disabled={isSubmitting}
+                          className="w-24"
+                        />
+                        <span className="text-muted-foreground">—</span>
+                        <Input
+                          type="number"
+                          min="13"
+                          max="65"
+                          value={ageMax}
+                          onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
+                          disabled={isSubmitting}
+                          className="w-24"
+                        />
+                        <span className="text-sm text-muted-foreground">лет</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Пол (только если shared) */}
+                  {!separateTikTokSettings && (
+                    <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                      <div className="flex items-center gap-1.5">
+                        <Label>Пол</Label>
+                        <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
+                      </div>
+                      <RadioGroup
+                        value={gender}
+                        onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
+                        disabled={isSubmitting}
+                        className="flex gap-4"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="all" id="adv-gender-all" />
+                          <Label htmlFor="adv-gender-all" className="font-normal cursor-pointer">
+                            Все
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="male" id="adv-gender-male" />
+                          <Label htmlFor="adv-gender-male" className="font-normal cursor-pointer">
+                            Мужчины
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="female" id="adv-gender-female" />
+                          <Label htmlFor="adv-gender-female" className="font-normal cursor-pointer">
+                            Женщины
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </div>
+                  )}
+
+                  {/* CTA-кнопка */}
+                  {showCta && (
+                    <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                      <Label htmlFor="cta-type-advanced">Кнопка действия</Label>
+                      <Select
+                        value={ctaType || 'LEARN_MORE'}
+                        onValueChange={(value) => setCtaType(value)}
+                        disabled={isSubmitting}
+                      >
+                        <SelectTrigger id="cta-type-advanced">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ctaOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Advantage+ Audience */}
+                  <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <Label>Advantage+ Audience</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Можно отключить, если нужен строго фиксированный таргетинг.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={advantageAudienceEnabled}
+                        onCheckedChange={setAdvantageAudienceEnabled}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Custom Audience */}
+                  <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                    <Label htmlFor="direction-custom-audience">Custom Audience (опционально)</Label>
+                    <Select
+                      value={customAudienceId || 'none'}
+                      onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
+                      disabled={isSubmitting || isLoadingCustomAudiences}
+                    >
+                      <SelectTrigger id="direction-custom-audience">
+                        <SelectValue placeholder={
+                          isLoadingCustomAudiences
+                            ? 'Загрузка...'
+                            : customAudiences.length === 0
+                              ? 'Аудитории не найдены'
+                              : 'Выберите аудиторию'
+                        } />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Без Custom Audience</SelectItem>
+                        {customAudiences.length === 0 && !isLoadingCustomAudiences && (
+                          <SelectItem value="no-audiences" disabled>
+                            Нет доступных Custom Audience
+                          </SelectItem>
+                        )}
+                        {customAudiences.map((audience) => (
+                          <SelectItem key={audience.id} value={audience.id}>
+                            {audience.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Список подтягивается из текущего рекламного кабинета Meta.
+                    </p>
+                  </div>
+
+                  {/* Язык аудитории */}
+                  <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                    <Label>Язык аудитории</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Если не выбрано — реклама показывается на всех языках.
+                    </p>
+                    <LocaleSearch
+                      selectedLocales={selectedLocales}
+                      onSelectionChange={setSelectedLocales}
+                      disabled={isSubmitting}
+                      portalContainer={dialogContentRef.current}
+                    />
+                  </div>
+
+                  {/* Placements */}
+                  <PlacementsSelector
+                    publisherPlatforms={publisherPlatforms}
+                    facebookPlacements={facebookPlacements}
+                    instagramPlacements={instagramPlacements}
+                    open={placementsOpen}
+                    onOpenChange={setPlacementsOpen}
+                    disabled={isSubmitting}
+                    onReset={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
+                    onTogglePlatform={(val) => {
+                      setPublisherPlatforms(prev => {
+                        const next = prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val];
+                        if (!next.includes('facebook')) setFacebookPlacements([]);
+                        if (!next.includes('instagram')) setInstagramPlacements([]);
+                        return next;
+                      });
+                    }}
+                    onToggleFb={(val) => setFacebookPlacements(prev =>
+                      prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                    )}
+                    onToggleIg={(val) => setInstagramPlacements(prev =>
+                      prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                    )}
+                  />
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })()}
 
           {/* Ошибка */}
           {error && (

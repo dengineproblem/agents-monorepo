@@ -645,6 +645,11 @@ export interface GeoLocationResult {
   supports_region?: boolean;
 }
 
+export interface LocaleResult {
+  key: number;
+  name: string;
+}
+
 export const facebookApi = {
   /**
    * Поиск гео-локаций через Facebook Targeting Search API
@@ -692,6 +697,52 @@ export const facebookApi = {
       return (result.data || []) as GeoLocationResult[];
     } catch (error) {
       console.error('[searchGeoLocations] Ошибка:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Поиск языков аудитории через Facebook Targeting Search API
+   * Endpoint: GET /search?type=adlocale
+   * Возвращает locale ID (число) для использования в targeting.locales
+   */
+  searchLocales: async (
+    query: string,
+    limit: number = 25,
+  ): Promise<LocaleResult[]> => {
+    if (!query || query.length < 2) return [];
+    if (!await hasValidConfig()) return [];
+
+    try {
+      const params: Record<string, string> = {
+        type: 'adlocale',
+        q: query,
+        limit: String(limit),
+      };
+
+      const adAccountId = getCurrentInternalAdAccountId();
+
+      const response = await fetch(`${API_BASE_URL}/fb-proxy`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          path: 'search',
+          params,
+          method: 'GET',
+          adAccountId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[searchLocales] Ошибка:', errorData);
+        return [];
+      }
+
+      const result = await response.json();
+      return (result.data || []) as LocaleResult[];
+    } catch (error) {
+      console.error('[searchLocales] Ошибка:', error);
       return [];
     }
   },

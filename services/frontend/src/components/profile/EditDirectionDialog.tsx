@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Loader2 } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Loader2, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
 import { PlacementsSelector } from '@/components/profile/PlacementsSelector';
 import type {
   Direction,
@@ -24,10 +25,12 @@ import type {
 import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS, CONVERSION_CHANNEL_LABELS, CTA_OPTIONS_SITE, CTA_OPTIONS_LEAD_FORM } from '@/types/direction';
 import { DEFAULT_UTM } from '@/constants/cities';
 import { GeoLocationSearch } from '@/components/GeoLocationSearch';
+import { LocaleSearch } from '@/components/LocaleSearch';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { directionsApi, type DirectionCustomAudience } from '@/services/directionsApi';
 import { toast } from 'sonner';
+import { AIGenerateButton } from './AIGenerateButton';
 
 const TIKTOK_MIN_DAILY_BUDGET = 2500;
 
@@ -85,6 +88,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   // Настройки рекламы
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
+  const [selectedLocales, setSelectedLocales] = useState<number[]>([]);
   const [ageMin, setAgeMin] = useState<number>(18);
   const [ageMax, setAgeMax] = useState<number>(65);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
@@ -112,6 +116,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const isTikTok = direction?.platform === 'tiktok';
 
   // Загрузка пикселей для site_leads
@@ -194,6 +199,13 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setCustomAudienceId(direction.custom_audience_id || '');
     setCtaType(direction.cta_type || '');
     setError(null);
+    // Раскрываем "Дополнительные настройки" если есть нестандартные значения direction-уровня.
+    // Дополнительно loadAdSettings выставит true при наличии locales/placements/age/gender/cta.
+    setAdvancedOpen(
+      direction.advantage_audience_enabled === false ||
+        Boolean(direction.custom_audience_id) ||
+        Boolean(direction.cta_type)
+    );
 
     if (isTikTok) {
       setTikTokDailyBudget(
@@ -229,6 +241,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         console.log('[EditDirectionDialog] Настройки загружены:', settings);
         setSettingsId(settings.id);
         setSelectedCities(settings.cities || []);
+        setSelectedLocales(settings.locales || []);
         setAgeMin(settings.age_min);
         setAgeMax(settings.age_max);
         setGender(settings.gender);
@@ -244,6 +257,15 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         setPublisherPlatforms(settings.publisher_platforms || []);
         setFacebookPlacements(settings.facebook_placements || []);
         setInstagramPlacements(settings.instagram_placements || []);
+        const hasAdvancedFromSettings =
+          (settings.locales?.length ?? 0) > 0 ||
+          (settings.publisher_platforms?.length ?? 0) > 0 ||
+          (settings.facebook_placements?.length ?? 0) > 0 ||
+          (settings.instagram_placements?.length ?? 0) > 0 ||
+          settings.age_min !== 18 ||
+          settings.age_max !== 65 ||
+          settings.gender !== 'all';
+        if (hasAdvancedFromSettings) setAdvancedOpen(true);
         if (settings.site_url) setSiteUrl(settings.site_url);
         if (settings.app_store_url) setAppStoreUrl(settings.app_store_url);
         setIsSkadnetworkAttribution(Boolean(settings.is_skadnetwork_attribution));
@@ -267,6 +289,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const resetAdSettings = () => {
     setSettingsId(null);
     setSelectedCities([]);
+    setSelectedLocales([]);
     setAgeMin(18);
     setAgeMax(65);
     setGender('all');
@@ -362,10 +385,25 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     }
 
     // Валидация специфичных полей (Facebook)
+    const needsWhatsAppFields = !isTikTok && (
+      direction.objective === 'whatsapp' ||
+      (direction.objective === 'conversions' && direction.conversion_channel === 'whatsapp')
+    );
+
     if (!isTikTok) {
-      if (direction.objective === 'whatsapp' && clientQuestions.filter(q => q.trim()).length === 0) {
-        setError('Введите хотя бы один вопрос клиента для WhatsApp');
-        return;
+      if (needsWhatsAppFields) {
+        if (!whatsappPhoneNumber.trim()) {
+          setError('Введите номер WhatsApp');
+          return;
+        }
+        if (!whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+          setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+          return;
+        }
+        if (clientQuestions.filter(q => q.trim()).length === 0) {
+          setError('Введите хотя бы один вопрос клиента для WhatsApp');
+          return;
+        }
       }
 
       if ((direction.objective === 'instagram_traffic' || direction.objective === 'instagram_dm') && !instagramUrl.trim()) {
@@ -383,6 +421,17 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         return;
       }
 
+    }
+
+    if (isTikTok && direction.tiktok_objective === 'whatsapp') {
+      if (!whatsappPhoneNumber.trim()) {
+        setError('Введите номер WhatsApp');
+        return;
+      }
+      if (!whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+        setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+        return;
+      }
     }
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
@@ -441,6 +490,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           publisher_platforms: publisherPlatforms.length > 0 ? publisherPlatforms : null,
           facebook_placements: facebookPlacements.length > 0 ? facebookPlacements : null,
           instagram_placements: instagramPlacements.length > 0 ? instagramPlacements : null,
+          // null = таргетинг на все языки (сброс), array = ручной выбор
+          locales: selectedLocales.length > 0 ? selectedLocales : null,
         }),
         ...(!isTikTok && direction.objective === 'site_leads' && {
           site_url: siteUrl.trim(),
@@ -669,143 +720,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     portalContainer={dialogContentRef.current}
                   />
                 </div>
-
-                {/* Возраст */}
-                <div className="space-y-2">
-                  <Label>
-                    Возраст <span className="text-red-500">*</span>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min="13"
-                      max="65"
-                      value={ageMin}
-                      onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
-                      disabled={isSubmitting}
-                      className="w-24"
-                    />
-                    <span className="text-muted-foreground">—</span>
-                    <Input
-                      type="number"
-                      min="13"
-                      max="65"
-                      value={ageMax}
-                      onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
-                      disabled={isSubmitting}
-                      className="w-24"
-                    />
-                    <span className="text-sm text-muted-foreground">лет</span>
-                  </div>
-                </div>
-
-                {/* Пол */}
-                <div className="space-y-2">
-                  <Label>Пол</Label>
-                  <RadioGroup
-                    value={gender}
-                    onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
-                    disabled={isSubmitting}
-                    className="flex gap-4"
-                  >
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="all" id="edit-gender-all" />
-                      <Label htmlFor="edit-gender-all" className="font-normal cursor-pointer">
-                        Все
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="male" id="edit-gender-male" />
-                      <Label htmlFor="edit-gender-male" className="font-normal cursor-pointer">
-                        Мужчины
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="female" id="edit-gender-female" />
-                      <Label htmlFor="edit-gender-female" className="font-normal cursor-pointer">
-                        Женщины
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
-
-                {!isTikTok && (
-                  <div className="space-y-3 rounded-md border p-3 bg-muted/20">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-0.5">
-                        <Label>Advantage+ Audience</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Можно отключить, если нужен строго фиксированный таргетинг.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={advantageAudienceEnabled}
-                        onCheckedChange={setAdvantageAudienceEnabled}
-                        disabled={isSubmitting}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="edit-direction-custom-audience">Custom Audience (опционально)</Label>
-                      <Select
-                        value={customAudienceId || 'none'}
-                        onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
-                        disabled={isSubmitting || isLoadingCustomAudiences}
-                      >
-                        <SelectTrigger id="edit-direction-custom-audience">
-                          <SelectValue placeholder={
-                            isLoadingCustomAudiences
-                              ? 'Загрузка...'
-                              : customAudiences.length === 0
-                                ? 'Аудитории не найдены'
-                                : 'Выберите аудиторию'
-                          } />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Без Custom Audience</SelectItem>
-                          {customAudiences.length === 0 && !isLoadingCustomAudiences && (
-                            <SelectItem value="no-audiences" disabled>
-                              Нет доступных Custom Audience
-                            </SelectItem>
-                          )}
-                          {customAudiences.map((audience) => (
-                            <SelectItem key={audience.id} value={audience.id}>
-                              {audience.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Список подтягивается из текущего рекламного кабинета Meta.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {!isTikTok && <PlacementsSelector
-                  publisherPlatforms={publisherPlatforms}
-                  facebookPlacements={facebookPlacements}
-                  instagramPlacements={instagramPlacements}
-                  open={placementsOpen}
-                  onOpenChange={setPlacementsOpen}
-                  disabled={isSubmitting}
-                  onReset={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
-                  onTogglePlatform={(val) => {
-                    setPublisherPlatforms(prev => {
-                      const next = prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val];
-                      // Очищаем плейсменты удалённой платформы чтобы не было stale данных
-                      if (!next.includes('facebook')) setFacebookPlacements([]);
-                      if (!next.includes('instagram')) setInstagramPlacements([]);
-                      return next;
-                    });
-                  }}
-                  onToggleFb={(val) => setFacebookPlacements(prev =>
-                    prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
-                  )}
-                  onToggleIg={(val) => setInstagramPlacements(prev =>
-                    prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
-                  )}
-                />}
               </div>
 
               <Separator />
@@ -816,9 +730,20 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
                 {/* Текст под видео */}
                 <div className="space-y-2">
-                  <Label htmlFor="edit-description">
-                    Текст под видео <span className="text-red-500">*</span>
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="edit-description">
+                      Текст под видео <span className="text-red-500">*</span>
+                    </Label>
+                    <AIGenerateButton
+                      userId={userAccountId}
+                      accountId={accountId}
+                      textType="video_caption"
+                      minimalContext
+                      contextHint={`Напиши короткий текст под видео для рекламного направления "${name}". Это текст рядом с видео в Instagram/TikTok ленте, который мотивирует совершить целевое действие. 2-4 коротких предложения.`}
+                      onGenerated={setDescription}
+                      disabled={isSubmitting}
+                    />
+                  </div>
                   <Textarea
                     id="edit-description"
                     placeholder="Напишите нам, чтобы узнать подробности"
@@ -839,10 +764,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
                   <div className="space-y-2">
                     <Label htmlFor="edit-tt-whatsapp-number">
-                      WhatsApp номер (опционально)
+                      Номер WhatsApp <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="edit-tt-whatsapp-number"
+                      type="tel"
                       value={whatsappPhoneNumber}
                       onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
                       placeholder="+77001234567"
@@ -858,14 +784,26 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
                     {clientQuestions.map((q, index) => (
                       <div key={index} className="flex gap-2 items-start">
-                        <Textarea
-                          value={q}
-                          onChange={(e) => updateQuestion(index, e.target.value)}
-                          placeholder="Введите вопрос клиента..."
-                          className="flex-1"
-                          rows={2}
-                          disabled={isSubmitting}
-                        />
+                        <div className="flex-1 space-y-1">
+                          <div className="flex justify-end">
+                            <AIGenerateButton
+                              userId={userAccountId}
+                              accountId={accountId}
+                              textType="whatsapp_question"
+                              minimalContext
+                              contextHint={`Сгенерируй короткий вопрос клиента для WhatsApp по направлению "${name}". Это первое сообщение, которое клиент отправляет в WhatsApp при переходе по рекламе. От первого лица, 1-2 предложения, разговорный стиль, без CTA, без рекламы.`}
+                              onGenerated={(text) => updateQuestion(index, text)}
+                              disabled={isSubmitting}
+                            />
+                          </div>
+                          <Textarea
+                            value={q}
+                            onChange={(e) => updateQuestion(index, e.target.value)}
+                            placeholder="Введите вопрос клиента..."
+                            rows={2}
+                            disabled={isSubmitting}
+                          />
+                        </div>
                         {clientQuestions.length > 1 && (
                           <button
                             type="button"
@@ -898,13 +836,14 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               {!isTikTok && direction.objective === 'whatsapp' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="edit-whatsapp-number">
-                      WhatsApp номер (опционально)
+                      Номер WhatsApp <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="edit-whatsapp-number"
+                      type="tel"
                       value={whatsappPhoneNumber}
                       onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
                       placeholder="+77001234567"
@@ -912,22 +851,34 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       className="font-mono"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
+                      Международный формат: +[код страны][номер].
                     </p>
                   </div>
-                  
+
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Вопросы клиента <span className="text-red-500">*</span></label>
                     {clientQuestions.map((q, index) => (
                       <div key={index} className="flex gap-2 items-start">
-                        <Textarea
-                          value={q}
-                          onChange={(e) => updateQuestion(index, e.target.value)}
-                          placeholder="Введите вопрос клиента..."
-                          className="flex-1"
-                          rows={2}
-                          disabled={isSubmitting}
-                        />
+                        <div className="flex-1 space-y-1">
+                          <div className="flex justify-end">
+                            <AIGenerateButton
+                              userId={userAccountId}
+                              accountId={accountId}
+                              textType="whatsapp_question"
+                              minimalContext
+                              contextHint={`Сгенерируй короткий вопрос клиента для WhatsApp по направлению "${name}". Это первое сообщение, которое клиент отправляет в WhatsApp при переходе по рекламе. От первого лица, 1-2 предложения, разговорный стиль, без CTA, без рекламы.`}
+                              onGenerated={(text) => updateQuestion(index, text)}
+                              disabled={isSubmitting}
+                            />
+                          </div>
+                          <Textarea
+                            value={q}
+                            onChange={(e) => updateQuestion(index, e.target.value)}
+                            placeholder="Введите вопрос клиента..."
+                            rows={2}
+                            disabled={isSubmitting}
+                          />
+                        </div>
                         {clientQuestions.length > 1 && (
                           <button
                             type="button"
@@ -1016,42 +967,23 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </div>
                   )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-wa-conv-number">
-                      WhatsApp номер (опционально)
-                    </Label>
-                    <Input
-                      id="edit-wa-conv-number"
-                      value={whatsappPhoneNumber}
-                      onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
-                      placeholder="+77001234567"
-                      disabled={isSubmitting}
-                      className="font-mono"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
-                    </p>
-                  </div>
-
-                  {(direction.conversion_channel === 'site' || direction.conversion_channel === 'lead_form') && (
+                  {direction.conversion_channel === 'whatsapp' && (
                     <div className="space-y-2">
-                      <Label htmlFor="edit-cta-type-conv">Кнопка действия</Label>
-                      <Select
-                        value={ctaType || (direction.conversion_channel === 'site' ? 'SIGN_UP' : 'LEARN_MORE')}
-                        onValueChange={(value) => setCtaType(value)}
+                      <Label htmlFor="edit-wa-conv-number">
+                        Номер WhatsApp <span className="text-red-500">*</span>
+                      </Label>
+                      <Input
+                        id="edit-wa-conv-number"
+                        type="tel"
+                        value={whatsappPhoneNumber}
+                        onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                        placeholder="+77001234567"
                         disabled={isSubmitting}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(direction.conversion_channel === 'site' ? CTA_OPTIONS_SITE : CTA_OPTIONS_LEAD_FORM).map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Международный формат: +[код страны][номер].
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1147,25 +1079,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-cta-type-site">Кнопка действия</Label>
-                    <Select
-                      value={ctaType || 'SIGN_UP'}
-                      onValueChange={(value) => setCtaType(value)}
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CTA_OPTIONS_SITE.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               )}
 
@@ -1190,25 +1103,6 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     </p>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-cta-type-lead">Кнопка действия</Label>
-                    <Select
-                      value={ctaType || 'LEARN_MORE'}
-                      onValueChange={(value) => setCtaType(value)}
-                      disabled={isSubmitting}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CTA_OPTIONS_LEAD_FORM.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
               )}
 
@@ -1244,6 +1138,212 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </p>
                 </div>
               )}
+
+              {/* Дополнительные настройки */}
+              {!isTikTok && (() => {
+                const showCta = direction.objective === 'site_leads' ||
+                  direction.objective === 'lead_forms' ||
+                  (direction.objective === 'conversions' &&
+                    (direction.conversion_channel === 'site' || direction.conversion_channel === 'lead_form'));
+                const ctaOptions = (direction.objective === 'site_leads' ||
+                  (direction.objective === 'conversions' && direction.conversion_channel === 'site'))
+                  ? CTA_OPTIONS_SITE
+                  : CTA_OPTIONS_LEAD_FORM;
+                return (
+                  <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} className="space-y-3">
+                    <CollapsibleTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between"
+                        disabled={isSubmitting}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Settings2 className="h-4 w-4" />
+                          Дополнительные настройки
+                        </span>
+                        {advancedOpen ? <ChevronDown className="h-4 w-4 opacity-60" /> : <ChevronRight className="h-4 w-4 opacity-60" />}
+                      </Button>
+                    </CollapsibleTrigger>
+
+                    <CollapsibleContent className="space-y-3">
+                      {/* Возраст */}
+                      <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                        <Label>
+                          Возраст <span className="text-red-500">*</span>
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min="13"
+                            max="65"
+                            value={ageMin}
+                            onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
+                            disabled={isSubmitting}
+                            className="w-24"
+                          />
+                          <span className="text-muted-foreground">—</span>
+                          <Input
+                            type="number"
+                            min="13"
+                            max="65"
+                            value={ageMax}
+                            onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
+                            disabled={isSubmitting}
+                            className="w-24"
+                          />
+                          <span className="text-sm text-muted-foreground">лет</span>
+                        </div>
+                      </div>
+
+                      {/* Пол */}
+                      <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                        <Label>Пол</Label>
+                        <RadioGroup
+                          value={gender}
+                          onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
+                          disabled={isSubmitting}
+                          className="flex gap-4"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="all" id="edit-gender-all" />
+                            <Label htmlFor="edit-gender-all" className="font-normal cursor-pointer">
+                              Все
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="male" id="edit-gender-male" />
+                            <Label htmlFor="edit-gender-male" className="font-normal cursor-pointer">
+                              Мужчины
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="female" id="edit-gender-female" />
+                            <Label htmlFor="edit-gender-female" className="font-normal cursor-pointer">
+                              Женщины
+                            </Label>
+                          </div>
+                        </RadioGroup>
+                      </div>
+
+                      {/* CTA-кнопка */}
+                      {showCta && (
+                        <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                          <Label htmlFor="edit-cta-type">Кнопка действия</Label>
+                          <Select
+                            value={ctaType || 'LEARN_MORE'}
+                            onValueChange={(value) => setCtaType(value)}
+                            disabled={isSubmitting}
+                          >
+                            <SelectTrigger id="edit-cta-type">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ctaOptions.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* Advantage+ Audience */}
+                      <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="space-y-0.5">
+                            <Label>Advantage+ Audience</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Можно отключить, если нужен строго фиксированный таргетинг.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={advantageAudienceEnabled}
+                            onCheckedChange={setAdvantageAudienceEnabled}
+                            disabled={isSubmitting}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Custom Audience */}
+                      <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                        <Label htmlFor="edit-direction-custom-audience">Custom Audience (опционально)</Label>
+                        <Select
+                          value={customAudienceId || 'none'}
+                          onValueChange={(value) => setCustomAudienceId(value === 'none' ? '' : value)}
+                          disabled={isSubmitting || isLoadingCustomAudiences}
+                        >
+                          <SelectTrigger id="edit-direction-custom-audience">
+                            <SelectValue placeholder={
+                              isLoadingCustomAudiences
+                                ? 'Загрузка...'
+                                : customAudiences.length === 0
+                                  ? 'Аудитории не найдены'
+                                  : 'Выберите аудиторию'
+                            } />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Без Custom Audience</SelectItem>
+                            {customAudiences.length === 0 && !isLoadingCustomAudiences && (
+                              <SelectItem value="no-audiences" disabled>
+                                Нет доступных Custom Audience
+                              </SelectItem>
+                            )}
+                            {customAudiences.map((audience) => (
+                              <SelectItem key={audience.id} value={audience.id}>
+                                {audience.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Список подтягивается из текущего рекламного кабинета Meta.
+                        </p>
+                      </div>
+
+                      {/* Язык аудитории */}
+                      <div className="space-y-2 rounded-md border p-3 bg-muted/20">
+                        <Label>Язык аудитории</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Если не выбрано — реклама показывается на всех языках.
+                        </p>
+                        <LocaleSearch
+                          selectedLocales={selectedLocales}
+                          onSelectionChange={setSelectedLocales}
+                          disabled={isSubmitting}
+                          portalContainer={dialogContentRef.current}
+                        />
+                      </div>
+
+                      {/* Placements */}
+                      <PlacementsSelector
+                        publisherPlatforms={publisherPlatforms}
+                        facebookPlacements={facebookPlacements}
+                        instagramPlacements={instagramPlacements}
+                        open={placementsOpen}
+                        onOpenChange={setPlacementsOpen}
+                        disabled={isSubmitting}
+                        onReset={() => { setPublisherPlatforms([]); setFacebookPlacements([]); setInstagramPlacements([]); }}
+                        onTogglePlatform={(val) => {
+                          setPublisherPlatforms(prev => {
+                            const next = prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val];
+                            if (!next.includes('facebook')) setFacebookPlacements([]);
+                            if (!next.includes('instagram')) setInstagramPlacements([]);
+                            return next;
+                          });
+                        }}
+                        onToggleFb={(val) => setFacebookPlacements(prev =>
+                          prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                        )}
+                        onToggleIg={(val) => setInstagramPlacements(prev =>
+                          prev.includes(val) ? prev.filter(p => p !== val) : [...prev, val]
+                        )}
+                      />
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })()}
 
               {/* Ошибка */}
               {error && (

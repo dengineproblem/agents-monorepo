@@ -116,6 +116,7 @@ export interface CreateDirectionPayload {
 
 export interface DirectionDefaultSettingsInput {
   cities?: string[];
+  locales?: number[];
   age_min?: number;
   age_max?: number;
   gender?: 'all' | 'male' | 'female';
@@ -215,6 +216,7 @@ export interface DefaultAdSettings {
   user_id: string | null;
   campaign_goal: DirectionObjective;
   cities: string[] | null;
+  locales: number[] | null;
   age_min: number;
   age_max: number;
   gender: 'all' | 'male' | 'female';
@@ -246,6 +248,7 @@ export interface CreateDefaultSettingsInput {
   direction_id: string;
   campaign_goal: DirectionObjective;
   cities?: string[];
+  locales?: number[];
   age_min?: number;
   age_max?: number;
   gender?: 'all' | 'male' | 'female';
@@ -267,6 +270,7 @@ export interface CreateDefaultSettingsInput {
 
 export interface UpdateDefaultSettingsInput {
   cities?: string[];
+  locales?: number[] | null;
   age_min?: number;
   age_max?: number;
   gender?: 'all' | 'male' | 'female';

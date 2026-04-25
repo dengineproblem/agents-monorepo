@@ -11,6 +11,7 @@ const CreateDefaultSettingsSchema = z.object({
   direction_id: z.string().uuid(),
   campaign_goal: z.enum(['whatsapp', 'conversions', 'instagram_traffic', 'instagram_dm', 'site_leads', 'lead_forms', 'app_installs']),
   cities: z.array(z.string()).optional(),
+  locales: z.array(z.number().int().positive()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
   gender: z.enum(['all', 'male', 'female']).optional(),
@@ -38,6 +39,7 @@ const CreateDefaultSettingsSchema = z.object({
 
 const UpdateDefaultSettingsSchema = z.object({
   cities: z.array(z.string()).optional(),
+  locales: z.array(z.number().int().positive()).nullable().optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
   gender: z.enum(['all', 'male', 'female']).optional(),
@@ -187,6 +189,7 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
           .update({
             campaign_goal: input.campaign_goal,
             cities: input.cities,
+            locales: input.locales ?? null,
             age_min: input.age_min,
             age_max: input.age_max,
             gender: input.gender,
@@ -230,6 +233,7 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             user_id: null, // направления не используют user_id
             campaign_goal: input.campaign_goal,
             cities: input.cities,
+            locales: input.locales ?? null,
             age_min: input.age_min ?? 18,
             age_max: input.age_max ?? 65,
             gender: input.gender ?? 'all',
@@ -329,6 +333,9 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       // сохранялся в БД. undefined = поле не прислано = не трогать.
       // Когда фронтенд присылает null → Zod парсит как null → попадает в input → spread включает.
       // Когда не присылает → undefined → Supabase клиент стрипает → поле не обновляется (OK).
+      if ('locales' in input) {
+        updatePayload.locales = input.locales ?? null;
+      }
       if ('publisher_platforms' in input) {
         updatePayload.publisher_platforms = input.publisher_platforms ?? null;
         app.log.info({ publisher_platforms: updatePayload.publisher_platforms }, '[default-settings] Placement fields included in PATCH');

@@ -123,6 +123,7 @@ export function buildTargeting(
     settingsId: settings.id,
     gender: settings.gender,
     citiesCount: settings.cities?.length ?? 0,
+    localesCount: Array.isArray(settings.locales) ? settings.locales.length : 0,
     hasPublisherPlatforms: Array.isArray(settings.publisher_platforms) && settings.publisher_platforms.length > 0,
     hasFbPlacements: Array.isArray(settings.facebook_placements) && settings.facebook_placements.length > 0,
     hasIgPlacements: Array.isArray(settings.instagram_placements) && settings.instagram_placements.length > 0,
@@ -245,6 +246,12 @@ export function buildTargeting(
     log.debug({ objective }, '[buildTargeting] No manual placements — using Advantage+ Placements (Meta auto-selects)');
   }
 
+  // Языки аудитории (FB locale IDs). Пустой массив или отсутствие = таргетинг на все языки
+  if (Array.isArray(settings.locales) && settings.locales.length > 0) {
+    targeting.locales = settings.locales;
+    log.info({ objective, locales: targeting.locales }, '[buildTargeting] Locales applied');
+  }
+
   const finalTargeting = applyDirectionAudienceControls(targeting, controls);
 
   log.info({
@@ -252,6 +259,7 @@ export function buildTargeting(
     countries: finalTargeting.geo_locations?.countries?.length || 0,
     regions: finalTargeting.geo_locations?.regions?.length || 0,
     cities: finalTargeting.geo_locations?.cities?.length || 0,
+    locales: finalTargeting.locales?.length || 0,
     advantageAudienceEnabled: controls.advantageAudienceEnabled !== false,
     hasCustomAudience: Boolean(controls.customAudienceId),
     manualPlacements: hasManualPlatforms || hasFbPlacements || hasIgPlacements,

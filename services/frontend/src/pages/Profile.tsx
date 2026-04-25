@@ -198,11 +198,6 @@ const Profile: React.FC = () => {
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [isSavingOpenaiKey, setIsSavingOpenaiKey] = useState(false);
   
-  // Audience ID (ig_seed_audience_id)
-  const [audienceId, setAudienceId] = useState<string>('');
-  const [audienceModal, setAudienceModal] = useState(false);
-  const [newAudienceId, setNewAudienceId] = useState('');
-  const [isSavingAudienceId, setIsSavingAudienceId] = useState(false);
 
   // AmoCRM Integration
   const [amocrmConnected, setAmocrmConnected] = useState(false);
@@ -357,7 +352,6 @@ const Profile: React.FC = () => {
         setOpenaiApiKey(data.openai_api_key || '');
         setGeminiApiKey(data.gemini_api_key || '');
         setAnthropicApiKey(data.anthropic_api_key || '');
-        setAudienceId(data.ig_seed_audience_id || '');
         setTildaConnected(Boolean(data.tilda_utm_field));
 
         // Обновляем localStorage актуальными данными
@@ -919,31 +913,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  const handleSaveAudienceId = async () => {
-    if (!user?.id) return;
-    
-    setIsSavingAudienceId(true);
-    try {
-      const idToSave = newAudienceId.trim();
-      
-      await userProfileApi.updateProfile(user.id, { ig_seed_audience_id: idToSave || null });
-
-      // Обновляем localStorage
-      const updatedUser = { ...user, ig_seed_audience_id: idToSave || null };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      setAudienceId(idToSave);
-      toast.success(appReviewText('Audience ID saved successfully', 'ID аудитории успешно сохранен'));
-      setAudienceModal(false);
-      setNewAudienceId('');
-    } catch (error) {
-      console.error('Ошибка при сохранении:', error);
-      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
-    } finally {
-      setIsSavingAudienceId(false);
-    }
-  };
-
   // AmoCRM handlers
   const handleAmoCRMConnect = () => {
     console.log('[Profile] handleAmoCRMConnect called, amocrmConnected:', amocrmConnected);
@@ -1471,52 +1440,6 @@ const Profile: React.FC = () => {
                   - Legacy (multi_account_enabled=false) использует user_accounts.autopilot (toggle on/off)
                   - Multi-account настраивает brain_mode через AdAccountsManager */}
 
-              {/* Audience ID Card - скрыто в preview версии и в мультиаккаунтном режиме (настраивается через AdAccountsManager) */}
-              {!APP_REVIEW_MODE && !multiAccountEnabled && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <Users className="h-5 w-5" />
-                      Аудитория
-                      <HelpTooltip tooltipKey={TooltipKeys.PROFILE_AUDIENCE_ID} iconSize="sm" />
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-start justify-between gap-2 sm:gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-muted-foreground mb-1">
-                          Facebook Custom Audience ID для дублирования кампаний
-                        </div>
-                        <div className="font-medium font-mono text-sm break-all">
-                          {audienceId || 'Не установлено'}
-                        </div>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setNewAudienceId(audienceId);
-                          setAudienceModal(true);
-                        }}
-                        className="px-2 sm:px-4 flex-shrink-0"
-                      >
-                        {audienceId ? (
-                          <>
-                            <Edit className="h-4 w-4 sm:mr-2" />
-                            <span className="hidden sm:inline">Изменить</span>
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="h-4 w-4 sm:mr-2" />
-                            <span className="hidden sm:inline">Добавить</span>
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && (
                 <div data-tour="directions-block">
@@ -1956,52 +1879,6 @@ const Profile: React.FC = () => {
                   disabled={isSavingApiKey}
                 >
                   {isSavingApiKey ? 'Сохранение...' : t('action.save')}
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Диалог изменения ID аудитории */}
-        <Dialog open={audienceModal} onOpenChange={setAudienceModal}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>{appReviewText('Audience ID', 'ID аудитории')}</DialogTitle>
-              <DialogDescription>
-                {appReviewText('Provide the Facebook Custom Audience ID used for duplicating campaigns with Brain.', 'Укажите Facebook Custom Audience ID для использования при дублировании кампаний агентом Brain.')}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="audience-id">Audience ID</Label>
-                <Input
-                  id="audience-id"
-                  type="text"
-                  placeholder={appReviewText('For example: 120210000000000000', 'Например: 120210000000000000')}
-                  value={newAudienceId}
-                  onChange={(e) => setNewAudienceId(e.target.value)}
-                  disabled={isSavingAudienceId}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {appReviewText('Use the existing LAL audience ID from Facebook Ads Manager. Leave empty to remove.', 'ID готовой LAL аудитории из Facebook Ads Manager. Оставьте пустым, чтобы удалить.')}
-                </p>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setAudienceModal(false);
-                    setNewAudienceId('');
-                  }}
-                  disabled={isSavingAudienceId}
-                >
-                  {t('action.cancel')}
-                </Button>
-                <Button
-                  onClick={handleSaveAudienceId}
-                  disabled={isSavingAudienceId}
-                >
-                  {isSavingAudienceId ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>

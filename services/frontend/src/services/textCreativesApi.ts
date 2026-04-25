@@ -4,7 +4,15 @@ const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION
   || (import.meta.env.DEV ? 'http://localhost:8085' : 'https://app.performanteaiagency.com/api/creative');
 
 // Типы текстовых креативов
-export type TextCreativeType = 'storytelling' | 'direct_offer' | 'expert_video' | 'telegram_post' | 'threads_post' | 'reference';
+export type TextCreativeType =
+  | 'storytelling'
+  | 'direct_offer'
+  | 'expert_video'
+  | 'telegram_post'
+  | 'threads_post'
+  | 'reference'
+  | 'whatsapp_question'
+  | 'video_caption';
 
 // Названия типов для UI
 export const TEXT_TYPE_LABELS: Record<TextCreativeType, string> = {
@@ -14,6 +22,8 @@ export const TEXT_TYPE_LABELS: Record<TextCreativeType, string> = {
   telegram_post: 'Пост в Telegram',
   threads_post: 'Пост в Threads',
   reference: 'Референс',
+  whatsapp_question: 'Вопрос клиента WhatsApp',
+  video_caption: 'Текст под видео',
 };
 
 // Типы для dropdown
@@ -24,6 +34,8 @@ export const TEXT_TYPES: Array<{ value: TextCreativeType; label: string }> = [
   { value: 'telegram_post', label: 'Пост в Telegram' },
   { value: 'threads_post', label: 'Пост в Threads' },
   { value: 'reference', label: 'Референс' },
+  { value: 'whatsapp_question', label: 'Вопрос клиента WhatsApp' },
+  { value: 'video_caption', label: 'Текст под видео' },
 ];
 
 // Request/Response интерфейсы
@@ -32,6 +44,7 @@ export interface GenerateTextCreativeRequest {
   text_type: TextCreativeType;
   user_prompt: string;
   account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
+  minimal_context?: boolean; // Если true - не подтягивать транскрипции/историю, не сохранять
 }
 
 export interface GenerateTextCreativeResponse {

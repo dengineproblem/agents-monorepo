@@ -16,6 +16,7 @@ export interface DefaultAdSettings {
   // Таргетинг
   cities?: string[]; // Может содержать коды стран (RU, KZ) или ID городов (2420877) - автоопределение
   geo_locations?: any; // Опционально: готовый Facebook geo_locations JSON (если передан - используется напрямую)
+  locales?: number[] | null; // Facebook locale IDs для таргетинга по языку. NULL = все языки
   age_min: number;
   age_max: number;
   gender: 'all' | 'male' | 'female';
