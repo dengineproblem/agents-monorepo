@@ -13,6 +13,75 @@ const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_VALIDATE_ONLY = String(process.env.FB_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const log = createLogger({ module: 'facebookAdapter' });
 
+/**
+ * Парсит заголовок x-business-use-case-usage и логирует warn при приближении
+ * к лимиту (>= 80% по call_count / total_cputime / total_time).
+ * Не блокирует запрос — только сигнал в логи.
+ */
+function logUseCaseUsage(headers: Headers, context: { method?: string; path?: string; tag: string }) {
+  try {
+    const raw =
+      headers.get('x-business-use-case-usage') ||
+      headers.get('x-ad-account-usage') ||
+      headers.get('x-app-usage');
+    if (!raw) return;
+    const json = JSON.parse(raw);
+    // x-business-use-case-usage: { "<ad_account_id>": [{ type, call_count, total_cputime, total_time, ... }] }
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+      for (const [adAccountId, entries] of Object.entries(json)) {
+        const arr = Array.isArray(entries) ? entries : [entries];
+        for (const e of arr as any[]) {
+          const callCount = Number(e?.call_count ?? 0);
+          const cpu = Number(e?.total_cputime ?? 0);
+          const tt = Number(e?.total_time ?? 0);
+          const max = Math.max(callCount, cpu, tt);
+          if (max >= 80) {
+            console.warn(
+              `[fb-rate-limit] ${context.tag} ad_account_id=${adAccountId} call_count=${callCount} total_cputime=${cpu} total_time=${tt} method=${context.method ?? ''} path=${context.path ?? ''}`
+            );
+          }
+        }
+      }
+      return;
+    }
+    // x-app-usage: { call_count, total_cputime, total_time }
+    const callCount = Number((json as any)?.call_count ?? 0);
+    const cpu = Number((json as any)?.total_cputime ?? 0);
+    const tt = Number((json as any)?.total_time ?? 0);
+    const max = Math.max(callCount, cpu, tt);
+    if (max >= 80) {
+      console.warn(
+        `[fb-rate-limit] ${context.tag} app-usage call_count=${callCount} total_cputime=${cpu} total_time=${tt} method=${context.method ?? ''} path=${context.path ?? ''}`
+      );
+    }
+  } catch {
+    // не валим запрос на парсинге заголовка
+  }
+}
+
+/**
+ * Распознаёт rate-limit / временные ошибки FB API в JSON-ответе.
+ * Подходит и для ответа graph(), и для подзапроса в graphBatch().
+ */
+function isRateLimitError(json: any): boolean {
+  const err = json?.error;
+  if (!err) return false;
+  const code = Number(err.code);
+  const subcode = Number(err.error_subcode);
+  // 4 = Application request limit reached
+  // 17 = User request limit reached
+  // 32 = Page-level throttling
+  // 613 = Calls to this api have exceeded the rate limit
+  // subcode 80004 = Ads management API rate limit
+  return (
+    code === 4 ||
+    code === 17 ||
+    code === 32 ||
+    code === 613 ||
+    subcode === 80004
+  );
+}
+
 // appsecret_proof закомментирован - он нужен ТОЛЬКО для OAuth, 
 // но НЕ для обычных API запросов (конфликтует с токенами из Supabase)
 // function appsecret_proof(token: string) {
@@ -44,12 +113,14 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 
   log.debug({ method, path }, '[graph] Request');
 
-  // Retry logic для сетевых ошибок (fetch failed, timeout)
+  // Retry logic — сеть + rate-limit (exponential backoff)
   const MAX_RETRIES = 5;
-  const RETRY_DELAY = 3000; // 3 секунды между попытками
+  const BASE_DELAY = 3000; // 3s → 6s → 12s → 24s → 48s
 
-  let res: Response;
+  let res: Response | undefined;
   let lastError: any;
+  let json: any;
+  let text: string = '';
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const controller = new AbortController();
@@ -63,7 +134,31 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
         body: method === 'GET' ? undefined : usp.toString(),
       });
       clearTimeout(timeout);
-      break; // Успешно - выходим из цикла
+
+      // Логируем заголовки rate-limit usage (использует ответ при любом статусе)
+      logUseCaseUsage(res.headers, { method, path, tag: '[graph]' });
+
+      text = await res.text();
+      try { json = JSON.parse(text); } catch { json = { raw: text }; }
+
+      // Rate-limit: HTTP 429 или известный FB-код в body — ретраим с backoff
+      const rateLimited = res.status === 429 || (!res.ok && isRateLimitError(json));
+      if (rateLimited && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY * Math.pow(2, attempt - 1);
+        log.warn({
+          method,
+          path,
+          attempt,
+          status: res.status,
+          fbCode: json?.error?.code,
+          fbSubcode: json?.error?.error_subcode,
+          delay,
+        }, '[graph] Rate limited, retrying with exponential backoff');
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      break; // Либо успех, либо не-ретраимая ошибка — выйдем и обработаем ниже
     } catch (error: any) {
       clearTimeout(timeout);
       lastError = error;
@@ -74,13 +169,15 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
                              error.code === 'ETIMEDOUT';
 
       if (isNetworkError && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY * Math.pow(2, attempt - 1);
         log.warn({
           method,
           path,
           attempt,
+          delay,
           error: error.message || error.name
-        }, `Network error, retrying in ${RETRY_DELAY}ms...`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }, `Network error, retrying with exponential backoff...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
 
@@ -98,14 +195,12 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
     }
   }
 
-  if (!res!) {
+  if (!res) {
     throw lastError || new Error(`Failed to fetch after ${MAX_RETRIES} attempts`);
   }
 
-  const text = await res.text();
   log.debug({ status: res.status, length: text.length }, '[graph] Response received');
 
-  let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!res.ok) {
     log.error({ status: res.status, error: json?.error?.message, error_user_title: json?.error?.error_user_title, error_user_msg: json?.error?.error_user_msg }, '[graph] Facebook API error');
     const g = json?.error || {};
@@ -238,6 +333,9 @@ export async function graphBatch(
         body: usp.toString(),
       });
       clearTimeout(timeout);
+
+      // Логируем заголовки rate-limit usage
+      logUseCaseUsage(res.headers, { tag: '[graphBatch]' });
 
       // Проверяем HTTP статус
       if (!res.ok) {

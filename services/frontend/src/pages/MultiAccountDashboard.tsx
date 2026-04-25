@@ -27,6 +27,7 @@ import DateRangePicker from '../components/DateRangePicker';
 import { toast } from 'sonner';
 import { facebookApi } from '@/services/facebookApi';
 import { tiktokApi } from '@/services/tiktokApi';
+import { withConcurrencyLimit } from '@/utils/concurrency';
 import { useOptimization, type OptimizationScope } from '@/hooks/useOptimization';
 import { OptimizeButton, OptimizationModal } from '@/components/optimization';
 import { AllAccountsExecutionsSection } from '@/components/AllAccountsExecutionsSection';
@@ -415,11 +416,12 @@ const MultiAccountDashboard: React.FC = () => {
       setAccountStats(data.accounts);
       setError(null);
 
-      // Загружаем бюджеты для всех аккаунтов параллельно
+      // Загружаем бюджеты для всех аккаунтов с ограниченной concurrency (макс 3),
+      // чтобы не перегружать Facebook Marketing API rate limits.
       const storedAdAccounts = localStorage.getItem('adAccounts');
       if (storedAdAccounts) {
         const adAccountsList = JSON.parse(storedAdAccounts);
-        const budgetPromises = adAccountsList.map(async (acc: any) => {
+        withConcurrencyLimit(adAccountsList, 3, async (acc: any) => {
           if (!acc.ad_account_id) return { id: acc.id, budget: 0 };
           const result = await facebookApi.getAdsetBudgetsForAccount(acc.ad_account_id, '', acc.id);
           logger.info('Account budget calculation', {
@@ -428,8 +430,7 @@ const MultiAccountDashboard: React.FC = () => {
             totalBudget: result.totalBudget,
           });
           return { id: acc.id, budget: result.totalBudget };
-        });
-        Promise.all(budgetPromises).then(results => {
+        }).then(results => {
           const budgets: Record<string, number> = {};
           results.forEach(r => { budgets[r.id] = r.budget; });
           setAccountBudgets(budgets);

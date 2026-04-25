@@ -6,6 +6,24 @@ import { format, subDays, addDays } from 'date-fns';
 import { toastT } from '@/utils/toastUtils';
 import { API_BASE_URL } from '@/config/api';
 import { getAuthHeaders, getUserId } from '@/lib/apiAuth';
+import { getCachedData, setCachedData } from '@/utils/apiCache';
+
+// TTL кэша для горячих методов статистики (минут)
+const STATS_CACHE_TTL_MIN = 5;
+
+/**
+ * Строит ключ кэша для статистики FB API.
+ * Включает: ad_account_id (внутренний UUID), level, периоды, опциональные параметры.
+ */
+function buildStatsCacheKey(level: string, params: Record<string, string | number | boolean | undefined>): string {
+  const accId = localStorage.getItem('currentAdAccountId') || 'legacy';
+  const parts = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('&');
+  return `api_cache_fb_${level}_${accId}_${parts}`;
+}
 
 // Types
 export interface Campaign {
@@ -346,10 +364,20 @@ const getAdsetsByCampaign = async (campaignId: string) => {
 };
 
 // Получить статистику для ad sets кампании за период
-const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
+const getAdsetStats = async (campaignId: string, dateRange: DateRange, options?: { forceRefresh?: boolean }) => {
   const FB_API_CONFIG = await getCurrentUserConfig();
   if (!FB_API_CONFIG.ad_account_id) {
     return [];
+  }
+
+  const cacheKey = buildStatsCacheKey('adset_stats', {
+    campaign_id: campaignId,
+    since: dateRange.since,
+    until: dateRange.until,
+  });
+  if (!options?.forceRefresh) {
+    const cached = getCachedData<any[]>(cacheKey);
+    if (cached) return cached;
   }
 
   try {
@@ -425,9 +453,11 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
       });
 
       console.log(`[API] getAdsetStats returning ${result.length} mapped adsets`);
+      setCachedData(cacheKey, result, STATS_CACHE_TTL_MIN);
       return result;
     }
 
+    setCachedData(cacheKey, [], STATS_CACHE_TTL_MIN);
     return [];
   } catch (error) {
     console.error('Ошибка получения статистики ad sets:', error);
@@ -906,12 +936,29 @@ export const facebookApi = {
 
   // Получить статистику кампаний за период
   // campaigns - опциональный параметр, если передан - используем его, иначе загружаем (для избежания дублирования запросов)
-  getCampaignStats: async (dateRange: DateRange, includeLeadForms: boolean = false, campaigns?: Campaign[]): Promise<CampaignStat[]> => {
+  // options.forceRefresh - обход кэша (по умолчанию используется кэш на 5 минут)
+  getCampaignStats: async (
+    dateRange: DateRange,
+    includeLeadForms: boolean = false,
+    campaigns?: Campaign[],
+    options?: { forceRefresh?: boolean }
+  ): Promise<CampaignStat[]> => {
     console.log('Запрос статистики кампаний за период:', dateRange);
 
     if (!await hasValidConfig()) {
       console.warn('Нет данных для получения статистики. Возвращаю пустой массив.');
       return [];
+    }
+
+    // Кэш по accountId + dateRange + includeLeadForms (level=campaign)
+    const cacheKey = buildStatsCacheKey('campaign_stats', {
+      since: dateRange.since,
+      until: dateRange.until,
+      includeLeadForms: includeLeadForms ? 1 : 0,
+    });
+    if (!options?.forceRefresh) {
+      const cached = getCachedData<CampaignStat[]>(cacheKey);
+      if (cached) return cached;
     }
 
     try {
@@ -1026,6 +1073,7 @@ export const facebookApi = {
         });
         
         console.log('Обработано реальных данных статистики:', result.length);
+        setCachedData(cacheKey, result, STATS_CACHE_TTL_MIN);
         return result;
       }
       // Если API вернул пустые данные, создаем нулевые статистики для каждой кампании на каждую дату
@@ -1067,6 +1115,7 @@ export const facebookApi = {
       });
       
       console.log(`Создано ${zeroStats.length} записей статистики с нулевыми значениями`);
+      setCachedData(cacheKey, zeroStats, STATS_CACHE_TTL_MIN);
       return zeroStats;
     } catch (error) {
       toastT.error('failedToLoadStats');
@@ -1371,7 +1420,7 @@ export const facebookApi = {
   /**
    * Получить статистику объявлений для адсета за период
    */
-  getAdStatsByAdset: async (adsetId: string, dateRange: DateRange): Promise<Array<{
+  getAdStatsByAdset: async (adsetId: string, dateRange: DateRange, options?: { forceRefresh?: boolean }): Promise<Array<{
     ad_id: string;
     ad_name: string;
     spend: number;
@@ -1388,6 +1437,15 @@ export const facebookApi = {
     if (!await hasValidConfig()) {
       return [];
     }
+    const cacheKey = buildStatsCacheKey('ad_stats_by_adset', {
+      adset_id: adsetId,
+      since: dateRange.since,
+      until: dateRange.until,
+    });
+    if (!options?.forceRefresh) {
+      const cached = getCachedData<any[]>(cacheKey);
+      if (cached) return cached;
+    }
     try {
       const FB_API_CONFIG = await getCurrentUserConfig();
       const endpoint = `${FB_API_CONFIG.ad_account_id}/insights`;
@@ -1403,7 +1461,7 @@ export const facebookApi = {
       const response = await fetchFromFacebookAPI(endpoint, params);
 
       if (response.data && response.data.length > 0) {
-        return response.data.map((stat: any) => {
+        const mapped = response.data.map((stat: any) => {
           // Используем ту же логику подсчёта лидов
           let messagingLeads = 0;
           let qualityLeads = 0;
@@ -1448,7 +1506,10 @@ export const facebookApi = {
             qualityRate,
           };
         });
+        setCachedData(cacheKey, mapped, STATS_CACHE_TTL_MIN);
+        return mapped;
       }
+      setCachedData(cacheKey, [], STATS_CACHE_TTL_MIN);
       return [];
     } catch (e) {
       console.error('getAdStatsByAdset error', e);

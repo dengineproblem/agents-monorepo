@@ -5,6 +5,8 @@ import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getPageAccessToken } from '../lib/facebookHelpers.js';
 import { checkUploadEligibility } from '../lib/uploadEligibility.js';
+import { withConcurrencyLimit } from '../lib/concurrency.js';
+import { graphBatch, parseBatchBody } from '../adapters/facebook.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -389,33 +391,64 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         hasDates: !!(since && until)
       }, '[all-stats] Preparing to fetch Facebook data');
 
-      // Запрашиваем статус для ВСЕХ аккаунтов с credentials (независимо от дат)
-      const statusPromises = accountsWithCredentials.map(async account => {
-        const accountStatus = await fetchFacebookAccountStatus(
-          account.fb_ad_account_id!,
-          account.access_token!,
-          account.id
-        );
-        return { accountId: account.id, accountStatus };
-      });
+      // ОПТИМИЗАЦИЯ: Группируем аккаунты по access_token и используем graphBatch
+      // вместо N параллельных single-запросов. Это резко снижает rate-limit давление
+      // при работе с 5-10+ аккаунтами.
+      const tokenGroups = new Map<string, typeof accountsWithCredentials>();
+      for (const acc of accountsWithCredentials) {
+        const token = acc.access_token!;
+        if (!tokenGroups.has(token)) tokenGroups.set(token, []);
+        tokenGroups.get(token)!.push(acc);
+      }
 
-      // Запрашиваем статистику только если есть даты
-      const statsPromises = accountsToFetchStats.map(async account => {
-        const stats = await fetchFacebookStatsForAccount(
-          account.fb_ad_account_id!,
-          account.access_token!,
-          since!,
-          until!,
-          account.id
-        );
-        return { accountId: account.id, stats };
-      });
+      // Throttle: не более 3 batch-запросов параллельно (на случай если разные токены).
+      const tokenGroupsArr = Array.from(tokenGroups.entries());
 
-      // Выполняем все запросы параллельно
-      const [statusResults, statsResults] = await Promise.all([
-        Promise.all(statusPromises),
-        Promise.all(statsPromises),
-      ]);
+      const groupResults = await withConcurrencyLimit(
+        tokenGroupsArr,
+        3,
+        async ([token, accounts]) => {
+          const statusByAccount = new Map<string, FacebookAccountStatus | null>();
+          const statsByAccount = new Map<string, FacebookStats | null>();
+          try {
+            const statusBatch = await fetchFacebookAccountStatusBatch(token, accounts);
+            for (const r of statusBatch) statusByAccount.set(r.accountId, r.accountStatus);
+          } catch (e: any) {
+            log.warn({ err: e?.message }, '[all-stats] Status batch failed, leaving accounts without status');
+          }
+
+          if (since && until) {
+            const statsTargets = accounts.filter(a =>
+              accountsToFetchStats.some(x => x.id === a.id)
+            );
+            try {
+              const statsBatch = await fetchFacebookStatsBatch(
+                token,
+                statsTargets,
+                since,
+                until
+              );
+              for (const r of statsBatch) statsByAccount.set(r.accountId, r.stats);
+            } catch (e: any) {
+              log.warn({ err: e?.message }, '[all-stats] Stats batch failed, leaving accounts without stats');
+            }
+          }
+
+          return { statusByAccount, statsByAccount };
+        }
+      );
+
+      // Сводим в плоские массивы (того же формата как раньше)
+      const statusResults: { accountId: string; accountStatus: FacebookAccountStatus | null }[] = [];
+      const statsResults: { accountId: string; stats: FacebookStats | null }[] = [];
+      for (const { statusByAccount, statsByAccount } of groupResults) {
+        for (const [accountId, accountStatus] of statusByAccount.entries()) {
+          statusResults.push({ accountId, accountStatus });
+        }
+        for (const [accountId, stats] of statsByAccount.entries()) {
+          statsResults.push({ accountId, stats });
+        }
+      }
 
       // Создаём maps для быстрого доступа к статистике и статусу
       const statsMap = new Map<string, FacebookStats | null>();
@@ -1237,6 +1270,153 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       return null;
     }
+  }
+
+  // ========================================
+  // BATCH HELPERS (graphBatch — 1 HTTP вместо N)
+  // ========================================
+
+  type AccountWithCreds = {
+    id: string;
+    fb_ad_account_id: string | null;
+    access_token: string | null;
+  };
+
+  /**
+   * Один batch-запрос к Graph API для статуса нескольких рекламных кабинетов.
+   * Все аккаунты в одном вызове должны делиться access_token.
+   */
+  async function fetchFacebookAccountStatusBatch(
+    accessToken: string,
+    accounts: AccountWithCreds[]
+  ): Promise<{ accountId: string; accountStatus: FacebookAccountStatus | null }[]> {
+    if (accounts.length === 0) return [];
+
+    const requests = accounts.map(a => {
+      const fbAccountId = a.fb_ad_account_id!.startsWith('act_')
+        ? a.fb_ad_account_id!
+        : `act_${a.fb_ad_account_id}`;
+      return {
+        method: 'GET' as const,
+        relative_url: `${fbAccountId}?fields=account_status,disable_reason`,
+      };
+    });
+
+    const responses = await graphBatch(accessToken, requests);
+
+    return accounts.map((a, i) => {
+      const r = responses[i];
+      if (!r) {
+        return { accountId: a.id, accountStatus: null };
+      }
+      const parsed = parseBatchBody<{ account_status?: number; disable_reason?: number }>(r);
+      if (!parsed.success || !parsed.data) {
+        log.warn({
+          accountDbId: a.id,
+          code: r.code,
+          err: parsed.error?.message?.slice?.(0, 200),
+        }, '[fetchFacebookAccountStatusBatch] account status sub-request failed');
+        return { accountId: a.id, accountStatus: null };
+      }
+      return {
+        accountId: a.id,
+        accountStatus: {
+          account_status: parsed.data.account_status ?? 1,
+          disable_reason: parsed.data.disable_reason,
+        },
+      };
+    });
+  }
+
+  /**
+   * Один batch-запрос к Graph API для insights нескольких рекламных кабинетов.
+   * Все аккаунты в одном вызове должны делиться access_token.
+   */
+  async function fetchFacebookStatsBatch(
+    accessToken: string,
+    accounts: AccountWithCreds[],
+    since: string,
+    until: string
+  ): Promise<{ accountId: string; stats: FacebookStats | null }[]> {
+    if (accounts.length === 0) return [];
+
+    const timeRange = encodeURIComponent(JSON.stringify({ since, until }));
+    const requests = accounts.map(a => {
+      const fbAccountId = a.fb_ad_account_id!.startsWith('act_')
+        ? a.fb_ad_account_id!
+        : `act_${a.fb_ad_account_id}`;
+      return {
+        method: 'GET' as const,
+        relative_url: `${fbAccountId}/insights?level=account&fields=spend,impressions,clicks,actions&time_range=${timeRange}`,
+      };
+    });
+
+    const responses = await graphBatch(accessToken, requests);
+
+    return accounts.map((a, i) => {
+      const r = responses[i];
+      if (!r) {
+        return { accountId: a.id, stats: null };
+      }
+      const parsed = parseBatchBody<{ data?: any[] }>(r);
+      if (!parsed.success || !parsed.data) {
+        log.warn({
+          accountDbId: a.id,
+          code: r.code,
+          err: parsed.error?.message?.slice?.(0, 200),
+        }, '[fetchFacebookStatsBatch] insights sub-request failed');
+        return { accountId: a.id, stats: null };
+      }
+      const items = parsed.data.data || [];
+      if (items.length === 0) {
+        return { accountId: a.id, stats: null };
+      }
+
+      const insight = items[0];
+      const spend = parseFloat(insight.spend || '0');
+      const impressions = parseInt(insight.impressions || '0', 10);
+      const clicks = parseInt(insight.clicks || '0', 10);
+
+      let leads = 0;
+      let messagingLeads = 0;
+      let qualityLeads = 0;
+
+      if (insight.actions && Array.isArray(insight.actions)) {
+        for (const action of insight.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            const value = parseInt(action.value || '0', 10);
+            messagingLeads = value;
+            leads += value;
+          } else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
+            qualityLeads = parseInt(action.value || '0', 10);
+          } else if (
+            action.action_type === 'offsite_conversion.fb_pixel_lead' ||
+            action.action_type === 'onsite_conversion.lead_grouped'
+          ) {
+            leads += parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const cpql = qualityLeads > 0 ? spend / qualityLeads : 0;
+      const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
+
+      const stats: FacebookStats = {
+        spend,
+        leads,
+        impressions,
+        clicks,
+        cpl: leads > 0 ? spend / leads : 0,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
+        messagingLeads,
+        qualityLeads,
+        cpql,
+        qualityRate,
+      };
+
+      return { accountId: a.id, stats };
+    });
   }
 
 }
