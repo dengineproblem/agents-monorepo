@@ -54,6 +54,7 @@ import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
 import { FEATURES } from '@/config/appReview';
+import { getBitrix24Status } from '@/services/bitrix24Api';
 
 // Конфигурация для badge типа медиа
 type MediaType = 'video' | 'image' | 'carousel' | null | undefined;
@@ -151,6 +152,11 @@ const ROIAnalytics: React.FC = () => {
 
   // Refresh/sync state
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // CRM connection state — гейт для CAPI Level/Conv колонок
+  const [amocrmConnected, setAmocrmConnected] = useState(false);
+  const [bitrix24Connected, setBitrix24Connected] = useState(false);
+  const hasCrm = amocrmConnected || bitrix24Connected;
 
   /* TEMPORARILY HIDDEN: Key Stages Qualification Stats
   // Qualification stats state - now supports up to 3 key stages
@@ -313,6 +319,14 @@ const ROIAnalytics: React.FC = () => {
       { header: 'Затраты', accessor: (c) => formatAmountForExport(c.spend) },
       { header: 'ROI %', accessor: (c) => c.roi.toFixed(1) },
       { header: 'Лиды', accessor: (c) => c.leads },
+      ...(hasCrm ? [
+        { header: 'Level 1', accessor: (c: CampaignROI) => c.capi_events?.interest ?? '' },
+        { header: 'Level 2', accessor: (c: CampaignROI) => c.capi_events?.qualified ?? '' },
+        { header: 'Level 3', accessor: (c: CampaignROI) => c.capi_events?.scheduled ?? '' },
+        { header: 'Conv 1 %', accessor: (c: CampaignROI) => (c.leads > 0 && c.capi_events?.interest) ? ((c.capi_events.interest / c.leads) * 100).toFixed(1) : '' },
+        { header: 'Conv 2 %', accessor: (c: CampaignROI) => (c.leads > 0 && c.capi_events?.qualified) ? ((c.capi_events.qualified / c.leads) * 100).toFixed(1) : '' },
+        { header: 'Conv 3 %', accessor: (c: CampaignROI) => (c.leads > 0 && c.capi_events?.scheduled) ? ((c.capi_events.scheduled / c.leads) * 100).toFixed(1) : '' },
+      ] : []),
     ], 'creatives');
   };
 
@@ -471,6 +485,45 @@ const ROIAnalytics: React.FC = () => {
     setSelectedDirectionId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, currentAdAccountId]);
+
+  // Загрузка CRM статуса (amoCRM + Bitrix24) — гейт для CAPI Level/Conv колонок
+  useEffect(() => {
+    const loadCrmStatus = async () => {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) return;
+      const userData = JSON.parse(storedUser);
+      const userId = userData?.id;
+      if (!userId) return;
+
+      // amoCRM
+      try {
+        const url = currentAdAccountId
+          ? `${API_BASE_URL}/amocrm/status?userAccountId=${userId}&accountId=${currentAdAccountId}`
+          : `${API_BASE_URL}/amocrm/status?userAccountId=${userId}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setAmocrmConnected(!!data.connected);
+        } else {
+          setAmocrmConnected(false);
+        }
+      } catch (error) {
+        console.error('Failed to load AmoCRM status in ROIAnalytics:', error);
+        setAmocrmConnected(false);
+      }
+
+      // Bitrix24
+      try {
+        const status = await getBitrix24Status(userId, currentAdAccountId || undefined);
+        setBitrix24Connected(!!status.connected);
+      } catch (error) {
+        console.error('Failed to load Bitrix24 status in ROIAnalytics:', error);
+        setBitrix24Connected(false);
+      }
+    };
+
+    loadCrmStatus();
+  }, [currentAdAccountId]);
 
   // Перезагрузка при смене направления, типа медиа, аккаунта или платформы
   useEffect(() => {
@@ -1070,50 +1123,52 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('cpl')}>
                               <SortButton label="CPL" columnKey="cpl" />
                             </th>
-                            {/* TEMPORARILY HIDDEN: CEP Level 1/2/3 Columns (optimization levels hidden from directions)
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="CAPI Level 1: Клиент проявил интерес (3+ входящих сообщений)"
-                              aria-sort={getAriaSort('capi_interest')}
-                            >
-                              <SortButton label="Level 1" columnKey="capi_interest" align="center" />
-                            </th>
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="CAPI Level 2: Клиент прошёл квалификацию"
-                              aria-sort={getAriaSort('capi_qualified')}
-                            >
-                              <SortButton label="Level 2" columnKey="capi_qualified" align="center" />
-                            </th>
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="CAPI Level 3: Клиент записался на консультацию"
-                              aria-sort={getAriaSort('capi_scheduled')}
-                            >
-                              <SortButton label="Level 3" columnKey="capi_scheduled" align="center" />
-                            </th>
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="Conv 1 = Level 1 события / Лиды × 100"
-                              aria-sort={getAriaSort('conv1')}
-                            >
-                              <SortButton label="Conv 1" columnKey="conv1" align="center" />
-                            </th>
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="Conv 2 = Level 2 события / Лиды × 100"
-                              aria-sort={getAriaSort('conv2')}
-                            >
-                              <SortButton label="Conv 2" columnKey="conv2" align="center" />
-                            </th>
-                            <th
-                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
-                              title="Conv 3 = Level 3 события / Лиды × 100"
-                              aria-sort={getAriaSort('conv3')}
-                            >
-                              <SortButton label="Conv 3" columnKey="conv3" align="center" />
-                            </th>
-                            */}
+                            {hasCrm && (
+                              <>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="CAPI Level 1: Клиент проявил интерес (3+ входящих сообщений)"
+                                  aria-sort={getAriaSort('capi_interest')}
+                                >
+                                  <SortButton label="Level 1" columnKey="capi_interest" align="center" />
+                                </th>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="CAPI Level 2: Клиент прошёл квалификацию"
+                                  aria-sort={getAriaSort('capi_qualified')}
+                                >
+                                  <SortButton label="Level 2" columnKey="capi_qualified" align="center" />
+                                </th>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="CAPI Level 3: Клиент записался на консультацию"
+                                  aria-sort={getAriaSort('capi_scheduled')}
+                                >
+                                  <SortButton label="Level 3" columnKey="capi_scheduled" align="center" />
+                                </th>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="Conv 1 = Level 1 события / Лиды × 100"
+                                  aria-sort={getAriaSort('conv1')}
+                                >
+                                  <SortButton label="Conv 1" columnKey="conv1" align="center" />
+                                </th>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="Conv 2 = Level 2 события / Лиды × 100"
+                                  aria-sort={getAriaSort('conv2')}
+                                >
+                                  <SortButton label="Conv 2" columnKey="conv2" align="center" />
+                                </th>
+                                <th
+                                  className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                                  title="Conv 3 = Level 3 события / Лиды × 100"
+                                  aria-sort={getAriaSort('conv3')}
+                                >
+                                  <SortButton label="Conv 3" columnKey="conv3" align="center" />
+                                </th>
+                              </>
+                            )}
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
                               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
@@ -1192,56 +1247,58 @@ const ROIAnalytics: React.FC = () => {
                                     : '—'
                                   }
                                 </td>
-                                {/* TEMPORARILY HIDDEN: CEP Level 1/2/3 Cells (optimization levels hidden from directions)
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.capi_events?.interest !== undefined && campaign.capi_events.interest > 0
-                                        ? <span className="text-blue-600 dark:text-blue-400 font-medium">{campaign.capi_events.interest}</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.capi_events?.qualified !== undefined && campaign.capi_events.qualified > 0
-                                        ? <span className="text-green-600 dark:text-green-400 font-medium">{campaign.capi_events.qualified}</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.capi_events?.scheduled !== undefined && campaign.capi_events.scheduled > 0
-                                        ? <span className="text-purple-600 dark:text-purple-400 font-medium">{campaign.capi_events.scheduled}</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.leads > 0 && campaign.capi_events?.interest
-                                        ? <span className="text-blue-600 dark:text-blue-400">{((campaign.capi_events.interest / campaign.leads) * 100).toFixed(1)}%</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.leads > 0 && campaign.capi_events?.qualified
-                                        ? <span className="text-green-600 dark:text-green-400">{((campaign.capi_events.qualified / campaign.leads) * 100).toFixed(1)}%</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                <td className="py-2 px-3 text-center text-sm">
-                                  {platform === 'tiktok'
-                                    ? <span className="text-muted-foreground">—</span>
-                                    : (campaign.leads > 0 && campaign.capi_events?.scheduled
-                                        ? <span className="text-purple-600 dark:text-purple-400">{((campaign.capi_events.scheduled / campaign.leads) * 100).toFixed(1)}%</span>
-                                        : <span className="text-muted-foreground">—</span>)
-                                  }
-                                </td>
-                                */}
+                                {hasCrm && (
+                                  <>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.capi_events?.interest !== undefined && campaign.capi_events.interest > 0
+                                            ? <span className="text-blue-600 dark:text-blue-400 font-medium">{campaign.capi_events.interest}</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.capi_events?.qualified !== undefined && campaign.capi_events.qualified > 0
+                                            ? <span className="text-green-600 dark:text-green-400 font-medium">{campaign.capi_events.qualified}</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.capi_events?.scheduled !== undefined && campaign.capi_events.scheduled > 0
+                                            ? <span className="text-purple-600 dark:text-purple-400 font-medium">{campaign.capi_events.scheduled}</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.leads > 0 && campaign.capi_events?.interest
+                                            ? <span className="text-blue-600 dark:text-blue-400">{((campaign.capi_events.interest / campaign.leads) * 100).toFixed(1)}%</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.leads > 0 && campaign.capi_events?.qualified
+                                            ? <span className="text-green-600 dark:text-green-400">{((campaign.capi_events.qualified / campaign.leads) * 100).toFixed(1)}%</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                    <td className="py-2 px-3 text-center text-sm">
+                                      {platform === 'tiktok'
+                                        ? <span className="text-muted-foreground">—</span>
+                                        : (campaign.leads > 0 && campaign.capi_events?.scheduled
+                                            ? <span className="text-purple-600 dark:text-purple-400">{((campaign.capi_events.scheduled / campaign.leads) * 100).toFixed(1)}%</span>
+                                            : <span className="text-muted-foreground">—</span>)
+                                      }
+                                    </td>
+                                  </>
+                                )}
                                 {/* TEMPORARILY HIDDEN: Key Stages Cell
                                 {qualificationStats && qualificationStats.key_stages.length > 0 && (
                                   <td className="py-2 px-3 text-center">

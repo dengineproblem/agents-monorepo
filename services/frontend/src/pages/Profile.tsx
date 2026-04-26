@@ -1443,7 +1443,7 @@ const Profile: React.FC = () => {
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && (
                 <div data-tour="directions-block">
-                  <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} />
+                  <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} hasCrm={amocrmConnected || bitrix24Connected} />
                 </div>
               )}
 
@@ -1534,6 +1534,16 @@ const Profile: React.FC = () => {
                 title: 'Tilda (сайт)',
                 connected: isTildaConnected,
                 onClick: () => setTildaInstructionsModal(true),
+              }] : []),
+              ...((amocrmConnected || bitrix24Connected) ? [{
+                id: 'meta_capi' as const,
+                title: 'Meta CAPI',
+                connected: capiSettings.length > 0,
+                onClick: () => setCapiSettingsModalOpen(true),
+                editMode: true,
+                badge: capiSettings.length > 0
+                  ? `${capiSettings.length} ${capiSettings.length === 1 ? 'канал' : 'канала'}`
+                  : undefined,
               }] : []),
             ]}
           />

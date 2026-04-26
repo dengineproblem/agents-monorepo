@@ -50,6 +50,7 @@ interface CreateDirectionDialogProps {
   accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
   defaultPlatform?: DirectionPlatform;
   hasInstagramId?: boolean; // Есть ли Instagram Account ID у текущего аккаунта
+  hasCrm?: boolean; // Есть ли подключённый amoCRM или Bitrix24 — гейт для CAPI-целей
 }
 
 export interface CreateDirectionFormData {
@@ -86,6 +87,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   accountId,
   defaultPlatform = 'facebook',
   hasInstagramId = true,
+  hasCrm = false,
 }) => {
   // Ref для порталинга Popover внутрь Dialog
   const dialogContentRef = React.useRef<HTMLDivElement>(null);
@@ -708,6 +710,14 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                       {OBJECTIVE_DESCRIPTIONS.whatsapp}
                     </Label>
                   </div>
+                  {hasCrm && (
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="conversions" id="obj-conversions" />
+                      <Label htmlFor="obj-conversions" className="font-normal cursor-pointer">
+                        {OBJECTIVE_DESCRIPTIONS.conversions}
+                      </Label>
+                    </div>
+                  )}
                   {hasInstagramId && (
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="instagram_traffic" id="obj-instagram" />

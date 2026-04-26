@@ -21,9 +21,10 @@ import { useAppContext } from '@/context/AppContext';
 interface DirectionsCardProps {
   userAccountId: string | null;
   accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
+  hasCrm?: boolean; // Есть ли подключённый amoCRM или Bitrix24 — гейт для CAPI-целей
 }
 
-const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId }) => {
+const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId, hasCrm = false }) => {
   const { platform, adAccounts, currentAdAccountId, multiAccountEnabled } = useAppContext();
   // В профиле показываем ВСЕ направления (без фильтра по платформе)
   const { directions, loading, createDirection, updateDirection, deleteDirection } =
@@ -398,6 +399,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         accountId={accountId}
         defaultPlatform={platform === 'tiktok' ? 'tiktok' : 'facebook'}
         hasInstagramId={hasInstagramId}
+        hasCrm={hasCrm}
       />
 
       <EditDirectionDialog
