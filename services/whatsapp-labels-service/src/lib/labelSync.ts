@@ -104,14 +104,59 @@ async function getUnlabeledPaidLeads(userAccountId: string): Promise<LeadToSync[
 }
 
 /**
- * Convert chat_id (phone number) to wwebjs chat ID format.
- * chat_id in DB: "77768712233" or "77768712233@s.whatsapp.net"
- * wwebjs expects: "77768712233@c.us"
+ * Normalize lead.chat_id from DB ("77768712233" or "77768712233@s.whatsapp.net")
+ * down to a bare phone number ("77768712233").
  */
-function toChatId(chatId: string): string {
-  // Strip any existing suffix
-  const phone = chatId.replace(/@.*$/, '').replace(/\D/g, '');
-  return `${phone}@c.us`;
+function toPhone(chatId: string): string {
+  return chatId.replace(/@.*$/, '').replace(/\D/g, '');
+}
+
+/**
+ * Build phone -> @lid chatId map by scanning the live chat-store and
+ * resolving each @lid chat's contact to its phone number.
+ *
+ * Why: CTWA chats live in wwebjs under "<numeric>@lid", not "<phone>@c.us".
+ * Calling chat.changeLabels() against a synthetic <phone>@c.us object misses
+ * the real chat object — locally it looks "applied", but nothing propagates
+ * to the WhatsApp server. We mirror the missed-messages cron's resolver here.
+ */
+async function buildLidMap(session: any): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const chats = await session.client.getChats();
+  let lidCount = 0;
+  let resolved = 0;
+  let failed = 0;
+
+  for (const chat of chats) {
+    if (chat.isGroup) continue;
+    const id: string = chat.id?._serialized;
+    if (!id || !id.endsWith('@lid')) continue;
+    lidCount++;
+    try {
+      const contact = await chat.getContact();
+      const phone: string | undefined = contact?.number || contact?.id?.user;
+      if (phone) {
+        const cleaned = phone.replace(/\D/g, '');
+        if (cleaned) {
+          map.set(cleaned, id);
+          resolved++;
+        }
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  log.info({ lidCount, resolved, failed }, 'Built phone -> @lid map');
+  return map;
+}
+
+/**
+ * Resolve a lead's chat_id to the wwebjs chat ID that actually exists in the
+ * live chat-store. Prefers @lid (CTWA), falls back to @c.us.
+ */
+function resolveChatId(phone: string, lidMap: Map<string, string>): string {
+  return lidMap.get(phone) || `${phone}@c.us`;
 }
 
 /**
@@ -156,8 +201,7 @@ async function markPaidSynced(leadId: number): Promise<void> {
  * The actual server propagation happens asynchronously; verification must be
  * done at the end of the sync via getChatsByLabelId (see syncAccountLabels).
  */
-async function queueLabel(session: any, lead: LeadToSync, labelId: string): Promise<{ status: 'queued' | 'already' | 'not_found'; chatId: string }> {
-  const chatId = toChatId(lead.chat_id);
+async function queueLabel(session: any, lead: LeadToSync, chatId: string, labelId: string): Promise<{ status: 'queued' | 'already' | 'not_found'; chatId: string }> {
   const chat = await session.client.getChatById(chatId);
 
   if (!chat) {
@@ -320,12 +364,14 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
 
   // Sanity check: getChats() forces a real round-trip to WhatsApp servers.
   // If session is stale (e.g. linked device expired), this will reveal it.
+  let lidMap: Map<string, string>;
   try {
     const chats = await session.client.getChats();
     log.info({ userAccountId: account.id, chatCount: chats.length }, 'Session sanity check passed — chats loaded from server');
     if (chats.length === 0) {
       log.warn({ userAccountId: account.id }, 'getChats() returned 0 chats — session may be stale');
     }
+    lidMap = await buildLidMap(session);
   } catch (err: any) {
     log.error({ userAccountId: account.id, err: err.message }, 'getChats() failed — session is dead, aborting');
     await destroySession(account.id);
@@ -342,14 +388,16 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
     log.info({ userAccountId: account.id, labelId, count: qualifiedLeads.length }, 'Pass 1: queuing qualified lead labels');
 
     for (const lead of qualifiedLeads) {
+      const phone = toPhone(lead.chat_id);
+      const chatId = resolveChatId(phone, lidMap);
       try {
-        const res = await queueLabel(session, lead, labelId);
+        const res = await queueLabel(session, lead, chatId, labelId);
         if (res.status === 'queued' || res.status === 'already') {
           queuedLead.set(res.chatId, lead.id);
         }
         await new Promise(r => setTimeout(r, 1000));
       } catch (err: any) {
-        log.error({ leadId: lead.id, err: err.message }, 'Failed to queue qualified lead');
+        log.error({ leadId: lead.id, chatId, err: err.message }, 'Failed to queue qualified lead');
       }
     }
   }
@@ -360,14 +408,16 @@ async function syncAccountLabels(account: UserAccount): Promise<number> {
     log.info({ userAccountId: account.id, paidLabelId, count: paidLeads.length }, 'Pass 2: queuing paid lead labels');
 
     for (const lead of paidLeads) {
+      const phone = toPhone(lead.chat_id);
+      const chatId = resolveChatId(phone, lidMap);
       try {
-        const res = await queueLabel(session, lead, paidLabelId);
+        const res = await queueLabel(session, lead, chatId, paidLabelId);
         if (res.status === 'queued' || res.status === 'already') {
           queuedPaid.set(res.chatId, lead.id);
         }
         await new Promise(r => setTimeout(r, 1000));
       } catch (err: any) {
-        log.error({ leadId: lead.id, err: err.message }, 'Failed to queue paid lead');
+        log.error({ leadId: lead.id, chatId, err: err.message }, 'Failed to queue paid lead');
       }
     }
   }
